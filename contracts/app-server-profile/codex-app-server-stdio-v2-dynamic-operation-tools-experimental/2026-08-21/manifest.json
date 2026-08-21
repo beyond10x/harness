@@ -1,0 +1,43 @@
+{
+  "profile": "codex-app-server-stdio-v2-dynamic-operation-tools-experimental",
+  "version": "2026-08-21",
+  "product": "daemonloom-harness",
+  "transport": "stdio-jsonl",
+  "pinned_after": "codex-cli 0.145.0",
+  "requires_capability": "experimentalApi",
+  "client_methods": [
+    "initialize",
+    "initialized",
+    "thread/start",
+    "turn/interrupt",
+    "turn/start"
+  ],
+  "refused_client_methods": [
+    "thread/resume",
+    "turn/steer"
+  ],
+  "server_methods": [
+    "item/agentMessage/delta",
+    "item/completed",
+    "item/started",
+    "item/tool/call",
+    "thread/started",
+    "thread/tokenUsage/updated",
+    "turn/completed",
+    "turn/started"
+  ],
+  "terminal_statuses": [
+    "completed",
+    "failed",
+    "interrupted"
+  ],
+  "dynamic_tool_item": "dynamicToolCall",
+  "conformance": "provider_emulated",
+  "files": [
+    {
+      "path": "fixtures/walking-trace.jsonl",
+      "bytes": 4619,
+      "sha256": "383725938e48d293f2f4643d048811311942107b60f7b1f7c54ae7849473b5a3"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+[package]
+name = "daemonloom-harness-app-server"
+description = "Serves Daemonloom's own loop over the pinned Codex app-server JSON-RPC format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-loop = { workspace = true }
+harness-wire = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+harness-responses = { workspace = true }
+tempfile = { workspace = true }

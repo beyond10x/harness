@@ -1,0 +1,29 @@
+[package]
+name = "daemonloom-harness-cli"
+description = "Daemonloom's own harness, driven from the command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "daemonloom-harness"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-app-server = { workspace = true }
+harness-loop = { workspace = true }
+harness-responses = { workspace = true }
+harness-wire = { workspace = true }
+clap = { workspace = true }
+ctrlc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

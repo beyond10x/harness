@@ -1,0 +1,44 @@
+# Status
+
+Observed on 2026-08-21, after the Responses wire, bridge mode, and an independent review.
+
+| Area | State | Next evidence |
+| --- | --- | --- |
+| Source | `runtime/harness/` in private `daemonloom/daemonloom`; own workspace, own gate, no monorepo dependency | keep the no-dependency boundary as the component grows |
+| Architecture | the split from `runtime/agent`'s bridges is accepted by ADR 0052 | none pending; the component is registered in `architecture/STATUS.md` |
+| Neutral values | `harness-wire` implements items, tool specs, turns, usage, stream events, the three ports and every size bound; positive and adversarial tests pass | none pending for the Responses slice; the Messages wire is what tests whether the abstraction holds |
+| Responses wire | `POST {base}/responses` streaming, SSE decode, request projection, tool-call decode, reasoning-item preservation, usage, stop reasons, cancellation, and typed status mapping pass against a real socket | characterize one authorized live endpoint and retain the evidence |
+| Loop | turn assembly, tool round trips, approvals, cancellation between turns and between calls, turn/token/deadline budgets, and refusal of an unenforceable spend ceiling all pass | add the wall-clock deadline test; it is enforced but proven only by construction |
+| Workspace tools | read-only `list`/`read`/`grep`, bounded. Every path is re-checked after canonicalization — including each entry `grep` walks into, which previously followed a symlink out of the workspace and returned outside files under a workspace-relative name | none pending; writing and executing are a separate slice |
+| Command line | `run` and `tools`, credential from an explicitly named file or variable, prose and JSONL output, Ctrl-C cancelling the run rather than the process, three distinct exit statuses | none pending |
+| Wire contract | `contracts/provider-wires/openai-responses/2026-08-21` pins the exact request and stream; `contracts/app-server-profile/codex-app-server-stdio-v2/2026-08-21` pins the served JSON-RPC subset and a full connection trace. Each is checked from both directions | pin the Messages wire the same way when it lands |
+| Bridge mode | `daemonloom-harness app-server` serves the pinned subset on stdio under profile `codex-app-server-stdio-v2-dynamic-operation-tools-experimental` — the client profile that actually admits dynamic tools. Registering tools requires the client to negotiate `experimentalApi`, and is refused by name otherwise; a text-only thread needs no capability. `thread/resume` and `turn/steer` refuse by name. An interrupt is acted on when its frame is decoded, acknowledged between streamed events, and distinguished from a client that merely vanished | **run `runtime/agent`'s real bridge against this binary.** Everything so far is this component's own client, written from the bridge's source; the two processes have never spoken, and no gate compares the two inventories |
+| Cancellation | one token reaches the loop, the tool sequence and the HTTP body being read. A cancelled read is a terminal outcome, not an error, so a person who cancels is not told something broke | none pending |
+| Messages wire | **not started** | project `/v1/messages` onto the same loop |
+| Subscription auth | **not started.** Only a bearer credential is supported | add ChatGPT/Codex and Claude OAuth as further `BearerSource` implementations |
+| Live provider | **no run has happened.** All evidence is `provider_emulated` against a deterministic local endpoint | one authorized live run against a real gateway |
+| Embedding | **not started.** Nothing embeds this component yet | a `runtime/agent` direct-provider adapter binding `ToolPort` to its capability compiler |
+
+## What this component does not claim
+
+- **No Substrate confinement.** Like the model-only Codex routes under ADR 0051, this harness's
+  effects are exactly what its published toolset admits, and nothing constrains it further.
+- **No live-provider conformance.** The deterministic local endpoint proves the pieces agree with
+  each other. It proves nothing about how a real provider behaves.
+- No delegation, structured output, realtime media, provider-side sessions, or durable resume.
+- No hosted service, no admission transport, no durable store.
+
+## Test counts
+
+189 tests pass across the workspace:
+
+| Crate | Unit | Integration |
+| --- | --- | --- |
+| `harness-wire` | 28 | — |
+| `harness-responses` | 37 | 16 provider-emulated, 4 contract |
+| `harness-loop` | 30 | — |
+| `harness-app-server` | 19 | 5 contract |
+| `harness-cli` | 26 | 7 end-to-end, 17 bridge-mode |
+
+The provider-emulated, end-to-end and bridge-mode suites drive real processes: a local HTTP endpoint
+over a socket, and the built binary over pipes.

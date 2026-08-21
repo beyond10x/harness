@@ -1,0 +1,24 @@
+[package]
+name = "daemonloom-harness-responses"
+description = "OpenAI Responses wire adapter for Daemonloom's own agent loop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-wire = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The loop does not depend on this crate, so driving the loop from these tests introduces no cycle.
+# It is what lets the wire be proven against the code that actually consumes it.
+[dev-dependencies]
+harness-loop = { workspace = true }
+tempfile = { workspace = true }

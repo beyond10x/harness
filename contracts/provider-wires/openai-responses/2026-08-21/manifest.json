@@ -1,0 +1,55 @@
+{
+  "wire": "openai-responses",
+  "version": "2026-08-21",
+  "transport": "https-sse",
+  "endpoint": "POST {base_url}/responses",
+  "streaming": true,
+  "stateful": false,
+  "request_fields": [
+    "include",
+    "input",
+    "instructions",
+    "max_output_tokens",
+    "model",
+    "store",
+    "stream",
+    "tools"
+  ],
+  "stream_events": [
+    "response.completed",
+    "response.content_part.added",
+    "response.content_part.done",
+    "response.created",
+    "response.function_call_arguments.delta",
+    "response.function_call_arguments.done",
+    "response.in_progress",
+    "response.output_item.added",
+    "response.output_item.done",
+    "response.output_text.delta",
+    "response.output_text.done"
+  ],
+  "output_items": [
+    "message",
+    "function_call",
+    "reasoning"
+  ],
+  "unmodelled_output_items": "preserved as opaque and reported as a warning",
+  "usage_fields": [
+    "input_tokens",
+    "output_tokens",
+    "input_tokens_details.cached_tokens"
+  ],
+  "conformance": "provider_emulated",
+  "files": [
+    {
+      "path": "fixtures/turn-request.json",
+      "bytes": 1186,
+      "sha256": "5a7be3b8c8e362eb93b1a9d1d6db6a61ca04297d1af404aa61e4444402bd7d5c"
+    },
+    {
+      "path": "fixtures/turn-stream.sse",
+      "bytes": 3129,
+      "sha256": "57c1aef1f84aac6003fcbee3aff404b18d592f54ce8274725714d159c54035d0"
+    }
+  ]
+}

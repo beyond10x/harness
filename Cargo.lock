@@ -120,6 +120,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-harness-substrate"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "b10x-harness-wire"
 version = "0.1.0"
 dependencies = [

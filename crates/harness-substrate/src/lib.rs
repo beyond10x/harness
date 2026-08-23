@@ -1,0 +1,156 @@
+//! What this machine can confine, and which tools may therefore exist.
+//!
+//! # The one property this crate is built on
+//!
+//! Substrate **refuses rather than degrading**. Its own README:
+//!
+//! > *"Without a delegated cgroup root, workspace operations remain served and exec confinement
+//! > facts are absent, so exec admission answers `exec.sandbox-unavailable`."*
+//!
+//! That turns the standing principle — *by default something insecure and open-ended like bash is
+//! not allowed; provide tools instead* — from a policy into a mechanism:
+//!
+//! **A tool whose effects this machine cannot confine is not published at all.**
+//!
+//! Not disabled, not gated, not refused when it is called: absent from the toolset, so the model
+//! never sees it, never plans around it and never spends a turn being told no. The toolset is a
+//! function of the machine, computed once from substrate's own probe.
+//!
+//! # Three tiers, and this crate owns the first
+//!
+//! | tier | question | decided by |
+//! |---|---|---|
+//! | **publication** | may this tool exist here at all? | [`Facts`], at startup — here |
+//! | authorization | may this call happen? | subjects × policy |
+//! | approval | does a person say yes? | [`harness_wire::Envelope::needs_approval`] |
+//!
+//! # The predicates are substrate's, not ours
+//!
+//! Every operation in the wire contract carries `capability_predicates` — `exec.argv-only == true`,
+//! `workspace.guarded-io == true`, `exec.output-limit-bytes >= <what you asked for>`. This crate
+//! evaluates *those*, against the facts `GET /v1/machine` returns. It invents no policy of its own,
+//! which is the whole reason to read a contract instead of writing a second one.
+//!
+//! Worth noticing in passing: `exec.start` requires **`exec.argv-only`**. Substrate will not run a
+//! shell either. The design this component is building towards — a `run` tool over a declared
+//! command set rather than a `bash` — is the same position, arrived at independently.
+//!
+//! # No HTTP crate, and the refusal is recorded here
+//!
+//! The transport is HTTP/1.1 over an owner-permissioned Unix socket, and this crate speaks it by
+//! hand. `reqwest` does not carry a Unix-socket transport in the feature set this workspace already
+//! builds, so taking one would mean adding `hyper`, `hyperlocal` and their trees to reach four
+//! routes with no body streaming, no redirects, no compression and no TLS. The workspace rule is
+//! *prefer no dependency, and record the refusal* — the same rule that kept `ratatui` out of
+//! `aep-render`'s terminal frame.
+//!
+//! What that costs is stated rather than hidden: [`Client`] handles one request per connection,
+//! reads a whole body into memory, and understands `Content-Length` and nothing else. Every route
+//! it is pointed at answers a bounded JSON document, so none of that is a limitation today, and a
+//! route that streams would need a different client rather than a flag on this one.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+mod client;
+mod predicate;
+
+pub use client::{Client, Transport, UnixTransport};
+pub use predicate::{Predicate, PredicateOp, Unmet, When};
+
+/// What substrate says this machine can do.
+///
+/// The `capability` document of the wire contract, kept as the facts it carries rather than as a
+/// struct per version: a fact this build has never heard of must survive being read, or a newer
+/// daemon becomes unreadable to an older client for having *more* to say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Facts {
+    /// Which driver answered.
+    #[serde(default)]
+    pub driver: Option<String>,
+    /// Its version.
+    #[serde(default)]
+    pub driver_version: Option<String>,
+    /// Every fact, by name.
+    #[serde(default)]
+    pub facts: BTreeMap<String, Value>,
+}
+
+impl Facts {
+    /// A machine that admits nothing.
+    ///
+    /// What a caller gets when there is no daemon to ask. **Not an error**: a harness with no
+    /// substrate is a harness whose confined tools do not exist, which is a legitimate way to run
+    /// and exactly how this component has always run. Turning it into a failure would make the
+    /// read-only harness unlaunchable on a machine that never wanted the other tools.
+    pub fn none() -> Self {
+        Self {
+            driver: None,
+            driver_version: None,
+            facts: BTreeMap::new(),
+        }
+    }
+
+    /// The value of one fact, where the machine states it.
+    pub fn get(&self, fact: &str) -> Option<&Value> {
+        self.facts.get(fact)
+    }
+
+    /// Whether every predicate holds, or the first that does not.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`Unmet`] predicate, naming the fact, what was wanted and what the machine
+    /// actually said — because the caller's next move is to read that sentence, not to retry.
+    pub fn admits(&self, predicates: &[Predicate], input: &Value) -> Result<(), Unmet> {
+        for predicate in predicates {
+            predicate.check(self, input)?;
+        }
+        Ok(())
+    }
+
+    /// `true` when this machine can run a confined process.
+    ///
+    /// The single question the `run` tool's existence turns on, asked in one place so three callers
+    /// cannot disagree about which facts count.
+    pub fn confines_execution(&self) -> bool {
+        self.get("exec.argv-only") == Some(&Value::Bool(true))
+            && self
+                .get("exec.cgroup-limits")
+                .and_then(Value::as_object)
+                .is_some_and(|limits| {
+                    ["cpu", "memory", "processes"]
+                        .iter()
+                        .all(|key| limits.get(*key) == Some(&Value::Bool(true)))
+                })
+    }
+
+    /// `true` when this machine can hold a guarded workspace.
+    ///
+    /// The question `workspace_write` turns on. Separate from execution on purpose: substrate
+    /// serves workspaces on a machine that cannot confine a process, so a harness there gets the
+    /// write tools and not the `run` tool — a real configuration, not a degenerate one.
+    pub fn holds_workspaces(&self) -> bool {
+        self.get("workspace.guarded-io") == Some(&Value::Bool(true))
+    }
+}
+
+/// Every way this crate fails.
+#[derive(Debug, thiserror::Error)]
+pub enum SubstrateError {
+    #[error("no substrate daemon at {path}: {source}")]
+    Unreachable {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the substrate daemon answered {status}: {body}")]
+    Refused { status: u16, body: String },
+    #[error("the substrate daemon's answer is not the document this build reads: {reason}")]
+    Unreadable { reason: String },
+}
+
+#[cfg(test)]
+mod tests;

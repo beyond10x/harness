@@ -5,6 +5,7 @@ members = [
     "crates/harness-responses",
     "crates/harness-loop",
     "crates/harness-flow",
+    "crates/harness-substrate",
     "crates/harness-app-server",
     "crates/harness-cli",
 ]
@@ -22,6 +23,7 @@ harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
 harness-responses = { package = "b10x-harness-responses", path = "crates/harness-responses" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
 harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
+harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 
 clap = { version = "4", features = ["derive"] }

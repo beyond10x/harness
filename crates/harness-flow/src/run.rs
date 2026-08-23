@@ -26,21 +26,36 @@ pub trait StepRunner {
     fn run(&mut self, path: &str, step: &Step) -> StepOutcome;
 }
 
-/// What a walk did, in totals.
+/// What a walk did.
+///
+/// # Tallies and a verdict are different things
+///
+/// `ran`, `failed`, `skipped` and `retreats` are **cumulative over every attempt**: a group that
+/// failed once and passed on its second attempt contributes the failure *and* the pass, because
+/// both happened and a report that erased the first would be describing a run nobody had.
+///
+/// [`Report::clean`] is the **outcome** — did the flow come out clean in the end — and it is not
+/// derived from the tallies. Deriving it was the bug this split fixes: a workflow that retreats and
+/// then succeeds is a successful run, and a `clean()` that counted the failed attempt would call
+/// every retreat a failure and make the whole feature look broken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Report {
-    /// Steps that ran.
+    /// Steps that ran, counting a repeated step once per attempt.
     pub ran: usize,
     /// Of those, how many failed.
     pub failed: usize,
     /// Steps that never ran, because something they needed failed.
     pub skipped: usize,
+    /// How many times a group was re-entered.
+    pub retreats: usize,
+    /// Whether the flow came out clean.
+    outcome_clean: bool,
 }
 
 impl Report {
-    /// `true` when every step that ran passed and none was skipped.
+    /// `true` when the flow came out clean, whatever it took to get there.
     pub fn clean(&self) -> bool {
-        self.failed == 0 && self.skipped == 0
+        self.outcome_clean
     }
 }
 
@@ -57,13 +72,15 @@ pub(crate) fn walk(
     });
     let mut report = Report::default();
     let failed = walk_group(root, plan, runner, sink, &mut report);
+    report.outcome_clean = !failed;
     sink.emit(FlowEvent::FlowFinished {
         flow: root.id.clone(),
         ran: report.ran,
         failed: report.failed,
         skipped: report.skipped,
+        retreats: report.retreats,
+        clean: report.outcome_clean,
     });
-    let _ = failed;
     report
 }
 
@@ -95,6 +112,7 @@ fn walk_group(
             });
             return failed;
         }
+        report.retreats += 1;
         sink.emit(FlowEvent::GroupRepeating {
             path: plan.path.clone(),
             attempt,

@@ -437,6 +437,8 @@ fn a_group_that_did_not_come_out_clean_runs_again_and_the_whole_scope_re_runs() 
     assert_eq!(report.failed, 1, "the first verify");
     assert_eq!(report.ran, 5);
     assert_eq!(report.skipped, 0, "review was not skipped: the group came out clean in the end");
+    assert!(report.clean(), "the outcome is the verdict, not the tally");
+    assert_eq!(report.retreats, 1);
 }
 
 #[test]
@@ -583,4 +585,94 @@ root:
         )
         .count();
     assert_eq!(outer_attempts, 2);
+}
+
+// --- the other side of a real projection --------------------------------------------------------
+
+#[test]
+fn a_real_workflow_projected_by_another_component_plans_here() {
+    // `engineering-protocols`' own development workflow, as `protocol workflow flow` emits it. The
+    // fixture is committed rather than generated, so this repository stays free of a dependency on
+    // that one and a change on either side shows up as a diff rather than as a surprise at runtime.
+    //
+    // What it pins is the contract between the two notations: a state graph with three back-edges
+    // arrives here as a chain with one repeating sub-tree, and this crate plans it without
+    // complaint.
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/adp-default.projected.yaml"),
+    )
+    .expect("the committed projection");
+    let flow: Flow = serde_yaml::from_str(&text).expect("a flow");
+    let plan = flow.plan().expect("it plans");
+
+    assert_eq!(
+        plan.layers.len(),
+        5,
+        "four states before the retreat, and the retreat itself"
+    );
+    assert_eq!(plan.width(), 1, "a workflow is a chain at the top level");
+
+    let retreat = plan
+        .groups
+        .get("implement-to-review")
+        .expect("the retreating group");
+    assert_eq!(retreat.attempts, 3, "the bound the projection was given");
+    assert_eq!(
+        retreat.depth(),
+        4,
+        "implement, verify, adversarial_verify, review - in that order"
+    );
+    assert_eq!(
+        flow.steps(),
+        vec![
+            "root.receive",
+            "root.specify",
+            "root.decompose",
+            "root.establish_verifiers",
+            "root.implement-to-review.implement",
+            "root.implement-to-review.verify",
+            "root.implement-to-review.adversarial_verify",
+            "root.implement-to-review.review",
+        ]
+    );
+}
+
+#[test]
+fn the_projected_workflow_retreats_when_verification_fails() {
+    // The behaviour the whole translation exists to preserve: a red suite sends the work back to
+    // `implement`, and the states after it run again rather than being skipped.
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/adp-default.projected.yaml"),
+    )
+    .expect("the committed projection");
+    let flow: Flow = serde_yaml::from_str(&text).expect("a flow");
+
+    let mut sink = VecFlowSink::new();
+    let report = flow
+        .run(
+            &mut HealsAfter { step: "verify", heal_after: 2, seen: 0 },
+            &mut sink,
+        )
+        .expect("valid");
+
+    let started = sink.steps_started();
+    assert_eq!(
+        started.iter().filter(|path| path.ends_with("implement")).count(),
+        2,
+        "implement ran twice: {started:?}"
+    );
+    assert!(
+        started.last().is_some_and(|path| path.ends_with("review")),
+        "and the run reached review in the end: {started:?}"
+    );
+    assert!(report.clean(), "a run that retreated and then succeeded is a successful run");
+    assert_eq!(report.retreats, 1);
+    assert_eq!(
+        (report.failed, report.skipped),
+        (1, 2),
+        "and the tallies still carry the failed attempt: the first verify, and the two states \
+         after it that did not run that time round"
+    );
 }

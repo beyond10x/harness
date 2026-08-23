@@ -68,11 +68,17 @@ pub enum FlowEvent {
         exhausted: bool,
     },
     /// The walk ended.
+    ///
+    /// `clean` is the verdict and the three counts are tallies over every attempt. A flow that
+    /// retreated once and then succeeded reports a failure *and* `clean: true`, because both are
+    /// true and folding them together would call every retreat a failed run.
     FlowFinished {
         flow: String,
         ran: usize,
         failed: usize,
         skipped: usize,
+        retreats: usize,
+        clean: bool,
     },
 }
 

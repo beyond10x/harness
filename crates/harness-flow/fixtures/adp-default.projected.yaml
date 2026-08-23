@@ -1,0 +1,64 @@
+# Projected from `adp/default/2` by `protocol workflow flow`. Do not edit.
+#
+# **An ordering, not a government.** 11 guard(s) in the source decide whether a run
+# may move; a flow node has no `when`, so none of them is here. What this document
+# reproduces is the order the states run in and the routes back; what governs a run is the
+# engine, which is not on this side of the translation.
+#
+# Dropped, because nothing runs in them: complete, declined.
+# Also dropped: any early exit. `declined` is an outcome the flow notation cannot express,
+# so a run under this document always walks its whole plan.
+#
+# A retreat is a group that repeats, which is `b10x-harness-flow`'s own shape for one: a
+# DAG has no back-edge, and every state a retreat spans is gathered into a sub-tree that
+# re-runs whole. Its bound is a number given on the command line, because the source bounds
+# a retreat with the engine's iteration budget and that is not in the document.
+#
+# 10 state(s) in 9 layer(s) of the source; 5 node(s) here.
+id: adp/default
+root:
+  id: root
+  nodes:
+    - id: receive
+      run:
+        state: receive
+        summary: "Take in the request and record what is being asked for, unedited."
+    - id: specify
+      needs: [receive]
+      run:
+        state: specify
+        summary: "State the required behaviour. Anything left only in the prompt cannot be checked later, so this is where an objective becomes something a verifier can disagree with."
+    - id: decompose
+      needs: [specify]
+      run:
+        state: decompose
+        summary: "Break the specification into units that can each be implemented and verified on their own."
+    - id: establish_verifiers
+      needs: [decompose]
+      run:
+        state: establish_verifiers
+        summary: "Write the tests, contracts and checks that will decide whether the work is done — before there is an implementation for them to be shaped around."
+    # the retreat: verify -> implement, adversarial_verify -> implement, review -> implement
+    - id: implement-to-review
+      needs: [establish_verifiers]
+      repeat: {max: 3}
+      nodes:
+        - id: implement
+          run:
+            state: implement
+            summary: "Make the smallest change that satisfies the decomposed unit and its verifiers."
+        - id: verify
+          needs: [implement]
+          run:
+            state: verify
+            summary: "Run the verifiers established earlier against the change."
+        - id: adversarial_verify
+          needs: [verify]
+          run:
+            state: adversarial_verify
+            summary: "Try to break what the previous state just declared working: mutants, edge cases, property violations, contract drift."
+        - id: review
+          needs: [adversarial_verify]
+          run:
+            state: review
+            summary: "Judge the change as a whole — intent, fit and risk, not just green checks."

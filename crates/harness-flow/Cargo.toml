@@ -1,0 +1,21 @@
+[package]
+name = "b10x-harness-flow"
+description = "A workflow notation the b10x loop runs natively: a DAG of sub-trees, validated before anything runs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-wire = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = "0.9"

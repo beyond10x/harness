@@ -422,7 +422,7 @@ fn an_edit_that_matched_nothing_or_several_places_is_refused_rather_than_guessed
     // Nothing matched: the model would otherwise believe a change landed.
     let mut published = tools(
         &confined(),
-        Scripted::new(vec![(200, r#"{"result":{"content":"fn main() {}"}}"#)]),
+        Scripted::new(vec![(200, r#"{"result":{"content":{"encoding":"base64","data":"Zm4gbWFpbigpIHt9"}}}"#)]),
         &[],
     );
     let outcome = published.call(&call(json!({"path": "a.rs", "old": "absent", "new": "x"})));
@@ -436,7 +436,7 @@ fn an_edit_that_matched_nothing_or_several_places_is_refused_rather_than_guessed
     // Several matched: three things nobody asked about would have changed.
     let mut published = tools(
         &confined(),
-        Scripted::new(vec![(200, r#"{"result":{"content":"a\na\na\n"}}"#)]),
+        Scripted::new(vec![(200, r#"{"result":{"content":{"encoding":"base64","data":"YQphCmEK"}}}"#)]),
         &[],
     );
     let outcome = published.call(&call(json!({"path": "a.rs", "old": "a", "new": "b"})));
@@ -449,7 +449,7 @@ fn an_edit_that_matched_nothing_or_several_places_is_refused_rather_than_guessed
 #[test]
 fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change() {
     let script = Scripted::new(vec![
-        (200, r#"{"result":{"content":"one\ntwo\nthree\n"}}"#),
+        (200, r#"{"result":{"content":{"encoding":"base64","data":"b25lCnR3bwp0aHJlZQo="}}}"#),
         (200, r#"{"result":{"ok":true}}"#),
     ]);
     let mut published = tools(&confined(), script.clone(), &[]);
@@ -464,7 +464,14 @@ fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change(
     assert_eq!(seen[0].0, "GET");
     assert_eq!(seen[1].0, "PUT");
     assert_eq!(seen[1].1, "/v1/workspaces/ws-1/files/a.txt");
-    assert_eq!(seen[1].2.as_ref().expect("a body")["input"]["content"], "one\n2\nthree\n");
+    // Base64 on the wire, because that is what the contract's own schema says a file is.
+    let sent = &seen[1].2.as_ref().expect("a body")["input"]["content"];
+    assert_eq!(sent["encoding"], "base64");
+    assert_eq!(
+        String::from_utf8(crate::base64::decode(sent["data"].as_str().expect("data")).expect("decodes"))
+            .expect("text"),
+        "one\n2\nthree\n"
+    );
 }
 
 #[test]

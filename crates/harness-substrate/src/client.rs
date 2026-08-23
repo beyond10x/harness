@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::{Facts, SubstrateError};
+use crate::{Facts, SubstrateError, base64};
 
 /// How long to wait on a local daemon that is not answering.
 ///
@@ -221,10 +221,16 @@ impl Client {
         text: &str,
     ) -> Result<Value, SubstrateError> {
         let route = format!("/v1/workspaces/{workspace}/files/{path}");
+        // **Base64, because the wire says so.** `workspace.file-write` takes
+        // `{"encoding": "base64", "data": …}`; this crate sent the text directly until the
+        // contract was read against a live daemon. A file's bytes are not a JSON string - a
+        // wire that carried them as one could not carry a file with a byte that is not UTF-8.
         let (status, body) = self.transport.request(
             "PUT",
             &route,
-            Some(&serde_json::json!({"input": {"content": text}})),
+            Some(&serde_json::json!({
+                "input": {"content": {"encoding": "base64", "data": base64::encode(text.as_bytes())}}
+            })),
         )?;
         self.decode(status, body)
     }
@@ -239,13 +245,46 @@ impl Client {
         let route = format!("/v1/workspaces/{workspace}/files/{path}");
         let (status, body) = self.transport.request("GET", &route, None)?;
         let value = self.decode(status, body)?;
+        let data = value
+            .pointer("/result/content/data")
+            .or_else(|| value.pointer("/content/data"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| SubstrateError::Unreadable {
+                reason: format!("no file content in {value}"),
+            })?;
+        let bytes = base64::decode(data).map_err(|reason| SubstrateError::Unreadable { reason })?;
+        String::from_utf8(bytes).map_err(|error| SubstrateError::Unreadable {
+            reason: format!("the file is not text: {error}"),
+        })
+    }
+
+    /// `POST /v1/workspaces` — open a confined workspace and answer its id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError`] when the daemon cannot be reached, refuses, or answers a document
+    /// with no workspace id in it.
+    pub fn workspace_create(&self, lease_ttl_ms: u64) -> Result<String, SubstrateError> {
+        // **`labels` is required, and the first live call is how that was learned.** The operation
+        // schema lists it beside `source` in `required`, and the daemon answers
+        // `request.schema-invalid` to a body without it - a closed schema, so an omission is a
+        // refusal rather than a default. An empty map is the honest value: this client labels
+        // nothing, and inventing a label would put a word in an operator's mouth.
+        let (status, body) = self.transport.request(
+            "POST",
+            "/v1/workspaces",
+            Some(&serde_json::json!({
+                "input": {"source": "empty", "labels": {}, "lease_ttl_ms": lease_ttl_ms}
+            })),
+        )?;
+        let value = self.decode(status, body)?;
         value
-            .pointer("/result/content")
-            .or_else(|| value.pointer("/content"))
+            .pointer("/result/id")
+            .or_else(|| value.pointer("/id"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .ok_or_else(|| SubstrateError::Unreadable {
-                reason: format!("no file content in {value}"),
+                reason: format!("no workspace id in {value}"),
             })
     }
 

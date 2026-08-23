@@ -54,6 +54,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod base64;
 mod client;
 mod predicate;
 mod tools;

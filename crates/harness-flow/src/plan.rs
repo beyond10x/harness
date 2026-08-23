@@ -41,6 +41,12 @@ impl Plan {
 }
 
 pub(crate) fn plan(root: &Group) -> Result<Plan, FlowError> {
+    if !root.gives.is_empty() {
+        return Err(FlowError::RootGives {
+            path: root.id.clone(),
+            gives: root.gives.join(", "),
+        });
+    }
     plan_group(root, &root.id)
 }
 

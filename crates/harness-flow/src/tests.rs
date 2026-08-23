@@ -24,7 +24,7 @@ root:
 struct Always(StepOutcome);
 
 impl StepRunner for Always {
-    fn run(&mut self, _path: &str, _step: &Step) -> StepOutcome {
+    fn run(&mut self, _path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
         self.0
     }
 }
@@ -33,7 +33,7 @@ impl StepRunner for Always {
 struct FailsAt(Vec<&'static str>);
 
 impl StepRunner for FailsAt {
-    fn run(&mut self, path: &str, _step: &Step) -> StepOutcome {
+    fn run(&mut self, path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
         if self.0.iter().any(|name| path.ends_with(name)) {
             StepOutcome::Failed
         } else {
@@ -323,7 +323,7 @@ root:
     );
     struct Capture(Vec<serde_json::Value>);
     impl StepRunner for Capture {
-        fn run(&mut self, _path: &str, step: &Step) -> StepOutcome {
+        fn run(&mut self, _path: &str, step: &Step, _cx: &StepContext) -> StepOutcome {
             self.0.push(step.run.clone());
             StepOutcome::Passed
         }
@@ -380,7 +380,7 @@ struct HealsAfter {
 }
 
 impl StepRunner for HealsAfter {
-    fn run(&mut self, path: &str, _step: &Step) -> StepOutcome {
+    fn run(&mut self, path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
         if !path.ends_with(self.step) {
             return StepOutcome::Passed;
         }
@@ -675,4 +675,223 @@ fn the_projected_workflow_retreats_when_verification_fails() {
         "and the tallies still carry the failed attempt: the first verify, and the two states \
          after it that did not run that time round"
     );
+}
+
+// --- the context boundary ------------------------------------------------------------------------
+
+/// Records the scope every step ran in and what it could see, and hands over whatever it is asked
+/// for — named after the group that promised it.
+#[derive(Default)]
+struct Scopes {
+    seen: Vec<(String, String, Vec<String>)>,
+    withhold: Option<&'static str>,
+}
+
+impl StepRunner for Scopes {
+    fn run(&mut self, path: &str, _step: &Step, cx: &StepContext) -> StepOutcome {
+        let mut names: Vec<String> = cx.available.keys().cloned().collect();
+        names.sort();
+        self.seen.push((path.to_owned(), cx.scope.clone(), names));
+        StepOutcome::Passed
+    }
+
+    fn handoff(&mut self, scope: &str, gives: &[NodeId]) -> Handoff {
+        gives
+            .iter()
+            .filter(|name| Some(name.as_str()) != self.withhold)
+            .map(|name| (name.clone(), serde_json::json!({"from": scope})))
+            .collect()
+    }
+}
+
+const SCOPED: &str = r"
+id: scoped
+root:
+  id: root
+  nodes:
+    - id: shape
+      gives: [specification_id]
+      nodes:
+        - id: specify
+        - id: decompose
+          needs: [specify]
+    - id: build
+      needs: [shape]
+      gives: [diff]
+      nodes:
+        - id: implement
+    - id: review
+      needs: [build]
+";
+
+#[test]
+fn steps_inside_one_group_share_a_scope_and_steps_in_another_do_not() {
+    let mut runner = Scopes::default();
+    let flow = flow(SCOPED);
+    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+
+    let scopes: Vec<(&str, &str)> = runner
+        .seen
+        .iter()
+        .map(|(path, scope, _)| (path.as_str(), scope.as_str()))
+        .collect();
+    assert_eq!(
+        scopes,
+        vec![
+            ("root.shape.specify", "root.shape"),
+            ("root.shape.decompose", "root.shape"),
+            ("root.build.implement", "root.build"),
+            ("root.review", "root"),
+        ],
+        "two steps of one group share one conversation; a step outside it does not"
+    );
+}
+
+#[test]
+fn what_crosses_a_boundary_is_the_declared_handoff_and_never_a_transcript() {
+    let mut runner = Scopes::default();
+    let flow = flow(SCOPED);
+    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+
+    let available = |path: &str| -> Vec<String> {
+        runner
+            .seen
+            .iter()
+            .find(|(seen, _, _)| seen == path)
+            .map(|(_, _, names)| names.clone())
+            .expect("ran")
+    };
+
+    assert!(
+        available("root.shape.specify").is_empty(),
+        "the first group starts from nothing"
+    );
+    assert_eq!(
+        available("root.build.implement"),
+        vec!["specification_id".to_owned()],
+        "and the next one starts from what the first promised - by name, not by transcript"
+    );
+    assert_eq!(
+        available("root.review"),
+        vec!["diff".to_owned(), "specification_id".to_owned()],
+        "a later sibling sees everything that has crossed so far"
+    );
+}
+
+#[test]
+fn a_group_that_breaks_its_promise_fails_and_stops_what_needed_it() {
+    // `gives` is a contract the document wrote down. A group that promised `specification_id` and
+    // handed over nothing with that name has not finished, and letting its siblings run on would
+    // give them a hole they cannot see.
+    let mut runner = Scopes {
+        withhold: Some("specification_id"),
+        ..Scopes::default()
+    };
+    let mut sink = VecFlowSink::new();
+    let report = flow(SCOPED).run(&mut runner, &mut sink).expect("valid");
+
+    assert!(!report.clean());
+    assert_eq!(report.failed, 0, "no step failed - the group did");
+    assert_eq!(report.skipped, 2, "build and review");
+
+    let incomplete = sink
+        .events()
+        .iter()
+        .find_map(|event| match event {
+            FlowEvent::HandoffIncomplete { path, missing } => Some((path.clone(), missing.clone())),
+            _ => None,
+        })
+        .expect("said so");
+    assert_eq!(incomplete.0, "root.shape");
+    assert_eq!(incomplete.1, vec!["specification_id".to_owned()]);
+}
+
+#[test]
+fn a_handoff_is_asked_for_once_after_the_last_attempt_and_not_once_per_draft() {
+    // A group that retreated three times hands over what it ended up with, not three drafts of it.
+    #[derive(Default)]
+    struct Counting {
+        asked: usize,
+        seen: usize,
+    }
+    impl StepRunner for Counting {
+        fn run(&mut self, path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
+            if path.ends_with("flaky") {
+                self.seen += 1;
+                if self.seen < 3 {
+                    return StepOutcome::Failed;
+                }
+            }
+            StepOutcome::Passed
+        }
+        fn handoff(&mut self, _scope: &str, gives: &[NodeId]) -> Handoff {
+            self.asked += 1;
+            gives
+                .iter()
+                .map(|name| (name.clone(), serde_json::json!(true)))
+                .collect()
+        }
+    }
+
+    let flow = flow(
+        r"
+id: retried
+root:
+  id: root
+  nodes:
+    - id: build
+      repeat: {max: 3}
+      gives: [diff]
+      nodes: [{id: flaky}]
+",
+    );
+    let mut runner = Counting::default();
+    let report = flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    assert!(report.clean());
+    assert_eq!(runner.seen, 3, "three attempts");
+    assert_eq!(runner.asked, 1, "and one handoff");
+}
+
+#[test]
+fn a_step_is_told_which_attempt_of_its_scope_it_is_running_in() {
+    // A runner that keeps one context per scope needs this to know whether to start a conversation
+    // or continue one.
+    #[derive(Default)]
+    struct Attempts(Vec<u32>);
+    impl StepRunner for Attempts {
+        fn run(&mut self, _path: &str, _step: &Step, cx: &StepContext) -> StepOutcome {
+            self.0.push(cx.attempt);
+            if self.0.len() < 2 { StepOutcome::Failed } else { StepOutcome::Passed }
+        }
+    }
+    let flow = flow(
+        r"
+id: attempts
+root:
+  id: root
+  nodes:
+    - id: build
+      repeat: {max: 2}
+      nodes: [{id: only}]
+",
+    );
+    let mut runner = Attempts::default();
+    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    assert_eq!(runner.0, vec![1, 2]);
+}
+
+#[test]
+fn the_root_cannot_promise_anything_because_there_is_nobody_on_the_other_side() {
+    let flow = flow(
+        r"
+id: rootgives
+root:
+  id: root
+  gives: [something]
+  nodes: [{id: a}]
+",
+    );
+    let error = flow.plan().expect_err("refused");
+    assert!(matches!(error, FlowError::RootGives { .. }), "{error}");
+    assert!(error.to_string().contains("no sibling on the other side"), "{error}");
 }

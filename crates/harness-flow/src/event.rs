@@ -54,10 +54,18 @@ pub enum FlowEvent {
         attempt: u32,
         of: u32,
     },
+    /// A group promised something in `gives` and did not hand it over.
+    ///
+    /// The group fails. `gives` is a contract the document wrote down, and letting siblings run on
+    /// after a broken one hands them a hole they cannot see.
+    HandoffIncomplete { path: String, missing: Vec<NodeId> },
     /// A sub-tree was left.
     GroupLeft {
         path: String,
         failed: bool,
+        /// What it handed its siblings, by name. The transcript stays inside.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gave: Vec<NodeId>,
         /// How many attempts it took, or used up.
         attempts: u32,
         /// `true` when it failed *and* had no attempts left.

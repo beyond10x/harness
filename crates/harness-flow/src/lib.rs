@@ -74,7 +74,7 @@ mod run;
 
 pub use event::{FlowEvent, FlowSink, VecFlowSink};
 pub use plan::{Layer, Plan};
-pub use run::{StepOutcome, StepRunner};
+pub use run::{Handoff, StepContext, StepOutcome, StepRunner};
 
 /// Names one node. Unique among its siblings, and a path from the root names it globally.
 pub type NodeId = String;
@@ -101,6 +101,26 @@ pub struct Group {
     /// Absent means once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<Repeat>,
+    /// What this group promises to hand its siblings when it leaves.
+    ///
+    /// # This is the context boundary, written down
+    ///
+    /// A sibling already cannot depend on a step *inside* a group — an edge may only join
+    /// siblings. The symmetric statement is the context rule: **if a sibling cannot depend on a
+    /// step inside a group, it must not see that step's transcript either.** So a group is a
+    /// context scope. Its steps share one conversation and stay warm; what crosses the boundary is
+    /// this list and nothing else.
+    ///
+    /// It is declared rather than inferred because the alternative is *whatever the model happened
+    /// to say last*, which is not a contract. A group that names `specification_id` and hands over
+    /// something without one has broken a promise the document made, and the walk says so.
+    ///
+    /// The cost this exists to remove is measurable. The first driven evaluation ran one cold
+    /// session per workflow state and spent 14.0M tokens where a single-session arm spent 4.6M for
+    /// the same deliverable — 3.4x, and the difference is six cold starts rather than six units of
+    /// work. Under scopes only the boundary pays.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gives: Vec<NodeId>,
     /// The nodes inside. An empty group is refused: a section that runs nothing is a mistake
     /// somebody made, not a section.
     pub nodes: Vec<Node>,
@@ -206,6 +226,11 @@ pub enum FlowError {
          is not there. Delete it, or say `max: 1`"
     )]
     RepeatsNever { path: String, max: u32 },
+    #[error(
+        "`{path}` is the root and promises `{gives}` to nobody: a handoff crosses a boundary, and \
+         the root has no sibling on the other side of it"
+    )]
+    RootGives { path: String, gives: String },
 }
 
 impl Flow {

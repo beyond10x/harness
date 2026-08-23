@@ -1,7 +1,7 @@
 {
   "profile": "codex-app-server-stdio-v2-dynamic-operation-tools-experimental",
   "version": "2026-08-21",
-  "product": "daemonloom-harness",
+  "product": "b10x-harness",
   "transport": "stdio-jsonl",
   "pinned_after": "codex-cli 0.145.0",
   "requires_capability": "experimentalApi",

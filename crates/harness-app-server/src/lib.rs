@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Serves Daemonloom's own loop over the pinned Codex app-server JSON-RPC format.
+//! Serves the b10x loop over the pinned Codex app-server JSON-RPC format.
 //!
 //! Not a bridge — the opposite end of one. `runtime/agent` already knows how to drive a process
 //! speaking this format, and the command it spawns is arbitrary. Speaking the format here means

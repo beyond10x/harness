@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! `OpenAI` Responses wire adapter for Daemonloom's own agent loop.
+//! `OpenAI` Responses wire adapter for the b10x agent loop.
 //!
 //! It speaks one documented endpoint, `POST {base}/responses`, in streaming mode, and projects it
 //! into [`harness_wire`]'s neutral values. It holds no credential: the bearer is read from an

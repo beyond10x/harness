@@ -1,6 +1,6 @@
 [package]
-name = "daemonloom-harness-app-server"
-description = "Serves Daemonloom's own loop over the pinned Codex app-server JSON-RPC format"
+name = "b10x-harness-app-server"
+description = "Serves the b10x loop over the pinned Codex app-server JSON-RPC format"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

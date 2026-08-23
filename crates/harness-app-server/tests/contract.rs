@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use daemonloom_harness_app_server::{
+use b10x_harness_app_server::{
     CLIENT_METHODS, DYNAMIC_TOOL_ITEM, PRODUCT, PROFILE, REFUSED_CLIENT_METHODS, SERVER_METHODS,
     TERMINAL_STATUSES,
 };

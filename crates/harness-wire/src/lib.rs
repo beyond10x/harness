@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Neutral values and ports shared by Daemonloom's own agent loop and its model wires.
+//! Neutral values and ports shared by the b10x agent loop and its model wires.
 //!
 //! This crate performs no I/O, reads no clock, holds no credential, and names no vendor field. A
 //! wire adapter projects one documented model API into these values; the loop consumes only these

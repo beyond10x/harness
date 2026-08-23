@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 
-use daemonloom_harness_responses::{Endpoint, ResponsesClient, WIRE};
+use b10x_harness_responses::{Endpoint, ResponsesClient, WIRE};
 use harness_loop::{AgentLoop, ApproveAll, Budget, LoopConfig, LoopEvent, LoopStop, VecLoopSink};
 use harness_wire::{
     Item, StaticBearer, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec, WireErrorCode,
@@ -190,7 +190,7 @@ fn a_tool_round_trip_completes_over_the_wire() {
     assert!(
         sink.events().iter().any(|event| matches!(
             event,
-            LoopEvent::ToolArgumentsDelta { call_id, .. } if call_id.as_str() == "call_daemonloom_001"
+            LoopEvent::ToolArgumentsDelta { call_id, .. } if call_id.as_str() == "call_b10x_001"
         )),
         "{:?}",
         sink.events()
@@ -210,7 +210,7 @@ fn a_tool_round_trip_completes_over_the_wire() {
         .iter()
         .find(|entry| entry["type"] == json!("function_call_output"))
         .expect("the result is replayed");
-    assert_eq!(output["call_id"], json!("call_daemonloom_001"));
+    assert_eq!(output["call_id"], json!("call_b10x_001"));
     assert!(
         output["output"]
             .as_str()

@@ -2,7 +2,7 @@
 //!
 //! This is the composition the unit tests cannot reach: argument parsing, credential resolution,
 //! the HTTP client, the loop, the read-only tools and the renderer, all at once. If this passes,
-//! `daemonloom-harness run` works.
+//! `b10x-harness run` works.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 
 use serde_json::Value;
 
-const BINARY: &str = env!("CARGO_BIN_EXE_daemonloom-harness");
+const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
 
 struct Fixture {
     child: Child,
@@ -89,7 +89,7 @@ fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
         "--model",
         "daemonloom-emulated",
         "--api-key-env",
-        "DAEMONLOOM_HARNESS_TEST_KEY",
+        "B10X_HARNESS_TEST_KEY",
         "--input",
         "read the readme and tell me what it says",
     ];
@@ -98,7 +98,7 @@ fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
         .args(&arguments)
         .arg("--workspace")
         .arg(workspace)
-        .env("DAEMONLOOM_HARNESS_TEST_KEY", "test-key")
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
         .output()
         .expect("the binary runs");
     Output {

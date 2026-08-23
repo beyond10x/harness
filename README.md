@@ -1,9 +1,9 @@
-# Daemonloom Harness
+# b10x harness
 
-**Status: pre-v1, development implementation.** Daemonloom's own agent loop. It talks to LLM APIs
+**Status: pre-v1, development implementation.** The b10x agent loop — our own, not a vendor's. It talks to LLM APIs
 directly and owns the cycle: one turn out, tool calls back, results in, next turn out.
 
-It is deliberately small, and it carries no bridges. [`runtime/agent`](../agent) is where the Codex
+It is deliberately small, and it carries no bridges. [`runtime/agent`](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/runtime/agent) is where the Codex
 and Claude bridges live; this component drives no vendor binary and depends on nothing else in the
 monorepo. The arrow points inward — something else embeds this, never the reverse.
 
@@ -29,7 +29,7 @@ Owning the loop changes three things concretely:
 | Shell | What it is | Status |
 | --- | --- | --- |
 | Embedded | `harness-loop` as a library; tools bound in-process, no IPC | implemented |
-| Command line | `daemonloom-harness run`, over a read-only workspace | implemented |
+| Command line | `b10x-harness run`, over a read-only workspace | implemented |
 | Bridge | a process speaking the Codex app-server JSON-RPC format | implemented |
 
 The seam that makes this possible is [`ToolPort`](crates/harness-wire/src/port.rs): in-process it is
@@ -40,7 +40,7 @@ arbitrary — `AppServerChild::spawn` takes a `Command`. So bridge mode reuses t
 without either component depending on the other:
 
 ```text
-daemonloom-harness app-server \
+b10x-harness app-server \
   --base-url https://llmgw.example/v1 \
   --model <alias> \
   --api-key-env LLMGW_KEY
@@ -72,7 +72,7 @@ one provider's blob replayed into another's.
 ## Running it
 
 ```text
-cargo run -p daemonloom-harness-cli -- run \
+cargo run -p b10x-harness-cli -- run \
   --base-url https://llmgw.example/v1 \
   --model <alias> \
   --api-key-file <path> \
@@ -100,7 +100,7 @@ reason, `1` the harness could not run.
 - `harness-responses` — the Responses projection and its HTTP/SSE client.
 - `harness-loop` — the loop: turn assembly, tool round trips, approvals, budgets, cancellation.
 - `harness-app-server` — the Codex-format JSON-RPC server, and the wire-backed `ToolPort`.
-- `harness-cli` — the `daemonloom-harness` binary and the read-only workspace tools.
+- `harness-cli` — the `b10x-harness` binary and the read-only workspace tools.
 
 ## Evidence
 
@@ -122,6 +122,6 @@ server.
 ## Not owned here
 
 No Substrate confinement claim: like the model-only Codex routes under
-[ADR 0051](../../architecture/adr/0051-hosted-model-only-harness-routes-do-not-claim-substrate-confinement.md),
+[ADR 0051](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/architecture/adr/0051-hosted-model-only-harness-routes-do-not-claim-substrate-confinement.md),
 this harness's effects are exactly what its toolset admits and nothing constrains it further. No
 delegation, structured output, realtime media, provider-side sessions, or durable resume.

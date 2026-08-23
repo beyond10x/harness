@@ -1,6 +1,6 @@
 [package]
-name = "daemonloom-harness-cli"
-description = "Daemonloom's own harness, driven from the command line"
+name = "b10x-harness-cli"
+description = "The b10x harness, driven from the command line"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "daemonloom-harness"
+name = "b10x-harness"
 path = "src/main.rs"
 
 [lints]

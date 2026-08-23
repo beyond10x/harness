@@ -1,6 +1,6 @@
 [package]
-name = "daemonloom-harness-responses"
-description = "OpenAI Responses wire adapter for Daemonloom's own agent loop"
+name = "b10x-harness-responses"
+description = "OpenAI Responses wire adapter for the b10x agent loop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

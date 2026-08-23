@@ -22,7 +22,7 @@ RECORD_LOCK = threading.Lock()
 
 def response_object(status, output, usage, incomplete=None, error=None):
     return {
-        "id": "resp_daemonloom_001",
+        "id": "resp_b10x_001",
         "object": "response",
         "created_at": 1786706400,
         "status": status,
@@ -46,7 +46,7 @@ def usage_object(output_tokens):
 
 def message_item(text):
     return {
-        "id": "msg_daemonloom_001",
+        "id": "msg_b10x_001",
         "type": "message",
         "status": "completed",
         "role": "assistant",
@@ -56,7 +56,7 @@ def message_item(text):
 
 def reasoning_item():
     return {
-        "id": "rs_daemonloom_001",
+        "id": "rs_b10x_001",
         "type": "reasoning",
         "summary": [],
         "encrypted_content": "OPAQUE-REASONING-BLOB",
@@ -65,11 +65,11 @@ def reasoning_item():
 
 def function_call_item(name, arguments):
     return {
-        "id": "fc_daemonloom_001",
+        "id": "fc_b10x_001",
         "type": "function_call",
         "status": "completed",
         "name": name,
-        "call_id": "call_daemonloom_001",
+        "call_id": "call_b10x_001",
         "arguments": json.dumps(arguments, separators=(",", ":")),
     }
 
@@ -86,13 +86,13 @@ def text_events(text, extra_output=()):
         },
         {
             "type": "response.output_text.delta",
-            "item_id": "msg_daemonloom_001",
+            "item_id": "msg_b10x_001",
             "output_index": 0,
             "delta": text[:midpoint],
         },
         {
             "type": "response.output_text.delta",
-            "item_id": "msg_daemonloom_001",
+            "item_id": "msg_b10x_001",
             "output_index": 0,
             "delta": text[midpoint:],
         },

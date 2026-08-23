@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Daemonloom's own harness, driven from the command line.
+//! The b10x harness, driven from the command line.
 //!
 //! The command is a thin shell: it resolves an endpoint, a credential and a workspace, then hands
 //! them to [`harness_loop`]. Everything interesting happens in the loop, which is what lets the
@@ -28,7 +28,7 @@ pub use workspace::{GREP_TOOL, LIST_TOOL, READ_TOOL, WorkspaceTools};
 
 /// The standing instruction when the caller supplies none.
 const DEFAULT_INSTRUCTIONS: &str = "\
-You are Daemonloom's own coding harness. You are looking at one workspace through three read-only \
+You are the b10x coding harness. You are looking at one workspace through three read-only \
 tools: workspace.list, workspace.read and workspace.grep. Nothing you can call changes a file or \
 runs a command, so say what you would change rather than claiming you changed it. Ground every \
 claim about the workspace in something you actually read, and say plainly when you have not \
@@ -36,9 +36,9 @@ looked. Prefer a few precise reads over broad guessing.";
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "daemonloom-harness",
+    name = "b10x-harness",
     version,
-    about = "Daemonloom's own agent loop, run against an OpenAI-compatible endpoint"
+    about = "The b10x agent loop, run against an OpenAI-compatible endpoint"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -349,10 +349,10 @@ mod tests {
 
     #[test]
     fn a_run_needs_an_endpoint_a_model_and_an_input() {
-        assert!(parse(&["daemonloom-harness", "run"]).is_err());
+        assert!(parse(&["b10x-harness", "run"]).is_err());
         assert!(
             parse(&[
-                "daemonloom-harness",
+                "b10x-harness",
                 "run",
                 "--base-url",
                 "https://gw.example/v1",
@@ -371,7 +371,7 @@ mod tests {
     fn the_two_credential_sources_are_mutually_exclusive() {
         assert!(
             parse(&[
-                "daemonloom-harness",
+                "b10x-harness",
                 "run",
                 "--base-url",
                 "https://gw.example/v1",
@@ -390,7 +390,7 @@ mod tests {
 
     fn options(arguments: &[&str]) -> RunOptions {
         let base = vec![
-            "daemonloom-harness",
+            "b10x-harness",
             "run",
             "--base-url",
             "https://gw.example/v1",
@@ -416,12 +416,9 @@ mod tests {
 
     #[test]
     fn an_unset_environment_variable_refuses_by_name() {
-        let options = options(&["--api-key-env", "DAEMONLOOM_HARNESS_ABSENT_TEST_KEY"]);
+        let options = options(&["--api-key-env", "B10X_HARNESS_ABSENT_TEST_KEY"]);
         let error = resolve_credential(&options).expect_err("an unset variable refuses");
-        assert!(
-            error.contains("DAEMONLOOM_HARNESS_ABSENT_TEST_KEY"),
-            "{error}"
-        );
+        assert!(error.contains("B10X_HARNESS_ABSENT_TEST_KEY"), "{error}");
     }
 
     #[test]

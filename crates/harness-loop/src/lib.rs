@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Daemonloom's own agent loop.
+//! The b10x agent loop.
 //!
 //! One turn goes out, tool calls come back, the results go in and the next turn goes out. Owning
 //! that cycle is the whole point: the tools are ours to publish, the budgets are ours to count,

@@ -12,15 +12,15 @@ members = [
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
-license = "LicenseRef-Daemonloom-Proprietary"
-repository = "https://github.com/daemonloom/daemonloom"
+license = "LicenseRef-B10x-Proprietary"
+repository = "https://github.com/beyond10x/harness"
 publish = false
 
 [workspace.dependencies]
-harness-wire = { package = "daemonloom-harness-wire", path = "crates/harness-wire" }
-harness-responses = { package = "daemonloom-harness-responses", path = "crates/harness-responses" }
-harness-loop = { package = "daemonloom-harness-loop", path = "crates/harness-loop" }
-harness-app-server = { package = "daemonloom-harness-app-server", path = "crates/harness-app-server" }
+harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
+harness-responses = { package = "b10x-harness-responses", path = "crates/harness-responses" }
+harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
+harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"

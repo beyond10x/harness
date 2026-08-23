@@ -53,7 +53,7 @@ def check_version(directory: pathlib.Path, failures: list[str]) -> None:
 
     # A server naming itself after the vendor makes an incident unreadable, so the manifest may
     # not claim to be one either.
-    if not manifest["product"].startswith("daemonloom"):
+    if not manifest["product"].startswith("b10x"):
         failures.append(
             f"{manifest_path}: product `{manifest['product']}` must name this implementation"
         )

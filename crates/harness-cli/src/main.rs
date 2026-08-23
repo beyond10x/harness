@@ -1,5 +1,5 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    daemonloom_harness_cli::run()
+    b10x_harness_cli::run()
 }

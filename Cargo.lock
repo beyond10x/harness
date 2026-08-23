@@ -59,6 +59,66 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "b10x-harness-app-server"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-loop",
+ "b10x-harness-responses",
+ "b10x-harness-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "b10x-harness-cli"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-app-server",
+ "b10x-harness-loop",
+ "b10x-harness-responses",
+ "b10x-harness-wire",
+ "clap",
+ "ctrlc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "b10x-harness-loop"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-wire",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "b10x-harness-responses"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-loop",
+ "b10x-harness-wire",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "b10x-harness-wire"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,66 +248,6 @@ dependencies = [
  "dispatch2",
  "nix",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "daemonloom-harness-app-server"
-version = "0.1.0"
-dependencies = [
- "daemonloom-harness-loop",
- "daemonloom-harness-responses",
- "daemonloom-harness-wire",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "daemonloom-harness-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "ctrlc",
- "daemonloom-harness-app-server",
- "daemonloom-harness-loop",
- "daemonloom-harness-responses",
- "daemonloom-harness-wire",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "daemonloom-harness-loop"
-version = "0.1.0"
-dependencies = [
- "daemonloom-harness-wire",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "daemonloom-harness-responses"
-version = "0.1.0"
-dependencies = [
- "daemonloom-harness-loop",
- "daemonloom-harness-wire",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "daemonloom-harness-wire"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "zeroize",
 ]
 
 [[package]]

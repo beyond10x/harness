@@ -1,6 +1,6 @@
 [package]
-name = "daemonloom-harness-wire"
-description = "Neutral values and ports shared by Daemonloom's own agent loop and its model wires"
+name = "b10x-harness-wire"
+description = "Neutral values and ports shared by the b10x agent loop and its model wires"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

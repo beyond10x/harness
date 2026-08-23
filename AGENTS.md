@@ -1,16 +1,22 @@
-# Working on daemonloom/runtime/harness
+# Working on beyond10x/harness
 
-This component owns Daemonloom's own agent loop: the harness that talks to LLM APIs directly rather
-than driving someone else's. The root [`AGENTS.md`](../../AGENTS.md) applies throughout; this file
+**github.com/beyond10x/harness is the canonical home of the b10x harness.** It was extracted from
+the daemonloom monorepo at
+[`1e074923`](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/runtime/harness)
+on 2026-08-23; the monorepo keeps a pinned git-submodule checkout at `runtime/harness` for its
+`inference` consumer. The gate is `bash scripts/gate.sh`.
+
+This repository owns the b10x agent loop: the harness that talks to LLM APIs directly rather
+than driving someone else's. The root [`AGENTS.md`](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/AGENTS.md) applies throughout; this file
 adds component rules. Read `README.md` and `STATUS.md` first, then `ROADMAP.md`.
 
 The cross-component decision is
-[ADR 0052](../../architecture/adr/0052-daemonloom-owns-an-inner-harness-separate-from-its-bridges.md).
+[ADR 0052](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/architecture/adr/0052-daemonloom-owns-an-inner-harness-separate-from-its-bridges.md).
 
 ## Boundary
 
 - **No bridges.** This component drives no vendor binary, no subprocess harness, and no vendor
-  control protocol as a client. Bridges live in [`runtime/agent`](../agent).
+  control protocol as a client. Bridges live in [`runtime/agent`](https://github.com/daemonloom/daemonloom/blob/1e0749233b711744b6e50f9106bba2c33dbbf396/runtime/agent).
 - **No monorepo dependencies.** Not on `agent-model`, not on `agent-runtime`, not on anything else
   in this repository. Something else embeds this; this embeds nothing. A dependency here would
   quietly re-couple the component the split exists to separate.
@@ -91,6 +97,6 @@ subprocess over a real socket.
 ## Safety
 
 - The monorepo is private. Never commit credentials, tokens, key files, or transcripts.
-- Automated commits and pushes use `daemonloom-bot` per the root `AGENTS.md`.
+- Automated commits and pushes use the org bot via `scripts/as-bot.sh`; never a human credential.
 - The shipped toolset is read-only. Adding a tool that writes or executes is its own change, with
   its own gate and its own entry in `STATUS.md` — not a flag on an existing one.

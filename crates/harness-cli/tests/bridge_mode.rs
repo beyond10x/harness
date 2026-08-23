@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-const BINARY: &str = env!("CARGO_BIN_EXE_daemonloom-harness");
+const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Methods this server is allowed to emit. A copy of the crate's own inventory, so a test failure
@@ -92,12 +92,12 @@ impl Bridge {
             "--model",
             "daemonloom-emulated",
             "--api-key-env",
-            "DAEMONLOOM_HARNESS_TEST_KEY",
+            "B10X_HARNESS_TEST_KEY",
         ];
         arguments.extend_from_slice(extra);
         let mut child = Command::new(BINARY)
             .args(&arguments)
-            .env("DAEMONLOOM_HARNESS_TEST_KEY", "test-key")
+            .env("B10X_HARNESS_TEST_KEY", "test-key")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -286,7 +286,7 @@ fn the_handshake_says_which_implementation_answered() {
         .as_str()
         .expect("initialize names its implementation");
     assert_eq!(
-        name, "daemonloom-harness",
+        name, "b10x-harness",
         "a server that impersonates the vendor makes an incident unreadable"
     );
     assert_eq!(

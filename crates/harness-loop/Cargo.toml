@@ -1,6 +1,6 @@
 [package]
-name = "daemonloom-harness-loop"
-description = "Daemonloom's own agent loop: turn assembly, tool round trips, approvals and budgets"
+name = "b10x-harness-loop"
+description = "The b10x agent loop: turn assembly, tool round trips, approvals and budgets"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

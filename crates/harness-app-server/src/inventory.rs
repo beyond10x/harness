@@ -22,7 +22,7 @@ pub const EXPERIMENTAL_API_CAPABILITY: &str = "experimentalApi";
 ///
 /// Deliberately not `codex-cli`. A bridge reading this must be able to tell which implementation
 /// answered, and a server that impersonates the vendor makes an incident unreadable.
-pub const PRODUCT: &str = "daemonloom-harness";
+pub const PRODUCT: &str = "b10x-harness";
 
 /// Requests and notifications this server accepts.
 pub const CLIENT_METHODS: &[&str] = &[
@@ -99,6 +99,6 @@ mod tests {
     #[test]
     fn the_server_never_claims_to_be_the_vendor() {
         assert_ne!(PRODUCT, "codex-cli");
-        assert!(PRODUCT.starts_with("daemonloom"));
+        assert!(PRODUCT.starts_with("b10x"));
     }
 }

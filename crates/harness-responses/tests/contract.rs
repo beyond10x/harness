@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use daemonloom_harness_responses::{WIRE, decode_stream, request_body};
+use b10x_harness_responses::{WIRE, decode_stream, request_body};
 use harness_wire::{
     Approval, CallId, Item, Sampling, StopReason, ToolCall, ToolName, ToolOutcome, ToolSpec, Usage,
     VecSink, WireId,

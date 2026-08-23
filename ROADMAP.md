@@ -73,3 +73,31 @@ does not.
 
 **Exit:** a direct-provider run passes `runtime/agent`'s own lifecycle conformance, and a live run
 exists whose evidence is not confused with provider emulation.
+
+## Phase 6: `harness-workspace`, one trait over three ways to hold a tree
+
+**Status: not started.** The shape is already visible in `harness-substrate::Backend`, which is
+where the argument for pulling it out comes from.
+
+A run's tools need a tree they may read and change. Today there are two implementations of that and
+they live in two crates for historical reasons rather than for a reason: `WorkspaceTools` reads the
+operator's own directory with no confinement at all, and `ConfinedTools` reaches substrate — either
+embedded in this process or across a socket. A third is missing and obvious.
+
+The three, and what each is for:
+
+| implementation | confinement | who asked | for |
+|---|---|---|---|
+| **non-confined** | none: the process's own filesystem, bounded by path checks this crate makes | nobody — there is no boundary to name a subject at | a run against the operator's own tree, which is what every run so far has been |
+| **substrate as a library** | the driver's: guarded IO, `openat2` containment, cgroups and namespaces around an exec | nobody: in-process there is no peer, so no subject | a simple run that wants real confinement and no deployment |
+| **substrate over a socket** | the same, plus an authenticated boundary | a subject derived from kernel peer credentials | an integrated or multi-tenant deployment, where *who asked* has to be answerable |
+
+What pulling it out buys: the publication gate stops being a property of one crate. Today
+`ConfinedTools::new` decides what exists from `Facts`, and `WorkspaceTools` publishes three tools
+unconditionally — two rules in two places for one question. One trait means the toolset is computed
+once from what the chosen workspace admits, and an embedder that passes a remote gets the same
+answer for the same reason.
+
+**Exit:** `harness-cli` names a workspace implementation and publishes what it admits, with no
+`cfg` and no branch on which one it got; the three implementations share one conformance suite; and
+`ToolPort` has one implementation rather than two that must be kept agreeing.

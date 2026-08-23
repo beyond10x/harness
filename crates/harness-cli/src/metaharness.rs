@@ -18,10 +18,12 @@
 //!
 //! # What is stated, and what is honestly absent
 //!
-//! `session.started` carries `adapter: b10x`, `adapter_class: loop` — **not** `harness`. A harness
-//! adapter drives somebody else's loop; this is one. A reader who filters on `adapter_class` must
-//! be able to see the difference, and the field exists to carry exactly that (metaharness design
-//! § 8.4 O5, *a harness adapter never silently becomes a direct API call*).
+//! `session.started` carries `adapter: b10x`, `adapter_class: direct_provider` — **not** `harness`.
+//! A harness adapter drives somebody else's loop; this is one, and metaharness's own vocabulary
+//! already had the word: *"the embedder holds the conversation and calls a model API"*. A reader
+//! who filters on `adapter_class` must be able to see the difference, and the field exists to carry
+//! exactly that (metaharness design § 8.4 O5, *a harness adapter never silently becomes a direct
+//! API call*).
 //!
 //! Several fields other adapters populate are written **`null`**, because this loop has no such
 //! thing and inventing one would be a claim about a run nobody made: no `slash_commands`, no
@@ -37,8 +39,12 @@ use serde_json::{Value, json};
 const FORMAT: &str = "metaharness.event/1";
 /// What this adapter calls itself.
 const ADAPTER: &str = "b10x";
-/// Not `harness`: this crate holds the loop rather than driving somebody else's.
-const ADAPTER_CLASS: &str = "loop";
+/// Not `harness`, and the word is metaharness's own.
+///
+/// `AdapterClass::DirectProvider` — *"the embedder holds the conversation and calls a model API"* —
+/// has been in that protocol since v0.1 with a note saying nothing was one yet. This is, so it
+/// takes the existing word rather than coining a second one for the same thing.
+const ADAPTER_CLASS: &str = "direct_provider";
 
 /// Reads a `--json` loop record and writes the metaharness stream for it.
 ///
@@ -271,13 +277,13 @@ mod tests {
     }
 
     #[test]
-    fn this_is_a_loop_and_says_so_rather_than_calling_itself_a_harness() {
+    fn this_names_the_class_metaharness_already_had_rather_than_a_synonym() {
         let events = convert_all(RUN);
         let started = &events[0];
         assert_eq!(started["adapter"], "b10x");
         assert_eq!(
-            started["adapter_class"], "loop",
-            "a harness adapter drives somebody else's loop; this is one"
+            started["adapter_class"], "direct_provider",
+            "metaharness's own word for this, rather than a synonym invented here"
         );
         assert_eq!(started["harness_version"], "0.1.0");
         assert_eq!(started["model"], "gpt-5.6-sol");

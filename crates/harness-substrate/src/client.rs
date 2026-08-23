@@ -192,4 +192,86 @@ impl Client {
             Err(other) => Err(other),
         }
     }
+
+    /// `PUT /v1/workspaces/{workspace}/files/{path}` — write one file whole.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError`] when the daemon cannot be reached or refuses. A path that leaves
+    /// the workspace is refused **by the daemon**, not here: this process is a client of a boundary
+    /// and re-implementing the check would make two answers to one question.
+    pub fn file_write(
+        &self,
+        workspace: &str,
+        path: &str,
+        text: &str,
+    ) -> Result<Value, SubstrateError> {
+        let route = format!("/v1/workspaces/{workspace}/files/{path}");
+        let (status, body) = self.transport.request(
+            "PUT",
+            &route,
+            Some(&serde_json::json!({"input": {"content": text}})),
+        )?;
+        self.decode(status, body)
+    }
+
+    /// `GET /v1/workspaces/{workspace}/files/{path}` — read one file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError`] when the daemon cannot be reached, refuses, or answers a document
+    /// with no text in it.
+    pub fn file_read(&self, workspace: &str, path: &str) -> Result<String, SubstrateError> {
+        let route = format!("/v1/workspaces/{workspace}/files/{path}");
+        let (status, body) = self.transport.request("GET", &route, None)?;
+        let value = self.decode(status, body)?;
+        value
+            .pointer("/result/content")
+            .or_else(|| value.pointer("/content"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| SubstrateError::Unreadable {
+                reason: format!("no file content in {value}"),
+            })
+    }
+
+    /// `POST /v1/execs` then `GET /v1/execs/{id}/output` — run one argv and answer what it did.
+    ///
+    /// **An argv, never a command line.** The wire takes a list and substrate's own `exec.start`
+    /// predicate is `exec.argv-only`; nothing here builds a string a shell would then take apart.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError`] when the daemon cannot be reached or refuses. A program that
+    /// exits non-zero is **not** an error: it is a result, and the caller needs to see it.
+    pub fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
+        let (status, body) = self.transport.request(
+            "POST",
+            "/v1/execs",
+            Some(&serde_json::json!({
+                "input": {"workspace_id": workspace, "argv": argv}
+            })),
+        )?;
+        let started = self.decode(status, body)?;
+        let Some(id) = started
+            .pointer("/result/exec_id")
+            .or_else(|| started.pointer("/exec_id"))
+            .and_then(Value::as_str)
+        else {
+            return Ok(started);
+        };
+        let (status, body) = self
+            .transport
+            .request("GET", &format!("/v1/execs/{id}/output"), None)?;
+        self.decode(status, body)
+    }
+
+    fn decode(&self, status: u16, body: String) -> Result<Value, SubstrateError> {
+        if !(200..300).contains(&status) {
+            return Err(SubstrateError::Refused { status, body });
+        }
+        serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
+            reason: error.to_string(),
+        })
+    }
 }

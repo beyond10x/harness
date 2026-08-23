@@ -56,9 +56,11 @@ use serde_json::Value;
 
 mod client;
 mod predicate;
+mod tools;
 
 pub use client::{Client, Transport, UnixTransport};
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
+pub use tools::{ConfinedTools, EDIT_TOOL, RUN_TOOL, WRITE_TOOL};
 
 /// What substrate says this machine can do.
 ///

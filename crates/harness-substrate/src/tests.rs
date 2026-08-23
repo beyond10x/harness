@@ -3,6 +3,7 @@ use std::os::unix::net::UnixListener;
 use std::sync::Mutex;
 use std::thread;
 
+use harness_wire::{ToolCall, ToolName, ToolPort};
 use serde_json::{Value, json};
 
 use super::*;
@@ -263,4 +264,251 @@ fn the_probe_asks_the_one_route_the_contract_names() {
     // call succeeded against a transport that only answers `/v1/machine`-shaped documents. The
     // route itself is pinned by the socket test above.
     assert!(client.machine().is_ok());
+}
+
+// --- publication, and the tools that exist only where they can be confined ----------------------
+
+use std::sync::Arc;
+
+/// A transport that answers from a script and records what it was asked.
+#[derive(Clone)]
+struct Scripted {
+    seen: Arc<Mutex<Vec<(String, String, Option<Value>)>>>,
+    answers: Arc<Mutex<Vec<(u16, String)>>>,
+}
+
+impl Scripted {
+    fn new(answers: Vec<(u16, &str)>) -> Self {
+        Self {
+            seen: Arc::new(Mutex::new(Vec::new())),
+            answers: Arc::new(Mutex::new(
+                answers
+                    .into_iter()
+                    .map(|(status, body)| (status, body.to_owned()))
+                    .collect(),
+            )),
+        }
+    }
+}
+
+impl Transport for Scripted {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<(u16, String), SubstrateError> {
+        self.seen.lock().expect("not poisoned").push((
+            method.to_owned(),
+            path.to_owned(),
+            body.cloned(),
+        ));
+        let mut answers = self.answers.lock().expect("not poisoned");
+        if answers.is_empty() {
+            return Ok((200, "{}".to_owned()));
+        }
+        Ok(answers.remove(0))
+    }
+}
+
+fn tools(facts: &Facts, script: Scripted, programs: &[&str]) -> ConfinedTools {
+    ConfinedTools::new(
+        Client::with(script),
+        facts,
+        "ws-1",
+        programs.iter().map(|p| (*p).to_owned()).collect(),
+    )
+}
+
+#[test]
+fn a_machine_that_cannot_confine_a_process_publishes_no_way_to_start_one() {
+    // The whole publication tier in one assertion. Not disabled, not gated: absent.
+    let published = tools(&unconfined(), Scripted::new(vec![]), &["cargo"]);
+    let names: Vec<&str> = published.specs().iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec![WRITE_TOOL, EDIT_TOOL]);
+    assert!(!names.contains(&RUN_TOOL), "the model is never told about it");
+
+    let confined_tools = tools(&confined(), Scripted::new(vec![]), &["cargo"]);
+    let names: Vec<&str> = confined_tools.specs().iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec![WRITE_TOOL, EDIT_TOOL, RUN_TOOL]);
+}
+
+#[test]
+fn no_daemon_at_all_publishes_nothing_and_the_harness_is_what_it_always_was() {
+    let published = tools(&Facts::none(), Scripted::new(vec![]), &["cargo"]);
+    assert!(published.specs().is_empty());
+}
+
+#[test]
+fn a_run_with_no_declared_programs_is_not_published_even_where_it_could_be() {
+    // A workflow that named no commands wants none. A tool that admitted everything because
+    // nobody listed anything is the failure this design exists to prevent.
+    let published = tools(&confined(), Scripted::new(vec![]), &[]);
+    let names: Vec<&str> = published.specs().iter().map(|s| s.name.as_str()).collect();
+    assert!(!names.contains(&RUN_TOOL));
+}
+
+#[test]
+fn the_declared_set_is_in_the_tools_own_schema_so_the_model_reads_it_rather_than_guessing() {
+    let published = tools(&confined(), Scripted::new(vec![]), &["cargo", "protocol"]);
+    let run = published
+        .specs()
+        .iter()
+        .find(|spec| spec.name.as_str() == RUN_TOOL)
+        .expect("published");
+    assert!(run.description.contains("cargo, protocol"), "{}", run.description);
+    assert!(
+        run.description.contains("not a shell"),
+        "and says what it is not: {}",
+        run.description
+    );
+    let allowed = &run.input_schema["properties"]["argv"]["prefixItems"][0]["enum"];
+    assert_eq!(allowed, &json!(["cargo", "protocol"]));
+}
+
+#[test]
+fn a_program_outside_the_declared_set_is_refused_by_name_and_the_set_is_listed() {
+    let script = Scripted::new(vec![]);
+    let mut published = tools(&confined(), script.clone(), &["cargo"]);
+    let outcome = published.call(&ToolCall {
+        call_id: harness_wire::CallId::new("c-1").expect("valid"),
+        name: ToolName::new(RUN_TOOL).expect("valid"),
+        arguments: json!({"argv": ["sh", "-c", "rm -rf /"]}),
+    });
+    assert!(outcome.failed);
+    let said = outcome.output.as_str().unwrap_or_default().to_owned();
+    assert!(said.contains("`sh` is not a program"), "{said}");
+    assert!(said.contains("cargo"), "the set is listed: {said}");
+    assert!(
+        script.seen.lock().expect("not poisoned").is_empty(),
+        "and nothing was sent: the refusal is local"
+    );
+}
+
+#[test]
+fn a_declared_program_is_sent_as_an_argv_and_never_as_a_command_line() {
+    let script = Scripted::new(vec![
+        (200, r#"{"result":{"exec_id":"e-1"}}"#),
+        (200, r#"{"result":{"exit_status":0,"stdout":"ok"}}"#),
+    ]);
+    let mut published = tools(&confined(), script.clone(), &["cargo"]);
+    let outcome = published.call(&ToolCall {
+        call_id: harness_wire::CallId::new("c-1").expect("valid"),
+        name: ToolName::new(RUN_TOOL).expect("valid"),
+        arguments: json!({"argv": ["cargo", "test", "--workspace"]}),
+    });
+    assert!(!outcome.failed, "{:?}", outcome.output);
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(seen[0].0, "POST");
+    assert_eq!(seen[0].1, "/v1/execs");
+    let sent = seen[0].2.as_ref().expect("a body");
+    assert_eq!(sent["input"]["argv"], json!(["cargo", "test", "--workspace"]));
+    assert!(
+        sent["input"].get("command").is_none(),
+        "there is no command line anywhere in it: {sent}"
+    );
+    assert_eq!(seen[1].1, "/v1/execs/e-1/output");
+}
+
+#[test]
+fn an_edit_that_matched_nothing_or_several_places_is_refused_rather_than_guessed_at() {
+    let call = |arguments: Value| ToolCall {
+        call_id: harness_wire::CallId::new("c-1").expect("valid"),
+        name: ToolName::new(EDIT_TOOL).expect("valid"),
+        arguments,
+    };
+
+    // Nothing matched: the model would otherwise believe a change landed.
+    let mut published = tools(
+        &confined(),
+        Scripted::new(vec![(200, r#"{"result":{"content":"fn main() {}"}}"#)]),
+        &[],
+    );
+    let outcome = published.call(&call(json!({"path": "a.rs", "old": "absent", "new": "x"})));
+    assert!(outcome.failed);
+    assert!(
+        outcome.output.as_str().unwrap_or_default().contains("nothing was changed"),
+        "{:?}",
+        outcome.output
+    );
+
+    // Several matched: three things nobody asked about would have changed.
+    let mut published = tools(
+        &confined(),
+        Scripted::new(vec![(200, r#"{"result":{"content":"a\na\na\n"}}"#)]),
+        &[],
+    );
+    let outcome = published.call(&call(json!({"path": "a.rs", "old": "a", "new": "b"})));
+    assert!(outcome.failed);
+    let said = outcome.output.as_str().unwrap_or_default().to_owned();
+    assert!(said.contains("3 times"), "{said}");
+    assert!(said.contains("more surrounding text"), "and says what to do: {said}");
+}
+
+#[test]
+fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change() {
+    let script = Scripted::new(vec![
+        (200, r#"{"result":{"content":"one\ntwo\nthree\n"}}"#),
+        (200, r#"{"result":{"ok":true}}"#),
+    ]);
+    let mut published = tools(&confined(), script.clone(), &[]);
+    let outcome = published.call(&ToolCall {
+        call_id: harness_wire::CallId::new("c-1").expect("valid"),
+        name: ToolName::new(EDIT_TOOL).expect("valid"),
+        arguments: json!({"path": "a.txt", "old": "two", "new": "2"}),
+    });
+    assert!(!outcome.failed, "{:?}", outcome.output);
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(seen[0].0, "GET");
+    assert_eq!(seen[1].0, "PUT");
+    assert_eq!(seen[1].1, "/v1/workspaces/ws-1/files/a.txt");
+    assert_eq!(seen[1].2.as_ref().expect("a body")["input"]["content"], "one\n2\nthree\n");
+}
+
+#[test]
+fn an_edit_declares_itself_non_idempotent_because_a_retreat_will_run_it_twice() {
+    let published = tools(&confined(), Scripted::new(vec![]), &[]);
+    let spec = |name: &str| {
+        published
+            .specs()
+            .iter()
+            .find(|spec| spec.name.as_str() == name)
+            .expect("published")
+            .clone()
+    };
+    assert_eq!(
+        spec(EDIT_TOOL).envelope.idempotency,
+        harness_wire::Idempotency::NonIdempotent,
+        "the second attempt finds nothing to replace"
+    );
+    assert_eq!(
+        spec(WRITE_TOOL).envelope.idempotency,
+        harness_wire::Idempotency::Idempotent,
+        "writing the same bytes twice leaves the same file"
+    );
+    assert!(
+        spec(WRITE_TOOL).envelope.mutates(),
+        "and both are mutations, whatever their idempotency"
+    );
+}
+
+#[test]
+fn a_call_names_what_it_touches_so_the_second_gate_has_something_to_read() {
+    let published = tools(&confined(), Scripted::new(vec![]), &["cargo"]);
+    let call = |name: &str, arguments: Value| ToolCall {
+        call_id: harness_wire::CallId::new("c-1").expect("valid"),
+        name: ToolName::new(name).expect("valid"),
+        arguments,
+    };
+    assert_eq!(
+        published.subjects(&call(WRITE_TOOL, json!({"path": "src/x.rs", "text": ""}))),
+        vec![harness_wire::Subject::file("src/x.rs")]
+    );
+    assert_eq!(
+        published.subjects(&call(RUN_TOOL, json!({"argv": ["cargo", "test"]}))),
+        vec![harness_wire::Subject::process("cargo")],
+        "the program, not the whole argv: what a policy names is what would start"
+    );
 }

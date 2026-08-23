@@ -137,7 +137,19 @@ struct RunOptions {
     /// it happened to be started.
     #[arg(long)]
     substrate: Option<PathBuf>,
+    /// Hold substrate's driver in this process instead, with its workspaces under this directory.
+    ///
+    /// The same confinement — guarded IO, `openat2` containment, cgroups and namespaces around an
+    /// exec are the driver's, and they are here. What a socket adds and this does not is an
+    /// authenticated subject derived from kernel peer credentials; embedded there is no peer. Right
+    /// for a run on the operator's own machine, wrong for anything multi-tenant.
+    #[arg(long, conflicts_with = "substrate")]
+    substrate_embedded: Option<PathBuf>,
     /// Which confined workspace the write and execute tools act in.
+    ///
+    /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
+    /// identity there, and a caller-supplied name would have to satisfy a rule only the driver
+    /// knows.
     #[arg(long, default_value = "default")]
     workspace_id: String,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
@@ -201,7 +213,19 @@ struct ToolsOptions {
     /// it happened to be started.
     #[arg(long)]
     substrate: Option<PathBuf>,
+    /// Hold substrate's driver in this process instead, with its workspaces under this directory.
+    ///
+    /// The same confinement — guarded IO, `openat2` containment, cgroups and namespaces around an
+    /// exec are the driver's, and they are here. What a socket adds and this does not is an
+    /// authenticated subject derived from kernel peer credentials; embedded there is no peer. Right
+    /// for a run on the operator's own machine, wrong for anything multi-tenant.
+    #[arg(long, conflicts_with = "substrate")]
+    substrate_embedded: Option<PathBuf>,
     /// Which confined workspace the write and execute tools act in.
+    ///
+    /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
+    /// identity there, and a caller-supplied name would have to satisfy a rule only the driver
+    /// knows.
     #[arg(long, default_value = "default")]
     workspace_id: String,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
@@ -307,6 +331,7 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     let mut tools = published(
         WorkspaceTools::new(&options.workspace)?,
         options.substrate.as_deref(),
+        options.substrate_embedded.as_deref(),
         &options.workspace_id,
         &options.allow_program,
     );
@@ -356,9 +381,31 @@ fn install_interrupt(cancel: &LoopCancel) {
 fn published(
     reading: WorkspaceTools,
     substrate: Option<&std::path::Path>,
+    embedded: Option<&std::path::Path>,
     workspace_id: &str,
     programs: &[String],
 ) -> Toolset {
+    if let Some(root) = embedded {
+        // Opened twice on purpose: once to ask what the machine admits, once for the tools to hold.
+        // A driver is a handle on a directory, not a session, so two handles on one root are two
+        // ways to reach the same tree rather than two trees.
+        let Ok(driver) = harness_substrate::Embedded::open(root, None) else {
+            return Toolset::read_only(reading);
+        };
+        let Ok(facts) = harness_substrate::Backend::machine(&driver) else {
+            return Toolset::read_only(reading);
+        };
+        let Ok(workspace) = harness_substrate::Backend::workspace_create(&driver, 3_600_000) else {
+            return Toolset::read_only(reading);
+        };
+        let Ok(tools) = harness_substrate::Embedded::open(root, None) else {
+            return Toolset::read_only(reading);
+        };
+        return Toolset::with_confined(
+            reading,
+            harness_substrate::ConfinedTools::new(tools, &facts, workspace, programs.to_vec()),
+        );
+    }
     let Some(socket) = substrate else {
         return Toolset::read_only(reading);
     };
@@ -381,6 +428,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools = published(
         WorkspaceTools::new(&options.workspace)?,
         options.substrate.as_deref(),
+        options.substrate_embedded.as_deref(),
         &options.workspace_id,
         &options.allow_program,
     );

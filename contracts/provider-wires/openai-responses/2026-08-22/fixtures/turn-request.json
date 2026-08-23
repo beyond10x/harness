@@ -22,7 +22,7 @@
     {
       "arguments": "{\"path\":\"README.md\"}",
       "call_id": "call_1",
-      "name": "workspace.read",
+      "name": "workspace_read",
       "type": "function_call"
     },
     {
@@ -43,7 +43,7 @@
   "tools": [
     {
       "description": "Read one text file inside the workspace.",
-      "name": "workspace.read",
+      "name": "workspace_read",
       "parameters": {
         "additionalProperties": false,
         "properties": {

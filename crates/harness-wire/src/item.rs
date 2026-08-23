@@ -117,7 +117,7 @@ mod tests {
             Item::assistant("hi"),
             Item::ToolCall(ToolCall {
                 call_id: call_id(),
-                name: ToolName::new("workspace.read").expect("valid"),
+                name: ToolName::new("workspace_read").expect("valid"),
                 arguments: json!({"path": "README.md"}),
             }),
             Item::result(call_id(), ToolOutcome::ok(json!({"bytes": 12}))),

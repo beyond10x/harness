@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use harness_wire::{Approval, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec};
 use serde_json::{Value, json};
 
-pub const LIST_TOOL: &str = "workspace.list";
-pub const READ_TOOL: &str = "workspace.read";
-pub const GREP_TOOL: &str = "workspace.grep";
+pub const LIST_TOOL: &str = "workspace_list";
+pub const READ_TOOL: &str = "workspace_read";
+pub const GREP_TOOL: &str = "workspace_grep";
 
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_READ_BYTES: u64 = 64 * 1024;
@@ -508,8 +508,11 @@ mod tests {
 
     #[test]
     fn an_unknown_tool_name_refuses() {
+        // A name in the published class that this port does not publish. It used to read
+        // `workspace.write`, which `ToolName` now refuses to construct at all — so the test was
+        // about to prove the port refuses a name nobody could have called it with.
         let (_dir, mut tools) = workspace();
-        assert!(call(&mut tools, "workspace.write", json!({})).failed);
+        assert!(call(&mut tools, "workspace_write", json!({})).failed);
     }
 
     #[test]

@@ -236,13 +236,13 @@ fn a_tool_call_round_trips_and_the_result_is_replayed_next_turn() {
         ScriptedModel::new(vec![
             Ok(asks_for(&[(
                 "call-1",
-                "workspace.read",
+                "workspace_read",
                 json!({"path": "README.md"}),
             )])),
             Ok(answer("the file says hello")),
         ]),
-        ScriptedTools::new(vec![spec("workspace.read", Approval::NotRequired)])
-            .answering("workspace.read", ToolOutcome::ok(json!({"text": "hello"}))),
+        ScriptedTools::new(vec![spec("workspace_read", Approval::NotRequired)])
+            .answering("workspace_read", ToolOutcome::ok(json!({"text": "hello"}))),
     );
     let (outcome, sink) = harness.run();
     let outcome = outcome.expect("the round trip completes");
@@ -291,7 +291,7 @@ fn a_call_to_an_unpublished_tool_is_refused_back_to_the_model_and_warned_about()
             )])),
             Ok(answer("understood")),
         ]),
-        ScriptedTools::new(vec![spec("workspace.read", Approval::NotRequired)]),
+        ScriptedTools::new(vec![spec("workspace_read", Approval::NotRequired)]),
     );
     let (outcome, sink) = harness.run();
     let outcome = outcome.expect("the run recovers");
@@ -376,10 +376,10 @@ fn a_tool_needing_approval_runs_once_a_person_says_yes() {
 fn approval_is_never_asked_for_a_tool_that_does_not_need_it() {
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
-            Ok(asks_for(&[("call-1", "workspace.read", json!({}))])),
+            Ok(asks_for(&[("call-1", "workspace_read", json!({}))])),
             Ok(answer("done")),
         ]),
-        ScriptedTools::new(vec![spec("workspace.read", Approval::NotRequired)]),
+        ScriptedTools::new(vec![spec("workspace_read", Approval::NotRequired)]),
     );
     let (_, sink) = harness.run();
     assert!(

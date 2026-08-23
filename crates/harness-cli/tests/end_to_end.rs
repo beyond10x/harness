@@ -117,7 +117,7 @@ fn the_binary_answers_and_puts_only_the_answer_on_stdout() {
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert_eq!(output.stdout.trim(), "provider emulation passed");
     assert!(
-        output.stderr.contains("workspace.read"),
+        output.stderr.contains("workspace_read"),
         "progress names the published tools: {}",
         output.stderr
     );
@@ -131,7 +131,7 @@ fn the_binary_reads_a_real_file_through_a_real_tool_call() {
 
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert!(
-        output.stderr.contains("→ workspace.read"),
+        output.stderr.contains("→ workspace_read"),
         "the call is reported: {}",
         output.stderr
     );
@@ -241,7 +241,7 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
         .collect();
     assert_eq!(
         names,
-        vec!["workspace.list", "workspace.read", "workspace.grep"]
+        vec!["workspace_list", "workspace_read", "workspace_grep"]
     );
     assert!(
         described["tools"]

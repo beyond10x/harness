@@ -7,6 +7,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A tool name this wire cannot publish is refused before the request, and the workspace toolset is
+  renamed.** The first live run this component has ever had — `https://chatgpt.com/backend-api/codex`
+  under a ChatGPT subscription credential, 2026-08-23 — answered turn 1 with
+
+  ```text
+  400 Invalid 'tools[0].name': string does not match pattern.
+      Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'.
+  ```
+
+  The published toolset was `workspace.list` / `workspace.read` / `workspace.grep`, and had been
+  since the crate was written. Nothing caught it because the only endpoint that had ever seen a
+  request was the emulated one, and an emulator written from the same source as the projection
+  cannot disagree with it about what a provider will take. This is the class of defect
+  `STATUS.md` predicted with *"all evidence is `provider_emulated`; it proves nothing about how a
+  real provider behaves"* — the prediction was right on the first attempt.
+
+  The tools are now `workspace_list`, `workspace_read` and `workspace_grep`, and
+  `harness-responses` gained `check_tool_names`, called beside `validate` and `check_opaque_items`
+  in `turn`. It refuses a toolset this wire cannot carry **locally**, naming the offending tool, the
+  pattern, and the name that would work.
+
+  **The rule is in the wire, not in `harness-wire`.** `ToolName` still admits any printable ASCII
+  identifier, and a test pins that it admits a dot. The pattern is one provider's, verified against
+  one provider; putting it in the neutral crate would shape the neutral layer to a single vendor and
+  forbid a name the Messages wire may well accept. A dedicated test in `harness-wire` exists to stop
+  a later reader tidying it back in.
+
 ### Added
 
 - Carry sampling on a turn. `TurnRequest` gains an optional `Sampling` — temperature, top_p and a

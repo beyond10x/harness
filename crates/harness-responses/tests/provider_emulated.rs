@@ -92,7 +92,7 @@ impl TestTools {
     fn with_read() -> Self {
         Self {
             specs: vec![ToolSpec {
-                name: ToolName::new("workspace.read").expect("valid"),
+                name: ToolName::new("workspace_read").expect("valid"),
                 description: "reads one file".to_owned(),
                 input_schema: json!({
                     "type": "object",
@@ -171,7 +171,7 @@ fn the_request_is_stateless_authenticated_and_asks_for_reasoning() {
     assert_eq!(first["accept"], json!("text/event-stream"));
     assert_eq!(first["has_authorization"], json!(true));
     assert_eq!(first["instructions"], json!("be useful"));
-    assert_eq!(first["tool_names"], json!(["workspace.read"]));
+    assert_eq!(first["tool_names"], json!(["workspace_read"]));
 }
 
 #[test]

@@ -355,6 +355,10 @@ impl ModelPort for ResponsesClient {
     ) -> Result<TurnOutcome, WireError> {
         request.validate()?;
         request.check_opaque_items(&self.wire)?;
+        // Beside the other two pre-flight checks, and for the same reason: a request this wire
+        // cannot carry is refused here, naming what is wrong, rather than posted and explained by
+        // the far side.
+        project::check_tool_names(&request.tools)?;
         let body = project::request_body(
             &request.model,
             &request.instructions,
@@ -475,12 +479,12 @@ mod tests {
         let (outcome, sink) = drive(&[
             json!({"type": "response.output_item.added", "item": {
                 "id": "fc_1", "type": "function_call", "call_id": "call-1",
-                "name": "workspace.read", "arguments": "",
+                "name": "workspace_read", "arguments": "",
             }}),
             json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": "{\"p\":1}"}),
             json!({"type": "response.completed", "response": {
                 "status": "completed",
-                "output": [{"type":"function_call","call_id":"call-1","name":"workspace.read","arguments":"{\"p\":1}"}],
+                "output": [{"type":"function_call","call_id":"call-1","name":"workspace_read","arguments":"{\"p\":1}"}],
             }}),
         ]);
         let outcome = outcome.expect("the turn completes");

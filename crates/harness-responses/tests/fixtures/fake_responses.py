@@ -298,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             item = {
                 "id": "fc_1",
                 "type": "function_call",
-                "name": "workspace.read",
+                "name": "workspace_read",
                 "call_id": "call_bad",
                 "arguments": "{not json",
             }
@@ -320,13 +320,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(text_events("The file says: hello harness"))
             else:
                 self._send_sse(
-                    function_call_events("workspace.read", {"path": "README.md"})
+                    function_call_events("workspace_read", {"path": "README.md"})
                 )
         elif scenario == "reasoning":
             if has_function_output(body):
                 self._send_sse(text_events("done", extra_output=[reasoning_item()]))
             else:
-                events = function_call_events("workspace.read", {"path": "README.md"})
+                events = function_call_events("workspace_read", {"path": "README.md"})
                 terminal = events[-1]
                 terminal["response"]["output"] = [
                     reasoning_item(),

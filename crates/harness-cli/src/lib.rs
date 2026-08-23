@@ -29,7 +29,7 @@ pub use workspace::{GREP_TOOL, LIST_TOOL, READ_TOOL, WorkspaceTools};
 /// The standing instruction when the caller supplies none.
 const DEFAULT_INSTRUCTIONS: &str = "\
 You are the b10x coding harness. You are looking at one workspace through three read-only \
-tools: workspace.list, workspace.read and workspace.grep. Nothing you can call changes a file or \
+tools: workspace_list, workspace_read and workspace_grep. Nothing you can call changes a file or \
 runs a command, so say what you would change rather than claiming you changed it. Ground every \
 claim about the workspace in something you actually read, and say plainly when you have not \
 looked. Prefer a few precise reads over broad guessing.";
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn the_default_instruction_names_the_read_only_toolset() {
         let text = instructions(&options(&[])).expect("the default is available");
-        assert!(text.contains("workspace.read"), "{text}");
+        assert!(text.contains("workspace_read"), "{text}");
         assert!(text.contains("read-only"), "{text}");
     }
 

@@ -6,7 +6,7 @@ data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1",
 
 data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"OPAQUE"}}
 
-data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"in_progress","name":"workspace.read","call_id":"call_1","arguments":""}}
+data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"in_progress","name":"workspace_read","call_id":"call_1","arguments":""}}
 
 data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"path\":"}
 
@@ -14,7 +14,7 @@ data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_
 
 data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":1,"arguments":"{\"path\":\"README.md\"}"}
 
-data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"completed","name":"workspace.read","call_id":"call_1","arguments":"{\"path\":\"README.md\"}"}}
+data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"completed","name":"workspace_read","call_id":"call_1","arguments":"{\"path\":\"README.md\"}"}}
 
 data: {"type":"response.output_item.added","output_index":2,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}
 
@@ -30,7 +30,7 @@ data: {"type":"response.content_part.done","item_id":"msg_1","output_index":2,"c
 
 data: {"type":"response.output_item.done","output_index":2,"item":{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Reading the readme.","annotations":[]}]}}
 
-data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"daemonloom-emulated","incomplete_details":null,"error":null,"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"OPAQUE"},{"id":"fc_1","type":"function_call","status":"completed","name":"workspace.read","call_id":"call_1","arguments":"{\"path\":\"README.md\"}"},{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Reading the readme.","annotations":[]}]}],"usage":{"input_tokens":42,"input_tokens_details":{"cached_tokens":7},"output_tokens":11,"output_tokens_details":{"reasoning_tokens":3},"total_tokens":53}}}
+data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"daemonloom-emulated","incomplete_details":null,"error":null,"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"OPAQUE"},{"id":"fc_1","type":"function_call","status":"completed","name":"workspace_read","call_id":"call_1","arguments":"{\"path\":\"README.md\"}"},{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Reading the readme.","annotations":[]}]}],"usage":{"input_tokens":42,"input_tokens_details":{"cached_tokens":7},"output_tokens":11,"output_tokens_details":{"reasoning_tokens":3},"total_tokens":53}}}
 
 data: [DONE]
 

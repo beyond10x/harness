@@ -60,6 +60,51 @@ pub fn tool_to_wire(tool: &ToolSpec) -> Value {
     })
 }
 
+/// The character class this wire will publish a tool name in.
+///
+/// Read off a live 400 rather than a specification, and stated here rather than guessed at
+/// elsewhere: on 2026-08-23 `https://chatgpt.com/backend-api/codex/responses` answered a toolset
+/// named `workspace.list` / `.read` / `.grep` with
+///
+/// ```text
+/// Invalid 'tools[0].name': string does not match pattern.
+/// Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'.
+/// ```
+pub const TOOL_NAME_PATTERN: &str = "^[a-zA-Z0-9_-]+$";
+
+/// Refuses a toolset this wire cannot publish, before anything is sent.
+///
+/// **Here and not in `harness-wire`.** The pattern is this provider's, verified against this
+/// provider and no other; a neutral [`harness_wire::ToolName`] that enforced it would be shaped by
+/// one vendor and would forbid a name a later wire may accept. What the neutral layer owes is that
+/// the name is a printable identifier — what *this* wire owes is to say so locally instead of
+/// letting the model's whole first turn cost a round trip and come back a 400.
+///
+/// The refusal names the tool and the pattern, because the caller's next move is to rename it and
+/// an error that says only *bad request* does not tell them to.
+///
+/// # Errors
+///
+/// Returns [`harness_wire::WireErrorCode::Protocol`] — not retriable, since sending it again sends
+/// the same name.
+pub fn check_tool_names(tools: &[ToolSpec]) -> Result<(), WireError> {
+    for tool in tools {
+        let name = tool.name.as_str();
+        if !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        {
+            return Err(WireError::protocol(format!(
+                "{WIRE} cannot publish the tool `{name}`: a tool name must match \
+                 `{TOOL_NAME_PATTERN}` on this wire. Rename it — `{}` — and the toolset is \
+                 publishable.",
+                name.replace(['.', ' ', '/', ':'], "_")
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Decodes one Responses output item.
 ///
 /// An item this wire does not model is kept as [`Item::Opaque`] and reported through `warn`. It is
@@ -268,6 +313,31 @@ pub fn request_body(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tool_name_this_wire_cannot_publish_is_refused_before_it_is_sent() {
+        use harness_wire::{ToolName, ToolSpec, WireErrorCode};
+        use serde_json::json;
+
+        let spec = |name: &str| ToolSpec {
+            name: ToolName::new(name).expect("a printable identifier"),
+            description: "d".to_owned(),
+            input_schema: json!({"type": "object"}),
+            approval: harness_wire::Approval::NotRequired,
+        };
+
+        // The live 400 of 2026-08-23, turned into a local refusal.
+        let error = super::check_tool_names(&[spec("workspace.read")]).expect_err("refused");
+        assert_eq!(error.code, WireErrorCode::Protocol);
+        assert!(!error.retriable, "the same name would fail again");
+        assert!(error.message.contains("workspace.read"), "{}", error.message);
+        assert!(error.message.contains("workspace_read"), "names the fix: {}", error.message);
+
+        // And the class it will publish.
+        super::check_tool_names(&[spec("workspace_read"), spec("with-hyphen"), spec("A9")])
+            .expect("the publishable class passes");
+    }
+
+
     use super::*;
     use harness_wire::{Approval, CallId, ToolOutcome};
 
@@ -295,7 +365,7 @@ mod tests {
     fn a_tool_call_and_its_result_correlate_on_call_id() {
         let call = ToolCall {
             call_id: CallId::new("call-1").expect("valid"),
-            name: ToolName::new("workspace.read").expect("valid"),
+            name: ToolName::new("workspace_read").expect("valid"),
             arguments: json!({"path": "README.md"}),
         };
         assert_eq!(
@@ -303,7 +373,7 @@ mod tests {
             json!({
                 "type": "function_call",
                 "call_id": "call-1",
-                "name": "workspace.read",
+                "name": "workspace_read",
                 "arguments": "{\"path\":\"README.md\"}",
             })
         );
@@ -401,7 +471,7 @@ mod tests {
         let value = json!({
             "type": "function_call",
             "call_id": "call-1",
-            "name": "workspace.read",
+            "name": "workspace_read",
             "arguments": "{\"path\":\"README.md\"}",
         });
         let Item::ToolCall(call) =
@@ -417,7 +487,7 @@ mod tests {
         let value = json!({
             "type": "function_call",
             "call_id": "call-1",
-            "name": "workspace.read",
+            "name": "workspace_read",
             "arguments": "{not json",
         });
         let error = output_item_to_item(&wire(), &value, &mut no_warn())

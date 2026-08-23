@@ -354,7 +354,7 @@ fn a_tool_call_round_trips_back_to_the_client() {
         "developerInstructions": "be useful",
         "dynamicTools": [{
             "type": "function",
-            "name": "workspace.read",
+            "name": "workspace_read",
             "description": "reads one file",
             "deferLoading": false,
             "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}},
@@ -373,7 +373,7 @@ fn a_tool_call_round_trips_back_to_the_client() {
 
     let call = bridge.next_frame();
     assert_eq!(call["method"], json!("item/tool/call"));
-    assert_eq!(call["params"]["tool"], json!("workspace.read"));
+    assert_eq!(call["params"]["tool"], json!("workspace_read"));
     assert_eq!(call["params"]["threadId"], json!(thread_id));
     assert_eq!(call["params"]["turnId"], json!(turn_id));
     assert_eq!(
@@ -414,7 +414,7 @@ fn a_client_refusal_reaches_the_model_as_a_failed_call() {
     let mut bridge = Bridge::start(&endpoint, &[]);
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({
-        "dynamicTools": [{"name": "workspace.read", "inputSchema": {"type": "object"}}],
+        "dynamicTools": [{"name": "workspace_read", "inputSchema": {"type": "object"}}],
     }));
     bridge.start_turn(&thread_id, "read the readme");
 
@@ -537,7 +537,7 @@ fn a_turn_stopped_by_a_budget_is_failed_rather_than_completed() {
     let mut bridge = Bridge::start(&endpoint, &["--max-turns", "1"]);
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({
-        "dynamicTools": [{"name": "workspace.read", "inputSchema": {"type": "object"}}],
+        "dynamicTools": [{"name": "workspace_read", "inputSchema": {"type": "object"}}],
     }));
     bridge.start_turn(&thread_id, "read the readme");
 
@@ -650,7 +650,7 @@ fn registering_tools_without_the_negotiated_capability_is_refused_at_thread_star
 
     let response = bridge.request(
         "thread/start",
-        &json!({"dynamicTools": [{"name": "workspace.read", "inputSchema": {"type": "object"}}]}),
+        &json!({"dynamicTools": [{"name": "workspace_read", "inputSchema": {"type": "object"}}]}),
     );
     // The client's own stable profile refuses `item/tool/call`, so accepting the registration here
     // would strand the turn at its first tool call instead of saying so while it can still act.

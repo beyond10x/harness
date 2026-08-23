@@ -24,6 +24,24 @@ fn validate(kind: &'static str, value: &str) -> Result<(), InvalidId> {
     Ok(())
 }
 
+// A tool name is **not** narrowed here, and that is a decision rather than an omission.
+//
+// The first live run against `https://chatgpt.com/backend-api/codex` (2026-08-23) answered a
+// toolset named `workspace.list` / `.read` / `.grep` with
+//
+//     400 Invalid 'tools[0].name': string does not match pattern.
+//         Expected a string that matches the pattern '^[a-zA-Z0-9_-]+$'.
+//
+// — names the emulated endpoint had accepted for the whole of this crate's life, because an
+// emulator written from the same source as the projection cannot disagree with it about what a
+// provider will take.
+//
+// That pattern is **the OpenAI Responses wire's**, verified there and nowhere else. Encoding it in
+// this crate would make the neutral layer vendor-shaped on the strength of one provider, and would
+// forbid a name a future wire may well accept. So the rule lives in `harness-responses`, which
+// refuses an unpublishable name **by name and before the request goes out** — a local refusal
+// naming the tool and the pattern, rather than a 400 from the far side of a network call.
+
 macro_rules! id_type {
     ($name:ident, $kind:literal, $doc:literal) => {
         #[doc = $doc]
@@ -75,7 +93,7 @@ id_type!(
 id_type!(
     ToolName,
     "tool name",
-    "Names one published tool. The loop refuses a call naming anything it did not publish."
+    "Names one published tool. The loop refuses a call naming anything it did not publish; which names a *wire* can carry is that wire's own rule."
 );
 id_type!(
     WireId,
@@ -93,8 +111,16 @@ mod tests {
         assert!(CallId::new("").is_err());
         assert!(CallId::new("call 1").is_err());
         assert!(CallId::new("call\n1").is_err());
-        assert!(ToolName::new("workspace.read").is_ok());
+        assert!(ToolName::new("workspace_read").is_ok());
         assert!(ToolName::new("workspace🧶").is_err());
+    }
+
+    #[test]
+    fn a_tool_name_carries_a_dot_because_narrowing_it_is_a_wires_business() {
+        // Pinned so that a later reader does not "tidy" the OpenAI pattern back into this crate.
+        // `harness-responses` refuses a dotted name before it sends one; a wire that accepts one
+        // must be free to.
+        assert!(ToolName::new("workspace.read").is_ok());
     }
 
     #[test]

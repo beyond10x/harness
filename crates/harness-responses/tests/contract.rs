@@ -54,7 +54,7 @@ fn canonical_request() -> Value {
         },
         Item::ToolCall(ToolCall {
             call_id: CallId::new("call_1").expect("valid"),
-            name: ToolName::new("workspace.read").expect("valid"),
+            name: ToolName::new("workspace_read").expect("valid"),
             arguments: json!({"path": "README.md"}),
         }),
         Item::result(
@@ -63,7 +63,7 @@ fn canonical_request() -> Value {
         ),
     ];
     let tools = vec![ToolSpec {
-        name: ToolName::new("workspace.read").expect("valid"),
+        name: ToolName::new("workspace_read").expect("valid"),
         description: "Read one text file inside the workspace.".to_owned(),
         input_schema: json!({
             "type": "object",

@@ -428,6 +428,12 @@ fn decode_one_tool(entry: &Value) -> Result<ToolSpec, (i64, String)> {
         // A registration carries no approval posture, so nothing here can claim a person gates it.
         // Approval in bridge mode is the client's business, on its side of the callback.
         approval: harness_wire::Approval::NotRequired,
+        // Nor does it carry an envelope. A client's dynamic tool is described by the client, and
+        // inventing effects for one would be this process asserting something about code it has
+        // never seen. The default is the safest description available, and the honest position is
+        // that in bridge mode the gate is on the other side of the wire — where the tool actually
+        // runs.
+        envelope: harness_wire::Envelope::default(),
     })
 }
 

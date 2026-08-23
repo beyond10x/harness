@@ -321,6 +321,7 @@ mod tests {
         let spec = |name: &str| ToolSpec {
             name: ToolName::new(name).expect("a printable identifier"),
             description: "d".to_owned(),
+            envelope: Default::default(),
             input_schema: json!({"type": "object"}),
             approval: harness_wire::Approval::NotRequired,
         };
@@ -611,6 +612,7 @@ mod tests {
             &[ToolSpec {
                 name: ToolName::new("t").expect("valid"),
                 description: "d".to_owned(),
+                envelope: Default::default(),
                 input_schema: json!({"type": "object"}),
                 approval: Approval::NotRequired,
             }],

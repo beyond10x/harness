@@ -9,6 +9,7 @@
 mod bearer;
 mod bound;
 mod cancel;
+mod envelope;
 mod id;
 mod item;
 mod port;
@@ -20,6 +21,7 @@ pub use bound::{
     MAX_TOOL_RESULT_BYTES, MAX_TOOLS, encoded_len, exceeds,
 };
 pub use cancel::Cancel;
+pub use envelope::{AccessKind, Effect, Envelope, Idempotency, Risk, Subject};
 pub use id::{CallId, InvalidId, ToolName, WireId};
 pub use item::{Item, ToolCall, ToolOutcome};
 pub use port::{ModelPort, StreamEvent, StreamSink, ToolPort, VecSink};

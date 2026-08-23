@@ -72,6 +72,7 @@ fn canonical_request() -> Value {
             "additionalProperties": false,
         }),
         approval: Approval::NotRequired,
+        envelope: Default::default(),
     }];
     request_body(
         "daemonloom-emulated",

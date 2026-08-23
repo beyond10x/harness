@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::WireError;
 use crate::id::{CallId, WireId};
 use crate::item::{ToolCall, ToolOutcome};
+use crate::envelope::Subject;
 use crate::turn::{ToolSpec, TurnOutcome, TurnRequest};
 
 /// What a caller can watch while a turn is still running.
@@ -98,6 +99,26 @@ pub trait ModelPort {
 pub trait ToolPort {
     /// The complete set of tools published for the next turn.
     fn specs(&self) -> &[ToolSpec];
+
+    /// The concrete things **this call** would touch.
+    ///
+    /// # A spec is a claim; this is the fact
+    ///
+    /// [`ToolSpec::envelope`] says what a tool *can* do and is fixed for the life of the tool.
+    /// This says what one invocation *does*, and it is what a gate stops things on: a tool that
+    /// honestly declares [`crate::Effect::Write`] and is handed a path outside the workspace is
+    /// refused on the subject, because the declaration was right and the call was not.
+    ///
+    /// Answering with an empty list means *this call touches nothing a policy could name*, which
+    /// is true of a tool gated by its bare name alone. It is not a way to avoid being gated: a
+    /// port that hid its subjects would be declaring itself unreviewable, and the tools that can
+    /// afford to say nothing are the ones that were never dangerous.
+    ///
+    /// Defaulted so the trait stays implementable in one line for a read-only toolset, which is
+    /// the shape most tests and every existing port have.
+    fn subjects(&self, _call: &ToolCall) -> Vec<Subject> {
+        Vec::new()
+    }
 
     /// Runs exactly one call the loop already checked against [`ToolPort::specs`].
     ///

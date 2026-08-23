@@ -73,6 +73,7 @@ mod tests {
                 description: "writes".to_owned(),
                 input_schema: json!({"type": "object"}),
                 approval: Approval::Required,
+                envelope: Default::default(),
             },
         )
     }

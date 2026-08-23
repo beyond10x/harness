@@ -7,7 +7,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harness_wire::{Approval, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec};
+use harness_wire::{
+    AccessKind, Approval, Effect, Envelope, Idempotency, Risk, Subject, ToolCall, ToolName,
+    ToolOutcome, ToolPort, ToolSpec,
+};
 use serde_json::{Value, json};
 
 pub const LIST_TOOL: &str = "workspace_list";
@@ -242,6 +245,20 @@ fn contained(path: &Path, boundary: &Path) -> bool {
         .is_ok_and(|resolved| resolved.starts_with(boundary))
 }
 
+/// What every tool in this port does: observes the filesystem, cheaply, repeatably.
+///
+/// Written once rather than three times, because three copies are three places for one of them to
+/// stop being true. The day this port grows a tool that writes, that tool declares its own and the
+/// difference is visible in one diff.
+fn reading() -> Envelope {
+    Envelope {
+        effects: vec![Effect::Read, Effect::Filesystem],
+        risk: Risk::Low,
+        idempotency: Idempotency::Idempotent,
+        access: vec![AccessKind::Filesystem],
+    }
+}
+
 fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
@@ -257,6 +274,7 @@ fn specs() -> Vec<ToolSpec> {
                 "additionalProperties": false,
             }),
             approval: Approval::NotRequired,
+            envelope: reading(),
         },
         ToolSpec {
             name: ToolName::new(READ_TOOL).expect("constant tool name is valid"),
@@ -273,6 +291,7 @@ fn specs() -> Vec<ToolSpec> {
                 "additionalProperties": false,
             }),
             approval: Approval::NotRequired,
+            envelope: reading(),
         },
         ToolSpec {
             name: ToolName::new(GREP_TOOL).expect("constant tool name is valid"),
@@ -290,6 +309,7 @@ fn specs() -> Vec<ToolSpec> {
                 "additionalProperties": false,
             }),
             approval: Approval::NotRequired,
+            envelope: reading(),
         },
     ]
 }
@@ -297,6 +317,26 @@ fn specs() -> Vec<ToolSpec> {
 impl ToolPort for WorkspaceTools {
     fn specs(&self) -> &[ToolSpec] {
         &self.specs
+    }
+
+    /// The path this call names, as the caller wrote it.
+    ///
+    /// **Before resolution, on purpose.** A gate has to see `../../etc/passwd` as the model sent
+    /// it; reporting the canonicalised path would show a policy a tidy answer for a call whose
+    /// whole problem is where it was trying to go. The refusal still happens in `resolve`, which
+    /// checks containment after canonicalising — this is what a *reader* of the run is shown.
+    ///
+    /// A `grep` with no path names the root, because that is what it will walk.
+    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+        let path = call
+            .arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(".");
+        match call.name.as_str() {
+            LIST_TOOL | READ_TOOL | GREP_TOOL => vec![Subject::file(path)],
+            _ => Vec::new(),
+        }
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
@@ -520,5 +560,65 @@ mod tests {
         let (_dir, mut tools) = workspace();
         assert!(call(&mut tools, READ_TOOL, json!({"path": "src"})).failed);
         assert!(call(&mut tools, LIST_TOOL, json!({"path": "README.md"})).failed);
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+    use harness_wire::CallId;
+    use serde_json::json;
+
+    fn call(name: &str, arguments: Value) -> ToolCall {
+        ToolCall {
+            call_id: CallId::new("call-1").expect("valid"),
+            name: ToolName::new(name).expect("valid"),
+            arguments,
+        }
+    }
+
+    #[test]
+    fn every_published_tool_describes_itself_as_a_read_of_the_filesystem() {
+        let dir = tempfile::tempdir().expect("a temporary workspace");
+        let tools = WorkspaceTools::new(dir.path()).expect("opens");
+        for spec in tools.specs() {
+            assert!(
+                !spec.envelope.mutates(),
+                "`{}` says it changes something, and this port cannot",
+                spec.name
+            );
+            assert_eq!(spec.envelope.risk, Risk::Low, "{}", spec.name);
+            assert_eq!(spec.envelope.access, vec![AccessKind::Filesystem]);
+            assert!(
+                !spec.envelope.needs_approval(Risk::Low),
+                "nothing here is worth interrupting a person for: {}",
+                spec.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_call_names_the_path_it_was_given_and_not_the_one_it_would_resolve_to() {
+        // The gate has to see what the model sent. Reporting the canonicalised path would show a
+        // policy a tidy answer for the one call whose whole problem is where it was trying to go —
+        // and `resolve` refuses it either way, after canonicalising.
+        let dir = tempfile::tempdir().expect("a temporary workspace");
+        let tools = WorkspaceTools::new(dir.path()).expect("opens");
+
+        assert_eq!(
+            tools.subjects(&call(READ_TOOL, json!({"path": "../../etc/passwd"}))),
+            vec![Subject::file("../../etc/passwd")]
+        );
+        assert_eq!(
+            tools.subjects(&call(LIST_TOOL, json!({"path": "crates"}))),
+            vec![Subject::file("crates")]
+        );
+        // A grep with no path walks the root, so that is what it names.
+        assert_eq!(
+            tools.subjects(&call(GREP_TOOL, json!({"pattern": "fn"}))),
+            vec![Subject::file(".")]
+        );
+        // A name this port does not publish touches nothing here, whatever it was.
+        assert!(tools.subjects(&call("workspace_write", json!({"path": "x"}))).is_empty());
     }
 }

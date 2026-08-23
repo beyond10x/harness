@@ -26,6 +26,7 @@ fn spec(name: &str, approval: Approval) -> ToolSpec {
     ToolSpec {
         name: tool_name(name),
         description: format!("the {name} tool"),
+        envelope: Default::default(),
         input_schema: json!({"type": "object"}),
         approval,
     }

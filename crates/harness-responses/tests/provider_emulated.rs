@@ -94,6 +94,7 @@ impl TestTools {
             specs: vec![ToolSpec {
                 name: ToolName::new("workspace_read").expect("valid"),
                 description: "reads one file".to_owned(),
+                envelope: Default::default(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {"path": {"type": "string"}},

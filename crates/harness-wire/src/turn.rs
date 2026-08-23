@@ -30,7 +30,20 @@ pub struct ToolSpec {
     pub name: ToolName,
     pub description: String,
     pub input_schema: Value,
+    /// Whether a person is asked before this tool runs.
+    ///
+    /// **Being retired in favour of [`ToolSpec::envelope`].** A tool that can assert its own
+    /// `NotRequired` can opt out of the safety boundary, which is the one thing a boundary must not
+    /// offer; `Envelope::needs_approval` derives the same answer from what the tool *does* and a
+    /// ceiling the caller sets. It remains here while the ports that set it are migrated, and a
+    /// tool that sets neither is described as the safest thing it could be.
     pub approval: Approval,
+    /// What this tool does, how much a wrong call costs, and what it must reach.
+    ///
+    /// Defaults to a pure, cheap, repeatable read, which is what every tool this harness shipped
+    /// before the envelope existed actually is.
+    #[serde(default)]
+    pub envelope: crate::Envelope,
 }
 
 /// How the model is asked to sample, when a caller asks at all.
@@ -246,6 +259,7 @@ mod tests {
             description: "does a thing".to_owned(),
             input_schema: json!({"type": "object"}),
             approval: Approval::NotRequired,
+            envelope: crate::Envelope::default(),
         }
     }
 

@@ -67,9 +67,15 @@ pub(crate) fn walk(
     report
 }
 
-/// Walks one group. Answers whether anything inside it failed or was skipped, which is what makes
-/// a group opaque to its siblings: they wait on *the group*, and a group that did not come out
-/// clean stops whatever needed it.
+/// Walks one group, re-entering it while it does not come out clean and the document still allows
+/// an attempt.
+///
+/// **This is the retreat.** The bound lives in the document rather than in the guard, and every
+/// attempt re-runs the *whole* scope: a run that went back and then did not re-verify would have
+/// skipped a check rather than retreated. See [`crate::Repeat`].
+///
+/// Answers whether the group failed on its last attempt, which is what makes it opaque to its
+/// siblings: they wait on *the group*, and one that did not come out clean stops whatever needed it.
 fn walk_group(
     group: &Group,
     plan: &Plan,
@@ -77,9 +83,41 @@ fn walk_group(
     sink: &mut dyn FlowSink,
     report: &mut Report,
 ) -> bool {
+    let mut attempt = 1;
+    loop {
+        let failed = attempt_group(group, plan, runner, sink, report, attempt);
+        if !failed || attempt >= plan.attempts {
+            sink.emit(FlowEvent::GroupLeft {
+                path: plan.path.clone(),
+                failed,
+                attempts: attempt,
+                exhausted: failed && attempt >= plan.attempts && plan.attempts > 1,
+            });
+            return failed;
+        }
+        sink.emit(FlowEvent::GroupRepeating {
+            path: plan.path.clone(),
+            attempt,
+            of: plan.attempts,
+        });
+        attempt += 1;
+    }
+}
+
+/// One pass over a group's layers.
+fn attempt_group(
+    group: &Group,
+    plan: &Plan,
+    runner: &mut dyn StepRunner,
+    sink: &mut dyn FlowSink,
+    report: &mut Report,
+    attempt: u32,
+) -> bool {
     sink.emit(FlowEvent::GroupEntered {
         path: plan.path.clone(),
         layers: plan.layers.len(),
+        attempt,
+        of: plan.attempts,
     });
 
     let mut broken: BTreeSet<NodeId> = BTreeSet::new();
@@ -126,12 +164,12 @@ fn walk_group(
                         .groups
                         .get(id)
                         .expect("every child group was planned with its parent");
-                    let failed = walk_group(inner, inner_plan, runner, sink, report);
-                    if failed {
+                    // `walk_group` emits this group's own `GroupLeft`, because only it knows how
+                    // many attempts it took.
+                    if walk_group(inner, inner_plan, runner, sink, report) {
                         broken.insert(id.clone());
                         any_failed = true;
                     }
-                    sink.emit(FlowEvent::GroupLeft { path, failed });
                 }
             }
         }

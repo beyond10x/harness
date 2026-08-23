@@ -273,7 +273,7 @@ fn a_group_that_failed_inside_is_failed_to_its_siblings() {
     assert!(
         sink.events().iter().any(|event| matches!(
             event,
-            FlowEvent::GroupLeft { path, failed: true } if path == "root.shape"
+            FlowEvent::GroupLeft { path, failed: true, .. } if path == "root.shape"
         )),
         "the group reports itself failed on the way out"
     );
@@ -368,4 +368,219 @@ root:
         flow.plan().expect_err("refused"),
         FlowError::SelfNeed { .. }
     ));
+}
+
+// --- the retreat --------------------------------------------------------------------------------
+
+/// Fails the named step until it has been attempted `heal_after` times, then passes it.
+struct HealsAfter {
+    step: &'static str,
+    heal_after: usize,
+    seen: usize,
+}
+
+impl StepRunner for HealsAfter {
+    fn run(&mut self, path: &str, _step: &Step) -> StepOutcome {
+        if !path.ends_with(self.step) {
+            return StepOutcome::Passed;
+        }
+        self.seen += 1;
+        if self.seen >= self.heal_after {
+            StepOutcome::Passed
+        } else {
+            StepOutcome::Failed
+        }
+    }
+}
+
+/// `adp/default/2`'s retreat, as this notation writes it: `verify -> implement` is a group that
+/// repeats, not an edge that goes backwards.
+const RETREAT: &str = r"
+id: development
+root:
+  id: root
+  nodes:
+    - id: build
+      repeat: {max: 3}
+      nodes:
+        - id: implement
+        - id: verify
+          needs: [implement]
+    - id: review
+      needs: [build]
+";
+
+#[test]
+fn a_group_that_did_not_come_out_clean_runs_again_and_the_whole_scope_re_runs() {
+    // The rule the design turns on: a retreat re-enters the *scope*. A run that went back to
+    // `implement` and did not re-verify would have skipped a check, not retreated.
+    let flow = flow(RETREAT);
+    let mut sink = VecFlowSink::new();
+    let report = flow
+        .run(
+            &mut HealsAfter { step: "verify", heal_after: 2, seen: 0 },
+            &mut sink,
+        )
+        .expect("valid");
+
+    assert_eq!(
+        sink.steps_started(),
+        vec![
+            "root.build.implement",
+            "root.build.verify",
+            "root.build.implement",
+            "root.build.verify",
+            "root.review",
+        ],
+        "implement ran again, not only verify"
+    );
+    assert_eq!(report.failed, 1, "the first verify");
+    assert_eq!(report.ran, 5);
+    assert_eq!(report.skipped, 0, "review was not skipped: the group came out clean in the end");
+}
+
+#[test]
+fn the_bound_is_a_number_in_the_document_and_exhausting_it_is_said_out_loud() {
+    let flow = flow(RETREAT);
+    let mut sink = VecFlowSink::new();
+    let report = flow
+        .run(&mut FailsAt(vec!["verify"]), &mut sink)
+        .expect("valid");
+
+    assert_eq!(
+        sink.steps_started().len(),
+        6,
+        "three attempts of two steps, and then review is skipped"
+    );
+    assert_eq!(report.failed, 3);
+    assert_eq!(report.skipped, 1, "review");
+
+    let left: Vec<&FlowEvent> = sink
+        .events()
+        .iter()
+        .filter(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
+        .collect();
+    assert_eq!(left.len(), 1, "a repeated group is left once, not once per attempt");
+    let FlowEvent::GroupLeft { failed, attempts, exhausted, .. } = left[0] else {
+        unreachable!()
+    };
+    assert!(failed);
+    assert_eq!(*attempts, 3);
+    assert!(
+        exhausted,
+        "*it broke* and *it kept breaking until the document stopped it* are different facts"
+    );
+
+    let repeats = sink
+        .events()
+        .iter()
+        .filter(|event| matches!(event, FlowEvent::GroupRepeating { .. }))
+        .count();
+    assert_eq!(repeats, 2, "two retreats between three attempts");
+}
+
+#[test]
+fn a_group_that_comes_out_clean_first_time_does_not_repeat_and_says_which_attempt_it_was() {
+    let flow = flow(RETREAT);
+    let mut sink = VecFlowSink::new();
+    let report = flow
+        .run(&mut Always(StepOutcome::Passed), &mut sink)
+        .expect("valid");
+
+    assert!(report.clean());
+    assert_eq!(report.ran, 3);
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| matches!(event, FlowEvent::GroupRepeating { .. })),
+        "a bound is a ceiling, not a quota"
+    );
+    // Always present, so *first time* is read the same way as *third time*.
+    assert!(sink.events().iter().any(|event| matches!(
+        event,
+        FlowEvent::GroupEntered { path, attempt: 1, of: 3, .. } if path == "root.build"
+    )));
+}
+
+#[test]
+fn a_group_without_repeat_runs_once_and_is_not_exhausted_when_it_fails() {
+    let flow = flow(
+        r"
+id: once
+root:
+  id: root
+  nodes:
+    - id: build
+      nodes: [{id: verify}]
+",
+    );
+    let mut sink = VecFlowSink::new();
+    flow.run(&mut FailsAt(vec!["verify"]), &mut sink)
+        .expect("valid");
+    let FlowEvent::GroupLeft { attempts, exhausted, failed, .. } = sink
+        .events()
+        .iter()
+        .find(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
+        .expect("left")
+    else {
+        unreachable!()
+    };
+    assert!(failed);
+    assert_eq!(*attempts, 1);
+    assert!(
+        !exhausted,
+        "a group that was never allowed to retry did not use up a budget it never had"
+    );
+}
+
+#[test]
+fn a_group_that_may_run_zero_times_is_refused_by_name() {
+    let flow = flow(
+        r"
+id: never
+root:
+  id: root
+  nodes:
+    - id: build
+      repeat: {max: 0}
+      nodes: [{id: a}]
+",
+    );
+    let error = flow.plan().expect_err("refused");
+    assert!(matches!(error, FlowError::RepeatsNever { .. }), "{error}");
+    assert!(error.to_string().contains("root.build"), "{error}");
+}
+
+#[test]
+fn a_nested_repeat_is_the_inner_groups_business_and_the_outer_one_counts_attempts_of_it() {
+    // An inner retreat exhausting itself fails the inner group, which is one failed attempt of the
+    // outer one — the same opacity rule the rest of the crate rests on, applied to attempts.
+    let flow = flow(
+        r"
+id: nested
+root:
+  id: root
+  nodes:
+    - id: outer
+      repeat: {max: 2}
+      nodes:
+        - id: inner
+          repeat: {max: 2}
+          nodes: [{id: flaky}]
+",
+    );
+    let mut sink = VecFlowSink::new();
+    let report = flow
+        .run(&mut FailsAt(vec!["flaky"]), &mut sink)
+        .expect("valid");
+    assert_eq!(report.ran, 4, "two attempts of the inner group, twice");
+    let outer_attempts = sink
+        .events()
+        .iter()
+        .filter(
+            |event| matches!(event, FlowEvent::GroupEntered { path, .. } if path == "root.outer"),
+        )
+        .count();
+    assert_eq!(outer_attempts, 2);
 }

@@ -28,6 +28,14 @@
 //! say so is the point, because a workflow whose parts reach into each other's middles is one
 //! nobody can reason about in pieces either.
 //!
+//! # Retreats, which a DAG cannot hold
+//!
+//! Real workflows go backwards: `adp/default/2` has three edges that do. A DAG has no back-edge and
+//! this notation does not grow one — a retreat is **re-entering a scope**, and a scope is what a
+//! group already is. [`Repeat`] is the whole feature: a group runs again while it did not come out
+//! clean, up to a bound written in the document. Every level stays acyclic and the locality
+//! argument above survives unchanged.
+//!
 //! # The shape
 //!
 //! ```yaml
@@ -88,9 +96,39 @@ pub struct Group {
     /// Siblings that must finish before this group starts.
     #[serde(default)]
     pub needs: Vec<NodeId>,
+    /// Run this group again while it does not come out clean.
+    ///
+    /// Absent means once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<Repeat>,
     /// The nodes inside. An empty group is refused: a section that runs nothing is a mistake
     /// somebody made, not a section.
     pub nodes: Vec<Node>,
+}
+
+/// How many times a group may be re-entered when it does not come out clean.
+///
+/// # This is how a retreat is written down
+///
+/// A real workflow has them. `adp/default/2` has three — `verify -> implement`,
+/// `adversarial_verify -> implement`, `review -> implement` — and its own header argues why: a
+/// workflow that can only go forwards is a lie about how engineering works, and without a route
+/// back the only ways out are to weaken the check or to declare victory anyway.
+///
+/// A DAG cannot hold a back-edge, so the notation does not grow one. **A retreat is re-entering a
+/// scope, and a scope is what a group already is**: `implement -> verify -> adversarial_verify`
+/// becomes one group that repeats until it comes out clean. Every level stays acyclic, the whole
+/// locality argument in this module's documentation survives intact, and the thing that stops an
+/// infinite retreat is a number in the document rather than an accident of the guard.
+///
+/// A back-edge would have bought one thing this does not: retreating to a *point* rather than to
+/// the start of a scope. That is deliberate. A run that goes back to `implement` and then does not
+/// re-verify has not retreated, it has skipped a check — which is exactly the failure the
+/// workflow's own comment names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Repeat {
+    /// Total attempts, including the first. `1` is the same as no `repeat` at all.
+    pub max: u32,
 }
 
 /// One thing that runs.
@@ -163,6 +201,11 @@ pub enum FlowError {
     Cycle { path: String, cycle: String },
     #[error("`{path}` is empty: a flow with no id names nothing")]
     NoId { path: String },
+    #[error(
+        "`{path}` may repeat at most {max} times: a group that may run zero times is a group that \
+         is not there. Delete it, or say `max: 1`"
+    )]
+    RepeatsNever { path: String, max: u32 },
 }
 
 impl Flow {

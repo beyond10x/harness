@@ -22,6 +22,8 @@ pub struct Plan {
     pub path: String,
     /// Its layers, in the order they run.
     pub layers: Vec<Layer>,
+    /// How many times this group may run. `1` unless the document says otherwise.
+    pub attempts: u32,
     /// A plan per child group, by name.
     pub groups: BTreeMap<NodeId, Plan>,
 }
@@ -46,6 +48,17 @@ fn plan_group(group: &Group, path: &str) -> Result<Plan, FlowError> {
     let siblings = index(group, path)?;
     check_edges(group, path, &siblings)?;
 
+    let attempts = match group.repeat {
+        None => 1,
+        Some(repeat) if repeat.max >= 1 => repeat.max,
+        Some(repeat) => {
+            return Err(FlowError::RepeatsNever {
+                path: path.to_owned(),
+                max: repeat.max,
+            });
+        }
+    };
+
     let layers = layers_of(group, path, &siblings)?;
 
     let mut groups = BTreeMap::new();
@@ -59,6 +72,7 @@ fn plan_group(group: &Group, path: &str) -> Result<Plan, FlowError> {
     Ok(Plan {
         path: path.to_owned(),
         layers,
+        attempts,
         groups,
     })
 }

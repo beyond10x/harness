@@ -23,6 +23,11 @@ pub enum FlowEvent {
         path: String,
         /// Its layers, so a reader knows how deep this section is before it starts.
         layers: usize,
+        /// Which attempt this is, from 1. Always present, so *first time* and *third time* are
+        /// read the same way rather than one being inferred from the absence of a field.
+        attempt: u32,
+        /// How many attempts the document allows.
+        of: u32,
     },
     /// A layer of siblings became runnable together.
     ///
@@ -39,8 +44,29 @@ pub enum FlowEvent {
     /// Named rather than silent: a step that never ran and a step that ran and passed are the two
     /// things a reader of a green run must be able to tell apart.
     NodeSkipped { path: String, because: String },
+    /// A sub-tree did not come out clean and is being re-entered.
+    ///
+    /// The retreat, as an event. A reader who sees `implement` twice in a stream must be able to
+    /// tell a retreat from a duplicate, and the only place that can be said is here.
+    GroupRepeating {
+        path: String,
+        /// The attempt that just failed.
+        attempt: u32,
+        of: u32,
+    },
     /// A sub-tree was left.
-    GroupLeft { path: String, failed: bool },
+    GroupLeft {
+        path: String,
+        failed: bool,
+        /// How many attempts it took, or used up.
+        attempts: u32,
+        /// `true` when it failed *and* had no attempts left.
+        ///
+        /// Distinct from `failed` on purpose: *it broke* and *it kept breaking until the document
+        /// stopped letting it try* are different facts, and a bounded repeat that silently reported
+        /// the first would hide the bound doing its job.
+        exhausted: bool,
+    },
     /// The walk ended.
     FlowFinished {
         flow: String,

@@ -137,12 +137,19 @@ struct RunOptions {
     /// it happened to be started.
     #[arg(long)]
     substrate: Option<PathBuf>,
-    /// Hold substrate's driver in this process instead, with its workspaces under this directory.
+    /// Hold substrate's driver in this process instead, confining `--workspace` itself.
     ///
     /// The same confinement — guarded IO, `openat2` containment, cgroups and namespaces around an
     /// exec are the driver's, and they are here. What a socket adds and this does not is an
     /// authenticated subject derived from kernel peer credentials; embedded there is no peer. Right
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
+    ///
+    /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
+    /// substrate's root, and reads and writes land in the same place. The directory must therefore
+    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
+    /// and one that is not leaves the run read-only rather than quietly writing somewhere else.
+    ///
+    /// Takes no value today; the root is derived from `--workspace`.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: Option<PathBuf>,
     /// Which confined workspace the write and execute tools act in.
@@ -152,6 +159,15 @@ struct RunOptions {
     /// knows.
     #[arg(long, default_value = "default")]
     workspace_id: String,
+    /// A delegated cgroup subtree, so the embedded driver may confine a process.
+    ///
+    /// Without one substrate's probe reports no exec facts and no `run` tool is published — which
+    /// is correct and is also why a test-first task cannot be attempted: a run that may not execute
+    /// its suite cannot see a test fail before writing the code, so it will not write the code. The
+    /// subtree must be delegated to this user, hold `cpu`, `memory` and `pids`, and be free of
+    /// processes.
+    #[arg(long)]
+    cgroup_root: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
@@ -213,12 +229,19 @@ struct ToolsOptions {
     /// it happened to be started.
     #[arg(long)]
     substrate: Option<PathBuf>,
-    /// Hold substrate's driver in this process instead, with its workspaces under this directory.
+    /// Hold substrate's driver in this process instead, confining `--workspace` itself.
     ///
     /// The same confinement — guarded IO, `openat2` containment, cgroups and namespaces around an
     /// exec are the driver's, and they are here. What a socket adds and this does not is an
     /// authenticated subject derived from kernel peer credentials; embedded there is no peer. Right
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
+    ///
+    /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
+    /// substrate's root, and reads and writes land in the same place. The directory must therefore
+    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
+    /// and one that is not leaves the run read-only rather than quietly writing somewhere else.
+    ///
+    /// Takes no value today; the root is derived from `--workspace`.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: Option<PathBuf>,
     /// Which confined workspace the write and execute tools act in.
@@ -228,6 +251,15 @@ struct ToolsOptions {
     /// knows.
     #[arg(long, default_value = "default")]
     workspace_id: String,
+    /// A delegated cgroup subtree, so the embedded driver may confine a process.
+    ///
+    /// Without one substrate's probe reports no exec facts and no `run` tool is published — which
+    /// is correct and is also why a test-first task cannot be attempted: a run that may not execute
+    /// its suite cannot see a test fail before writing the code, so it will not write the code. The
+    /// subtree must be delegated to this user, hold `cpu`, `memory` and `pids`, and be free of
+    /// processes.
+    #[arg(long)]
+    cgroup_root: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
@@ -332,6 +364,7 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
         WorkspaceTools::new(&options.workspace)?,
         options.substrate.as_deref(),
         options.substrate_embedded.as_deref(),
+        options.cgroup_root.as_deref(),
         &options.workspace_id,
         &options.allow_program,
     );
@@ -382,23 +415,44 @@ fn published(
     reading: WorkspaceTools,
     substrate: Option<&std::path::Path>,
     embedded: Option<&std::path::Path>,
+    cgroup_root: Option<&std::path::Path>,
     workspace_id: &str,
     programs: &[String],
 ) -> Toolset {
-    if let Some(root) = embedded {
+    if embedded.is_some() {
+        // **One tree.** The workspace the read-only tools see *is* the confined workspace: its
+        // parent becomes substrate's root and the directory itself is adopted. Opening a fresh
+        // empty workspace beside it - which is what this did until now - meant a run read one tree
+        // and wrote into another, and was not doing the task it had been given.
+        //
+        // The price is a naming rule the operator has to meet: the directory must be called
+        // `ws_something`, because that is what substrate's guarded filesystem will represent. A
+        // directory that is not is refused by name rather than silently given a second tree.
+        let Some(root) = reading.root().parent() else {
+            return Toolset::read_only(reading);
+        };
+        let Some(name) = reading
+            .root()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(ToOwned::to_owned)
+        else {
+            return Toolset::read_only(reading);
+        };
         // Opened twice on purpose: once to ask what the machine admits, once for the tools to hold.
         // A driver is a handle on a directory, not a session, so two handles on one root are two
         // ways to reach the same tree rather than two trees.
-        let Ok(driver) = harness_substrate::Embedded::open(root, None) else {
+        let cgroup = cgroup_root.map(std::path::Path::to_path_buf);
+        let (Ok(driver), Ok(tools)) = (
+            harness_substrate::Embedded::open(root, cgroup.clone()),
+            harness_substrate::Embedded::open(root, cgroup),
+        ) else {
             return Toolset::read_only(reading);
         };
         let Ok(facts) = harness_substrate::Backend::machine(&driver) else {
             return Toolset::read_only(reading);
         };
-        let Ok(workspace) = harness_substrate::Backend::workspace_create(&driver, 3_600_000) else {
-            return Toolset::read_only(reading);
-        };
-        let Ok(tools) = harness_substrate::Embedded::open(root, None) else {
+        let Ok(workspace) = driver.workspace_adopt(&name) else {
             return Toolset::read_only(reading);
         };
         return Toolset::with_confined(
@@ -429,6 +483,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
         WorkspaceTools::new(&options.workspace)?,
         options.substrate.as_deref(),
         options.substrate_embedded.as_deref(),
+        options.cgroup_root.as_deref(),
         &options.workspace_id,
         &options.allow_program,
     );

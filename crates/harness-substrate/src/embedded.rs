@@ -108,6 +108,59 @@ impl Embedded {
         &self.root
     }
 
+    /// Take an existing directory under the root as a confined workspace.
+    ///
+    /// # The gap this closes
+    ///
+    /// [`Backend::workspace_create`] makes a **new, empty** directory. That is right for a run that
+    /// builds something from nothing and wrong for every run that works on a tree that already
+    /// exists — which, for an evaluation of a coding agent, is all of them. Without this a run read
+    /// one tree through the read-only tools and wrote into another through the confined ones, and
+    /// was not doing the task it had been given.
+    ///
+    /// Adopting performs no copy. The directory *is* the workspace, so reads and writes land in the
+    /// same place and substrate's containment applies to it from this moment on.
+    ///
+    /// # What it does not do
+    ///
+    /// It does not make the tree confined **retroactively**. Whatever was in that directory before
+    /// is there, symlinks included, and `openat2` containment stops a path *leaving* the workspace
+    /// rather than auditing what was already inside it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError::Refused`] when the name is not one the driver can represent — it
+    /// must begin `ws_` and hold only alphanumerics and underscores — or when no such directory is
+    /// there. The name rule is the driver's; see [`Backend::workspace_create`] for why meeting the
+    /// stricter of its two checks is the only thing a caller can do.
+    pub fn workspace_adopt(&self, name: &str) -> Result<String, SubstrateError> {
+        self.driver
+            .workspace_root_identity(name)
+            .map_err(|error| Self::refused("workspace identity", &error))?;
+        if !name.starts_with("ws_")
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(SubstrateError::Refused {
+                status: 0,
+                body: format!(
+                    "`{name}` cannot be a workspace: a name must begin `ws_` and hold only \
+                     alphanumerics and underscores. Rename the directory, or let \
+                     `workspace_create` open a fresh one."
+                ),
+            });
+        }
+        let path = self.root.join(name);
+        if !path.is_dir() {
+            return Err(SubstrateError::Refused {
+                status: 0,
+                body: format!("`{}` is not a directory to adopt", path.display()),
+            });
+        }
+        Ok(name.to_owned())
+    }
+
     fn refused(context: &str, error: &impl std::fmt::Debug) -> SubstrateError {
         SubstrateError::Refused {
             // Not an HTTP status: there is no HTTP. `0` is the honest stand-in and the message

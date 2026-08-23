@@ -96,3 +96,55 @@ fn the_toolset_follows_the_machine_and_the_tools_do_not_know_which_backend_they_
         refused.output
     );
 }
+
+#[test]
+fn a_tree_that_already_exists_is_adopted_rather_than_replaced_by_an_empty_one() {
+    // The gap this closes: a run read one tree through the read-only tools and wrote into another
+    // through the confined ones, so it was not doing the task it had been given.
+    let root = tempfile::tempdir().expect("a temporary root");
+    let tree = root.path().join("ws_existing");
+    std::fs::create_dir(&tree).expect("the tree");
+    std::fs::write(tree.join("already.txt"), "here first\n").expect("what was there before");
+
+    let embedded = Embedded::open(root.path(), None).expect("the driver opens");
+    let workspace = embedded.workspace_adopt("ws_existing").expect("adopted");
+
+    // What was there before is readable through the confined backend: same tree, not a copy.
+    assert_eq!(
+        embedded
+            .file_read(&workspace, "already.txt")
+            .expect("reads what was there"),
+        "here first\n"
+    );
+
+    // And a write lands beside it, on disk, where the read-only tools would see it too.
+    embedded
+        .file_write(&workspace, "added.txt", "and here after\n")
+        .expect("writes");
+    assert_eq!(
+        std::fs::read_to_string(tree.join("added.txt")).expect("on disk"),
+        "and here after\n",
+        "one tree: what the confined tools wrote is what an ordinary reader finds"
+    );
+}
+
+#[test]
+fn a_directory_the_driver_cannot_represent_is_refused_by_name_and_says_what_to_do() {
+    let root = tempfile::tempdir().expect("a temporary root");
+    std::fs::create_dir(root.path().join("work-native")).expect("a badly named tree");
+    let embedded = Embedded::open(root.path(), None).expect("the driver opens");
+
+    let error = embedded
+        .workspace_adopt("work-native")
+        .expect_err("refused")
+        .to_string();
+    assert!(error.contains("must begin `ws_`"), "{error}");
+    assert!(error.contains("Rename the directory"), "and what to do: {error}");
+
+    // And a name that is legal but names nothing is a different refusal.
+    let error = embedded
+        .workspace_adopt("ws_absent")
+        .expect_err("refused")
+        .to_string();
+    assert!(error.contains("is not a directory to adopt"), "{error}");
+}

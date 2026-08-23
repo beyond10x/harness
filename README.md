@@ -80,6 +80,20 @@ cargo run -p b10x-harness-cli -- run \
   --input "what does this workspace do?"
 ```
 
+### Running with confinement
+
+The embedded driver serves execution only where the machine can confine one, and substrate decides:
+its probe requires the process to be **inside** a delegated cgroup subtree whose root is
+process-free and carries `cpu`, `memory` and `pids`. A process cannot move itself into one — the
+kernel refuses a write across delegation domains — so it has to be *started* there:
+
+```console
+systemd-run --user --scope --property="Delegate=cpu memory pids" -- ./run.sh
+```
+
+and inside, pass the scope's containing slice as `--cgroup-root`. Without it the run has five tools
+and no `run`; with it, six. That is the toolset following the machine rather than a flag.
+
 `--api-key-env <NAME>` is the alternative. There is no ambient fallback: the harness reads no
 credential it was not pointed at, so a run can always be explained afterwards.
 

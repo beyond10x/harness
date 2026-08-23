@@ -8,6 +8,7 @@
 
 mod metaharness;
 mod render;
+mod toolset;
 mod workspace;
 
 use std::fs;
@@ -25,6 +26,7 @@ use harness_responses::{Endpoint, ResponsesClient};
 use harness_wire::{Sampling, StaticBearer};
 
 pub use render::Renderer;
+pub use toolset::Toolset;
 pub use workspace::{GREP_TOOL, LIST_TOOL, READ_TOOL, WorkspaceTools};
 
 /// The standing instruction when the caller supplies none.
@@ -125,6 +127,25 @@ struct RunOptions {
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
+    /// The substrate daemon's socket, so a run may write and execute inside a confined workspace.
+    ///
+    /// Without it the toolset is read-only, which is what this harness has always published. With
+    /// it, what appears is what the daemon says the machine can confine — a host with no delegated
+    /// cgroup root serves workspaces and no execution, and the run then has the write tools and no
+    /// `run` tool. Named rather than discovered, for the reason the credential is: a harness that
+    /// picked up a confinement boundary from the environment is one whose effects depend on where
+    /// it happened to be started.
+    #[arg(long)]
+    substrate: Option<PathBuf>,
+    /// Which confined workspace the write and execute tools act in.
+    #[arg(long, default_value = "default")]
+    workspace_id: String,
+    /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
+    ///
+    /// Declared rather than open, because an argv whose program could be anything is a shell with
+    /// extra steps. A set nobody named means nobody wanted one.
+    #[arg(long)]
+    allow_program: Vec<String>,
     /// The request.
     #[arg(long)]
     input: String,
@@ -170,6 +191,25 @@ struct ToolsOptions {
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
+    /// The substrate daemon's socket, so a run may write and execute inside a confined workspace.
+    ///
+    /// Without it the toolset is read-only, which is what this harness has always published. With
+    /// it, what appears is what the daemon says the machine can confine — a host with no delegated
+    /// cgroup root serves workspaces and no execution, and the run then has the write tools and no
+    /// `run` tool. Named rather than discovered, for the reason the credential is: a harness that
+    /// picked up a confinement boundary from the environment is one whose effects depend on where
+    /// it happened to be started.
+    #[arg(long)]
+    substrate: Option<PathBuf>,
+    /// Which confined workspace the write and execute tools act in.
+    #[arg(long, default_value = "default")]
+    workspace_id: String,
+    /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
+    ///
+    /// Declared rather than open, because an argv whose program could be anything is a shell with
+    /// extra steps. A set nobody named means nobody wanted one.
+    #[arg(long)]
+    allow_program: Vec<String>,
 }
 
 /// Reads a credential from exactly the place the caller named.
@@ -264,7 +304,12 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     let mut client = ResponsesClient::new(endpoint, Arc::new(StaticBearer::new(credential)))
         .map_err(|error| error.to_string())?
         .with_cancel(cancel.clone());
-    let mut tools = WorkspaceTools::new(&options.workspace)?;
+    let mut tools = published(
+        WorkspaceTools::new(&options.workspace)?,
+        options.substrate.as_deref(),
+        &options.workspace_id,
+        &options.allow_program,
+    );
     let mut approvals: Box<dyn ApprovalPort> = if options.yes {
         Box::new(ApproveAll)
     } else {
@@ -298,12 +343,51 @@ fn install_interrupt(cancel: &LoopCancel) {
     }
 }
 
+/// The toolset this machine admits, which is the machine's answer and not a flag's.
+///
+/// **The publication gate, in one function.** With no `--substrate` this is the read-only toolset
+/// this component has always published. With one, the daemon is asked what it can confine and the
+/// write and execute tools appear only where the answer admits them — absent otherwise, so the
+/// model is never told about a tool it cannot have.
+///
+/// A daemon that cannot be reached is not an error, for the reason `Client::probe` gives. A daemon
+/// that answers something unreadable is, and it stops the launch: a broken deployment must not
+/// silently look like an absent one.
+fn published(
+    reading: WorkspaceTools,
+    substrate: Option<&std::path::Path>,
+    workspace_id: &str,
+    programs: &[String],
+) -> Toolset {
+    let Some(socket) = substrate else {
+        return Toolset::read_only(reading);
+    };
+    let client = harness_substrate::Client::at(socket);
+    match client.probe() {
+        Ok(facts) => Toolset::with_confined(
+            reading,
+            harness_substrate::ConfinedTools::new(
+                harness_substrate::Client::at(socket),
+                &facts,
+                workspace_id,
+                programs.to_vec(),
+            ),
+        ),
+        Err(_) => Toolset::read_only(reading),
+    }
+}
+
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
-    let tools = WorkspaceTools::new(&options.workspace)?;
+    let tools = published(
+        WorkspaceTools::new(&options.workspace)?,
+        options.substrate.as_deref(),
+        &options.workspace_id,
+        &options.allow_program,
+    );
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "workspace": tools.root().display().to_string(),
+            "workspace": options.workspace.display().to_string(),
             "tools": tools_specs(&tools),
         }))
         .map_err(|error| error.to_string())?
@@ -311,8 +395,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn tools_specs(tools: &WorkspaceTools) -> serde_json::Value {
-    use harness_wire::ToolPort as _;
+fn tools_specs(tools: &dyn harness_wire::ToolPort) -> serde_json::Value {
     serde_json::to_value(tools.specs()).unwrap_or(serde_json::Value::Null)
 }
 

@@ -78,6 +78,7 @@ dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-loop",
  "b10x-harness-responses",
+ "b10x-harness-substrate",
  "b10x-harness-wire",
  "clap",
  "ctrlc",

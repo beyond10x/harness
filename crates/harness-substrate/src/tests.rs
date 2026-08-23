@@ -512,3 +512,25 @@ fn a_call_names_what_it_touches_so_the_second_gate_has_something_to_read() {
         "the program, not the whole argv: what a policy names is what would start"
     );
 }
+
+#[test]
+fn a_real_daemons_answer_is_wrapped_in_a_result_and_the_facts_are_found_inside_it() {
+    // The shape the first live daemon this crate ever spoke to actually answered, 2026-08-23. The
+    // client read the body until then; a document of an unexpected shape deserialises into a
+    // `Facts` whose map is empty, so it would have published no tools and blamed the machine.
+    let (_dir, socket) = serve(
+        r#"{"api_version":"v1","request_id":"req_1","result":{"driver":"host","driver_version":"0.2.0","facts":{"exec.argv-only":true,"exec.cgroup-limits":{"cpu":true,"memory":true,"processes":true},"workspace.guarded-io":true}}}"#,
+        200,
+    );
+    let facts = Client::at(&socket).machine().expect("reads");
+    assert_eq!(facts.driver_version.as_deref(), Some("0.2.0"));
+    assert!(facts.confines_execution(), "the facts were found");
+    assert!(facts.holds_workspaces());
+}
+
+#[test]
+fn a_bare_capability_document_is_still_read_because_that_is_what_the_schemas_show() {
+    let (_dir, socket) = serve(r#"{"driver":"host","facts":{"workspace.guarded-io":true}}"#, 200);
+    let facts = Client::at(&socket).machine().expect("reads");
+    assert!(facts.holds_workspaces());
+}

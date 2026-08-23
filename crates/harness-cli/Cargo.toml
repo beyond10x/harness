@@ -19,6 +19,7 @@ workspace = true
 harness-app-server = { workspace = true }
 harness-loop = { workspace = true }
 harness-responses = { workspace = true }
+harness-substrate = { workspace = true }
 harness-wire = { workspace = true }
 clap = { workspace = true }
 ctrlc = { workspace = true }

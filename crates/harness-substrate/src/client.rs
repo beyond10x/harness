@@ -167,7 +167,21 @@ impl Client {
         if !(200..300).contains(&status) {
             return Err(SubstrateError::Refused { status, body });
         }
-        serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
+        let value: Value =
+            serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
+                reason: error.to_string(),
+            })?;
+        // **The envelope, and the first live probe is why it is here.** Every route answers
+        // `{api_version, request_id, result: {...}}` — the capability document is the `result`, not
+        // the body. This crate read the body until 2026-08-23, when the first real daemon it ever
+        // spoke to answered 200 with every fact present and this build saw none of them, because a
+        // document with an unexpected shape deserialises into a `Facts` whose map is simply empty.
+        // Which would have published no tools and blamed the machine.
+        //
+        // Both shapes are accepted: a bare document is what every test fixture and every hand-made
+        // example is, and refusing one would be refusing the thing the contract's own schemas show.
+        let document = value.get("result").unwrap_or(&value);
+        serde_json::from_value(document.clone()).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),
         })
     }

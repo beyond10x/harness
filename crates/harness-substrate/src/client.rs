@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::{Facts, SubstrateError, base64};
+use crate::{Backend, Facts, SubstrateError, base64};
 
 /// How long to wait on a local daemon that is not answering.
 ///
@@ -326,5 +326,32 @@ impl Client {
         serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),
         })
+    }
+}
+
+impl Backend for Client {
+    fn machine(&self) -> Result<Facts, SubstrateError> {
+        Client::machine(self)
+    }
+
+    fn workspace_create(&self, lease_ttl_ms: u64) -> Result<String, SubstrateError> {
+        Client::workspace_create(self, lease_ttl_ms)
+    }
+
+    fn file_write(
+        &self,
+        workspace: &str,
+        path: &str,
+        text: &str,
+    ) -> Result<Value, SubstrateError> {
+        Client::file_write(self, workspace, path, text)
+    }
+
+    fn file_read(&self, workspace: &str, path: &str) -> Result<String, SubstrateError> {
+        Client::file_read(self, workspace, path)
+    }
+
+    fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
+        Client::exec(self, workspace, argv)
     }
 }

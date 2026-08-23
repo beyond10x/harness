@@ -54,12 +54,16 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod backend;
 mod base64;
 mod client;
+mod embedded;
 mod predicate;
 mod tools;
 
+pub use backend::Backend;
 pub use client::{Client, Transport, UnixTransport};
+pub use embedded::Embedded;
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
 pub use tools::{ConfinedTools, EDIT_TOOL, RUN_TOOL, WRITE_TOOL};
 

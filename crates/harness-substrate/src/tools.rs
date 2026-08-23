@@ -27,7 +27,7 @@ use harness_wire::{
     ToolOutcome, ToolPort, ToolSpec,
 };
 
-use crate::{Client, Facts};
+use crate::{Backend, Facts};
 
 /// Writes one file, whole.
 pub const WRITE_TOOL: &str = "workspace_write";
@@ -38,7 +38,7 @@ pub const RUN_TOOL: &str = "run";
 
 /// The tools a confined workspace admits on this machine.
 pub struct ConfinedTools {
-    client: Client,
+    backend: Box<dyn Backend>,
     workspace: String,
     programs: Vec<String>,
     specs: Vec<ToolSpec>,
@@ -63,7 +63,7 @@ impl ConfinedTools {
     /// that admitted everything because nobody listed anything is the failure mode this design
     /// exists to prevent.
     pub fn new(
-        client: Client,
+        backend: impl Backend + 'static,
         facts: &Facts,
         workspace: impl Into<String>,
         programs: Vec<String>,
@@ -77,7 +77,7 @@ impl ConfinedTools {
             specs.push(run_spec(&programs));
         }
         Self {
-            client,
+            backend: Box::new(backend),
             workspace: workspace.into(),
             programs,
             specs,
@@ -92,7 +92,7 @@ impl ConfinedTools {
     fn write(&self, arguments: &Value) -> Result<Value, String> {
         let path = string(arguments, "path")?;
         let text = string(arguments, "text")?;
-        self.client
+        self.backend
             .file_write(&self.workspace, path, text)
             .map_err(|error| error.to_string())
     }
@@ -103,7 +103,7 @@ impl ConfinedTools {
         let new = string(arguments, "new")?;
 
         let current = self
-            .client
+            .backend
             .file_read(&self.workspace, path)
             .map_err(|error| error.to_string())?;
         let matches = current.matches(old).count();
@@ -120,7 +120,7 @@ impl ConfinedTools {
                 ));
             }
         }
-        self.client
+        self.backend
             .file_write(&self.workspace, path, &current.replacen(old, new, 1))
             .map_err(|error| error.to_string())
     }
@@ -145,7 +145,7 @@ impl ConfinedTools {
                 self.programs.join(", ")
             ));
         }
-        self.client
+        self.backend
             .exec(&self.workspace, &argv)
             .map_err(|error| error.to_string())
     }

@@ -13,6 +13,16 @@ workspace = true
 
 [dependencies]
 harness-wire = { workspace = true }
+# **A path dependency on a sibling repository, and both boundaries it crosses are argued in
+# `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
+# daemon artifact and the wire contract; this imports the driver. The socket path could not be made
+# to work against the daemon this machine happens to run, and embedding turns a 422 nobody could
+# diagnose into a compile error.
+substrate-host = { path = "../../../substrate/crates/substrate-host" }
+substrate-wire = { path = "../../../substrate/crates/substrate-wire" }
+# Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
+# per operation, no concurrency anywhere.
+tokio = { version = "1", features = ["rt"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

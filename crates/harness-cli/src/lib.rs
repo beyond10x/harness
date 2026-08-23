@@ -6,6 +6,7 @@
 //! them to [`harness_loop`]. Everything interesting happens in the loop, which is what lets the
 //! same core run embedded in another process or behind a bridge without a second implementation.
 
+mod metaharness;
 mod render;
 mod workspace;
 
@@ -56,6 +57,26 @@ enum Command {
     /// Tools arrive from the client on `thread/start`; the workspace toolset is not published
     /// here. The endpoint and credential stay outside the protocol.
     AppServer(Box<AppServerOptions>),
+    /// Rewrite a `--json` loop record as the `metaharness.event/1` stream every evaluation arm is
+    /// judged from.
+    ///
+    /// A converter and **not** a metaharness adapter, and the difference is the point. Every other
+    /// arm reaches the matrix through an adapter that spawns a vendor binary and decides each tool
+    /// call at a seam — which is what arm `driven` measures. Arm `native` measures the opposite
+    /// claim, that the published toolset *is* the policy, so wrapping this loop in a seam would put
+    /// the driven arm's treatment back on top of it and measure that instead. What crosses is the
+    /// record, not the control.
+    Events(EventsOptions),
+}
+
+#[derive(Debug, Args)]
+struct EventsOptions {
+    /// The loop record to read. Standard input when absent.
+    #[arg(long)]
+    r#in: Option<PathBuf>,
+    /// Where to write. Standard output when absent.
+    #[arg(long)]
+    out: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -326,7 +347,33 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Events(options) => match events_command(options) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        },
     }
+}
+
+/// `b10x-harness events`
+fn events_command(options: &EventsOptions) -> Result<(), String> {
+    let mut input: Box<dyn std::io::BufRead> = match &options.r#in {
+        Some(path) => Box::new(std::io::BufReader::new(
+            std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?,
+        )),
+        None => Box::new(std::io::BufReader::new(std::io::stdin())),
+    };
+    let mut output: Box<dyn std::io::Write> = match &options.out {
+        Some(path) => Box::new(
+            std::fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?,
+        ),
+        None => Box::new(std::io::stdout()),
+    };
+    metaharness::convert(&mut input, &mut output, env!("CARGO_PKG_VERSION"))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 pub fn run() -> ExitCode {

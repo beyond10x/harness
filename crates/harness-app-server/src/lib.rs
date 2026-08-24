@@ -464,6 +464,7 @@ fn terminal_status(stop: &LoopStop) -> &'static str {
         LoopStop::MaxTurns { .. }
         | LoopStop::MaxInputTokens { .. }
         | LoopStop::MaxOutputTokens { .. }
+        | LoopStop::MaxCost { .. }
         | LoopStop::Deadline { .. }
         | LoopStop::ProviderIncomplete { .. } => "failed",
     }

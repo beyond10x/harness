@@ -1,11 +1,13 @@
-//! The tools that exist only where the machine can confine them.
+//! The operations that exist only where the machine can confine them.
 //!
 //! # Publication is the first gate, and it is the quiet one
 //!
-//! [`ConfinedTools::specs`] is computed from [`Facts`], once. On a machine with no delegated cgroup
-//! root there is no `run` in the list at all — the model is never told about a tool it cannot have,
-//! never plans around one, and never spends a turn being refused. On a machine with no substrate
-//! daemon the list is **empty**, and the harness is exactly the read-only thing it has always been.
+//! What this provider *admits* is computed from [`Facts`], once, and
+//! `harness_tools::Catalogue::of` turns that into which entries exist. On a machine with no
+//! delegated cgroup root there is no `run` entry at all — the model is never told about a tool it
+//! cannot have, never plans around one, and never spends a turn being refused. On a machine with no
+//! substrate backend there are no writing entries either, and the harness is exactly the read-only
+//! thing it has always been.
 //!
 //! # `run`, and deliberately not `bash`
 //!
@@ -13,105 +15,98 @@
 //! subject of the call is not knowable before it runs — and a subject nobody can compute is one
 //! nobody can authorize, which collapses the middle gate into nothing.
 //!
-//! `run` takes an argv and a program from a **declared set**. The set is in the tool's own schema,
+//! `run` takes an argv and a program from a **declared set**. The set is in the entry's own schema,
 //! so the model can read what it may run instead of guessing and being refused; a program outside
-//! it is refused by name, listing the set.
+//! it is refused by name, listing the set — **here**, with nothing sent to the daemon.
 //!
 //! Substrate reaches the same place from the other side: `exec.start`'s first capability predicate
 //! is `exec.argv-only`. Neither component will run a shell, and neither had to be told by the other.
 
+use harness_tools::Operations;
 use serde_json::{Value, json};
-
-use harness_wire::{
-    AccessKind, Approval, Effect, Envelope, Idempotency, Risk, Subject, ToolCall, ToolName,
-    ToolOutcome, ToolPort, ToolSpec,
-};
 
 use crate::{Backend, Facts};
 
-/// Writes one file, whole.
-pub const WRITE_TOOL: &str = "workspace_write";
-/// Replaces one exact string in one file.
-pub const EDIT_TOOL: &str = "workspace_edit";
-/// Runs one declared program.
-pub const RUN_TOOL: &str = "run";
-
-/// The tools a confined workspace admits on this machine.
-pub struct ConfinedTools {
+/// What a confined workspace can do on this machine.
+pub struct ConfinedOperations {
     backend: Box<dyn Backend>,
     workspace: String,
     programs: Vec<String>,
-    specs: Vec<ToolSpec>,
+    writes: bool,
 }
 
-impl std::fmt::Debug for ConfinedTools {
+impl std::fmt::Debug for ConfinedOperations {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("ConfinedTools")
+            .debug_struct("ConfinedOperations")
             .field("workspace", &self.workspace)
             .field("programs", &self.programs)
-            .field("published", &self.specs.len())
+            .field("writes", &self.writes)
             .finish_non_exhaustive()
     }
 }
 
-impl ConfinedTools {
-    /// The toolset this machine admits.
+impl ConfinedOperations {
+    /// The provider this machine admits.
     ///
-    /// `programs` is the declared set `run` may name. An empty set publishes no `run` even on a
-    /// machine that could confine one: a workflow that named no commands wants none, and a tool
-    /// that admitted everything because nobody listed anything is the failure mode this design
-    /// exists to prevent.
+    /// `programs` is the declared set `run` may name. An empty set offers no execution even on a
+    /// machine that could confine it: a workflow that named no commands wants none, and a tool that
+    /// admitted everything because nobody listed anything is the failure this design exists to
+    /// prevent.
     pub fn new(
         backend: impl Backend + 'static,
         facts: &Facts,
         workspace: impl Into<String>,
         programs: Vec<String>,
     ) -> Self {
-        let mut specs = Vec::new();
-        if facts.holds_workspaces() {
-            specs.push(write_spec());
-            specs.push(edit_spec());
-        }
-        if facts.confines_execution() && !programs.is_empty() {
-            specs.push(run_spec(&programs));
-        }
+        let confines_execution = facts.confines_execution();
         Self {
             backend: Box::new(backend),
             workspace: workspace.into(),
-            programs,
-            specs,
+            // A machine that cannot confine a process offers none, whatever was declared.
+            programs: if confines_execution {
+                programs
+            } else {
+                Vec::new()
+            },
+            writes: facts.holds_workspaces(),
         }
     }
+}
 
-    /// The programs `run` will accept, in the order they were declared.
-    pub fn programs(&self) -> &[String] {
-        &self.programs
+impl Operations for ConfinedOperations {
+    fn file_read(&self, path: &str, _max_bytes: Option<u64>) -> Result<Value, String> {
+        // The daemon's own read ceiling governs; a caller's smaller one is not forwarded, because a
+        // truncation this side could not be reported as one and a partial read that looked whole is
+        // the failure the read tool's own reply exists to prevent.
+        self.backend
+            .file_read(&self.workspace, path)
+            .map(
+                |text| json!({"path": path, "bytes": text.len(), "truncated": false, "text": text}),
+            )
+            .map_err(|error| error.to_string())
     }
 
-    fn write(&self, arguments: &Value) -> Result<Value, String> {
-        let path = string(arguments, "path")?;
-        let text = string(arguments, "text")?;
+    fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
         self.backend
             .file_write(&self.workspace, path, text)
             .map_err(|error| error.to_string())
     }
 
-    fn edit(&self, arguments: &Value) -> Result<Value, String> {
-        let path = string(arguments, "path")?;
-        let old = string(arguments, "old")?;
-        let new = string(arguments, "new")?;
-
+    fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
         let current = self
             .backend
             .file_read(&self.workspace, path)
             .map_err(|error| error.to_string())?;
-        let matches = current.matches(old).count();
         // Neither *none* nor *several* is an edit. A replacement that hit nothing leaves the model
-        // believing a change landed, and one that hit four places changed three things nobody
-        // asked about — which is why this is checked here rather than left to a `replace` call.
-        match matches {
-            0 => return Err(format!("`{path}` does not contain that text, so nothing was changed")),
+        // believing a change landed, and one that hit four places changed three things nobody asked
+        // about — which is why this is checked here rather than left to a `replace` call.
+        match current.matches(old).count() {
+            0 => {
+                return Err(format!(
+                    "`{path}` does not contain that text, so nothing was changed"
+                ));
+            }
             1 => {}
             several => {
                 return Err(format!(
@@ -125,20 +120,19 @@ impl ConfinedTools {
             .map_err(|error| error.to_string())
     }
 
-    fn run(&self, arguments: &Value) -> Result<Value, String> {
-        let argv: Vec<String> = arguments
-            .get("argv")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let Some(program) = argv.first() else {
-            return Err("`argv` is required and names the program first".to_owned());
-        };
+    fn dir_list(&self, _path: &str) -> Result<Value, String> {
+        // Not served through the backend today: `Backend` has no listing route, and inventing one
+        // by reading the host filesystem would step around the very containment this provider is
+        // for. A run that needs a listing gets it from the read-only provider beside this one.
+        Err(Self::unavailable("dir_list through a confined workspace"))
+    }
+
+    fn search(&self, _p: &str, _path: &str, _max: Option<usize>) -> Result<Value, String> {
+        Err(Self::unavailable("search through a confined workspace"))
+    }
+
+    fn run(&self, argv: &[String]) -> Result<Value, String> {
+        let program = &argv[0];
         if !self.programs.iter().any(|allowed| allowed == program) {
             return Err(format!(
                 "`{program}` is not a program this run may start. Declared: {}.",
@@ -146,144 +140,15 @@ impl ConfinedTools {
             ));
         }
         self.backend
-            .exec(&self.workspace, &argv)
+            .exec(&self.workspace, argv)
             .map_err(|error| error.to_string())
     }
-}
 
-impl ToolPort for ConfinedTools {
-    fn specs(&self) -> &[ToolSpec] {
-        &self.specs
+    fn programs(&self) -> &[String] {
+        &self.programs
     }
 
-    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
-        match call.name.as_str() {
-            WRITE_TOOL | EDIT_TOOL => call
-                .arguments
-                .get("path")
-                .and_then(Value::as_str)
-                .map(|path| vec![Subject::file(path)])
-                .unwrap_or_default(),
-            RUN_TOOL => call
-                .arguments
-                .get("argv")
-                .and_then(Value::as_array)
-                .and_then(|argv| argv.first())
-                .and_then(Value::as_str)
-                .map(|program| vec![Subject::process(program)])
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        }
-    }
-
-    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
-        let result = match call.name.as_str() {
-            WRITE_TOOL => self.write(&call.arguments),
-            EDIT_TOOL => self.edit(&call.arguments),
-            RUN_TOOL => self.run(&call.arguments),
-            other => Err(format!("`{other}` is not published here")),
-        };
-        match result {
-            Ok(output) => ToolOutcome::ok(output),
-            Err(message) => ToolOutcome::failed(message),
-        }
-    }
-}
-
-fn string<'a>(arguments: &'a Value, field: &str) -> Result<&'a str, String> {
-    arguments
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("`{field}` is required"))
-}
-
-fn write_spec() -> ToolSpec {
-    ToolSpec {
-        name: ToolName::new(WRITE_TOOL).expect("constant tool name is valid"),
-        description: "Write one file in the workspace, whole. Creates it if it is not there. \
-                      Replacing an existing file replaces all of it — use `workspace_edit` to \
-                      change part of one."
-            .to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File relative to the workspace root."},
-                "text": {"type": "string", "description": "The whole new contents."},
-            },
-            "required": ["path", "text"],
-            "additionalProperties": false,
-        }),
-        approval: Approval::NotRequired,
-        envelope: Envelope {
-            effects: vec![Effect::Write, Effect::Filesystem],
-            risk: Risk::Medium,
-            // Writing the same bytes twice leaves the same file. What is not idempotent is the
-            // *edit* below, which is why they are two tools rather than one with a flag.
-            idempotency: Idempotency::Idempotent,
-            access: vec![AccessKind::Filesystem],
-        },
-    }
-}
-
-fn edit_spec() -> ToolSpec {
-    ToolSpec {
-        name: ToolName::new(EDIT_TOOL).expect("constant tool name is valid"),
-        description: "Replace one exact piece of text in one workspace file. The text must appear \
-                      exactly once; a replacement that matched nothing, or several places, is \
-                      refused rather than guessed at."
-            .to_owned(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File relative to the workspace root."},
-                "old": {"type": "string", "description": "The exact text to replace, appearing once."},
-                "new": {"type": "string", "description": "What to put in its place."},
-            },
-            "required": ["path", "old", "new"],
-            "additionalProperties": false,
-        }),
-        approval: Approval::NotRequired,
-        envelope: Envelope {
-            effects: vec![Effect::Write, Effect::Filesystem],
-            risk: Risk::Medium,
-            // Running it twice is not running it once: the second attempt finds nothing to replace,
-            // and under a retreat that re-runs a whole scope that is exactly what happens.
-            idempotency: Idempotency::NonIdempotent,
-            access: vec![AccessKind::Filesystem],
-        },
-    }
-}
-
-fn run_spec(programs: &[String]) -> ToolSpec {
-    ToolSpec {
-        name: ToolName::new(RUN_TOOL).expect("constant tool name is valid"),
-        description: format!(
-            "Run one program in the confined workspace and answer its output and exit status. \
-             This is not a shell: `argv` is a list, nothing is composed, redirected or substituted, \
-             and only these programs may be named — {}.",
-            programs.join(", ")
-        ),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "argv": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {"type": "string"},
-                    "description": "The program and its arguments. The first item must be one of the declared programs.",
-                    // The model can read the set instead of guessing at it and being refused.
-                    "prefixItems": [{"enum": programs}],
-                },
-            },
-            "required": ["argv"],
-            "additionalProperties": false,
-        }),
-        approval: Approval::NotRequired,
-        envelope: Envelope {
-            effects: vec![Effect::Process],
-            risk: Risk::High,
-            idempotency: Idempotency::Conditional,
-            access: vec![AccessKind::Process, AccessKind::Filesystem],
-        },
+    fn writes(&self) -> bool {
+        self.writes
     }
 }

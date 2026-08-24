@@ -53,7 +53,9 @@ pub enum Effect {
 /// How much a call is allowed to cost when it is wrong.
 ///
 /// Ordered, and the order is used: a policy says *approval above `Medium`* and means it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Risk {
     /// Wrong is cheap and visible.
@@ -135,7 +137,9 @@ impl Subject {
 
     /// The part after the colon.
     pub fn value(&self) -> &str {
-        self.0.split_once(':').map_or(self.0.as_str(), |(_, rest)| rest)
+        self.0
+            .split_once(':')
+            .map_or(self.0.as_str(), |(_, rest)| rest)
     }
 }
 
@@ -234,7 +238,10 @@ mod tests {
             idempotency: Idempotency::Idempotent,
             access: vec![AccessKind::Filesystem],
         };
-        assert!(!writes.needs_approval(Risk::Medium), "at the ceiling, not above it");
+        assert!(
+            !writes.needs_approval(Risk::Medium),
+            "at the ceiling, not above it"
+        );
         assert!(writes.needs_approval(Risk::Low));
 
         // The second clause: doing it twice is doing it twice, so somebody has to want it once.

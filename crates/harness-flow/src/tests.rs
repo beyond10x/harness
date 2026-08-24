@@ -50,21 +50,30 @@ fn a_group_is_one_node_to_its_siblings_and_a_whole_plan_inside() {
     assert_eq!(
         plan.layers,
         vec![
-            Layer { nodes: vec!["receive".to_owned()] },
-            Layer { nodes: vec!["shape".to_owned()] },
-            Layer { nodes: vec!["implement".to_owned()] },
+            Layer {
+                nodes: vec!["receive".to_owned()]
+            },
+            Layer {
+                nodes: vec!["shape".to_owned()]
+            },
+            Layer {
+                nodes: vec!["implement".to_owned()]
+            },
         ],
         "the root sees three nodes, one of which happens to hold two"
     );
     let shape = plan.groups.get("shape").expect("the sub-tree was planned");
     assert_eq!(shape.path, "root.shape");
     assert_eq!(shape.depth(), 2, "and inside it, its own two layers");
-    assert_eq!(flow.steps(), vec![
-        "root.receive",
-        "root.shape.specify",
-        "root.shape.decompose",
-        "root.implement",
-    ]);
+    assert_eq!(
+        flow.steps(),
+        vec![
+            "root.receive",
+            "root.shape.specify",
+            "root.shape.decompose",
+            "root.implement",
+        ]
+    );
 }
 
 #[test]
@@ -202,12 +211,15 @@ fn a_walk_runs_every_step_in_plan_order_and_nests_its_report() {
 
     assert_eq!(report.ran, 4);
     assert!(report.clean());
-    assert_eq!(sink.steps_started(), vec![
-        "root.receive",
-        "root.shape.specify",
-        "root.shape.decompose",
-        "root.implement",
-    ]);
+    assert_eq!(
+        sink.steps_started(),
+        vec![
+            "root.receive",
+            "root.shape.specify",
+            "root.shape.decompose",
+            "root.implement",
+        ]
+    );
     // The nesting is in the stream, not only in the document.
     let entered: Vec<&str> = sink
         .events()
@@ -251,7 +263,10 @@ root:
         unreachable!()
     };
     assert_eq!(path, "root.b");
-    assert!(because.contains('a'), "the reason names the blocker: {because}");
+    assert!(
+        because.contains('a'),
+        "the reason names the blocker: {because}"
+    );
 }
 
 #[test]
@@ -264,7 +279,10 @@ fn a_group_that_failed_inside_is_failed_to_its_siblings() {
         .run(&mut FailsAt(vec!["specify"]), &mut sink)
         .expect("valid");
 
-    assert_eq!(sink.steps_started(), vec!["root.receive", "root.shape.specify"]);
+    assert_eq!(
+        sink.steps_started(),
+        vec!["root.receive", "root.shape.specify"]
+    );
     assert_eq!(report.failed, 1);
     assert_eq!(
         report.skipped, 2,
@@ -296,8 +314,13 @@ root:
 ",
     );
     let mut sink = VecFlowSink::new();
-    let report = flow.run(&mut FailsAt(vec!["gate"]), &mut sink).expect("valid");
-    assert_eq!(report.skipped, 2, "both steps inside the skipped group count");
+    let report = flow
+        .run(&mut FailsAt(vec!["gate"]), &mut sink)
+        .expect("valid");
+    assert_eq!(
+        report.skipped, 2,
+        "both steps inside the skipped group count"
+    );
     let skipped: Vec<&str> = sink
         .events()
         .iter()
@@ -307,6 +330,16 @@ root:
         })
         .collect();
     assert_eq!(skipped, vec!["root.rest", "root.rest.one", "root.rest.two"]);
+}
+
+/// Keeps every `run:` block it is handed, so a test can assert what reached the runner.
+struct Capture(Vec<serde_json::Value>);
+
+impl StepRunner for Capture {
+    fn run(&mut self, _path: &str, step: &Step, _cx: &StepContext) -> StepOutcome {
+        self.0.push(step.run.clone());
+        StepOutcome::Passed
+    }
 }
 
 #[test]
@@ -321,13 +354,6 @@ root:
       run: {prompt: 'do the thing', tools: [a, b]}
 ",
     );
-    struct Capture(Vec<serde_json::Value>);
-    impl StepRunner for Capture {
-        fn run(&mut self, _path: &str, step: &Step, _cx: &StepContext) -> StepOutcome {
-            self.0.push(step.run.clone());
-            StepOutcome::Passed
-        }
-    }
     let mut capture = Capture(Vec::new());
     flow.run(&mut capture, &mut VecFlowSink::new())
         .expect("valid");
@@ -418,7 +444,11 @@ fn a_group_that_did_not_come_out_clean_runs_again_and_the_whole_scope_re_runs() 
     let mut sink = VecFlowSink::new();
     let report = flow
         .run(
-            &mut HealsAfter { step: "verify", heal_after: 2, seen: 0 },
+            &mut HealsAfter {
+                step: "verify",
+                heal_after: 2,
+                seen: 0,
+            },
             &mut sink,
         )
         .expect("valid");
@@ -436,7 +466,10 @@ fn a_group_that_did_not_come_out_clean_runs_again_and_the_whole_scope_re_runs() 
     );
     assert_eq!(report.failed, 1, "the first verify");
     assert_eq!(report.ran, 5);
-    assert_eq!(report.skipped, 0, "review was not skipped: the group came out clean in the end");
+    assert_eq!(
+        report.skipped, 0,
+        "review was not skipped: the group came out clean in the end"
+    );
     assert!(report.clean(), "the outcome is the verdict, not the tally");
     assert_eq!(report.retreats, 1);
 }
@@ -462,8 +495,18 @@ fn the_bound_is_a_number_in_the_document_and_exhausting_it_is_said_out_loud() {
         .iter()
         .filter(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
         .collect();
-    assert_eq!(left.len(), 1, "a repeated group is left once, not once per attempt");
-    let FlowEvent::GroupLeft { failed, attempts, exhausted, .. } = left[0] else {
+    assert_eq!(
+        left.len(),
+        1,
+        "a repeated group is left once, not once per attempt"
+    );
+    let FlowEvent::GroupLeft {
+        failed,
+        attempts,
+        exhausted,
+        ..
+    } = left[0]
+    else {
         unreachable!()
     };
     assert!(failed);
@@ -520,7 +563,12 @@ root:
     let mut sink = VecFlowSink::new();
     flow.run(&mut FailsAt(vec!["verify"]), &mut sink)
         .expect("valid");
-    let FlowEvent::GroupLeft { attempts, exhausted, failed, .. } = sink
+    let FlowEvent::GroupLeft {
+        attempts,
+        exhausted,
+        failed,
+        ..
+    } = sink
         .events()
         .iter()
         .find(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
@@ -652,14 +700,21 @@ fn the_projected_workflow_retreats_when_verification_fails() {
     let mut sink = VecFlowSink::new();
     let report = flow
         .run(
-            &mut HealsAfter { step: "verify", heal_after: 2, seen: 0 },
+            &mut HealsAfter {
+                step: "verify",
+                heal_after: 2,
+                seen: 0,
+            },
             &mut sink,
         )
         .expect("valid");
 
     let started = sink.steps_started();
     assert_eq!(
-        started.iter().filter(|path| path.ends_with("implement")).count(),
+        started
+            .iter()
+            .filter(|path| path.ends_with("implement"))
+            .count(),
         2,
         "implement ran twice: {started:?}"
     );
@@ -667,7 +722,10 @@ fn the_projected_workflow_retreats_when_verification_fails() {
         started.last().is_some_and(|path| path.ends_with("review")),
         "and the run reached review in the end: {started:?}"
     );
-    assert!(report.clean(), "a run that retreated and then succeeded is a successful run");
+    assert!(
+        report.clean(),
+        "a run that retreated and then succeeded is a successful run"
+    );
     assert_eq!(report.retreats, 1);
     assert_eq!(
         (report.failed, report.skipped),
@@ -728,7 +786,8 @@ root:
 fn steps_inside_one_group_share_a_scope_and_steps_in_another_do_not() {
     let mut runner = Scopes::default();
     let flow = flow(SCOPED);
-    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    flow.run(&mut runner, &mut VecFlowSink::new())
+        .expect("valid");
 
     let scopes: Vec<(&str, &str)> = runner
         .seen
@@ -751,7 +810,8 @@ fn steps_inside_one_group_share_a_scope_and_steps_in_another_do_not() {
 fn what_crosses_a_boundary_is_the_declared_handoff_and_never_a_transcript() {
     let mut runner = Scopes::default();
     let flow = flow(SCOPED);
-    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    flow.run(&mut runner, &mut VecFlowSink::new())
+        .expect("valid");
 
     let available = |path: &str| -> Vec<String> {
         runner
@@ -846,7 +906,9 @@ root:
 ",
     );
     let mut runner = Counting::default();
-    let report = flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    let report = flow
+        .run(&mut runner, &mut VecFlowSink::new())
+        .expect("valid");
     assert!(report.clean());
     assert_eq!(runner.seen, 3, "three attempts");
     assert_eq!(runner.asked, 1, "and one handoff");
@@ -861,7 +923,11 @@ fn a_step_is_told_which_attempt_of_its_scope_it_is_running_in() {
     impl StepRunner for Attempts {
         fn run(&mut self, _path: &str, _step: &Step, cx: &StepContext) -> StepOutcome {
             self.0.push(cx.attempt);
-            if self.0.len() < 2 { StepOutcome::Failed } else { StepOutcome::Passed }
+            if self.0.len() < 2 {
+                StepOutcome::Failed
+            } else {
+                StepOutcome::Passed
+            }
         }
     }
     let flow = flow(
@@ -876,7 +942,8 @@ root:
 ",
     );
     let mut runner = Attempts::default();
-    flow.run(&mut runner, &mut VecFlowSink::new()).expect("valid");
+    flow.run(&mut runner, &mut VecFlowSink::new())
+        .expect("valid");
     assert_eq!(runner.0, vec![1, 2]);
 }
 
@@ -893,5 +960,8 @@ root:
     );
     let error = flow.plan().expect_err("refused");
     assert!(matches!(error, FlowError::RootGives { .. }), "{error}");
-    assert!(error.to_string().contains("no sibling on the other side"), "{error}");
+    assert!(
+        error.to_string().contains("no sibling on the other side"),
+        "{error}"
+    );
 }

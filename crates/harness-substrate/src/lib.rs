@@ -65,7 +65,7 @@ pub use backend::Backend;
 pub use client::{Client, Transport, UnixTransport};
 pub use embedded::Embedded;
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
-pub use tools::{ConfinedTools, EDIT_TOOL, RUN_TOOL, WRITE_TOOL};
+pub use tools::ConfinedOperations;
 
 /// What substrate says this machine can do.
 ///

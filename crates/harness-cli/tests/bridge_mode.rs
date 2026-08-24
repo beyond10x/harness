@@ -347,7 +347,7 @@ fn a_text_turn_produces_the_pinned_notification_sequence() {
 
 #[test]
 fn a_tool_call_round_trips_back_to_the_client() {
-    let endpoint = Endpoint::start("tool");
+    let endpoint = Endpoint::start("dynamic-tool");
     let mut bridge = Bridge::start(&endpoint, &[]);
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({
@@ -410,7 +410,7 @@ fn a_tool_call_round_trips_back_to_the_client() {
 
 #[test]
 fn a_client_refusal_reaches_the_model_as_a_failed_call() {
-    let endpoint = Endpoint::start("tool");
+    let endpoint = Endpoint::start("dynamic-tool");
     let mut bridge = Bridge::start(&endpoint, &[]);
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({
@@ -533,7 +533,7 @@ fn a_turn_the_endpoint_fails_is_reported_as_failed_not_answered() {
 
 #[test]
 fn a_turn_stopped_by_a_budget_is_failed_rather_than_completed() {
-    let endpoint = Endpoint::start("tool");
+    let endpoint = Endpoint::start("dynamic-tool");
     let mut bridge = Bridge::start(&endpoint, &["--max-turns", "1"]);
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({

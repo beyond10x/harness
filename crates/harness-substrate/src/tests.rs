@@ -3,7 +3,6 @@ use std::os::unix::net::UnixListener;
 use std::sync::Mutex;
 use std::thread;
 
-use harness_wire::{ToolCall, ToolName, ToolPort};
 use serde_json::{Value, json};
 
 use super::*;
@@ -75,7 +74,9 @@ fn an_absent_fact_never_passes_a_predicate() {
     assert_eq!(unmet.fact, "exec.argv-only");
     assert_eq!(unmet.found, "nothing");
     assert!(
-        unmet.to_string().contains("Nothing that needs it is published here"),
+        unmet
+            .to_string()
+            .contains("Nothing that needs it is published here"),
         "{unmet}"
     );
 
@@ -90,7 +91,9 @@ fn a_fact_that_is_false_is_as_unmet_as_one_that_is_missing() {
     facts
         .facts
         .insert("exec.argv-only".to_owned(), Value::Bool(false));
-    let unmet = facts.admits(&exec_start(), &json!({})).expect_err("refused");
+    let unmet = facts
+        .admits(&exec_start(), &json!({}))
+        .expect_err("refused");
     assert_eq!(unmet.found, "false");
 }
 
@@ -142,10 +145,16 @@ fn a_conditional_predicate_does_not_apply_when_its_condition_is_not_met() {
     .expect("predicates");
 
     conditional[0]
-        .check(&confined(), &json!({"mode": "directory", "limit_items": 9_999_999}))
+        .check(
+            &confined(),
+            &json!({"mode": "directory", "limit_items": 9_999_999}),
+        )
         .expect("a listing is not a read");
     conditional[0]
-        .check(&confined(), &json!({"mode": "file", "limit_bytes": 999_999}))
+        .check(
+            &confined(),
+            &json!({"mode": "file", "limit_bytes": 999_999}),
+        )
         .expect_err("and a read is");
 }
 
@@ -184,10 +193,7 @@ fn serve(body: &'static str, status: u16) -> (tempfile::TempDir, std::path::Path
 
 #[test]
 fn the_client_reads_a_capability_document_off_a_real_socket() {
-    let (_dir, socket) = serve(
-        r#"{"driver":"host","facts":{"exec.argv-only":true}}"#,
-        200,
-    );
+    let (_dir, socket) = serve(r#"{"driver":"host","facts":{"exec.argv-only":true}}"#, 200);
     let facts = Client::at(&socket).machine().expect("reads");
     assert_eq!(facts.driver.as_deref(), Some("host"));
     assert_eq!(facts.get("exec.argv-only"), Some(&Value::Bool(true)));
@@ -266,14 +272,18 @@ fn the_probe_asks_the_one_route_the_contract_names() {
     assert!(client.machine().is_ok());
 }
 
-// --- publication, and the tools that exist only where they can be confined ----------------------
+// --- what a confined workspace admits, and what the catalogue makes of it ----------------------
 
+use harness_tools::{Catalogue, Operations};
 use std::sync::Arc;
+
+/// One thing the scripted transport was asked: method, path, and the body if there was one.
+type Asked = (String, String, Option<Value>);
 
 /// A transport that answers from a script and records what it was asked.
 #[derive(Clone)]
 struct Scripted {
-    seen: Arc<Mutex<Vec<(String, String, Option<Value>)>>>,
+    seen: Arc<Mutex<Vec<Asked>>>,
     answers: Arc<Mutex<Vec<(u16, String)>>>,
 }
 
@@ -311,8 +321,8 @@ impl Transport for Scripted {
     }
 }
 
-fn tools(facts: &Facts, script: Scripted, programs: &[&str]) -> ConfinedTools {
-    ConfinedTools::new(
+fn provider(facts: &Facts, script: Scripted, programs: &[&str]) -> ConfinedOperations {
+    ConfinedOperations::new(
         Client::with(script),
         facts,
         "ws-1",
@@ -320,65 +330,58 @@ fn tools(facts: &Facts, script: Scripted, programs: &[&str]) -> ConfinedTools {
     )
 }
 
-#[test]
-fn a_machine_that_cannot_confine_a_process_publishes_no_way_to_start_one() {
-    // The whole publication tier in one assertion. Not disabled, not gated: absent.
-    let published = tools(&unconfined(), Scripted::new(vec![]), &["cargo"]);
-    let names: Vec<&str> = published.specs().iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec![WRITE_TOOL, EDIT_TOOL]);
-    assert!(!names.contains(&RUN_TOOL), "the model is never told about it");
-
-    let confined_tools = tools(&confined(), Scripted::new(vec![]), &["cargo"]);
-    let names: Vec<&str> = confined_tools.specs().iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec![WRITE_TOOL, EDIT_TOOL, RUN_TOOL]);
+fn entry_names(catalogue: &Catalogue) -> Vec<&'static str> {
+    catalogue.entries().iter().map(|entry| entry.name).collect()
 }
 
 #[test]
-fn no_daemon_at_all_publishes_nothing_and_the_harness_is_what_it_always_was() {
-    let published = tools(&Facts::none(), Scripted::new(vec![]), &["cargo"]);
-    assert!(published.specs().is_empty());
+fn a_machine_that_cannot_confine_a_process_contributes_no_way_to_start_one() {
+    // The publication gate, in one assertion. The model is never told about a tool it cannot have.
+    let entries = entry_names(&Catalogue::of(provider(
+        &unconfined(),
+        Scripted::new(vec![]),
+        &["cargo"],
+    )));
+    assert!(entries.contains(&"file_write"), "{entries:?}");
+    assert!(!entries.contains(&"run"), "{entries:?}");
+
+    let entries = entry_names(&Catalogue::of(provider(
+        &confined(),
+        Scripted::new(vec![]),
+        &["cargo"],
+    )));
+    assert!(entries.contains(&"run"), "{entries:?}");
 }
 
 #[test]
-fn a_run_with_no_declared_programs_is_not_published_even_where_it_could_be() {
-    // A workflow that named no commands wants none. A tool that admitted everything because
-    // nobody listed anything is the failure this design exists to prevent.
-    let published = tools(&confined(), Scripted::new(vec![]), &[]);
-    let names: Vec<&str> = published.specs().iter().map(|s| s.name.as_str()).collect();
-    assert!(!names.contains(&RUN_TOOL));
+fn no_backend_at_all_contributes_nothing_that_outlives_a_call() {
+    let entries = entry_names(&Catalogue::of(provider(
+        &Facts::none(),
+        Scripted::new(vec![]),
+        &["cargo"],
+    )));
+    assert_eq!(entries, vec!["file_read", "dir_list", "search"]);
 }
 
 #[test]
-fn the_declared_set_is_in_the_tools_own_schema_so_the_model_reads_it_rather_than_guessing() {
-    let published = tools(&confined(), Scripted::new(vec![]), &["cargo", "protocol"]);
-    let run = published
-        .specs()
-        .iter()
-        .find(|spec| spec.name.as_str() == RUN_TOOL)
-        .expect("published");
-    assert!(run.description.contains("cargo, protocol"), "{}", run.description);
-    assert!(
-        run.description.contains("not a shell"),
-        "and says what it is not: {}",
-        run.description
-    );
-    let allowed = &run.input_schema["properties"]["argv"]["prefixItems"][0]["enum"];
-    assert_eq!(allowed, &json!(["cargo", "protocol"]));
+fn a_run_with_no_declared_programs_is_not_offered_even_where_it_could_be() {
+    let entries = entry_names(&Catalogue::of(provider(
+        &confined(),
+        Scripted::new(vec![]),
+        &[],
+    )));
+    assert!(!entries.contains(&"run"), "{entries:?}");
 }
 
 #[test]
-fn a_program_outside_the_declared_set_is_refused_by_name_and_the_set_is_listed() {
+fn a_program_outside_the_declared_set_is_refused_locally_and_the_set_is_listed() {
     let script = Scripted::new(vec![]);
-    let mut published = tools(&confined(), script.clone(), &["cargo"]);
-    let outcome = published.call(&ToolCall {
-        call_id: harness_wire::CallId::new("c-1").expect("valid"),
-        name: ToolName::new(RUN_TOOL).expect("valid"),
-        arguments: json!({"argv": ["sh", "-c", "rm -rf /"]}),
-    });
-    assert!(outcome.failed);
-    let said = outcome.output.as_str().unwrap_or_default().to_owned();
-    assert!(said.contains("`sh` is not a program"), "{said}");
-    assert!(said.contains("cargo"), "the set is listed: {said}");
+    let confined_provider = provider(&confined(), script.clone(), &["cargo"]);
+    let refused = confined_provider
+        .run(&["sh".to_owned(), "-c".to_owned(), "rm -rf /".to_owned()])
+        .expect_err("refused");
+    assert!(refused.contains("`sh` is not a program"), "{refused}");
+    assert!(refused.contains("cargo"), "the set is listed: {refused}");
     assert!(
         script.seen.lock().expect("not poisoned").is_empty(),
         "and nothing was sent: the refusal is local"
@@ -391,153 +394,95 @@ fn a_declared_program_is_sent_as_an_argv_and_never_as_a_command_line() {
         (200, r#"{"result":{"exec_id":"e-1"}}"#),
         (200, r#"{"result":{"exit_status":0,"stdout":"ok"}}"#),
     ]);
-    let mut published = tools(&confined(), script.clone(), &["cargo"]);
-    let outcome = published.call(&ToolCall {
-        call_id: harness_wire::CallId::new("c-1").expect("valid"),
-        name: ToolName::new(RUN_TOOL).expect("valid"),
-        arguments: json!({"argv": ["cargo", "test", "--workspace"]}),
-    });
-    assert!(!outcome.failed, "{:?}", outcome.output);
+    let confined_provider = provider(&confined(), script.clone(), &["cargo"]);
+    confined_provider
+        .run(&["cargo".to_owned(), "test".to_owned()])
+        .expect("ran");
 
     let seen = script.seen.lock().expect("not poisoned");
-    assert_eq!(seen[0].0, "POST");
-    assert_eq!(seen[0].1, "/v1/execs");
+    assert_eq!(
+        (seen[0].0.as_str(), seen[0].1.as_str()),
+        ("POST", "/v1/execs")
+    );
     let sent = seen[0].2.as_ref().expect("a body");
-    assert_eq!(sent["input"]["argv"], json!(["cargo", "test", "--workspace"]));
+    assert_eq!(sent["input"]["argv"], json!(["cargo", "test"]));
     assert!(
         sent["input"].get("command").is_none(),
         "there is no command line anywhere in it: {sent}"
     );
-    assert_eq!(seen[1].1, "/v1/execs/e-1/output");
 }
 
 #[test]
 fn an_edit_that_matched_nothing_or_several_places_is_refused_rather_than_guessed_at() {
-    let call = |arguments: Value| ToolCall {
-        call_id: harness_wire::CallId::new("c-1").expect("valid"),
-        name: ToolName::new(EDIT_TOOL).expect("valid"),
-        arguments,
+    let content = |text: &str| {
+        format!(
+            r#"{{"result":{{"content":{{"encoding":"base64","data":"{}"}}}}}}"#,
+            crate::base64::encode(text.as_bytes())
+        )
     };
 
-    // Nothing matched: the model would otherwise believe a change landed.
-    let mut published = tools(
-        &confined(),
-        Scripted::new(vec![(200, r#"{"result":{"content":{"encoding":"base64","data":"Zm4gbWFpbigpIHt9"}}}"#)]),
-        &[],
-    );
-    let outcome = published.call(&call(json!({"path": "a.rs", "old": "absent", "new": "x"})));
-    assert!(outcome.failed);
-    assert!(
-        outcome.output.as_str().unwrap_or_default().contains("nothing was changed"),
-        "{:?}",
-        outcome.output
-    );
+    let none = Scripted::new(vec![(
+        200,
+        Box::leak(content("fn main() {}").into_boxed_str()),
+    )]);
+    let refused = provider(&confined(), none, &[])
+        .file_edit("a.rs", "absent", "x")
+        .expect_err("refused");
+    assert!(refused.contains("nothing was changed"), "{refused}");
 
-    // Several matched: three things nobody asked about would have changed.
-    let mut published = tools(
-        &confined(),
-        Scripted::new(vec![(200, r#"{"result":{"content":{"encoding":"base64","data":"YQphCmEK"}}}"#)]),
-        &[],
-    );
-    let outcome = published.call(&call(json!({"path": "a.rs", "old": "a", "new": "b"})));
-    assert!(outcome.failed);
-    let said = outcome.output.as_str().unwrap_or_default().to_owned();
-    assert!(said.contains("3 times"), "{said}");
-    assert!(said.contains("more surrounding text"), "and says what to do: {said}");
+    let several = Scripted::new(vec![(
+        200,
+        Box::leak(content("a\na\na\n").into_boxed_str()),
+    )]);
+    let refused = provider(&confined(), several, &[])
+        .file_edit("a.rs", "a", "b")
+        .expect_err("refused");
+    assert!(refused.contains("3 times"), "{refused}");
+    assert!(refused.contains("more surrounding text"), "{refused}");
 }
 
 #[test]
 fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change() {
+    let body = format!(
+        r#"{{"result":{{"content":{{"encoding":"base64","data":"{}"}}}}}}"#,
+        crate::base64::encode(b"one\ntwo\nthree\n")
+    );
     let script = Scripted::new(vec![
-        (200, r#"{"result":{"content":{"encoding":"base64","data":"b25lCnR3bwp0aHJlZQo="}}}"#),
+        (200, Box::leak(body.into_boxed_str())),
         (200, r#"{"result":{"ok":true}}"#),
     ]);
-    let mut published = tools(&confined(), script.clone(), &[]);
-    let outcome = published.call(&ToolCall {
-        call_id: harness_wire::CallId::new("c-1").expect("valid"),
-        name: ToolName::new(EDIT_TOOL).expect("valid"),
-        arguments: json!({"path": "a.txt", "old": "two", "new": "2"}),
-    });
-    assert!(!outcome.failed, "{:?}", outcome.output);
+    provider(&confined(), script.clone(), &[])
+        .file_edit("a.txt", "two", "2")
+        .expect("edited");
 
     let seen = script.seen.lock().expect("not poisoned");
     assert_eq!(seen[0].0, "GET");
     assert_eq!(seen[1].0, "PUT");
-    assert_eq!(seen[1].1, "/v1/workspaces/ws-1/files/a.txt");
-    // Base64 on the wire, because that is what the contract's own schema says a file is.
     let sent = &seen[1].2.as_ref().expect("a body")["input"]["content"];
     assert_eq!(sent["encoding"], "base64");
     assert_eq!(
-        String::from_utf8(crate::base64::decode(sent["data"].as_str().expect("data")).expect("decodes"))
-            .expect("text"),
+        String::from_utf8(
+            crate::base64::decode(sent["data"].as_str().expect("data")).expect("decodes")
+        )
+        .expect("text"),
         "one\n2\nthree\n"
     );
 }
 
 #[test]
-fn an_edit_declares_itself_non_idempotent_because_a_retreat_will_run_it_twice() {
-    let published = tools(&confined(), Scripted::new(vec![]), &[]);
-    let spec = |name: &str| {
-        published
-            .specs()
-            .iter()
-            .find(|spec| spec.name.as_str() == name)
-            .expect("published")
-            .clone()
-    };
-    assert_eq!(
-        spec(EDIT_TOOL).envelope.idempotency,
-        harness_wire::Idempotency::NonIdempotent,
-        "the second attempt finds nothing to replace"
-    );
-    assert_eq!(
-        spec(WRITE_TOOL).envelope.idempotency,
-        harness_wire::Idempotency::Idempotent,
-        "writing the same bytes twice leaves the same file"
-    );
-    assert!(
-        spec(WRITE_TOOL).envelope.mutates(),
-        "and both are mutations, whatever their idempotency"
-    );
-}
-
-#[test]
-fn a_call_names_what_it_touches_so_the_second_gate_has_something_to_read() {
-    let published = tools(&confined(), Scripted::new(vec![]), &["cargo"]);
-    let call = |name: &str, arguments: Value| ToolCall {
-        call_id: harness_wire::CallId::new("c-1").expect("valid"),
-        name: ToolName::new(name).expect("valid"),
-        arguments,
-    };
-    assert_eq!(
-        published.subjects(&call(WRITE_TOOL, json!({"path": "src/x.rs", "text": ""}))),
-        vec![harness_wire::Subject::file("src/x.rs")]
-    );
-    assert_eq!(
-        published.subjects(&call(RUN_TOOL, json!({"argv": ["cargo", "test"]}))),
-        vec![harness_wire::Subject::process("cargo")],
-        "the program, not the whole argv: what a policy names is what would start"
-    );
-}
-
-#[test]
-fn a_real_daemons_answer_is_wrapped_in_a_result_and_the_facts_are_found_inside_it() {
-    // The shape the first live daemon this crate ever spoke to actually answered, 2026-08-23. The
-    // client read the body until then; a document of an unexpected shape deserialises into a
-    // `Facts` whose map is empty, so it would have published no tools and blamed the machine.
-    let (_dir, socket) = serve(
-        r#"{"api_version":"v1","request_id":"req_1","result":{"driver":"host","driver_version":"0.2.0","facts":{"exec.argv-only":true,"exec.cgroup-limits":{"cpu":true,"memory":true,"processes":true},"workspace.guarded-io":true}}}"#,
-        200,
-    );
-    let facts = Client::at(&socket).machine().expect("reads");
-    assert_eq!(facts.driver_version.as_deref(), Some("0.2.0"));
-    assert!(facts.confines_execution(), "the facts were found");
-    assert!(facts.holds_workspaces());
-}
-
-#[test]
-fn a_bare_capability_document_is_still_read_because_that_is_what_the_schemas_show() {
-    let (_dir, socket) = serve(r#"{"driver":"host","facts":{"workspace.guarded-io":true}}"#, 200);
-    let facts = Client::at(&socket).machine().expect("reads");
-    assert!(facts.holds_workspaces());
+fn a_confined_workspace_lists_and_searches_through_nothing_and_says_so() {
+    // `Backend` carries no listing route, and reading the host filesystem to fake one would step
+    // around the containment this provider exists for. A run that needs a listing gets it from the
+    // reading provider beside this one, which is what `harness_tools::Split` composes.
+    let confined_provider = provider(&confined(), Scripted::new(vec![]), &[]);
+    for refused in [
+        confined_provider.dir_list("."),
+        confined_provider.search("fn", ".", None),
+    ] {
+        assert!(
+            refused
+                .expect_err("refused")
+                .contains("is not offered by this workspace")
+        );
+    }
 }

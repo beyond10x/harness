@@ -25,10 +25,17 @@ pub struct Budget {
     /// Wall-clock ceiling, checked between turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_duration_ms: Option<u64>,
-    /// Accepted only to be refused by name.
+    /// Total spend across the run, in millionths of a US dollar.
     ///
-    /// A gateway relays bytes and reports no price, so nothing here can convert tokens to money.
-    /// Silently ignoring this field would let a caller believe a spend ceiling is in force.
+    /// Enforceable **only for a run carrying a rate card that prices its model** — see
+    /// [`crate::RateCard`]. Without one, nothing converts tokens to money and this is refused by
+    /// name rather than ignored, because silently dropping it would let a caller believe a spend
+    /// ceiling is in force when none is.
+    ///
+    /// The field was refused unconditionally until rate cards existed, on the reasoning that a
+    /// gateway relays bytes and reports no price. Half of that is still true — the provider returns
+    /// no price — and the other half was wrong: the price exists, and every other harness in the
+    /// comparison states one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cost_microunits: Option<u64>,
 }
@@ -44,11 +51,14 @@ pub enum BudgetError {
 impl Budget {
     /// Checks every bound before the first request.
     ///
+    /// `priced` says whether the run can compute what it spends — a rate card is loaded and it
+    /// covers this model. A spend ceiling is only a ceiling where that holds.
+    ///
     /// # Errors
     ///
     /// Returns [`BudgetError::Zero`] for a bound that admits nothing and
-    /// [`BudgetError::Unenforceable`] for one this harness cannot observe.
-    pub fn validate(&self) -> Result<(), BudgetError> {
+    /// [`BudgetError::Unenforceable`] for one this run cannot observe.
+    pub fn validate(&self, priced: bool) -> Result<(), BudgetError> {
         for (name, value) in [
             ("max_turns", self.max_turns),
             ("max_input_tokens", self.max_input_tokens),
@@ -58,12 +68,13 @@ impl Budget {
                 self.max_output_tokens_per_turn,
             ),
             ("max_duration_ms", self.max_duration_ms),
+            ("max_cost_microunits", self.max_cost_microunits),
         ] {
             if value == Some(0) {
                 return Err(BudgetError::Zero { name });
             }
         }
-        if self.max_cost_microunits.is_some() {
+        if self.max_cost_microunits.is_some() && !priced {
             return Err(BudgetError::Unenforceable {
                 name: "max_cost_microunits",
             });
@@ -88,7 +99,7 @@ mod tests {
 
     #[test]
     fn an_empty_budget_is_valid() {
-        assert!(Budget::default().validate().is_ok());
+        assert!(Budget::default().validate(false).is_ok());
     }
 
     #[test]
@@ -98,20 +109,45 @@ mod tests {
             ..Budget::default()
         };
         assert_eq!(
-            budget.validate().expect_err("zero refuses"),
+            budget.validate(false).expect_err("zero refuses"),
             BudgetError::Zero { name: "max_turns" }
         );
     }
 
     #[test]
-    fn a_cost_ceiling_is_refused_rather_than_ignored() {
+    fn a_cost_ceiling_on_an_unpriced_run_is_refused_rather_than_ignored() {
         let budget = Budget {
             max_cost_microunits: Some(1_000),
             ..Budget::default()
         };
         assert_eq!(
-            budget.validate().expect_err("cost refuses"),
+            budget.validate(false).expect_err("cost refuses"),
             BudgetError::Unenforceable {
+                name: "max_cost_microunits"
+            }
+        );
+    }
+
+    #[test]
+    fn a_cost_ceiling_stands_once_the_run_can_price_itself() {
+        let budget = Budget {
+            max_cost_microunits: Some(1_000),
+            ..Budget::default()
+        };
+        assert!(budget.validate(true).is_ok());
+    }
+
+    #[test]
+    fn a_zero_cost_ceiling_refuses_even_where_it_could_be_enforced() {
+        // Zero admits nothing, and a caller who meant "spend nothing" wants a run that never
+        // started rather than one that stops after the turn it already paid for.
+        let budget = Budget {
+            max_cost_microunits: Some(0),
+            ..Budget::default()
+        };
+        assert_eq!(
+            budget.validate(true).expect_err("zero refuses"),
+            BudgetError::Zero {
                 name: "max_cost_microunits"
             }
         );

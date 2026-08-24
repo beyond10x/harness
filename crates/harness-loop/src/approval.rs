@@ -57,6 +57,7 @@ impl ApprovalPort for ApproveAll {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harness_wire::Envelope;
     use harness_wire::{Approval, CallId, ToolName};
     use serde_json::json;
 
@@ -73,7 +74,7 @@ mod tests {
                 description: "writes".to_owned(),
                 input_schema: json!({"type": "object"}),
                 approval: Approval::Required,
-                envelope: Default::default(),
+                envelope: Envelope::default(),
             },
         )
     }

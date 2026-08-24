@@ -105,6 +105,7 @@ dependencies = [
  "b10x-harness-loop",
  "b10x-harness-responses",
  "b10x-harness-substrate",
+ "b10x-harness-tools",
  "b10x-harness-wire",
  "clap",
  "ctrlc",
@@ -150,6 +151,7 @@ dependencies = [
 name = "b10x-harness-substrate"
 version = "0.1.0"
 dependencies = [
+ "b10x-harness-tools",
  "b10x-harness-wire",
  "serde",
  "serde_json",
@@ -158,6 +160,16 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "b10x-harness-tools"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

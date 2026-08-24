@@ -40,6 +40,27 @@ pub enum LoopEvent {
     },
     /// Reported token counts for one turn. Absent usage produces no event at all.
     Usage(Usage),
+    /// The rate card in force, emitted once before the first turn.
+    ///
+    /// Carried in the record rather than left on the command line so that every cost figure below
+    /// can be traced to the rates that produced it — and so that a run priced from a stale card is
+    /// distinguishable from one priced this morning. A run with no card emits no event here, and
+    /// then reports no cost at all.
+    Rates {
+        source: String,
+        as_of: String,
+    },
+    /// What one turn's reported tokens cost, in millionths of a US dollar.
+    ///
+    /// Emitted only where the card prices the model the provider served. **A turn nobody could
+    /// price produces no event**, never a zero: silence means no rate was supplied, and zero would
+    /// mean the turn was free.
+    ///
+    /// Rounded per turn, so the events below a run sum exactly to the total reported with it.
+    Cost {
+        model: String,
+        micro_usd: u64,
+    },
     Warning {
         code: String,
         message: String,

@@ -62,7 +62,9 @@ impl Transport for UnixTransport {
         };
 
         let mut stream = UnixStream::connect(&self.socket).map_err(unreachable)?;
-        stream.set_read_timeout(Some(TIMEOUT)).map_err(unreachable)?;
+        stream
+            .set_read_timeout(Some(TIMEOUT))
+            .map_err(unreachable)?;
         stream
             .set_write_timeout(Some(TIMEOUT))
             .map_err(unreachable)?;
@@ -104,10 +106,10 @@ impl Transport for UnixTransport {
             if header.is_empty() {
                 break;
             }
-            if let Some((name, value)) = header.split_once(':') {
-                if name.eq_ignore_ascii_case("content-length") {
-                    length = value.trim().parse::<usize>().ok();
-                }
+            if let Some((name, value)) = header.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                length = value.trim().parse::<usize>().ok();
             }
         }
 
@@ -232,7 +234,7 @@ impl Client {
                 "input": {"content": {"encoding": "base64", "data": base64::encode(text.as_bytes())}}
             })),
         )?;
-        self.decode(status, body)
+        Self::decode(status, body)
     }
 
     /// `GET /v1/workspaces/{workspace}/files/{path}` — read one file.
@@ -244,7 +246,7 @@ impl Client {
     pub fn file_read(&self, workspace: &str, path: &str) -> Result<String, SubstrateError> {
         let route = format!("/v1/workspaces/{workspace}/files/{path}");
         let (status, body) = self.transport.request("GET", &route, None)?;
-        let value = self.decode(status, body)?;
+        let value = Self::decode(status, body)?;
         let data = value
             .pointer("/result/content/data")
             .or_else(|| value.pointer("/content/data"))
@@ -277,7 +279,7 @@ impl Client {
                 "input": {"source": "empty", "labels": {}, "lease_ttl_ms": lease_ttl_ms}
             })),
         )?;
-        let value = self.decode(status, body)?;
+        let value = Self::decode(status, body)?;
         value
             .pointer("/result/id")
             .or_else(|| value.pointer("/id"))
@@ -305,7 +307,7 @@ impl Client {
                 "input": {"workspace_id": workspace, "argv": argv}
             })),
         )?;
-        let started = self.decode(status, body)?;
+        let started = Self::decode(status, body)?;
         let Some(id) = started
             .pointer("/result/exec_id")
             .or_else(|| started.pointer("/exec_id"))
@@ -313,13 +315,13 @@ impl Client {
         else {
             return Ok(started);
         };
-        let (status, body) = self
-            .transport
-            .request("GET", &format!("/v1/execs/{id}/output"), None)?;
-        self.decode(status, body)
+        let (status, body) =
+            self.transport
+                .request("GET", &format!("/v1/execs/{id}/output"), None)?;
+        Self::decode(status, body)
     }
 
-    fn decode(&self, status: u16, body: String) -> Result<Value, SubstrateError> {
+    fn decode(status: u16, body: String) -> Result<Value, SubstrateError> {
         if !(200..300).contains(&status) {
             return Err(SubstrateError::Refused { status, body });
         }
@@ -338,12 +340,7 @@ impl Backend for Client {
         Client::workspace_create(self, lease_ttl_ms)
     }
 
-    fn file_write(
-        &self,
-        workspace: &str,
-        path: &str,
-        text: &str,
-    ) -> Result<Value, SubstrateError> {
+    fn file_write(&self, workspace: &str, path: &str, text: &str) -> Result<Value, SubstrateError> {
         Client::file_write(self, workspace, path, text)
     }
 

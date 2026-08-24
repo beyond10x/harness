@@ -36,7 +36,11 @@ impl Plan {
 
     /// The widest layer in this group — how much can run at once here.
     pub fn width(&self) -> usize {
-        self.layers.iter().map(|layer| layer.nodes.len()).max().unwrap_or(0)
+        self.layers
+            .iter()
+            .map(|layer| layer.nodes.len())
+            .max()
+            .unwrap_or(0)
     }
 }
 

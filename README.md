@@ -16,12 +16,32 @@ mechanism. Any budget the vendor does not enforce cannot be enforced at all.
 
 Owning the loop changes three things concretely:
 
-- **Tools are published directly.** Each admitted operation is its own model tool with its real
-  input schema — no `search`/`describe`/`invoke` indirection, no vendor tool ceiling to dodge.
-- **Budgets bind.** `max_turns`, input and output token totals and a wall-clock deadline are
-  counted here, so they are enforced here. A bound that cannot be enforced — a spend ceiling, since
-  a gateway relays bytes and reports no price — is [refused by name](crates/harness-loop/src/budget.rs)
-  rather than accepted and ignored.
+- **One tool surface, ours, on every harness.** ~~Tools are published directly. Each admitted
+  operation is its own model tool with its real input schema — no `search`/`describe`/`invoke`
+  indirection, no vendor tool ceiling to dodge.~~ **Amended.** The model is now offered exactly three
+  verbs — `tool_search`, `tool_describe`, `tool_invoke` — over a
+  [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral operations.
+  The reason the original gave still holds: this catalogue has six entries and would fit under any
+  vendor ceiling, so the indirection is not a dodge. It was outweighed by a different reason. The
+  evaluation compares arms across three harnesses that each name their tools differently — `Bash`
+  here, `run` there, `Write` and `workspace_write` for one act — so everything that reads a run had
+  to learn one vendor's vocabulary, and the corpus that judges them was written in Claude Code's.
+  Three verbs over one catalogue makes the names **ours everywhere**, which is worth more than a
+  flat surface on ours alone. What it costs is a turn spent on `tool_describe` before a first call,
+  and whether that shows up in practice is an experiment, not a claim.
+- **Budgets bind.** `max_turns`, input and output token totals, a wall-clock deadline and — with
+  `--prices` — a spend ceiling are counted here, so they are enforced here. A bound that *cannot* be
+  enforced is [refused by name](crates/harness-loop/src/budget.rs) rather than accepted and ignored:
+  a spend ceiling on a run with no rates to measure it against stops the run before the first
+  request instead of pretending.
+- **A run says what it cost.** No provider on this wire returns a price, and neither does the one
+  behind Claude Code, which states `total_cost_usd` regardless. A subscription is not a reason for a
+  run to be uncosted, so `--prices <card>` names a small JSON document of rates — with its own
+  `source` and `as_of` date — and the record carries the figure and the card that produced it.
+  Rates are declared and never compiled in: a table baked into this binary would be numbers nobody
+  could date, wrong silently the first time one moved. Without a card the run reports tokens and no
+  price, and a model the card does not list is **warned about by name** rather than reported as
+  free.
 - **Approval is a blocking call**, not a protocol round trip that can land after the effect.
 
 ## Two shells, one loop
@@ -97,11 +117,20 @@ and no `run`; with it, six. That is the toolset following the machine rather tha
 `--api-key-env <NAME>` is the alternative. There is no ambient fallback: the harness reads no
 credential it was not pointed at, so a run can always be explained afterwards.
 
-The published toolset is **read-only** — `workspace.list`, `workspace.read`, `workspace.grep`,
-bounded to the workspace root. Every path is checked after canonicalization, including each entry
-`grep` walks into, so a symlink inside the workspace cannot be used to read outside it. Nothing it can call
-changes a file or runs a command, so a first live run costs inference and nothing else. Writing and
-executing are a separate, separately-gated slice.
+The model is offered **three tools** — `tool_search`, `tool_describe`, `tool_invoke` — and the
+catalogue behind them is what the machine can perform: three entries with no backend, five with a
+confined workspace, six inside a delegated cgroup. Reads are bounded to the workspace root, and
+every path is checked after canonicalization, including each entry `search` walks into, so a
+symlink inside the workspace cannot be used to read outside it.
+
+With no `--substrate` or `--substrate-embedded`, nothing the run can call changes a file or starts
+a process, so a first live run costs inference and nothing else. **That is a fact about the
+machine, not a promise this README makes to the model**: the standing instruction states no effects
+at all and tells the run to ask `tool_search`. It used to name three tools that no longer exist and
+assert that none of them could write — and a measured run given a write-and-execute catalogue
+believed it, read two files, changed nothing, and reported the task done.
+
+`--prices <card>` makes the run report what it cost. See § *What this is*.
 
 `--json` emits one event per line on stdout instead of prose. Exit status distinguishes the three
 outcomes a caller acts on differently: `0` the model answered, `2` the run stopped for a named

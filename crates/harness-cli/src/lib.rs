@@ -8,8 +8,6 @@
 
 mod metaharness;
 mod render;
-mod toolset;
-mod workspace;
 
 use std::fs;
 use std::io;
@@ -26,16 +24,33 @@ use harness_responses::{Endpoint, ResponsesClient};
 use harness_wire::{Sampling, StaticBearer};
 
 pub use render::Renderer;
-pub use toolset::Toolset;
-pub use workspace::{GREP_TOOL, LIST_TOOL, READ_TOOL, WorkspaceTools};
 
 /// The standing instruction when the caller supplies none.
+///
+/// # What this used to say, and what it cost
+///
+/// Until the three verbs landed, this text named `workspace_list`, `workspace_read` and
+/// `workspace_grep` and told the model *"nothing you can call changes a file or runs a command, so
+/// say what you would change rather than claiming you changed it"*. Both halves went stale: those
+/// tools no longer exist under any name, and the catalogue behind the verbs now reaches six entries
+/// on a machine that can confine a process.
+///
+/// It was not a harmless leftover. A run given a write-and-execute catalogue and this instruction
+/// was told in the same breath that it could do neither — and the measured result was a model that
+/// searched for read-only tools, read two files, changed nothing, and reported the task done.
+/// **The instruction had asked it to.**
+///
+/// So the text below states no effects at all. What a run can do differs from run to run — it is a
+/// question about the machine, answered by `tool_search` — and an instruction that answers it in
+/// advance can only ever be out of date.
 const DEFAULT_INSTRUCTIONS: &str = "\
-You are the b10x coding harness. You are looking at one workspace through three read-only \
-tools: workspace_list, workspace_read and workspace_grep. Nothing you can call changes a file or \
-runs a command, so say what you would change rather than claiming you changed it. Ground every \
-claim about the workspace in something you actually read, and say plainly when you have not \
-looked. Prefer a few precise reads over broad guessing.";
+You are the b10x coding harness. Everything you can do reaches you through three tools: \
+`tool_search` lists what this run has, `tool_describe` gives one entry's input schema, and \
+`tool_invoke` calls it. Begin by calling `tool_search` with no arguments. The catalogue differs \
+from run to run, so filtering it before you have seen it whole hides tools you may need, and what \
+is missing from a filtered list is not missing from the run. Ground every claim about the \
+workspace in something you actually read, and say plainly when you have not looked. Never report \
+work as done unless a tool you called made it so.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -192,6 +207,24 @@ struct RunOptions {
     /// Wall-clock ceiling in milliseconds, checked between turns.
     #[arg(long)]
     max_duration_ms: Option<u64>,
+    /// A rate card, so the run reports what it cost.
+    ///
+    /// A JSON document naming its own `source` and `as_of` date and holding
+    /// `input_usd_per_mtok`, `cached_input_usd_per_mtok` and `output_usd_per_mtok` per model.
+    /// Declared rather than compiled in: a table baked into this binary would be a set of numbers
+    /// nobody could date, and wrong silently the first time a rate moved.
+    ///
+    /// Without one the run reports tokens and no price — which is what it has always done, and is
+    /// also why a b10x record could not be compared with a Claude Code record on cost. A model the
+    /// card does not list is warned about by name rather than reported as free.
+    #[arg(long)]
+    prices: Option<PathBuf>,
+    /// Total spend ceiling for the run, in millionths of a US dollar. Needs `--prices`.
+    ///
+    /// Checked after each turn, because that is when the provider reports what it charged for.
+    /// Refused rather than ignored when the run cannot price itself.
+    #[arg(long)]
+    max_cost_microunits: Option<u64>,
     /// Sampling temperature. Left out entirely when unset, so the endpoint's own default stands.
     #[arg(long)]
     temperature: Option<f64>,
@@ -268,38 +301,63 @@ struct ToolsOptions {
     allow_program: Vec<String>,
 }
 
-/// Reads a credential from exactly the place the caller named.
+/// Reads a credential from exactly the place the caller named, or none.
 ///
 /// There is no ambient fallback: a harness that quietly picks up a key from the environment is one
-/// whose runs cannot be explained afterwards.
-fn resolve_credential(options: &RunOptions) -> Result<String, String> {
+/// whose runs cannot be explained afterwards. **Naming neither source is itself a declaration** —
+/// the run sends no `authorization` header, which is right for a gateway on this machine that
+/// authenticates nobody, and for a run deliberately started with no credential whose first request
+/// is meant to be refused by the far end.
+fn resolve_credential(options: &RunOptions) -> Result<Option<String>, String> {
     credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())
 }
 
-fn credential_from(file: Option<&PathBuf>, variable: Option<&String>) -> Result<String, String> {
-    match (file, variable) {
+fn credential_from(
+    file: Option<&PathBuf>,
+    variable: Option<&String>,
+) -> Result<Option<String>, String> {
+    let value = match (file, variable) {
+        (None, None) => return Ok(None),
         (Some(path), None) => fs::read_to_string(path)
             .map(|value| value.trim().to_owned())
             .map_err(|error| format!("reading the credential file `{}`: {error}", path.display())),
         (None, Some(name)) => std::env::var(name)
             .map(|value| value.trim().to_owned())
             .map_err(|_| format!("the environment variable `{name}` is not set")),
-        _ => Err("supply exactly one of `--api-key-file` or `--api-key-env`".to_owned()),
-    }
-    .and_then(|value| {
-        if value.is_empty() {
-            Err("the credential source is empty".to_owned())
-        } else {
-            Ok(value)
+        // `conflicts_with` makes this unreachable from the command line and reachable from a
+        // caller that built the options itself.
+        (Some(_), Some(_)) => {
+            Err("supply at most one of `--api-key-file` or `--api-key-env`".to_owned())
         }
-    })
+    }?;
+    // A source that was named and answered with nothing is an error, not a declaration: the caller
+    // meant to authenticate and something went wrong upstream of here.
+    if value.is_empty() {
+        return Err("the credential source is empty".to_owned());
+    }
+    Ok(Some(value))
+}
+
+/// A client for this endpoint, authenticated or deliberately not.
+fn model_client(
+    endpoint: Endpoint,
+    credential: Option<String>,
+    cancel: &LoopCancel,
+) -> Result<ResponsesClient, String> {
+    match credential {
+        Some(value) => ResponsesClient::new(endpoint, Arc::new(StaticBearer::new(value))),
+        None => ResponsesClient::unauthenticated(endpoint),
+    }
+    .map(|client| client.with_cancel(cancel.clone()))
+    .map_err(|error| error.to_string())
 }
 
 fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
     let credential = credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())?;
     let endpoint = Endpoint::new(&options.base_url, &options.model, options.context_window)
         .map_err(|error| error.to_string())?;
-    let bearer: Arc<dyn harness_wire::BearerSource> = Arc::new(StaticBearer::new(credential));
+    let bearer: Option<Arc<dyn harness_wire::BearerSource>> = credential
+        .map(|value| Arc::new(StaticBearer::new(value)) as Arc<dyn harness_wire::BearerSource>);
     let config = ServerConfig {
         model: options.model.clone(),
         budget: Budget {
@@ -312,9 +370,12 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
     // One client per turn: a turn that was interrupted leaves its token set, and reusing the
     // client would end the next turn before it started.
     let mut new_model = |cancel: harness_wire::Cancel| {
-        ResponsesClient::new(endpoint.clone(), Arc::clone(&bearer))
-            .map(|client| Box::new(client.with_cancel(cancel)) as Box<dyn harness_wire::ModelPort>)
-            .map_err(|error| error.to_string())
+        match &bearer {
+            Some(source) => ResponsesClient::new(endpoint.clone(), Arc::clone(source)),
+            None => ResponsesClient::unauthenticated(endpoint.clone()),
+        }
+        .map(|client| Box::new(client.with_cancel(cancel)) as Box<dyn harness_wire::ModelPort>)
+        .map_err(|error| error.to_string())
     };
     harness_app_server::serve(
         &config,
@@ -332,8 +393,23 @@ fn budget(options: &RunOptions) -> Budget {
         max_output_tokens: options.max_output_tokens,
         max_output_tokens_per_turn: options.max_output_tokens_per_turn,
         max_duration_ms: options.max_duration_ms,
-        max_cost_microunits: None,
+        max_cost_microunits: options.max_cost_microunits,
     }
+}
+
+/// Reads the rate card the caller named, or none.
+///
+/// A card that cannot be read is fatal rather than skipped: a caller who asked to be told the cost
+/// and got silence would read the silence as free.
+fn prices(options: &RunOptions) -> Result<Option<harness_loop::RateCard>, String> {
+    let Some(path) = options.prices.as_ref() else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("reading the rate card `{}`: {error}", path.display()))?;
+    harness_loop::RateCard::parse(&text)
+        .map(Some)
+        .map_err(|error| format!("the rate card `{}`: {error}", path.display()))
 }
 
 fn sampling(options: &RunOptions) -> Sampling {
@@ -357,11 +433,10 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     let endpoint = Endpoint::new(&options.base_url, &options.model, options.context_window)
         .map_err(|error| error.to_string())?;
     let cancel = LoopCancel::new();
-    let mut client = ResponsesClient::new(endpoint, Arc::new(StaticBearer::new(credential)))
-        .map_err(|error| error.to_string())?
-        .with_cancel(cancel.clone());
+    let mut client = model_client(endpoint, credential, &cancel)?;
     let mut tools = published(
-        WorkspaceTools::new(&options.workspace)?,
+        harness_tools::LocalOperations::new(&options.workspace)?,
+        workspace_name(&options.workspace),
         options.substrate.as_deref(),
         options.substrate_embedded.as_deref(),
         options.cgroup_root.as_deref(),
@@ -375,7 +450,8 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     };
     let config = LoopConfig::new(&options.model, instructions(options)?)
         .with_sampling(sampling(options))
-        .with_budget(budget(options));
+        .with_budget(budget(options))
+        .with_prices(prices(options)?);
 
     install_interrupt(&cancel);
 
@@ -401,86 +477,78 @@ fn install_interrupt(cancel: &LoopCancel) {
     }
 }
 
-/// The toolset this machine admits, which is the machine's answer and not a flag's.
+/// The tools this machine admits, which is the machine's answer and not a flag's.
 ///
-/// **The publication gate, in one function.** With no `--substrate` this is the read-only toolset
-/// this component has always published. With one, the daemon is asked what it can confine and the
-/// write and execute tools appear only where the answer admits them — absent otherwise, so the
-/// model is never told about a tool it cannot have.
+/// **The publication gate, in one function**, and it is unchanged by the move to three verbs: what
+/// the *model* sees is always `tool_search`, `tool_describe`, `tool_invoke`, and what the catalogue
+/// behind them holds is what the machine can perform. Three entries with no backend; five with a
+/// confined workspace; six inside a delegated cgroup. A tool the machine cannot confine is one
+/// `tool_search` never lists.
 ///
-/// A daemon that cannot be reached is not an error, for the reason `Client::probe` gives. A daemon
-/// that answers something unreadable is, and it stops the launch: a broken deployment must not
-/// silently look like an absent one.
+/// A backend that cannot be reached is not an error, for the reason `Client::probe` gives. A daemon
+/// that answers something unreadable is, and every other failure here degrades to the read-only
+/// catalogue rather than to a run that thinks it can write.
 fn published(
-    reading: WorkspaceTools,
+    reading: harness_tools::LocalOperations,
+    workspace_name: Option<String>,
     substrate: Option<&std::path::Path>,
     embedded: Option<&std::path::Path>,
     cgroup_root: Option<&std::path::Path>,
     workspace_id: &str,
     programs: &[String],
-) -> Toolset {
+) -> harness_tools::Verbs {
+    let read_only = || harness_tools::Verbs::new(harness_tools::Catalogue::of(reading.clone()));
+
     if embedded.is_some() {
-        // **One tree.** The workspace the read-only tools see *is* the confined workspace: its
-        // parent becomes substrate's root and the directory itself is adopted. Opening a fresh
-        // empty workspace beside it - which is what this did until now - meant a run read one tree
-        // and wrote into another, and was not doing the task it had been given.
-        //
-        // The price is a naming rule the operator has to meet: the directory must be called
-        // `ws_something`, because that is what substrate's guarded filesystem will represent. A
-        // directory that is not is refused by name rather than silently given a second tree.
-        let Some(root) = reading.root().parent() else {
-            return Toolset::read_only(reading);
+        // **One tree.** The workspace the reading provider sees *is* the confined workspace: its
+        // parent becomes substrate's root and the directory itself is adopted. Opening a fresh empty
+        // workspace beside it would mean a run read one tree and wrote into another, and was not
+        // doing the task it had been given.
+        let (Some(root), Some(name)) = (reading.root().parent(), workspace_name) else {
+            return read_only();
         };
-        let Some(name) = reading
-            .root()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(ToOwned::to_owned)
-        else {
-            return Toolset::read_only(reading);
-        };
-        // Opened twice on purpose: once to ask what the machine admits, once for the tools to hold.
-        // A driver is a handle on a directory, not a session, so two handles on one root are two
-        // ways to reach the same tree rather than two trees.
         let cgroup = cgroup_root.map(std::path::Path::to_path_buf);
         let (Ok(driver), Ok(tools)) = (
             harness_substrate::Embedded::open(root, cgroup.clone()),
             harness_substrate::Embedded::open(root, cgroup),
         ) else {
-            return Toolset::read_only(reading);
+            return read_only();
         };
-        let Ok(facts) = harness_substrate::Backend::machine(&driver) else {
-            return Toolset::read_only(reading);
+        let (Ok(facts), Ok(workspace)) = (
+            harness_substrate::Backend::machine(&driver),
+            driver.workspace_adopt(&name),
+        ) else {
+            return read_only();
         };
-        let Ok(workspace) = driver.workspace_adopt(&name) else {
-            return Toolset::read_only(reading);
-        };
-        return Toolset::with_confined(
-            reading,
-            harness_substrate::ConfinedTools::new(tools, &facts, workspace, programs.to_vec()),
-        );
+        let confined =
+            harness_substrate::ConfinedOperations::new(tools, &facts, workspace, programs.to_vec());
+        return harness_tools::Verbs::new(harness_tools::Catalogue::of(harness_tools::Split::new(
+            reading, confined,
+        )));
     }
+
     let Some(socket) = substrate else {
-        return Toolset::read_only(reading);
+        return read_only();
     };
     let client = harness_substrate::Client::at(socket);
-    match client.probe() {
-        Ok(facts) => Toolset::with_confined(
-            reading,
-            harness_substrate::ConfinedTools::new(
-                harness_substrate::Client::at(socket),
-                &facts,
-                workspace_id,
-                programs.to_vec(),
-            ),
-        ),
-        Err(_) => Toolset::read_only(reading),
-    }
+    let Ok(facts) = client.probe() else {
+        return read_only();
+    };
+    let confined = harness_substrate::ConfinedOperations::new(
+        harness_substrate::Client::at(socket),
+        &facts,
+        workspace_id,
+        programs.to_vec(),
+    );
+    harness_tools::Verbs::new(harness_tools::Catalogue::of(harness_tools::Split::new(
+        reading, confined,
+    )))
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools = published(
-        WorkspaceTools::new(&options.workspace)?,
+        harness_tools::LocalOperations::new(&options.workspace)?,
+        workspace_name(&options.workspace),
         options.substrate.as_deref(),
         options.substrate_embedded.as_deref(),
         options.cgroup_root.as_deref(),
@@ -492,10 +560,23 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
         serde_json::to_string_pretty(&serde_json::json!({
             "workspace": options.workspace.display().to_string(),
             "tools": tools_specs(&tools),
+            // What the three verbs stand in front of, so `b10x-harness tools` still answers the
+            // question a reader is actually asking: what can this run do?
+            "catalogue": tools.catalogue().search(None, None),
         }))
         .map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+/// The directory's own name, which is what substrate will represent the workspace as.
+fn workspace_name(workspace: &std::path::Path) -> Option<String> {
+    workspace
+        .canonicalize()
+        .ok()?
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
 }
 
 fn tools_specs(tools: &dyn harness_wire::ToolPort) -> serde_json::Value {
@@ -642,12 +723,6 @@ mod tests {
     }
 
     #[test]
-    fn naming_no_credential_source_refuses() {
-        let error = resolve_credential(&options(&[])).expect_err("no source refuses");
-        assert!(error.contains("exactly one"), "{error}");
-    }
-
-    #[test]
     fn an_unset_environment_variable_refuses_by_name() {
         let options = options(&["--api-key-env", "B10X_HARNESS_ABSENT_TEST_KEY"]);
         let error = resolve_credential(&options).expect_err("an unset variable refuses");
@@ -660,7 +735,10 @@ mod tests {
         let path = dir.path().join("key");
         fs::write(&path, "  sk-test\n").expect("write");
         let options = options(&["--api-key-file", path.to_str().expect("utf-8 path")]);
-        assert_eq!(resolve_credential(&options).expect("readable"), "sk-test");
+        assert_eq!(
+            resolve_credential(&options).expect("readable"),
+            Some("sk-test".to_owned())
+        );
     }
 
     #[test]
@@ -673,6 +751,15 @@ mod tests {
     }
 
     #[test]
+    fn naming_no_credential_source_is_a_declaration_and_not_an_error() {
+        // The shape a gateway on this machine needs, and the one a run started deliberately
+        // without a credential needs: no `authorization` header, refused by the far end rather
+        // than by this process. An *empty* named source stays an error, above — that is a
+        // credential that went wrong, not one nobody asked for.
+        assert_eq!(resolve_credential(&options(&[])).expect("declared"), None);
+    }
+
+    #[test]
     fn a_missing_credential_file_names_the_path() {
         let options = options(&["--api-key-file", "/definitely/not/here"]);
         let error = resolve_credential(&options).expect_err("a missing file refuses");
@@ -680,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn budget_flags_reach_the_loop_and_carry_no_spend_ceiling() {
+    fn budget_flags_reach_the_loop() {
         let budget = budget(&options(&[
             "--max-turns",
             "4",
@@ -689,18 +776,66 @@ mod tests {
         ]));
         assert_eq!(budget.max_turns, Some(4));
         assert_eq!(budget.max_output_tokens, Some(900));
-        assert_eq!(
-            budget.max_cost_microunits, None,
-            "the CLI must not offer a bound the loop refuses"
-        );
-        assert!(budget.validate().is_ok());
+        assert_eq!(budget.max_cost_microunits, None, "none was asked for");
+        assert!(budget.validate(false).is_ok());
     }
 
     #[test]
-    fn the_default_instruction_names_the_read_only_toolset() {
+    fn a_spend_ceiling_reaches_the_loop_and_is_refused_without_rates_to_measure_it_against() {
+        let budget = budget(&options(&["--max-cost-microunits", "50000"]));
+        assert_eq!(budget.max_cost_microunits, Some(50_000));
+        assert!(
+            budget.validate(false).is_err(),
+            "a ceiling nobody can compute is refused rather than ignored"
+        );
+        assert!(budget.validate(true).is_ok());
+    }
+
+    #[test]
+    fn a_rate_card_reaches_the_loop_and_an_unreadable_one_stops_the_run() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("rates.json");
+        fs::write(
+            &path,
+            r#"{"source": "a table someone read", "as_of": "2026-08-24", "models": {
+                "m": {"input_usd_per_mtok": 1.0, "cached_input_usd_per_mtok": 0.1,
+                      "output_usd_per_mtok": 2.0}}}"#,
+        )
+        .expect("write");
+        let loaded = prices(&options(&["--prices", path.to_str().expect("utf-8 path")]))
+            .expect("readable")
+            .expect("a card");
+        assert!(loaded.rates_for("m").is_some());
+
+        assert!(prices(&options(&[])).expect("no flag is no card").is_none());
+
+        // Fatal rather than skipped: a caller who asked to be told the cost and got silence would
+        // read the silence as free.
+        let bad = dir.path().join("bad.json");
+        fs::write(
+            &bad,
+            r#"{"source": "", "as_of": "2026-08-24", "models": {}}"#,
+        )
+        .expect("write");
+        let error = prices(&options(&["--prices", bad.to_str().expect("utf-8 path")]))
+            .expect_err("a card with no provenance refuses");
+        assert!(error.contains("provenance"), "{error}");
+    }
+
+    #[test]
+    fn the_default_instruction_points_at_the_catalogue_and_promises_no_effects() {
         let text = instructions(&options(&[])).expect("the default is available");
-        assert!(text.contains("workspace_read"), "{text}");
-        assert!(text.contains("read-only"), "{text}");
+        assert!(text.contains("tool_search"), "{text}");
+        for stale in ["workspace_read", "workspace_list", "workspace_grep"] {
+            assert!(!text.contains(stale), "`{stale}` no longer exists: {text}");
+        }
+        // The regression that made a live run change nothing and say it had: the standing
+        // instruction told a write-capable run that it could not write.
+        assert!(
+            !text.contains("read-only"),
+            "what a run can do is `tool_search`'s answer, not this text's: {text}"
+        );
+        assert!(text.contains("Never report work as done"), "{text}");
     }
 
     #[test]

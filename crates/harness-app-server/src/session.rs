@@ -203,7 +203,11 @@ impl LoopSink for BridgeSink {
             // The turn's own frames are written by the server, which holds the outcome.
             | LoopEvent::Started { .. }
             | LoopEvent::TurnStarted { .. }
-            | LoopEvent::Finished { .. } => {}
+            | LoopEvent::Finished { .. }
+            // The pinned notification set has no field for a price, and this server may not invent
+            // one. A bridged run is priced by whoever started it, from the token counts above.
+            | LoopEvent::Rates { .. }
+            | LoopEvent::Cost { .. } => {}
         }
     }
 }

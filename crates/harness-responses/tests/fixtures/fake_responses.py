@@ -298,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             item = {
                 "id": "fc_1",
                 "type": "function_call",
-                "name": "workspace_read",
+                "name": "tool_invoke",
                 "call_id": "call_bad",
                 "arguments": "{not json",
             }
@@ -316,17 +316,28 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send_sse(function_call_events("shell.exec", {"cmd": "id"}))
         elif scenario == "tool":
+            # The three-verb surface: the model calls `tool_invoke` and names an entry inside it.
             if has_function_output(body):
                 self._send_sse(text_events("The file says: hello harness"))
             else:
                 self._send_sse(
-                    function_call_events("workspace_read", {"path": "README.md"})
+                    function_call_events(
+                        "tool_invoke", {"name": "file_read", "arguments": {"path": "README.md"}}
+                    )
                 )
+        elif scenario == "dynamic-tool":
+            # Bridge mode is the other surface: the tools are the *client's*, registered by name at
+            # `thread/start`, and the verbs are not among them. A scenario of its own rather than a
+            # flag, because the two surfaces are two different things a model can be offered.
+            if has_function_output(body):
+                self._send_sse(text_events("The file says: hello harness"))
+            else:
+                self._send_sse(function_call_events("workspace_read", {"path": "README.md"}))
         elif scenario == "reasoning":
             if has_function_output(body):
                 self._send_sse(text_events("done", extra_output=[reasoning_item()]))
             else:
-                events = function_call_events("workspace_read", {"path": "README.md"})
+                events = function_call_events("tool_invoke", {"name": "file_read", "arguments": {"path": "README.md"}})
                 terminal = events[-1]
                 terminal["response"]["output"] = [
                     reasoning_item(),

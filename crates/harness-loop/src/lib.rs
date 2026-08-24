@@ -15,6 +15,7 @@
 mod approval;
 mod budget;
 mod event;
+mod price;
 
 use std::time::Instant;
 
@@ -28,6 +29,7 @@ use serde::{Deserialize, Serialize};
 pub use approval::{ApprovalDecision, ApprovalPort, ApproveAll, DenyAll};
 pub use budget::{Budget, BudgetError};
 pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink};
+pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 
 /// Why the loop stopped. Every variant is a real terminal state, not a failure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +47,12 @@ pub enum LoopStop {
     MaxOutputTokens {
         limit: u64,
         reported: u64,
+    },
+    /// A spend ceiling bound. Reachable only for a run whose rate card prices its model — an
+    /// unpriced run cannot be held to a figure nobody could compute.
+    MaxCost {
+        limit_micro_usd: u64,
+        spent_micro_usd: u64,
     },
     Deadline {
         limit_ms: u64,
@@ -76,6 +84,12 @@ pub struct LoopOutcome {
     /// One entry per turn the provider reported for. An empty list means usage is unknown, not
     /// that nothing was spent.
     pub usage: Vec<Usage>,
+    /// What the run cost in millionths of a US dollar, at the rates the caller declared.
+    ///
+    /// [`None`] when no rate card was supplied or none of it priced this model. Absent rather than
+    /// zero, for the reason [`LoopEvent::Cost`] gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micro_usd: Option<u64>,
 }
 
 impl LoopOutcome {
@@ -119,6 +133,12 @@ pub struct LoopConfig {
     /// How the model is asked to sample. Sent on every turn, because a stateless loop replays the
     /// whole conversation each time and a value set once would otherwise apply only to the first.
     pub sampling: Sampling,
+    /// Rates to price this run at, declared by whoever started it.
+    ///
+    /// [`None`] leaves the run unpriced, which is what it has always been. It is also what makes
+    /// [`Budget::max_cost_microunits`] enforceable or not: a ceiling is only real where the figure
+    /// it bounds can be computed.
+    pub prices: Option<RateCard>,
 }
 
 impl LoopConfig {
@@ -128,6 +148,7 @@ impl LoopConfig {
             instructions: instructions.into(),
             budget: Budget::default(),
             sampling: Sampling::default(),
+            prices: None,
         }
     }
 
@@ -140,6 +161,12 @@ impl LoopConfig {
     #[must_use]
     pub fn with_budget(mut self, budget: Budget) -> Self {
         self.budget = budget;
+        self
+    }
+
+    #[must_use]
+    pub fn with_prices(mut self, prices: Option<RateCard>) -> Self {
+        self.prices = prices;
         self
     }
 }
@@ -167,6 +194,8 @@ struct RunState {
     turns: u64,
     input_total: u64,
     output_total: u64,
+    /// Absent until a turn is priced, so a run nobody could price never reports a figure.
+    cost_total: Option<u64>,
     text: String,
 }
 
@@ -178,6 +207,7 @@ impl RunState {
             turns: 0,
             input_total: 0,
             output_total: 0,
+            cost_total: None,
             text: String::new(),
         }
     }
@@ -186,12 +216,20 @@ impl RunState {
     fn absorb(
         &mut self,
         outcome: harness_wire::TurnOutcome,
+        prices: Option<&RateCard>,
         sink: &mut dyn LoopSink,
     ) -> (Vec<ToolCall>, StopReason) {
         if let Some(reported) = outcome.usage {
             self.input_total = self.input_total.saturating_add(reported.input_tokens);
             self.output_total = self.output_total.saturating_add(reported.output_tokens);
             sink.emit(LoopEvent::Usage(reported.clone()));
+            if let Some(micro_usd) = prices.and_then(|card| card.price(&reported)) {
+                self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(micro_usd));
+                sink.emit(LoopEvent::Cost {
+                    model: reported.model.clone(),
+                    micro_usd,
+                });
+            }
             self.usage.push(reported);
         }
 
@@ -224,6 +262,7 @@ impl RunState {
             items: self.items,
             turns: self.turns,
             usage: self.usage,
+            cost_micro_usd: self.cost_total,
         }
     }
 }
@@ -311,7 +350,15 @@ impl<'a> AgentLoop<'a> {
         input: impl Into<String>,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopOutcome, LoopError> {
-        self.config.budget.validate()?;
+        // The run's own model is what the ceiling is judged against, because it is the only model
+        // known before the first turn. An endpoint that answers as something else is caught by
+        // `RateCard::price` and reported as an unpriced turn.
+        let priced = self
+            .config
+            .prices
+            .as_ref()
+            .is_some_and(|card| card.rates_for(&self.config.model).is_some());
+        self.config.budget.validate(priced)?;
         let deadline = self
             .config
             .budget
@@ -328,10 +375,43 @@ impl<'a> AgentLoop<'a> {
                 .map(|spec| spec.name.clone())
                 .collect(),
         });
+        self.announce_prices(priced, sink);
 
         let stop = self.drive(&mut state, deadline, sink)?;
         sink.emit(LoopEvent::Finished { stop: stop.clone() });
         Ok(state.into_outcome(stop))
+    }
+
+    /// Puts the rates in the record, and says so by name when they miss this model.
+    ///
+    /// The warning is the point. Without it a run against an unpriced model reports no cost, and a
+    /// reader has no way to tell that from a run that cost nothing — so the one number an
+    /// evaluation compares arms on would quietly be missing.
+    fn announce_prices(&self, priced: bool, sink: &mut dyn LoopSink) {
+        let Some(card) = self.config.prices.as_ref() else {
+            return;
+        };
+        sink.emit(LoopEvent::Rates {
+            source: card.source.clone(),
+            as_of: card.as_of.clone(),
+        });
+        if priced {
+            return;
+        }
+        let known: Vec<&str> = card.priced_models().collect();
+        sink.emit(LoopEvent::Warning {
+            code: "unpriced-model".to_owned(),
+            message: format!(
+                "the rate card of {} does not price `{}`, so this run reports no cost; it prices: {}",
+                card.as_of,
+                self.config.model,
+                if known.is_empty() {
+                    "nothing".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            ),
+        });
     }
 
     /// Turns, tool calls, turns again, until something says stop.
@@ -361,7 +441,7 @@ impl<'a> AgentLoop<'a> {
                 }
             };
 
-            let (calls, stop_reason) = state.absorb(outcome, sink);
+            let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
             if calls.is_empty() {
                 return Ok(terminal_stop(stop_reason));
             }
@@ -404,6 +484,15 @@ impl<'a> AgentLoop<'a> {
 
     /// Token ceilings bind after a turn, because that is when the provider reports.
     fn stop_after_tokens(&self, state: &RunState) -> Option<LoopStop> {
+        if let (Some(limit), Some(spent)) =
+            (self.config.budget.max_cost_microunits, state.cost_total)
+            && spent > limit
+        {
+            return Some(LoopStop::MaxCost {
+                limit_micro_usd: limit,
+                spent_micro_usd: spent,
+            });
+        }
         if let Some(limit) = self.config.budget.max_input_tokens
             && state.input_total > limit
         {

@@ -52,7 +52,8 @@ pub fn decode(text: &str) -> Result<Vec<u8>, String> {
             .iter()
             .position(|candidate| *candidate as char == character)
             .ok_or_else(|| format!("`{character}` at {position} is not base64"))?;
-        block = (block << 6) | value as u32;
+        // `position` in a 64-entry alphabet: the cast cannot lose anything.
+        block = (block << 6) | u32::try_from(value).expect("an alphabet index fits");
         held += 6;
         if held >= 8 {
             held -= 8;

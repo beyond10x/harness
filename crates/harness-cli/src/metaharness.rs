@@ -62,6 +62,9 @@ pub fn convert(
     let mut sequence = 0_u64;
     let mut written = 0;
     let mut ended = false;
+    // Summed as the record is read, so `session.ended` can state what the run cost. Stays `None`
+    // when no turn was priced, and `None` becomes `null` rather than `0` downstream.
+    let mut spent_micro_usd: Option<u64> = None;
     let mut emit = |output: &mut dyn Write, mut event: Value| -> std::io::Result<()> {
         sequence += 1;
         if let Some(object) = event.as_object_mut() {
@@ -81,7 +84,10 @@ pub fn convert(
             written += 1;
             continue;
         };
-        let kind = value.get("kind").and_then(Value::as_str).unwrap_or_default();
+        let kind = value
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let mapped = match kind {
             "started" => started(&value, version),
             "text-delta" => json!({"event": "text", "text": value["text"]}),
@@ -90,6 +96,11 @@ pub fn convert(
                 "call_id": value["call_id"],
                 "name": value["name"],
                 "input": value["arguments"],
+                // What the call *is*, in the neutral vocabulary a consumer selects on. Without it
+                // this stream said `tool_invoke` for every act in the run and buried the entry in
+                // the input — so a reader could not tell a write from a read, and one written for
+                // another harness could not read this arm at all.
+                "operations": operations(&value),
                 // Nothing decided this call at a seam, because nothing was in a position to: the
                 // toolset it was drawn from is the policy. `false` here is a fact about the arm.
                 "decision_required": false,
@@ -119,13 +130,23 @@ pub fn convert(
                     "cost_usd": Value::Null,
                 },
             }),
+            // Folded into the run's total rather than mapped onto the `usage` line it follows: the
+            // per-turn figure would have to reach an event already written, and buffering the
+            // stream to backfill one field is a worse trade than carrying this line as it stands.
+            // The number a reader compares arms on is the run total, and that is stated below.
+            "cost" => {
+                if let Some(micro) = value["micro_usd"].as_u64() {
+                    spent_micro_usd = Some(spent_micro_usd.unwrap_or(0).saturating_add(micro));
+                }
+                opaque(&line)
+            }
             "finished" => {
                 ended = true;
-                finished(&value)
+                finished(&value, spent_micro_usd)
             }
-            // `turn-started`, `tool-arguments-delta`, `approval-required` and `warning` have no
-            // counterpart that any expectation reads. Carried as opaque rather than dropped, for
-            // the reason in this function's own documentation.
+            // `turn-started`, `tool-arguments-delta`, `approval-required`, `warning` and `rates`
+            // have no counterpart that any expectation reads. Carried as opaque rather than
+            // dropped, for the reason in this function's own documentation.
             _ => opaque(&line),
         };
         emit(output, mapped)?;
@@ -170,9 +191,12 @@ fn started(value: &Value, version: &str) -> Value {
     })
 }
 
-fn finished(value: &Value) -> Value {
+fn finished(value: &Value, spent_micro_usd: Option<u64>) -> Value {
     let stop = value.get("stop").cloned().unwrap_or(Value::Null);
-    let kind = stop.get("kind").and_then(Value::as_str).unwrap_or("unknown");
+    let kind = stop
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     json!({
         "event": "session.ended",
         "is_error": kind != "completed",
@@ -185,14 +209,48 @@ fn finished(value: &Value) -> Value {
         "duration_api_ms": Value::Null,
         "ttft_ms": Value::Null,
         "time_to_request_ms": Value::Null,
-        // The gateway relays bytes and reports no price, so this loop has never had a cost to
-        // state. `null` is the honest answer and a zero would be a lie about a run that cost money.
-        "total_cost_usd": Value::Null,
+        // What the run cost at the rates the operator declared with `--prices`.
+        //
+        // `null` where no card priced the run — which is the honest answer, and the same one this
+        // field carried unconditionally until rate cards existed. A zero would be a lie about a run
+        // that cost money. The figure is this harness's own, exactly as Claude Code's
+        // `total_cost_usd` is Claude Code's: neither provider returns a price, and both state one
+        // anyway, because a subscription is not a reason for a run to be uncosted.
+        "total_cost_usd": spent_micro_usd.map_or(Value::Null, dollars),
         "permission_denials": [],
         "subagents_spawned": 0,
         "usage": Value::Null,
         "model_usage": Value::Null,
     })
+}
+
+/// Millionths of a dollar as the JSON number this field is declared to hold.
+///
+/// Built from the decimal rather than by dividing into a float, so the number in this stream and
+/// the number in the loop record are the same figure — not two that agree to within a rounding
+/// nobody wrote down.
+fn dollars(micro_usd: u64) -> Value {
+    serde_json::from_str(&harness_loop::micro_usd_as_decimal(micro_usd)).unwrap_or(Value::Null)
+}
+
+/// The neutral operations one `tool-requested` resolves to.
+///
+/// This loop publishes three verbs and nothing else, so the tool name is never the answer:
+/// `tool_invoke` is every act in the run, and which one is inside its arguments. Resolved here
+/// rather than by the consumer, because the mapping is a fact about the catalogue and a consumer
+/// that kept its own copy is a copy that drifts.
+///
+/// Empty for `tool_search` and `tool_describe` — they are questions about the catalogue, not acts —
+/// and for an entry outside the vocabulary, which reached no tool.
+fn operations(value: &Value) -> Vec<&'static str> {
+    if value["name"].as_str() != Some(harness_tools::INVOKE_VERB) {
+        return Vec::new();
+    }
+    value["arguments"]["name"]
+        .as_str()
+        .and_then(harness_tools::operation_of)
+        .into_iter()
+        .collect()
 }
 
 fn opaque(line: &str) -> Value {
@@ -211,7 +269,7 @@ fn opaque(line: &str) -> Value {
 /// FNV-1a rather than SHA-256: what an opaque record needs is *these two lines are the same line*,
 /// and nothing here is a security claim. Taking `sha2` for it would be a dependency to say
 /// something this does not say.
-struct Digest(u64);
+struct Digest;
 
 impl Digest {
     fn of(line: &str) -> u64 {
@@ -239,9 +297,9 @@ mod tests {
             .collect()
     }
 
-    const RUN: &str = r#"{"kind":"started","model":"gpt-5.6-sol","published_tools":["workspace_read"]}
+    const RUN: &str = r#"{"kind":"started","model":"gpt-5.6-sol","published_tools":["tool_search","tool_describe","tool_invoke"]}
 {"kind":"turn-started","turn":1}
-{"kind":"tool-requested","call_id":"c-1","name":"workspace_read","arguments":{"path":"README.md"}}
+{"kind":"tool-requested","call_id":"c-1","name":"tool_invoke","arguments":{"name":"file_read","arguments":{"path":"README.md"}}}
 {"kind":"tool-completed","call_id":"c-1","failed":false}
 {"kind":"usage","model":"gpt-5.6-sol","input_tokens":297,"output_tokens":25,"cached_input_tokens":0}
 {"kind":"finished","stop":{"kind":"completed"}}"#;
@@ -287,7 +345,64 @@ mod tests {
         );
         assert_eq!(started["harness_version"], "0.1.0");
         assert_eq!(started["model"], "gpt-5.6-sol");
-        assert_eq!(started["offered_tools"], json!(["workspace_read"]));
+        assert_eq!(
+            started["offered_tools"],
+            json!(["tool_search", "tool_describe", "tool_invoke"]),
+            "what the *model* was offered, which on this loop is three verbs whatever the \
+             catalogue behind them holds"
+        );
+    }
+
+    const PRICED: &str = r#"{"kind":"started","model":"m","published_tools":["tool_search"]}
+{"kind":"rates","source":"a table the operator read","as_of":"2026-08-24"}
+{"kind":"usage","model":"m","input_tokens":100,"output_tokens":10,"cached_input_tokens":0}
+{"kind":"cost","model":"m","micro_usd":106000}
+{"kind":"usage","model":"m","input_tokens":50,"output_tokens":5,"cached_input_tokens":40}
+{"kind":"cost","model":"m","micro_usd":233}
+{"kind":"finished","stop":{"kind":"completed"}}"#;
+
+    #[test]
+    fn a_priced_run_states_its_cost_where_every_other_arm_states_theirs() {
+        // The number the matrix compares arms on. Nothing on this wire returns a price - and
+        // nothing returns one for Claude Code either, which states `total_cost_usd` all the same.
+        let events = convert_all(PRICED);
+        let ended = events.last().expect("a terminal event");
+        assert_eq!(ended["event"], "session.ended");
+        assert_eq!(
+            ended["total_cost_usd"],
+            json!(0.106_233),
+            "the turns below it sum to exactly this"
+        );
+    }
+
+    #[test]
+    fn an_unpriced_run_reports_no_cost_rather_than_a_zero() {
+        // `RUN` carries no rate card. A zero here would say the run was free, which is a claim
+        // about somebody's invoice that nobody made.
+        let events = convert_all(RUN);
+        assert_eq!(
+            events.last().expect("terminal")["total_cost_usd"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn the_rate_card_line_crosses_as_opaque_rather_than_being_dropped() {
+        // No expectation reads it, and it is the only record of which rates produced the figure
+        // above - so it is carried, on the same rule every unmapped line is carried by.
+        let events = convert_all(PRICED);
+        let carried = events
+            .iter()
+            .find(|event| event["event"] == "opaque" && event["vendor_subtype"] == "rates");
+        assert!(carried.is_some(), "{events:?}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["vendor_subtype"] == "cost")
+                .count(),
+            2,
+            "both priced turns are still visible as lines, whatever the total says"
+        );
     }
 
     #[test]
@@ -308,8 +423,16 @@ mod tests {
             .find(|event| event["event"] == "tool.requested")
             .expect("there is one");
         assert_eq!(requested["decision_required"], json!(false));
-        assert_eq!(requested["name"], "workspace_read");
-        assert_eq!(requested["input"]["path"], "README.md");
+        assert_eq!(
+            requested["name"], "tool_invoke",
+            "the verb the model called"
+        );
+        assert_eq!(
+            requested["operations"],
+            json!(["file.read"]),
+            "and what it was"
+        );
+        assert_eq!(requested["input"]["arguments"]["path"], "README.md");
     }
 
     #[test]
@@ -359,5 +482,70 @@ mod tests {
         let events = convert_all(RUN);
         let ended = events.last().expect("terminal");
         assert_eq!(ended["total_cost_usd"], Value::Null);
+    }
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The stream says what each call **was**, not only which verb carried it.
+    ///
+    /// Every act in this loop travels through `tool_invoke`, so a consumer reading tool names saw
+    /// one name for reads, writes and processes alike — and a consumer written against another
+    /// harness saw a name it had never heard of. Both are the same blindness, and this is the
+    /// field that ends it: `file.write` reads the same here, on Claude Code's wire, and on codex's.
+    #[test]
+    fn every_act_carries_the_neutral_operation_and_a_catalogue_question_carries_none() {
+        for (entry, expected) in [
+            ("file_read", vec!["file.read"]),
+            ("file_write", vec!["file.write"]),
+            ("file_edit", vec!["file.edit"]),
+            ("dir_list", vec!["dir.list"]),
+            ("search", vec!["search"]),
+            ("run", vec!["shell"]),
+        ] {
+            assert_eq!(
+                operations(&json!({
+                    "name": harness_tools::INVOKE_VERB,
+                    "arguments": {"name": entry, "arguments": {}}
+                })),
+                expected,
+                "{entry}"
+            );
+        }
+
+        for verb in [harness_tools::SEARCH_VERB, harness_tools::DESCRIBE_VERB] {
+            assert!(
+                operations(&json!({"name": verb, "arguments": {}})).is_empty(),
+                "{verb} asks what the run may do; it does none of it"
+            );
+        }
+
+        assert!(
+            operations(&json!({
+                "name": harness_tools::INVOKE_VERB,
+                "arguments": {"name": "Bash", "arguments": {}}
+            }))
+            .is_empty(),
+            "a name outside the vocabulary reached no tool, so it is no operation"
+        );
+    }
+
+    /// The field reaches the converted stream, which is the thing a judge actually reads.
+    #[test]
+    fn the_converted_stream_carries_it_where_a_consumer_will_look() {
+        let line = r#"{"kind":"tool-requested","call_id":"c-1","name":"tool_invoke","arguments":{"name":"run","arguments":{"argv":["/usr/bin/python3","test.py"]}}}"#;
+        let mut out = Vec::new();
+        convert(&mut std::io::Cursor::new(line), &mut out, "0.1.0").expect("converts");
+        let event: Value =
+            serde_json::from_str(String::from_utf8(out).expect("utf-8").trim()).expect("JSON");
+        assert_eq!(event["event"], "tool.requested");
+        assert_eq!(event["operations"], json!(["shell"]));
+        assert_eq!(
+            event["name"], "tool_invoke",
+            "the vendor's name stays too: the neutral one is an addition, not a replacement"
+        );
     }
 }

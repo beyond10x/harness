@@ -117,8 +117,10 @@ fn the_binary_answers_and_puts_only_the_answer_on_stdout() {
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert_eq!(output.stdout.trim(), "provider emulation passed");
     assert!(
-        output.stderr.contains("workspace_read"),
-        "progress names the published tools: {}",
+        output
+            .stderr
+            .contains("tool_search, tool_describe, tool_invoke"),
+        "progress names the three verbs, whatever the catalogue holds: {}",
         output.stderr
     );
 }
@@ -131,7 +133,7 @@ fn the_binary_reads_a_real_file_through_a_real_tool_call() {
 
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert!(
-        output.stderr.contains("→ workspace_read"),
+        output.stderr.contains("→ tool_invoke"),
         "the call is reported: {}",
         output.stderr
     );
@@ -208,7 +210,11 @@ fn a_rejected_credential_fails_with_a_message_naming_the_cause() {
 }
 
 #[test]
-fn naming_no_credential_source_refuses_before_any_request() {
+fn naming_no_credential_source_reaches_the_endpoint_unauthenticated() {
+    // The declaration a gateway on this machine needs, and the one `--credentials none` becomes
+    // when metaharness launches this loop. It is not a refusal: the request goes out with no
+    // `authorization` header and the far end decides. Here nothing is listening, so what comes
+    // back is a transport failure — proof the run got as far as the socket.
     let workspace = workspace();
     let output = run(
         &[
@@ -223,7 +229,12 @@ fn naming_no_credential_source_refuses_before_any_request() {
         workspace.path(),
     );
     assert_eq!(output.status, Some(1));
-    assert!(output.stderr.contains("exactly one"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("posting to"),
+        "it tried, rather than refusing itself: {}",
+        output.stderr
+    );
+    assert!(!output.stderr.contains("exactly one"), "{}", output.stderr);
 }
 
 #[test]
@@ -241,8 +252,17 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
         .collect();
     assert_eq!(
         names,
-        vec!["workspace_list", "workspace_read", "workspace_grep"]
+        vec!["tool_search", "tool_describe", "tool_invoke"],
+        "the model is offered three verbs, whatever the machine admits"
     );
+    // ...and what stands behind them is the question a reader is actually asking.
+    let entries: Vec<&str> = described["catalogue"]["tools"]
+        .as_array()
+        .expect("a catalogue")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(entries, vec!["file_read", "dir_list", "search"]);
     assert!(
         described["tools"]
             .as_array()

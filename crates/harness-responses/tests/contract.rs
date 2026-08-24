@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use b10x_harness_responses::{WIRE, decode_stream, request_body};
 use harness_wire::{
-    Approval, CallId, Item, Sampling, StopReason, ToolCall, ToolName, ToolOutcome, ToolSpec, Usage,
-    VecSink, WireId,
+    Approval, CallId, Envelope, Item, Sampling, StopReason, ToolCall, ToolName, ToolOutcome,
+    ToolSpec, Usage, VecSink, WireId,
 };
 use serde_json::{Value, json};
 
@@ -72,7 +72,7 @@ fn canonical_request() -> Value {
             "additionalProperties": false,
         }),
         approval: Approval::NotRequired,
-        envelope: Default::default(),
+        envelope: Envelope::default(),
     }];
     request_body(
         "daemonloom-emulated",

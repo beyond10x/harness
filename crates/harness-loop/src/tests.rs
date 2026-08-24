@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use harness_wire::{
-    CallId, Item, ModelPort, StopReason, StreamEvent, StreamSink, ToolCall, ToolName, ToolOutcome,
-    ToolPort, ToolSpec, TurnOutcome, TurnRequest, Usage, WireError, WireErrorCode, WireId,
+    CallId, Envelope, Item, ModelPort, StopReason, StreamEvent, StreamSink, ToolCall, ToolName,
+    ToolOutcome, ToolPort, ToolSpec, TurnOutcome, TurnRequest, Usage, WireError, WireErrorCode,
+    WireId,
 };
 use serde_json::{Value, json};
 
@@ -26,7 +27,7 @@ fn spec(name: &str, approval: Approval) -> ToolSpec {
     ToolSpec {
         name: tool_name(name),
         description: format!("the {name} tool"),
-        envelope: Default::default(),
+        envelope: Envelope::default(),
         input_schema: json!({"type": "object"}),
         approval,
     }
@@ -198,6 +199,11 @@ impl Harness {
 
     fn budgeted(mut self, budget: Budget) -> Self {
         self.config.budget = budget;
+        self
+    }
+
+    fn priced(mut self, card: RateCard) -> Self {
+        self.config.prices = Some(card);
         self
     }
 
@@ -730,4 +736,162 @@ fn a_cancelled_read_after_a_tool_call_still_reports_the_work_done() {
         "the call it did make is not erased"
     );
     assert_eq!(outcome.total_tokens(), Some((10, 5)));
+}
+
+// --- what a run cost ------------------------------------------------------------------------
+
+/// A card that prices the scripted model at round numbers: $1/Mtok in, $2/Mtok out.
+fn scripted_card() -> RateCard {
+    RateCard::parse(
+        r#"{
+            "source": "a table the test declares",
+            "as_of": "2026-08-24",
+            "models": {"scripted-model": {
+                "input_usd_per_mtok": 1.0,
+                "cached_input_usd_per_mtok": 0.1,
+                "output_usd_per_mtok": 2.0
+            }}
+        }"#,
+    )
+    .expect("a valid card")
+}
+
+fn costs(sink: &VecLoopSink) -> Vec<u64> {
+    sink.events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::Cost { micro_usd, .. } => Some(*micro_usd),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_priced_run_states_what_it_cost_and_names_the_rates_that_priced_it() {
+    // The figure a comparison actually needs. A subscription reports no price on the wire and the
+    // run states one anyway, exactly as every other harness in the matrix does.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "a", json!({}))])),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .priced(scripted_card());
+    let (outcome, sink) = harness.run();
+    let outcome = outcome.expect("the run completes");
+
+    // Two turns of 10 in / 5 out: 10 µ$ + 10 µ$ input, 10 µ$ + 10 µ$ output.
+    assert_eq!(costs(&sink), vec![20, 20]);
+    assert_eq!(
+        outcome.cost_micro_usd,
+        Some(40),
+        "the total is the sum of the turns a reader can see"
+    );
+    assert!(
+        sink.events().iter().any(|event| matches!(
+            event,
+            LoopEvent::Rates { as_of, .. } if as_of == "2026-08-24"
+        )),
+        "the record carries the card that priced it"
+    );
+}
+
+#[test]
+fn an_unpriced_run_reports_no_cost_at_all_rather_than_a_zero() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("done"))]),
+        ScriptedTools::new(Vec::new()),
+    );
+    let (outcome, sink) = harness.run();
+
+    assert_eq!(outcome.expect("completes").cost_micro_usd, None);
+    assert!(costs(&sink).is_empty());
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| matches!(event, LoopEvent::Rates { .. })),
+        "no card, nothing to attribute a figure to"
+    );
+}
+
+#[test]
+fn a_card_that_misses_this_model_says_so_by_name_instead_of_going_quiet() {
+    // Silence would be indistinguishable from a run that cost nothing, and the one number an
+    // evaluation compares arms on would be missing without anybody noticing.
+    let card = RateCard::parse(
+        r#"{"source": "s", "as_of": "2026-08-24", "models": {"some-other-model": {
+            "input_usd_per_mtok": 1.0, "cached_input_usd_per_mtok": 0.1, "output_usd_per_mtok": 2.0
+        }}}"#,
+    )
+    .expect("a valid card");
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("done"))]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .priced(card);
+    let (outcome, sink) = harness.run();
+
+    assert_eq!(outcome.expect("completes").cost_micro_usd, None);
+    let warnings: Vec<_> = sink.warnings().collect();
+    let (code, message) = warnings.first().expect("one warning");
+    assert_eq!(*code, "unpriced-model");
+    assert!(message.contains("scripted-model"), "{message}");
+    assert!(
+        message.contains("some-other-model"),
+        "and it names what the card does price: {message}"
+    );
+}
+
+#[test]
+fn a_spend_ceiling_ends_the_run_once_the_declared_rates_say_it_was_reached() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "a", json!({}))])),
+            Ok(asks_for(&[("call-2", "a", json!({}))])),
+            Ok(answer("never reached")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .priced(scripted_card())
+    .budgeted(Budget {
+        max_cost_microunits: Some(15),
+        ..Budget::default()
+    });
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("a budget that binds is an outcome, not an error");
+
+    assert_eq!(
+        outcome.stop,
+        LoopStop::MaxCost {
+            limit_micro_usd: 15,
+            spent_micro_usd: 20,
+        }
+    );
+    assert_eq!(outcome.turns, 1, "it stops after the turn that crossed");
+}
+
+#[test]
+fn a_spend_ceiling_on_a_run_that_cannot_price_itself_is_refused_before_the_first_request() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("never sent"))]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .budgeted(Budget {
+        max_cost_microunits: Some(1_000),
+        ..Budget::default()
+    });
+    let (outcome, _) = harness.run();
+
+    assert!(matches!(
+        outcome.expect_err("refused"),
+        LoopError::Budget(BudgetError::Unenforceable {
+            name: "max_cost_microunits"
+        })
+    ));
+    assert!(
+        harness.model.seen.is_empty(),
+        "nothing was spent proving the ceiling could not be kept"
+    );
 }

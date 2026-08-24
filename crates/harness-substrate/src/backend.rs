@@ -38,8 +38,7 @@ pub trait Backend {
     /// Returns [`SubstrateError`] when the write is refused. A path that leaves the workspace is
     /// refused by substrate and never by this crate: re-implementing containment here would make
     /// two answers to one question, and the wrong one would be the one nobody was looking at.
-    fn file_write(&self, workspace: &str, path: &str, text: &str)
-    -> Result<Value, SubstrateError>;
+    fn file_write(&self, workspace: &str, path: &str, text: &str) -> Result<Value, SubstrateError>;
 
     /// Read one file back as text.
     ///

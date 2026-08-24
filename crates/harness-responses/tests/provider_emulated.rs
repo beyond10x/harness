@@ -14,7 +14,8 @@ use std::sync::Arc;
 use b10x_harness_responses::{Endpoint, ResponsesClient, WIRE};
 use harness_loop::{AgentLoop, ApproveAll, Budget, LoopConfig, LoopEvent, LoopStop, VecLoopSink};
 use harness_wire::{
-    Item, StaticBearer, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec, WireErrorCode,
+    Envelope, Item, StaticBearer, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec,
+    WireErrorCode,
 };
 use serde_json::{Value, json};
 
@@ -94,7 +95,7 @@ impl TestTools {
             specs: vec![ToolSpec {
                 name: ToolName::new("workspace_read").expect("valid"),
                 description: "reads one file".to_owned(),
-                envelope: Default::default(),
+                envelope: Envelope::default(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
@@ -178,7 +179,9 @@ fn the_request_is_stateless_authenticated_and_asks_for_reasoning() {
 #[test]
 fn a_tool_round_trip_completes_over_the_wire() {
     let mut tools = TestTools::with_read();
-    let (fixture, outcome, sink) = run("tool", &mut tools);
+    // `dynamic-tool`: the emulator calls this test's own tool by name. The provider is the wire, and
+    // the wire does not know about catalogues — whatever the caller published is what comes back.
+    let (fixture, outcome, sink) = run("dynamic-tool", &mut tools);
     let outcome = outcome.expect("the round trip completes");
 
     assert_eq!(outcome.stop, LoopStop::Completed);

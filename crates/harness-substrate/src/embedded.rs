@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use substrate_host::{Driver as _, DispatchOutcome, HostConfig, HostDriver};
+use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
 use substrate_wire::{
     ConfinementRequest, EmptySource, ExecEnvironment, ExecLimits, ExecOutputQuery, ExecStartInput,
     FileMode, FileReadQuery, NetworkMode, OutputStream, SandboxProfile, WorkspaceCreateInput,
@@ -174,9 +174,10 @@ impl Embedded {
 impl Backend for Embedded {
     fn machine(&self) -> Result<Facts, SubstrateError> {
         let snapshot = self.driver.machine();
-        let value = serde_json::to_value(&snapshot).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
-        })?;
+        let value =
+            serde_json::to_value(&snapshot).map_err(|error| SubstrateError::Unreadable {
+                reason: error.to_string(),
+            })?;
         serde_json::from_value(value).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),
         })
@@ -190,11 +191,7 @@ impl Backend for Embedded {
         // hyphen. A name that passes the first and fails the second reaches `mkdirat` and comes back
         // as `workspace.path-escape` — which reads as a containment failure and is a naming rule.
         // Meeting the stricter of the two is the only thing a caller can do about that.
-        let id = format!(
-            "ws_{}_{}",
-            lease_ttl_ms,
-            std::process::id()
-        );
+        let id = format!("ws_{}_{}", lease_ttl_ms, std::process::id());
         let root_name = self
             .driver
             .workspace_root_identity(&id)
@@ -219,9 +216,10 @@ impl Backend for Embedded {
             DispatchOutcome::NotDispatched(error) => {
                 Err(Self::refused("workspace.create was not dispatched", &error))
             }
-            DispatchOutcome::ContainedAbsent(error) => {
-                Err(Self::refused("workspace.create left nothing behind", &error))
-            }
+            DispatchOutcome::ContainedAbsent(error) => Err(Self::refused(
+                "workspace.create left nothing behind",
+                &error,
+            )),
             DispatchOutcome::OutcomeUnknown(error) => Err(Self::refused(
                 "workspace.create outcome is unknown - do not retry blindly",
                 &error,
@@ -229,12 +227,7 @@ impl Backend for Embedded {
         }
     }
 
-    fn file_write(
-        &self,
-        workspace: &str,
-        path: &str,
-        text: &str,
-    ) -> Result<Value, SubstrateError> {
+    fn file_write(&self, workspace: &str, path: &str, text: &str) -> Result<Value, SubstrateError> {
         let root_name = self
             .driver
             .workspace_root_identity(workspace)
@@ -242,10 +235,12 @@ impl Backend for Embedded {
         // Bytes, not base64. The encoding was the *wire's*; a driver takes the file.
         let observed = self
             .runtime
-            .block_on(
-                self.driver
-                    .write_workspace_file(workspace, &root_name, path, text.as_bytes()),
-            )
+            .block_on(self.driver.write_workspace_file(
+                workspace,
+                &root_name,
+                path,
+                text.as_bytes(),
+            ))
             .map_err(|error| Self::refused("workspace.file-write", &error))?;
         serde_json::to_value(observed).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),

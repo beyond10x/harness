@@ -90,7 +90,14 @@ impl Endpoint {
 pub struct ResponsesClient {
     wire: WireId,
     endpoint: Endpoint,
-    bearer: Arc<dyn BearerSource>,
+    /// [`None`] sends no `authorization` header at all.
+    ///
+    /// Not the same as an empty credential, which is refused below: an empty bearer means a
+    /// credential source answered with nothing and the run would fail in a way nobody could
+    /// explain. `None` means the caller named no source, which is the right shape for a gateway on
+    /// this machine that authenticates nobody — and for a run declared with no credential, whose
+    /// first request is expected to be refused by the far end rather than by this client.
+    bearer: Option<Arc<dyn BearerSource>>,
     http: reqwest::blocking::Client,
     cancel: Cancel,
 }
@@ -116,6 +123,24 @@ impl ResponsesClient {
     ///
     /// Panics only if [`WIRE`], a source-controlled constant, stops being a valid identifier.
     pub fn new(endpoint: Endpoint, bearer: Arc<dyn BearerSource>) -> Result<Self, WireError> {
+        Self::build(endpoint, Some(bearer))
+    }
+
+    /// A client that sends no `authorization` header.
+    ///
+    /// For an endpoint that authenticates nobody — a gateway on this machine — and for a run
+    /// declared with no credential, where being refused by the far end is the wanted outcome.
+    /// Separate constructor rather than an `Option` on [`Self::new`], so that a run reaching an
+    /// endpoint unauthenticated is something a caller wrote down.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireErrorCode::Transport`] when the HTTP client cannot be constructed.
+    pub fn unauthenticated(endpoint: Endpoint) -> Result<Self, WireError> {
+        Self::build(endpoint, None)
+    }
+
+    fn build(endpoint: Endpoint, bearer: Option<Arc<dyn BearerSource>>) -> Result<Self, WireError> {
         let http = reqwest::blocking::Client::builder()
             .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
             .timeout(DEFAULT_OPERATION_TIMEOUT)
@@ -153,27 +178,30 @@ impl ResponsesClient {
         if self.cancel.is_cancelled() {
             return Err(WireError::cancelled());
         }
-        let bearer = self.bearer.bearer()?;
-        if bearer.is_empty() {
-            return Err(WireError::unauthorized(
-                "the bearer source returned an empty credential",
-            ));
-        }
-        let response = self
+        let mut request = self
             .http
             .post(self.endpoint.responses_url())
-            .header("authorization", format!("Bearer {}", bearer.expose()))
             .header("accept", "text/event-stream")
             .header("content-type", "application/json")
-            .json(body)
-            .send()
-            .map_err(|error| {
-                WireError::transport(format!(
-                    "posting to {}: {error}",
-                    self.endpoint.responses_url()
-                ))
-            })?;
-        drop(bearer);
+            .json(body);
+        // Held only for as long as it takes to become a header, and dropped before the send that
+        // can block — the same custody the credential had before it became optional.
+        if let Some(source) = &self.bearer {
+            let bearer = source.bearer()?;
+            if bearer.is_empty() {
+                return Err(WireError::unauthorized(
+                    "the bearer source returned an empty credential",
+                ));
+            }
+            request = request.header("authorization", format!("Bearer {}", bearer.expose()));
+            drop(bearer);
+        }
+        let response = request.send().map_err(|error| {
+            WireError::transport(format!(
+                "posting to {}: {error}",
+                self.endpoint.responses_url()
+            ))
+        })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);

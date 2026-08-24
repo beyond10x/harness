@@ -81,6 +81,15 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 "  usage {} in / {} out ({} cached)",
                 usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
             )),
+            LoopEvent::Rates { source, as_of } => {
+                self.note(&format!("  rates {as_of} — {source}"));
+            }
+            // Six decimals, because a turn can genuinely cost less than a cent and `$0.00` beside a
+            // real charge reads as free.
+            LoopEvent::Cost { micro_usd, .. } => self.note(&format!(
+                "  cost ${}",
+                harness_loop::micro_usd_as_decimal(micro_usd)
+            )),
             LoopEvent::Warning { code, message } => {
                 let _ = writeln!(self.err, "warning [{code}] {message}");
             }

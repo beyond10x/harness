@@ -115,12 +115,54 @@ Today the harness has only the third, and only as a boolean the caller passes wi
 
 ## 3. The toolset the eval actually needs
 
-| tool | effects | risk | subject | status |
+| entry | operation | effects | risk | subject |
 |---|---|---|---|---|
-| `workspace_list` / `workspace_read` / `workspace_grep` | `Read`, `Filesystem` | Low | `file:<path>` | ships today |
-| `workspace_write` | `Write`, `Filesystem` | Medium | `file:<path>` | new |
-| `workspace_edit` | `Write`, `Filesystem` | Medium | `file:<path>` | new |
-| `run` | `Process` | High | `proc:<program>` | new — **and it is not `bash`** |
+| `file_read` | `file.read` | `Read`, `Filesystem` | Low | `file:<path>` |
+| `dir_list` | `dir.list` | `Read`, `Filesystem` | Low | `file:<path>` |
+| `search` | `search` | `Read`, `Filesystem` | Low | `file:<path>` |
+| `file_write` | `file.write` | `Write`, `Filesystem` | Medium | `file:<path>` |
+| `file_edit` | `file.edit` | `Write`, `Filesystem` | Medium | `file:<path>` |
+| `run` | `shell` | `Process` | High | `proc:<program>` — **and it is not `bash`** |
+
+### Amendment: three verbs, and the names are ours everywhere
+
+The entries above were originally `workspace_list`, `workspace_read`, `workspace_grep`,
+`workspace_write` and `workspace_edit` — this component's own vendor vocabulary — and each was
+published to the model as its own tool. Both halves changed, for one reason.
+
+The evaluation compares four arms across three harnesses that each name their tools differently:
+`Bash` here, `run` there, `Write` and `workspace_write` for one act, and a Codex write travelling as
+`apply_patch` with the path inside a patch envelope. Everything downstream of a run therefore had to
+learn one vendor's vocabulary — and the corpus in `engineering-protocols/conformance/eval/` selects
+on tool names, so it was written in Claude Code's and was blind to every other harness. Two patches
+tried to widen it and both put *more* vendor names into a document that should hold none.
+
+So the fix moved upstream of the judge:
+
+* **The entries are named by metaharness's neutral operations**, which is the vocabulary both sides
+  already share. The `operation` column above is that name, and it is what a reader of a run sees.
+* **The model is offered exactly three verbs**, on every harness:
+
+  ```text
+  tool_search   {query?, effect?}   -> the tools this run has
+  tool_describe {name}              -> one tool's arguments, effects, risk
+  tool_invoke   {name, arguments}   -> call it
+  ```
+
+`tool_invoke`'s own envelope cannot be honest — what it does depends on the entry it names — so it
+declares every effect any entry can have and `Idempotency::Conditional`, and the *subject* a policy
+sees is unwrapped from the entry inside it rather than read off the verb. A gate that read the
+verb's own arguments would see one opaque blob for every call in the run.
+
+There are two bindings and the model cannot tell them apart. In-process, `harness_tools::Verbs`
+implements `ToolPort` and the b10x loop publishes it directly. For a vendor harness,
+`metaharness mcp-serve` publishes the same three verbs over the same catalogue on stdio, and the
+launch pairs it with `--tools ""` — so an arm that must not have a shell does not have one, rather
+than having one denied a turn at a time.
+
+The cost, stated rather than discovered: a model that would have called `file_read` directly now
+spends a turn on `tool_describe` first, or guesses the arguments. Whether that shows up in the
+measured arms is an experiment, and it is the one the first live run under this surface answers.
 
 ### Why `run` and not `bash`
 

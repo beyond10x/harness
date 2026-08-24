@@ -321,7 +321,7 @@ mod tests {
         let spec = |name: &str| ToolSpec {
             name: ToolName::new(name).expect("a printable identifier"),
             description: "d".to_owned(),
-            envelope: Default::default(),
+            envelope: Envelope::default(),
             input_schema: json!({"type": "object"}),
             approval: harness_wire::Approval::NotRequired,
         };
@@ -330,16 +330,24 @@ mod tests {
         let error = super::check_tool_names(&[spec("workspace.read")]).expect_err("refused");
         assert_eq!(error.code, WireErrorCode::Protocol);
         assert!(!error.retriable, "the same name would fail again");
-        assert!(error.message.contains("workspace.read"), "{}", error.message);
-        assert!(error.message.contains("workspace_read"), "names the fix: {}", error.message);
+        assert!(
+            error.message.contains("workspace.read"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("workspace_read"),
+            "names the fix: {}",
+            error.message
+        );
 
         // And the class it will publish.
         super::check_tool_names(&[spec("workspace_read"), spec("with-hyphen"), spec("A9")])
             .expect("the publishable class passes");
     }
 
-
     use super::*;
+    use harness_wire::Envelope;
     use harness_wire::{Approval, CallId, ToolOutcome};
 
     fn wire() -> WireId {
@@ -612,7 +620,7 @@ mod tests {
             &[ToolSpec {
                 name: ToolName::new("t").expect("valid"),
                 description: "d".to_owned(),
-                envelope: Default::default(),
+                envelope: Envelope::default(),
                 input_schema: json!({"type": "object"}),
                 approval: Approval::NotRequired,
             }],

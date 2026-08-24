@@ -92,7 +92,10 @@ subprocess over a real socket.
 
 - Maintain `CHANGELOG.md` in Keep a Changelog form. Every user-visible behavior, contract, wire, or
   boundary change enters `Unreleased` in the same change that implements it.
-- Release tags are `harness-vMAJOR.MINOR.PATCH` and point at a fully gated `main` commit.
+- Release tags are the bare version — `0.1.0`, the version and nothing else — annotated, and point
+  at a fully gated `main` commit. The `harness-v` prefix was the monorepo's namespace and retired
+  with it; a slug or prefix is a second copy of what the tag message and the changelog heading
+  already carry.
 
 ## Safety
 

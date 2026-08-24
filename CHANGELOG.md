@@ -7,8 +7,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-08-24
+
+First tagged release. The entries below cover everything since the component was established;
+the commit history carries the full reasoning per change.
+
 ### Fixed
 
+- **Compaction reaches its target instead of firing every turn.** The floor on what a compaction
+  may elide was a count — the newest six tool results were never touched — and six results can
+  outweigh the whole target, so compaction fired on consecutive turns and each rewrite voided the
+  prompt cache for a full-rate replay. The floor is now bytes (`KEPT_RESULT_BYTES`, 48 kB) and
+  compaction elides to a low-water mark (`COMPACTED_TARGET_BYTES`, 96 kB) instead of stopping the
+  moment it fits. Measured on a live run: one compaction instead of four, cost −17%, cache hit rate
+  78% → 86%.
+- **A confined read is bounded, and says when it was.** The substrate-backed `file_read` ignored
+  `max_bytes` and always answered `truncated: false`; the note claiming the truncation could not be
+  reported was wrong. It now bounds at 64 kB — the same figure the unconfined provider uses — and
+  reports the real size and `truncated: true`.
+- **A turn the far side never answered is retried**, instead of ending the run before any text
+  arrived.
+- **The `2026-08-22` provider-wire manifest is re-pinned to its own fixture.** The workspace tool
+  rename changed `turn-stream.sse` without moving the manifest digest, so the contract check
+  refused bytes the Rust contract test already required.
 - **A tool name this wire cannot publish is refused before the request, and the workspace toolset is
   renamed.** The first live run this component has ever had — `https://chatgpt.com/backend-api/codex`
   under a ChatGPT subscription credential, 2026-08-23 — answered turn 1 with
@@ -38,6 +59,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A workflow notation the loop runs natively** (`harness-flow`): a DAG of sub-trees, a group as
+  a context scope with what crosses it written down, a retreat as a group that repeats — because a
+  DAG has no back-edge — and plan/walk over a real projected workflow, with the verdict split from
+  the tallies. A workflow renders as committed prose instructions.
+- **Confined tools, published only where the machine can confine them.** `file_write`, `file_edit`
+  and `run` exist behind substrate's own contract: what this machine can confine is read from
+  substrate's facts, an embedded driver rides behind the same trait as the socket, and publication
+  follows — three tools with no backend, five with an embedded driver, six inside a delegated
+  cgroup. `--substrate-embedded` and `--cgroup-root` on `run` and `tools`; one tree, so the
+  workspace a run reads is the workspace it writes.
+- **A declared toolchain** (`--toolchain rust`), so a confined run can build and not only
+  interpret: exec limits sized for a build, the exec identity substrate admits, and a pin that the
+  declared toolchain carries no operator credential into the child.
+- **Three verbs over one catalogue**: `tool_search`, `tool_describe` and `tool_invoke` over
+  entries named by neutral operations; a call names which file it touched, and the run's own
+  record — the event stream every arm is judged from — reports what it cost.
+- **A run declares where it may write, and the toolset holds it**: `--write-scope
+  <glob>=<allowed|partial-only|denied>` (ordered, first match wins, unnamed paths unrestricted),
+  `--context <file>` preloaded into the standing instruction (an absent file refuses the run), and
+  `--scope-announce stated|silent` — `silent` is the experiment control that shows the toolset,
+  not the prose, is what holds the rule.
+- **Prompt caching on the Responses wire**: send `prompt_cache_key`, key it on the conversation,
+  say who is calling, and carry the standing instruction at the head of `input` where the cache
+  can see it; the catalogue is stated once in the instructions instead of asked for, call by call.
+- **A conversation bound instead of a length cliff**: the loop elides old tool-result payloads
+  when the replayed conversation passes its bound, and the warning carries the figures.
 - Carry sampling on a turn. `TurnRequest` gains an optional `Sampling` — temperature, top_p and a
   reasoning effort — which `LoopConfig` sets once and the loop sends on every turn, because a
   stateless loop replays the whole conversation and a value carried only on the first request would

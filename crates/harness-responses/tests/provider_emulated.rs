@@ -464,3 +464,37 @@ fn a_cancel_during_a_stream_stops_it_mid_answer() {
         outcome.text
     );
 }
+
+#[test]
+fn a_turn_that_failed_before_answering_is_retried_and_the_run_recovers() {
+    // `retriable` was set on 429 and 5xx from the beginning and **nothing ever acted on it**: a
+    // gateway still starting a backend ended a run that had already paid for every turn before it.
+    let mut tools = TestTools::default();
+    let (_fixture, outcome, sink) = run("cold-once", &mut tools);
+    let outcome = outcome.expect("the second attempt answers");
+
+    assert_eq!(outcome.stop, harness_loop::LoopStop::Completed);
+    assert_eq!(outcome.text, "provider emulation passed");
+    assert!(
+        sink.warnings().any(|(code, _)| code == "turn-retried"),
+        "and it says so: a run that quietly took four times as long is one whose latency means \
+         nothing"
+    );
+}
+
+#[test]
+fn a_turn_that_had_already_answered_is_never_retried() {
+    // The whole of the retry rule. Resending is safe on this wire - `store: false`, so the far side
+    // keeps nothing - but not once the caller has seen part of the first attempt: the text is out,
+    // a person has read it, and a second attempt would append a second copy of the same sentence.
+    //
+    // `truncated` streams text and then stops, so the sink has been written to before it fails.
+    let mut tools = TestTools::default();
+    let (_fixture, outcome, sink) = run("truncated", &mut tools);
+
+    assert!(outcome.is_err(), "a stream that stopped mid-answer is final");
+    assert!(
+        !sink.warnings().any(|(code, _)| code == "turn-retried"),
+        "nothing was retried after the caller had seen output"
+    );
+}

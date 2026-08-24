@@ -53,6 +53,43 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_ERROR_BODY_BYTES: usize = 2048;
 
+/// How many extra attempts a turn gets when the far side failed in a way that may not repeat.
+///
+/// A rate limit and a gateway that is still warming up are not answers; they are the absence of
+/// one, and the run has already paid for every turn before this. Losing all of it to a 503 is the
+/// most expensive way to fail.
+const MAX_ATTEMPTS: u32 = 4;
+
+/// How long to wait before attempt `n`, doubling and capped.
+///
+/// Capped rather than unbounded because the loop's own deadline is what should end a run that is
+/// going nowhere; a backoff that outlived it would take the decision away from the caller.
+fn backoff(attempt: u32) -> Duration {
+    Duration::from_millis(500u64 << attempt.min(4))
+}
+
+/// A sink that remembers whether anything reached the caller.
+///
+/// **The whole of the retry rule.** Resending a request is safe on this wire — `store: false`, so
+/// the far side keeps nothing and a second identical POST is a fresh turn. What is *not* safe is
+/// resending after the caller has already seen part of the first attempt: the text deltas are out,
+/// a person has read them, and a second attempt would append a second copy of the same sentence to
+/// the record. So an attempt that has emitted **anything** is final, whatever went wrong.
+///
+/// In practice that keeps exactly the failures worth retrying: a refused connection, a rate limit,
+/// a gateway still starting a backend — all of which land before the first byte of the stream.
+struct WitnessedSink<'a> {
+    inner: &'a mut dyn StreamSink,
+    emitted: bool,
+}
+
+impl StreamSink for WitnessedSink<'_> {
+    fn emit(&mut self, event: StreamEvent) {
+        self.emitted = true;
+        self.inner.emit(event);
+    }
+}
+
 /// One endpoint serving one model.
 ///
 /// These are exactly the three facts an `OpenAI`-compatible gateway needs, so a route already
@@ -199,6 +236,53 @@ impl ResponsesClient {
     pub fn with_cancel(mut self, cancel: Cancel) -> Self {
         self.cancel = cancel;
         self
+    }
+
+    /// One turn, retried while the far side has not actually answered.
+    ///
+    /// See [`WitnessedSink`] for the rule that decides what may be retried. A cancelled run stops
+    /// at once — waiting out a backoff after somebody pressed Ctrl-C is the harness ignoring them.
+    fn attempt_turn(
+        &self,
+        body: &Value,
+        model: &str,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        let mut attempt = 0;
+        loop {
+            let mut witnessed = WitnessedSink {
+                inner: sink,
+                emitted: false,
+            };
+            let outcome = self.send(body).and_then(|response| {
+                let reader =
+                    SseReader::new(BufReader::new(response)).with_cancel(self.cancel.clone());
+                drain(reader, &self.wire, model, &mut witnessed)
+            });
+            let error = match outcome {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) => error,
+            };
+            attempt += 1;
+            let again = error.retriable
+                && attempt < MAX_ATTEMPTS
+                && !witnessed.emitted
+                && !self.cancel.is_cancelled();
+            if !again {
+                return Err(error);
+            }
+            // Said out loud. A run that quietly took four times as long as it looks would be a run
+            // whose latency numbers mean nothing.
+            sink.emit(StreamEvent::Warning {
+                code: "turn-retried".to_owned(),
+                message: format!(
+                    "attempt {attempt} of {MAX_ATTEMPTS} failed before answering and is being \
+                     retried: {}",
+                    error.message
+                ),
+            });
+            std::thread::sleep(backoff(attempt));
+        }
     }
 
     fn send(&self, body: &Value) -> Result<reqwest::blocking::Response, WireError> {
@@ -430,9 +514,7 @@ impl ModelPort for ResponsesClient {
             request.max_output_tokens,
             &request.sampling,
         );
-        let response = self.send(&body)?;
-        let reader = SseReader::new(BufReader::new(response)).with_cancel(self.cancel.clone());
-        drain(reader, &self.wire, &request.model, sink)
+        self.attempt_turn(&body, &request.model, sink)
     }
 }
 

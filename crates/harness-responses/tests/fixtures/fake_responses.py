@@ -142,6 +142,8 @@ def replayed_reasoning(body):
 
 class Handler(BaseHTTPRequestHandler):
     scenario = "text"
+    # How many requests this process has served, for scenarios whose answer depends on it.
+    requests = 0
     record_path = None
     turn_count = 0
 
@@ -235,6 +237,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(503)
             self.send_header("retry-after", "5")
             self.end_headers()
+        elif scenario == "cold-once":
+            # 503 once, then answer. The shape a gateway starting a backend actually has, and the
+            # one that tells a retry apart from a slower failure.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                self.send_response(503)
+                self.send_header("retry-after", "0")
+                self.end_headers()
+            else:
+                self._send_sse(text_events("provider emulation passed"))
         elif scenario == "slow":
             # Paced so a client has time to cancel mid-stream. A cancel that only lands between
             # turns proves nothing about the case that matters.

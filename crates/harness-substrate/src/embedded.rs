@@ -359,7 +359,12 @@ impl Backend for Embedded {
             limits: ExecLimits {
                 timeout_ms: 900_000,
                 output_bytes: 1_048_576,
-                processes: 64,
+                // A parallel build is hundreds of processes and threads, not dozens: `cargo`
+                // fans out across every core and each `rustc` spawns its own codegen threads.
+                // At 64 the run did not fail cleanly — it died inside the standard library with
+                // `failed to spawn thread: Resource temporarily unavailable`, which reads as a
+                // machine under load rather than as a bound somebody set.
+                processes: 2_048,
                 memory_bytes: 8_589_934_592,
                 cpu_millis: 3_600_000,
             },

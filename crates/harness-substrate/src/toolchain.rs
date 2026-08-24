@@ -33,6 +33,17 @@ use substrate_wire::ReadOnlyRoot;
 /// this one.
 const MOUNT_PREFIX: &str = "/toolchain";
 
+/// Where substrate binds the workspace.
+const WORKSPACE: &str = "/workspace";
+
+/// The toolchain directory `rustup` keeps a stable install under.
+///
+/// Named rather than discovered because the shim directory `rustup` puts on `PATH` lives in
+/// `CARGO_HOME`, and `CARGO_HOME` is now inside the workspace where no shim exists. Pointing
+/// `PATH` straight at the toolchain's own `bin` skips the shim entirely, which is what a confined
+/// run wants anyway: one fixed compiler, chosen before the run started.
+const TOOLCHAIN: &str = "stable-x86_64-unknown-linux-gnu";
+
 /// A toolchain the run may read, and the environment that points at it.
 #[derive(Debug, Clone, Default)]
 pub struct Toolchain {
@@ -53,56 +64,63 @@ impl Toolchain {
     /// fails deep inside cargo with a message about a registry, which is a much worse way to find
     /// out that a path was wrong.
     pub fn rust(home: Option<&Path>) -> Result<Self, String> {
-        let located = |variable: &str, fallback: &str| -> Result<PathBuf, String> {
-            if let Some(value) = std::env::var_os(variable) {
-                return Ok(PathBuf::from(value));
-            }
-            home.map(|home| home.join(fallback)).ok_or_else(|| {
-                format!("neither `{variable}` nor a home directory says where to find `{fallback}`")
-            })
+        let rustup = match std::env::var_os("RUSTUP_HOME") {
+            Some(value) => PathBuf::from(value),
+            None => home
+                .map(|home| home.join(".rustup"))
+                .ok_or_else(|| "neither `RUSTUP_HOME` nor a home directory says where the Rust \
+                                 toolchain is".to_owned())?,
         };
-        let cargo = located("CARGO_HOME", ".cargo")?;
-        let rustup = located("RUSTUP_HOME", ".rustup")?;
-
-        let mut toolchain = Self::default();
-        for (path, name) in [(cargo, "cargo"), (rustup, "rustup")] {
-            let path = path.canonicalize().map_err(|error| {
-                format!("the Rust toolchain's `{name}` directory ({}): {error}", path.display())
-            })?;
-            if !path.is_dir() {
-                return Err(format!(
-                    "the Rust toolchain's `{name}` directory ({}) is not a directory",
-                    path.display()
-                ));
-            }
-            toolchain.roots.push(ReadOnlyRoot {
-                host_path: path.display().to_string(),
-                mount: format!("{MOUNT_PREFIX}/{name}"),
-            });
+        let rustup = rustup.canonicalize().map_err(|error| {
+            format!("the Rust toolchain's `rustup` directory ({}): {error}", rustup.display())
+        })?;
+        if !rustup.is_dir() {
+            return Err(format!(
+                "the Rust toolchain's `rustup` directory ({}) is not a directory",
+                rustup.display()
+            ));
         }
 
-        // `--clearenv` leaves the process with nothing, so everything cargo reads has to be said
+        let mut toolchain = Self::default();
+        toolchain.roots.push(ReadOnlyRoot {
+            host_path: rustup.display().to_string(),
+            mount: format!("{MOUNT_PREFIX}/rustup"),
+        });
+
+        // `--clearenv` leaves the process with nothing, so everything the toolchain reads is said
         // here. `PATH` carries rustup's shims, which is how `cargo` finds `rustc` at all.
-        toolchain.env.insert(
-            "CARGO_HOME".to_owned(),
-            format!("{MOUNT_PREFIX}/cargo"),
-        );
-        toolchain.env.insert(
-            "RUSTUP_HOME".to_owned(),
-            format!("{MOUNT_PREFIX}/rustup"),
-        );
-        toolchain.env.insert(
-            "PATH".to_owned(),
-            format!("{MOUNT_PREFIX}/cargo/bin:/usr/local/bin:/usr/bin:/bin"),
-        );
-        // The workspace, not the operator's home — which is not mounted and must not be implied.
-        // cargo reads `HOME` for its own fallbacks and a run without one behaves unpredictably.
-        toolchain.env.insert("HOME".to_owned(), "/workspace".to_owned());
-        // A build tree the run may actually write to. `CARGO_HOME` is read-only by construction,
-        // so without this cargo would try to write its output into a directory it cannot.
         toolchain
             .env
-            .insert("CARGO_TARGET_DIR".to_owned(), "/workspace/target".to_owned());
+            .insert("RUSTUP_HOME".to_owned(), format!("{MOUNT_PREFIX}/rustup"));
+        toolchain.env.insert(
+            "PATH".to_owned(),
+            format!("{MOUNT_PREFIX}/rustup/toolchains/{TOOLCHAIN}/bin:/usr/local/bin:/usr/bin:/bin"),
+        );
+        // **`CARGO_HOME` is inside the workspace, and that is not a convenience.**
+        //
+        // Two reasons, and the first is the serious one. `~/.cargo` holds `credentials.toml` — a
+        // registry token — beside the package cache, so mounting it whole would hand every
+        // confined run the operator's publishing credential. It was mounted whole for one commit
+        // and that was wrong; nothing about a build needs the token, and a confinement that leaks
+        // one is not a confinement.
+        //
+        // The second is that cargo needs `CARGO_HOME` **writable** even offline: it takes a
+        // `.package-cache` lock there before it does anything, and against a read-only mount it
+        // blocks forever with no output — which is exactly how this was found.
+        //
+        // So the caller seeds `<workspace>/.cargo` with the package cache the run needs. That is a
+        // copy rather than a mount, and it is the caller's to make, because only the caller knows
+        // which crates a task will want.
+        toolchain
+            .env
+            .insert("CARGO_HOME".to_owned(), format!("{WORKSPACE}/.cargo"));
+        // The workspace, never the operator's home — which is not mounted and must not be implied.
+        toolchain.env.insert("HOME".to_owned(), WORKSPACE.to_owned());
+        // A build tree the run may write to. Without it cargo writes beside the sources, which is
+        // fine, but naming it keeps the output somewhere a caller can find and clear.
+        toolchain
+            .env
+            .insert("CARGO_TARGET_DIR".to_owned(), format!("{WORKSPACE}/target"));
         Ok(toolchain)
     }
 

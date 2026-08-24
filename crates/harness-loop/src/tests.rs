@@ -959,13 +959,105 @@ fn the_most_recent_results_survive_however_long_the_conversation_is() {
         .map(|(index, _)| index)
         .collect();
     assert!(
-        intact.len() >= super::KEPT_TOOL_RESULTS,
-        "at least the newest {} are whole, got {}",
-        super::KEPT_TOOL_RESULTS,
-        intact.len()
+        !intact.is_empty(),
+        "a model that cannot see the result of the call it just made is stuck"
     );
     let last = items.len() - 1;
     assert!(intact.contains(&last), "the newest result above all");
+}
+
+/// A conversation of `n` results of `bytes` each, in call order.
+///
+/// Separate from [`fat_conversation`] because the newest [`super::KEPT_RESULT_BYTES`] are never
+/// elided: a fixture of few very large results tests the floor, and this one tests the target.
+fn conversation_of(n: usize, bytes: usize) -> Vec<Item> {
+    let mut items = vec![Item::user("do the thing")];
+    for index in 0..n {
+        items.push(Item::ToolCall(ToolCall {
+            call_id: call_id(&format!("c{index}")),
+            name: tool_name("a"),
+            arguments: json!({}),
+        }));
+        items.push(Item::result(
+            call_id(&format!("c{index}")),
+            ToolOutcome::ok(json!({ "text": "x".repeat(bytes) })),
+        ));
+    }
+    items
+}
+
+/// The conversation's serialized size, the way `compact` measures it.
+fn measured(items: &[Item]) -> usize {
+    items
+        .iter()
+        .map(|item| serde_json::to_string(item).map_or(0, |json| json.len()))
+        .sum()
+}
+
+#[test]
+fn a_compaction_goes_below_the_bound_so_the_next_result_does_not_pay_for_another_one() {
+    // Measured on a live 24-turn run: compacting to the bound fired twice, and the two turns after
+    // replayed 43,203 and 58,448 tokens uncached — about a third of that run's bill. The bytes
+    // dropped are the same either way; what changes is how many times the cache is thrown away.
+    let mut items = conversation_of(40, 8_000);
+    super::compact(&mut items, &mut NullLoopSink);
+
+    let after = measured(&items);
+    assert!(
+        after <= super::COMPACTED_TARGET_BYTES,
+        "compaction stopped at {after} bytes, above the {} low-water mark",
+        super::COMPACTED_TARGET_BYTES
+    );
+}
+
+#[test]
+fn one_more_large_result_after_a_compaction_does_not_trigger_a_second_one() {
+    // The defect this exists to catch: stopping at the bound leaves the next result to cross it
+    // again, and the second prefix rewrite costs a whole uncached replay.
+    let mut items = conversation_of(40, 8_000);
+    super::compact(&mut items, &mut NullLoopSink);
+
+    items.push(Item::ToolCall(ToolCall {
+        call_id: call_id("next"),
+        name: tool_name("a"),
+        arguments: json!({}),
+    }));
+    items.push(Item::result(
+        call_id("next"),
+        ToolOutcome::ok(json!({ "text": "x".repeat(40_000) })),
+    ));
+
+    let mut sink = VecLoopSink::new();
+    super::compact(&mut items, &mut sink);
+    assert_eq!(
+        sink.warnings()
+            .filter(|(code, _)| *code == "conversation-compacted")
+            .count(),
+        0,
+        "one 40kB result after a compaction must fit under the bound, not buy another rewrite"
+    );
+}
+
+#[test]
+fn the_newest_results_are_kept_by_size_so_the_floor_never_sits_above_the_target() {
+    // A live run kept six recent results whole, they came to about 130kB, and compaction could then
+    // only reach 177,915 bytes — above the low-water mark and barely under the bound. It fired
+    // again on the next result, and again on the one after.
+    let mut items = fat_conversation(10);
+    super::compact(&mut items, &mut NullLoopSink);
+
+    let after = measured(&items);
+    assert!(
+        after <= super::COMPACTED_TARGET_BYTES,
+        "40kB results must not hold the floor above the target: left {after} bytes"
+    );
+    let intact = items
+        .iter()
+        .filter(
+            |item| matches!(item, Item::ToolResult { output, .. } if output.get("elided").is_none()),
+        )
+        .count();
+    assert!(intact >= 1, "the newest result survives whatever its size");
 }
 
 #[test]

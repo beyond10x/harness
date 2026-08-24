@@ -275,11 +275,37 @@ impl RunState {
 /// then edited is dead weight from the moment the edit landed.
 pub const MAX_CONVERSATION_BYTES: usize = 192 * 1024;
 
-/// How many of the most recent tool results are never elided, however large the conversation is.
+/// How far below the bound a compaction elides, rather than stopping the moment it fits.
+///
+/// # The measurement that put this here
+///
+/// Without it, compaction stops at the bound — so the *next* large result crosses it again and the
+/// prefix is rewritten a second time. A live 24-turn run on 2026-08-24 compacted at turn 18 (one
+/// result, 22,707 bytes freed) and again at turn 22, and the two turns after those replayed 43,203
+/// and 58,448 tokens **uncached**: about $0.39 of a $1.19 run, a third of the bill, for a cache the
+/// run had already paid to build.
+///
+/// Eliding to a low-water mark makes the rewrite rare and deep instead of frequent and shallow. The
+/// bytes dropped are the same bytes either way; what changes is how many times the cache is thrown
+/// away to drop them.
+pub const COMPACTED_TARGET_BYTES: usize = 96 * 1024;
+
+/// How many **bytes** of the most recent tool results are never elided.
 ///
 /// The model is usually working from what it just read. Eliding that would make it read the file
 /// again, which costs more than the elision saved.
-pub const KEPT_TOOL_RESULTS: usize = 6;
+///
+/// # Why this is a size and not a count
+///
+/// It was a count of six, and a live run on 2026-08-24 showed what that costs: six recent results
+/// came to about 130kB, so a compaction that could only touch the rest freed 45,860 bytes and left
+/// 177,915 — above the low-water mark, and barely under the bound. The conversation then crossed
+/// the bound again on the next result, and again on the one after: four compactions, two of them on
+/// consecutive turns, each one a full uncached replay.
+///
+/// A count cannot bound bytes when one result can be 64kB. A size can, so the floor can never sit
+/// above the target it is meant to leave room under.
+pub const KEPT_RESULT_BYTES: usize = 48 * 1024;
 
 /// Elides the oldest tool results until the conversation fits, and says how much went.
 ///
@@ -318,11 +344,25 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         .filter(|(_, item)| matches!(item, Item::ToolResult { output, .. } if !is_elided(output)))
         .map(|(index, _)| index)
         .collect();
-    let elidable = results.len().saturating_sub(KEPT_TOOL_RESULTS);
+    // The newest results, whole, until they come to [`KEPT_RESULT_BYTES`] — and always at least
+    // one, because a model that cannot see the result of the call it just made is stuck.
+    let mut kept = 0_usize;
+    let mut protected = 0_usize;
+    for &index in results.iter().rev() {
+        let size = serde_json::to_string(&items[index]).map_or(0, |json| json.len());
+        if protected > 0 && kept + size > KEPT_RESULT_BYTES {
+            break;
+        }
+        kept += size;
+        protected += 1;
+    }
+    let elidable = results.len().saturating_sub(protected);
     let mut freed = 0_usize;
     let mut count = 0_usize;
     for index in results.into_iter().take(elidable) {
-        if measure(items) <= MAX_CONVERSATION_BYTES {
+        // Down to the low-water mark, not to the bound: stopping at the bound leaves the next
+        // result to cross it again, and the second rewrite costs a whole uncached replay.
+        if measure(items) <= COMPACTED_TARGET_BYTES {
             break;
         }
         let Item::ToolResult { output, .. } = &mut items[index] else {
@@ -346,8 +386,9 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
             code: "conversation-compacted".to_owned(),
             message: format!(
                 "the conversation passed {MAX_CONVERSATION_BYTES} bytes, so {count} old tool \
-                 result(s) were elided, freeing {freed} bytes. The most recent \
-                 {KEPT_TOOL_RESULTS} are untouched."
+                 result(s) were elided, freeing {freed} bytes and leaving {now}. The most recent \
+                 {protected} result(s), {kept} bytes, are untouched.",
+                now = measure(items)
             ),
         });
     }

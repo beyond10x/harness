@@ -45,11 +45,23 @@ use substrate_wire::{
 
 use crate::{Backend, Facts, SubstrateError};
 
+/// One execution's identity, in the shape substrate admits.
+///
+/// `^ex_[A-Za-z0-9_]+$`, and unique per call. Its own function so the rule is testable without a
+/// driver, a workspace or a delegated cgroup — which is why nothing caught the shape that came
+/// before it.
+pub(crate) fn exec_identity(process: u32, sequence: u64) -> String {
+    format!("ex_{process}_{sequence}")
+}
+
 /// Substrate's driver, held in this process.
 pub struct Embedded {
     driver: Arc<HostDriver>,
     runtime: tokio::runtime::Runtime,
     root: PathBuf,
+    /// Makes each exec's identity distinct. substrate keys an execution's output and lifetime on
+    /// it, so two calls sharing one would read each other's.
+    next_exec: std::sync::atomic::AtomicU64,
 }
 
 impl std::fmt::Debug for Embedded {
@@ -100,6 +112,7 @@ impl Embedded {
             driver,
             runtime,
             root,
+            next_exec: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -321,7 +334,23 @@ impl Backend for Embedded {
             capsule: None,
             lease_ttl_ms: None,
         };
-        let id = format!("exec-{}-{}", std::process::id(), argv.join("-"));
+        // **substrate's own shape, which this never had.** `admit` requires `^ex_[A-Za-z0-9_]+$`
+        // and this was `exec-<pid>-<argv joined by dashes>`: wrong prefix, and a program path is
+        // full of `/` and `.`. Every exec was refused `exec.identity-invalid` before it started —
+        // for the whole life of the embedded driver, and quietly, because a failed tool call is
+        // just a failed tool call to the model.
+        //
+        // It cost more than a feature. A live run asked to fix a suite had all three of its `run`
+        // calls refused, edited the file anyway, and reported the suite passing; the file was
+        // right and nothing had ever executed. A harness whose exec silently never works turns
+        // every "run the tests" instruction into an invitation to claim.
+        //
+        // Unique per call, because substrate keys an execution's output and lifetime on it and two
+        // calls sharing an id would read each other's.
+        let id = exec_identity(
+            std::process::id(),
+            self.next_exec.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        );
         let started = self
             .runtime
             .block_on(self.driver.start_exec(&id, &root_name, &input));

@@ -486,3 +486,30 @@ fn a_confined_workspace_lists_and_searches_through_nothing_and_says_so() {
         );
     }
 }
+
+#[test]
+fn an_exec_identity_is_the_shape_substrate_admits() {
+    // `admit` requires `^ex_[A-Za-z0-9_]+$`. This was `exec-<pid>-<argv joined by dashes>` - wrong
+    // prefix, and a program path is full of `/` and `.` - so **every exec was refused before it
+    // started**, for the whole life of the embedded driver, and quietly: a refused tool call looks
+    // like a failed tool call to the model.
+    //
+    // A live run asked to fix a failing suite had all three of its `run` calls refused, edited the
+    // file anyway, and reported the suite passing. The file was right and nothing had executed.
+    let first = super::embedded::exec_identity(4242, 0);
+    let second = super::embedded::exec_identity(4242, 1);
+
+    for id in [&first, &second] {
+        assert!(id.starts_with("ex_"), "{id}");
+        assert!(
+            id.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'),
+            "{id}"
+        );
+    }
+    assert_ne!(
+        first, second,
+        "substrate keys an execution's output and lifetime on this, so two calls sharing one \
+         would read each other's"
+    );
+}

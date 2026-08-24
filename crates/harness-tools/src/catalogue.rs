@@ -72,6 +72,8 @@ impl Entry {
 pub struct Catalogue {
     operations: Box<dyn Operations>,
     entries: Vec<Entry>,
+    /// Where this run may write. Empty restricts nothing — see [`crate::Scope`].
+    scope: crate::Scope,
 }
 
 impl std::fmt::Debug for Catalogue {
@@ -106,7 +108,25 @@ impl Catalogue {
         Self {
             operations: Box::new(operations),
             entries,
+            scope: crate::Scope::default(),
         }
+    }
+
+    /// The same catalogue, restricted to where this run may write.
+    ///
+    /// Declared before the run starts and never changed during it: a boundary a run could widen is
+    /// not a boundary. Every entry stays published — the model is told what exists and refused per
+    /// call with a reason naming the way in, rather than handed a shorter list it cannot ask about.
+    #[must_use]
+    pub fn scoped(mut self, scope: crate::Scope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Where this run may write.
+    #[must_use]
+    pub fn scope(&self) -> &crate::Scope {
+        &self.scope
     }
 
     /// Every entry, in the order they were built.
@@ -255,6 +275,15 @@ impl Catalogue {
     /// nothing sent anywhere — or the operation itself failed, in which case the words are its own.
     pub fn invoke(&self, name: &str, arguments: &Value) -> Result<Value, String> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
+        // **Refused here, by the tool, because here is where this loop's policy lives.** Every
+        // other arm adjudicates at a decision seam; this one has none and never grows one, so a
+        // tool that must not act on a path refuses on that path exactly as `run` refuses a program
+        // nobody declared. Before the operation runs, so a refusal costs nothing but a turn.
+        if let Some(path) = arguments.get("path").and_then(Value::as_str)
+            && let Some(refusal) = self.scope.refusal(entry.operation, path)
+        {
+            return Err(refusal);
+        }
         let string = |field: &str| -> Result<&str, String> {
             arguments
                 .get(field)

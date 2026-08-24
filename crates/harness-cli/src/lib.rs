@@ -9,6 +9,7 @@
 mod metaharness;
 mod render;
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -61,12 +62,48 @@ work as done unless a tool you called made it so.";
 ///
 /// The verbs are unchanged and still the only way to act. What is removed is the requirement to
 /// ask before doing anything.
-fn standing_instruction(catalogue: &harness_tools::Catalogue) -> String {
-    format!(
+fn standing_instruction(
+    catalogue: &harness_tools::Catalogue,
+    context: &str,
+    announce: bool,
+) -> String {
+    let mut text = format!(
         "{DEFAULT_INSTRUCTIONS}\n\nThis run's catalogue, which is what `tool_invoke` will \
          accept — call `tool_search` only if you need to re-check it:\n\n{}",
         catalogue.brief()
-    )
+    );
+    // Where the run may write, in the instruction as well as in the tool. The tool is what makes
+    // it true; this is what stops the model spending a turn discovering it by being refused.
+    if announce && !catalogue.scope().is_empty() {
+        text.push_str("\n\nWhere this run may write. A path no rule names is unrestricted:\n");
+        for rule in catalogue.scope().rules() {
+            let word = match rule.write {
+                harness_tools::WriteScope::Allowed => "may be written or edited",
+                harness_tools::WriteScope::PartialOnly => {
+                    "may be edited in part, never replaced whole — use `file_edit`"
+                }
+                harness_tools::WriteScope::Denied => "must not be changed at all",
+            };
+            let _ = writeln!(text, "- `{}` {word}", rule.paths);
+        }
+    }
+    if !context.is_empty() {
+        text.push_str(
+            "\n\nFiles you have been given. They are already read; do not read them again:\n",
+        );
+        text.push_str(context);
+    }
+    text
+}
+
+/// Whether a declared scope is stated in the instruction as well as bound into the tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ScopeAnnounce {
+    /// Say it up front, so no turn is spent discovering it by being refused.
+    Stated,
+    /// Bind it and say nothing. The refusal has to teach it — which is what makes a run under this
+    /// a measurement of the toolset rather than of the prose.
+    Silent,
 }
 
 #[derive(Debug, Parser)]
@@ -237,6 +274,35 @@ struct RunOptions {
     /// Wall-clock ceiling in milliseconds, checked between turns.
     #[arg(long)]
     max_duration_ms: Option<u64>,
+    /// Where this run may write, as `<glob>=<allowed|partial-only|denied>`. Repeatable, ordered.
+    ///
+    /// First match wins; a path no rule mentions is allowed, because this declares where writing is
+    /// **restricted** and a scope nobody wrote restricts nothing.
+    ///
+    /// `partial-only` is the one worth knowing: the path may be changed in part and never replaced
+    /// whole. It is what a store whose frontmatter is owned by a CLI needs, and it is a distinction
+    /// no list of operations can make — `file_write` and `file_edit` are both writes.
+    ///
+    /// Refused by the tool, per call, with a reason naming the way in. This loop has no decision
+    /// seam and never grows one: the published toolset is the policy.
+    #[arg(long, value_name = "GLOB=SCOPE")]
+    write_scope: Vec<String>,
+    /// Whether the declared scope is also stated in the instruction.
+    ///
+    /// `silent` is an experiment control, and it exists because the two are different claims. A run
+    /// told the rule and a run refused the rule both end with the rule kept, and only the second
+    /// shows that the **toolset** is what kept it. Stating it is cheaper — the model spends no call
+    /// being refused — so a real run states it.
+    #[arg(long, value_name = "MODE", default_value = "stated")]
+    scope_announce: ScopeAnnounce,
+    /// A file the run is given before it starts, instead of discovering it. Repeatable.
+    ///
+    /// Costs input tokens on **every** turn, because a stateless loop replays its conversation. It
+    /// is still usually a saving: what it replaces is a read, a turn, *and* a result that joins the
+    /// same replay. A file that is not there refuses the run — one given a smaller context than it
+    /// was told to have is a run nobody can reproduce.
+    #[arg(long, value_name = "FILE")]
+    context: Vec<PathBuf>,
     /// A rate card, so the run reports what it cost.
     ///
     /// A JSON document naming its own `source` and `as_of` date and holding
@@ -329,6 +395,12 @@ struct ToolsOptions {
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
     allow_program: Vec<String>,
+    /// Where a run may write, as `<glob>=<allowed|partial-only|denied>`, so `tools` answers with it.
+    ///
+    /// The same declaration `run` takes. It belongs in this answer because "what can this run do?"
+    /// is not answered by a list of tools alone once some paths refuse some of them.
+    #[arg(long, value_name = "GLOB=SCOPE")]
+    write_scope: Vec<String>,
     /// Admit a build toolchain read-only, so `tools` describes the run a `run` would get.
     #[arg(long, value_name = "NAME")]
     toolchain: Option<String>,
@@ -461,11 +533,16 @@ fn sampling(options: &RunOptions) -> Sampling {
 fn instructions(
     options: &RunOptions,
     catalogue: &harness_tools::Catalogue,
+    context: &str,
 ) -> Result<String, String> {
     match &options.instructions_file {
         Some(path) => fs::read_to_string(path)
             .map_err(|error| format!("reading `{}`: {error}", path.display())),
-        None => Ok(standing_instruction(catalogue)),
+        None => Ok(standing_instruction(
+            catalogue,
+            context,
+            options.scope_announce == ScopeAnnounce::Stated,
+        )),
     }
 }
 
@@ -485,6 +562,7 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
             workspace_id: &options.workspace_id,
             programs: &options.allow_program,
             toolchain: &toolchain(options.toolchain.as_deref())?,
+            scope: write_scope(&options.write_scope)?,
         },
     );
     let mut approvals: Box<dyn ApprovalPort> = if options.yes {
@@ -492,7 +570,10 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     } else {
         Box::new(DenyAll)
     };
-    let config = LoopConfig::new(&options.model, instructions(options, tools.catalogue())?)
+    let config = LoopConfig::new(
+        &options.model,
+        instructions(options, tools.catalogue(), &context(&options.context)?)?,
+    )
         .with_sampling(sampling(options))
         .with_budget(budget(options))
         .with_prices(prices(options)?);
@@ -528,6 +609,36 @@ fn install_interrupt(cancel: &LoopCancel) {
 /// Names the toolchain that is not known, and lists the ones that are. A misspelling that silently
 /// declared nothing would produce a run whose builds fail deep inside a build tool, which is a much
 /// worse way to find out.
+/// The scope the caller declared, in order.
+///
+/// # Errors
+///
+/// Names the rule that could not be read. A misspelling silently becoming "allowed" would be a
+/// boundary that quietly is not one.
+fn write_scope(declarations: &[String]) -> Result<harness_tools::Scope, String> {
+    declarations
+        .iter()
+        .map(|rule| harness_tools::ScopeRule::parse(rule))
+        .collect::<Result<Vec<_>, _>>()
+        .map(harness_tools::Scope::of)
+}
+
+/// The declared context files, read and labelled.
+///
+/// # Errors
+///
+/// Names the file that could not be read. A run given a smaller context than it was told to have is
+/// one nobody can reproduce from the declaration.
+fn context(files: &[PathBuf]) -> Result<String, String> {
+    let mut text = String::new();
+    for path in files {
+        let body = fs::read_to_string(path)
+            .map_err(|error| format!("reading the context file `{}`: {error}", path.display()))?;
+        let _ = write!(text, "\n\n--- {} ---\n{body}", path.display());
+    }
+    Ok(text)
+}
+
 fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     match name {
@@ -563,6 +674,9 @@ struct Confinement<'a> {
     workspace_id: &'a str,
     programs: &'a [String],
     toolchain: &'a harness_substrate::Toolchain,
+    /// Where the run may write. Part of the confinement because it is the same decision: what this
+    /// run may do, taken before it starts and not by it.
+    scope: harness_tools::Scope,
 }
 
 fn published(
@@ -577,9 +691,14 @@ fn published(
         workspace_id,
         programs,
         toolchain,
+        scope,
     } = confinement;
     let (substrate, embedded, cgroup_root) = (*substrate, *embedded, *cgroup_root);
-    let read_only = || harness_tools::Verbs::new(harness_tools::Catalogue::of(reading.clone()));
+    let read_only = || {
+        harness_tools::Verbs::new(
+            harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()),
+        )
+    };
 
     if embedded.is_some() {
         // **One tree.** The workspace the reading provider sees *is* the confined workspace: its
@@ -604,9 +723,10 @@ fn published(
         };
         let confined =
             harness_substrate::ConfinedOperations::new(tools, &facts, workspace, programs.to_vec());
-        return harness_tools::Verbs::new(harness_tools::Catalogue::of(harness_tools::Split::new(
-            reading, confined,
-        )));
+        return harness_tools::Verbs::new(
+            harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
+                .scoped(scope.clone()),
+        );
     }
 
     let Some(socket) = substrate else {
@@ -622,9 +742,10 @@ fn published(
         *workspace_id,
         programs.to_vec(),
     );
-    harness_tools::Verbs::new(harness_tools::Catalogue::of(harness_tools::Split::new(
-        reading, confined,
-    )))
+    harness_tools::Verbs::new(
+        harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
+            .scoped(scope.clone()),
+    )
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
@@ -638,6 +759,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             workspace_id: &options.workspace_id,
             programs: &options.allow_program,
             toolchain: &toolchain(options.toolchain.as_deref())?,
+            scope: write_scope(&options.write_scope)?,
         },
     );
     println!(
@@ -922,7 +1044,7 @@ mod tests {
         // which are also the only half of a request a prompt cache can hold.
         let dir = tempfile::tempdir().expect("temporary directory");
         let catalogue = a_catalogue(dir.path());
-        let text = instructions(&options(&[]), &catalogue).expect("the default is available");
+        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
 
         for entry in ["file_read", "dir_list", "search"] {
             assert!(text.contains(entry), "`{entry}` is named up front: {text}");
@@ -939,7 +1061,7 @@ mod tests {
     fn the_default_instruction_points_at_the_catalogue_and_promises_no_effects() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let catalogue = a_catalogue(dir.path());
-        let text = instructions(&options(&[]), &catalogue).expect("the default is available");
+        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
         assert!(text.contains("tool_search"), "{text}");
         for stale in ["workspace_read", "workspace_list", "workspace_grep"] {
             assert!(!text.contains(stale), "`{stale}` no longer exists: {text}");
@@ -954,6 +1076,39 @@ mod tests {
     }
 
     #[test]
+    fn a_declared_scope_is_stated_up_front_so_no_turn_is_spent_discovering_it() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let catalogue = a_catalogue(dir.path()).scoped(harness_tools::Scope::of(vec![
+            harness_tools::ScopeRule::parse(".engineering/planning/**=partial-only")
+                .expect("a rule"),
+        ]));
+        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
+
+        assert!(text.contains(".engineering/planning/**"), "{text}");
+        assert!(text.contains("file_edit"), "and the way in: {text}");
+    }
+
+    #[test]
+    fn a_silent_scope_still_binds_the_tools_it_is_simply_not_said_out_loud() {
+        // The experiment control. A run told the rule and a run refused the rule both end with the
+        // rule kept; only the second shows that the toolset is what kept it.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let scope = harness_tools::Scope::of(vec![
+            harness_tools::ScopeRule::parse(".engineering/planning/**=partial-only")
+                .expect("a rule"),
+        ]);
+        let catalogue = a_catalogue(dir.path()).scoped(scope);
+        let text = instructions(&options(&["--scope-announce", "silent"]), &catalogue, "")
+            .expect("the default is available");
+
+        assert!(!text.contains(".engineering/planning/**"), "{text}");
+        assert!(
+            !catalogue.scope().is_empty(),
+            "the tools are bound either way — that is the whole point"
+        );
+    }
+
+    #[test]
     fn an_instruction_file_replaces_the_default() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("instructions.md");
@@ -963,7 +1118,7 @@ mod tests {
         // Verbatim, catalogue and all: appending to a document somebody wrote would make the run's
         // instruction something the file alone cannot reproduce.
         assert_eq!(
-            instructions(&options, &a_catalogue(dir2.path())).expect("readable"),
+            instructions(&options, &a_catalogue(dir2.path()), "").expect("readable"),
             "be terse"
         );
     }

@@ -494,3 +494,93 @@ fn a_filtered_search_says_what_it_withheld_so_a_filter_is_not_a_ceiling() {
     assert!(all.get("withheld_by_filter").is_none(), "{all}");
     assert!(all.get("note").is_none());
 }
+
+// --- the write scope ----------------------------------------------------------------------------
+
+/// The store's rule, in the shape a step map declares it.
+fn store_scope() -> Scope {
+    Scope::of(vec![
+        ScopeRule::parse(".engineering/planning/**=partial-only").expect("a rule"),
+        ScopeRule::parse("**=allowed").expect("a rule"),
+    ])
+}
+
+#[test]
+fn a_whole_file_write_under_a_partial_only_path_is_refused_and_nothing_is_written() {
+    let dir = tree();
+    let mut verbs =
+        Verbs::new(Catalogue::of(Everything::at(dir.path(), &[])).scoped(store_scope()));
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({
+            "name": "file_write",
+            "arguments": {"path": ".engineering/planning/story/a.md", "text": "whole"},
+        }),
+    ));
+
+    assert!(answer.failed, "the call is refused, not performed");
+    // The refusal has to be usable, or the model retries it until the turn budget is gone.
+    let said = output(&answer);
+    assert!(said.contains(".engineering/planning/story/a.md"), "{said}");
+    assert!(said.contains("file_edit"), "names the way in: {said}");
+    assert!(
+        !dir.path().join(".engineering/planning/story/a.md").exists(),
+        "the provider was never reached"
+    );
+}
+
+#[test]
+fn a_partial_edit_under_the_same_path_goes_through_because_that_is_the_distinction() {
+    let dir = tree();
+    let mut verbs =
+        Verbs::new(Catalogue::of(Everything::at(dir.path(), &[])).scoped(store_scope()));
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({
+            "name": "file_edit",
+            "arguments": {"path": ".engineering/planning/story/a.md", "old": "x", "new": "y"},
+        }),
+    ));
+
+    assert!(
+        !answer.failed,
+        "an edit is what the scope admits: {}",
+        output(&answer)
+    );
+}
+
+#[test]
+fn a_path_no_rule_names_is_unrestricted_because_a_scope_declares_where_writing_is_bounded() {
+    let dir = tree();
+    let mut verbs = Verbs::new(
+        Catalogue::of(Everything::at(dir.path(), &[])).scoped(Scope::of(vec![
+            ScopeRule::parse(".engineering/**=denied").expect("a rule"),
+        ])),
+    );
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_write", "arguments": {"path": "src/main.rs", "text": "fn main() {}"}}),
+    ));
+
+    assert!(!answer.failed, "{}", output(&answer));
+}
+
+#[test]
+fn reading_a_denied_path_is_still_reading_because_a_write_scope_bounds_writes() {
+    let dir = tree();
+    let mut verbs = Verbs::new(
+        Catalogue::of(Everything::at(dir.path(), &[]))
+            .scoped(Scope::of(vec![ScopeRule::parse("**=denied").expect("a rule")])),
+    );
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_read", "arguments": {"path": "src/main.rs"}}),
+    ));
+
+    assert!(!answer.failed, "{}", output(&answer));
+    assert_eq!(answer.output["text"], "fn marker() {}\n");
+}

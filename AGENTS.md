@@ -88,7 +88,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 - **Three pinned wire manifests carry wire-visible identifiers.** The `b10x_operation_search`
   tool name and the `b10x-emulated` model name are bytes a sender on the other side verifies.
   They were renamed off the former brand together with the agent-side sender and the manifests
-  re-pinned to the new bytes, so `contracts/` is no longer exempt from `scripts/check-brand.sh`
+  re-pinned to the new bytes, so `contracts/` carries no former-brand token either
   (atlas ADR 0001 § *Wire-visible identifiers*). Renaming either again is a **coordinated
   migration with an ADR in atlas**, done by cutting a new contract version — never by rewriting
   a released one (invariant 13).
@@ -113,7 +113,7 @@ bash scripts/gate.sh
 `cargo test --workspace --locked`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,
 `python3 scripts/check-provider-wires.py`, `python3 scripts/check-app-server-profile.py`,
-`bash scripts/check-brand.sh`. Run it before every commit.
+the contract checkers. Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
 
 **`python3` must be available**: the wire fixtures are a standard-library HTTP server, driven as a
 real subprocess over a real socket. A missing interpreter is a failed gate, not a skipped check.

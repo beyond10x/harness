@@ -59,6 +59,11 @@ pub struct Embedded {
     driver: Arc<HostDriver>,
     runtime: tokio::runtime::Runtime,
     root: PathBuf,
+    /// The toolchain this driver admits read-only, if the caller declared one.
+    ///
+    /// Empty by default, and empty is what keeps a run reaching nothing outside `/usr` and its own
+    /// workspace. See [`crate::Toolchain`] for what declaring one costs.
+    toolchain: crate::Toolchain,
     /// Makes each exec's identity distinct. substrate keys an execution's output and lifetime on
     /// it, so two calls sharing one would read each other's.
     next_exec: std::sync::atomic::AtomicU64,
@@ -88,6 +93,19 @@ impl Embedded {
         root: impl AsRef<Path>,
         cgroup_root: Option<PathBuf>,
     ) -> Result<Self, SubstrateError> {
+        Self::open_with(root, cgroup_root, crate::Toolchain::default())
+    }
+
+    /// The same, admitting a toolchain read-only inside every exec this driver starts.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open`].
+    pub fn open_with(
+        root: impl AsRef<Path>,
+        cgroup_root: Option<PathBuf>,
+        toolchain: crate::Toolchain,
+    ) -> Result<Self, SubstrateError> {
         // Canonical, because the driver compares every path it opens against this root: a root
         // reached through a symlink makes every workspace under it look like an escape. A
         // temporary directory under a symlinked `TMPDIR` is the ordinary way to meet that.
@@ -109,6 +127,7 @@ impl Embedded {
                 reason: format!("no runtime for the embedded driver: {error}"),
             })?;
         Ok(Self {
+            toolchain,
             driver,
             runtime,
             root,
@@ -314,9 +333,14 @@ impl Backend for Embedded {
             env: ExecEnvironment {
                 // Nothing inherited. An exec that saw this process's environment would carry a
                 // credential into a confined workspace, which is the one thing confinement is for.
+                // What is set here is only what a declared toolchain needs to be findable, and it
+                // names mount points inside the sandbox rather than anything on this host.
                 allow: Vec::new(),
-                set: std::collections::BTreeMap::new(),
+                set: self.toolchain.env().clone(),
             },
+            // substrate mounts these read-only and reports them in the observation (its ADR 0010).
+            // Empty unless the caller declared a toolchain, which is every existing consumer.
+            read_only_roots: self.toolchain.roots().to_vec(),
             sandbox: ConfinementRequest {
                 capability_snapshot: snapshot.snapshot.clone(),
                 network: NetworkMode::None,

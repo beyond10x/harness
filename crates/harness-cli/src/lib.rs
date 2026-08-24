@@ -200,6 +200,19 @@ struct RunOptions {
     /// processes.
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
+    /// Admit a build toolchain read-only inside the confined workspace. Only `rust` today.
+    ///
+    /// Without one a confined run can execute anything whose implementation lives under `/usr` —
+    /// an interpreter — and nothing whose compilers and package registry live in the operator's
+    /// home, which is every build tool. The directories are mounted **read-only** and reported in
+    /// the run's observation (substrate ADR 0010); the network stays unshared, so this brings a
+    /// closure in and is not a way to reach out.
+    ///
+    /// Declared rather than implied, because it is the one place a confined run is given something
+    /// substrate did not verify: there is no digest over a package registry. A run that does not
+    /// need a toolchain should not name one.
+    #[arg(long, value_name = "NAME")]
+    toolchain: Option<String>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
@@ -316,6 +329,9 @@ struct ToolsOptions {
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
     allow_program: Vec<String>,
+    /// Admit a build toolchain read-only, so `tools` describes the run a `run` would get.
+    #[arg(long, value_name = "NAME")]
+    toolchain: Option<String>,
 }
 
 /// Reads a credential from exactly the place the caller named, or none.
@@ -462,11 +478,14 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     let mut tools = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
-        options.substrate.as_deref(),
-        options.substrate_embedded.as_deref(),
-        options.cgroup_root.as_deref(),
-        &options.workspace_id,
-        &options.allow_program,
+        &Confinement {
+            substrate: options.substrate.as_deref(),
+            embedded: options.substrate_embedded.as_deref(),
+            cgroup_root: options.cgroup_root.as_deref(),
+            workspace_id: &options.workspace_id,
+            programs: &options.allow_program,
+            toolchain: &toolchain(options.toolchain.as_deref())?,
+        },
     );
     let mut approvals: Box<dyn ApprovalPort> = if options.yes {
         Box::new(ApproveAll)
@@ -502,6 +521,24 @@ fn install_interrupt(cancel: &LoopCancel) {
     }
 }
 
+/// The toolchain the caller declared, or none.
+///
+/// # Errors
+///
+/// Names the toolchain that is not known, and lists the ones that are. A misspelling that silently
+/// declared nothing would produce a run whose builds fail deep inside a build tool, which is a much
+/// worse way to find out.
+fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    match name {
+        None => Ok(harness_substrate::Toolchain::default()),
+        Some("rust") => harness_substrate::Toolchain::rust(home.as_deref()),
+        Some(other) => Err(format!(
+            "`{other}` is not a toolchain this build knows; there is `rust`"
+        )),
+    }
+}
+
 /// The tools this machine admits, which is the machine's answer and not a flag's.
 ///
 /// **The publication gate, in one function**, and it is unchanged by the move to three verbs: what
@@ -513,15 +550,35 @@ fn install_interrupt(cancel: &LoopCancel) {
 /// A backend that cannot be reached is not an error, for the reason `Client::probe` gives. A daemon
 /// that answers something unreadable is, and every other failure here degrades to the read-only
 /// catalogue rather than to a run that thinks it can write.
+/// Everything about *where and how* a run may act, as one value.
+///
+/// Grouped because they are one decision taken together — a socket or an embedded driver, the
+/// cgroup that makes execution possible at all, the programs it may start and the toolchain it may
+/// read — and because a function taking them one by one is a function whose call sites are seven
+/// positional paths nobody can read.
+struct Confinement<'a> {
+    substrate: Option<&'a std::path::Path>,
+    embedded: Option<&'a std::path::Path>,
+    cgroup_root: Option<&'a std::path::Path>,
+    workspace_id: &'a str,
+    programs: &'a [String],
+    toolchain: &'a harness_substrate::Toolchain,
+}
+
 fn published(
     reading: harness_tools::LocalOperations,
     workspace_name: Option<String>,
-    substrate: Option<&std::path::Path>,
-    embedded: Option<&std::path::Path>,
-    cgroup_root: Option<&std::path::Path>,
-    workspace_id: &str,
-    programs: &[String],
+    confinement: &Confinement<'_>,
 ) -> harness_tools::Verbs {
+    let Confinement {
+        substrate,
+        embedded,
+        cgroup_root,
+        workspace_id,
+        programs,
+        toolchain,
+    } = confinement;
+    let (substrate, embedded, cgroup_root) = (*substrate, *embedded, *cgroup_root);
     let read_only = || harness_tools::Verbs::new(harness_tools::Catalogue::of(reading.clone()));
 
     if embedded.is_some() {
@@ -534,8 +591,8 @@ fn published(
         };
         let cgroup = cgroup_root.map(std::path::Path::to_path_buf);
         let (Ok(driver), Ok(tools)) = (
-            harness_substrate::Embedded::open(root, cgroup.clone()),
-            harness_substrate::Embedded::open(root, cgroup),
+            harness_substrate::Embedded::open_with(root, cgroup.clone(), (*toolchain).clone()),
+            harness_substrate::Embedded::open_with(root, cgroup, (*toolchain).clone()),
         ) else {
             return read_only();
         };
@@ -562,7 +619,7 @@ fn published(
     let confined = harness_substrate::ConfinedOperations::new(
         harness_substrate::Client::at(socket),
         &facts,
-        workspace_id,
+        *workspace_id,
         programs.to_vec(),
     );
     harness_tools::Verbs::new(harness_tools::Catalogue::of(harness_tools::Split::new(
@@ -574,11 +631,14 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
-        options.substrate.as_deref(),
-        options.substrate_embedded.as_deref(),
-        options.cgroup_root.as_deref(),
-        &options.workspace_id,
-        &options.allow_program,
+        &Confinement {
+            substrate: options.substrate.as_deref(),
+            embedded: options.substrate_embedded.as_deref(),
+            cgroup_root: options.cgroup_root.as_deref(),
+            workspace_id: &options.workspace_id,
+            programs: &options.allow_program,
+            toolchain: &toolchain(options.toolchain.as_deref())?,
+        },
     );
     println!(
         "{}",

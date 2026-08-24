@@ -54,6 +54,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod toolchain;
 mod backend;
 mod base64;
 mod client;
@@ -61,6 +62,7 @@ mod embedded;
 mod predicate;
 mod tools;
 
+pub use toolchain::Toolchain;
 pub use backend::Backend;
 pub use client::{Client, Transport, UnixTransport};
 pub use embedded::Embedded;

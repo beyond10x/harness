@@ -267,6 +267,97 @@ impl RunState {
     }
 }
 
+/// How many bytes of conversation a turn may carry before the oldest tool results are elided.
+///
+/// A stateless loop replays everything every turn, so the cost of a run is quadratic in its length
+/// and the context window is a hard ceiling on it. Nothing here summarises: what is dropped is
+/// **bytes of old tool output**, which is where the weight is — a file read whose contents were
+/// then edited is dead weight from the moment the edit landed.
+pub const MAX_CONVERSATION_BYTES: usize = 192 * 1024;
+
+/// How many of the most recent tool results are never elided, however large the conversation is.
+///
+/// The model is usually working from what it just read. Eliding that would make it read the file
+/// again, which costs more than the elision saved.
+pub const KEPT_TOOL_RESULTS: usize = 6;
+
+/// Elides the oldest tool results until the conversation fits, and says how much went.
+///
+/// # What is dropped, and what never is
+///
+/// Only **tool results**, and only their payload. The result item stays, because a `function_call`
+/// replayed without its output is a provider error on the next turn — the same rule
+/// [`recordable`] follows for an oversized call. User text, assistant text, the calls themselves
+/// and opaque reasoning items are never touched: the first three are the record of what was asked
+/// and decided, and dropping the fourth costs the model its own chain of thought across every tool
+/// round trip, which is the whole reason this loop carries them.
+///
+/// # Why this is monotone, and why that matters for the bill
+///
+/// Compaction **rewrites the prefix**, and the prefix is what a prompt cache is keyed on: the turn
+/// after a compaction pays full rate for everything. That is a real cost, bounded by doing this
+/// rarely and never undoing it — an item elided once stays elided, so the prefix settles again
+/// immediately and every later turn caches against the smaller conversation.
+///
+/// Trading one uncached turn for a permanently shorter conversation is worth it at these sizes;
+/// trading one every turn would not be, which is why the threshold is a bound rather than a target.
+fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
+    fn measure(items: &[Item]) -> usize {
+        items
+            .iter()
+            .map(|item| serde_json::to_string(item).map_or(0, |json| json.len()))
+            .sum()
+    }
+    if measure(items) <= MAX_CONVERSATION_BYTES {
+        return;
+    }
+
+    let results: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| matches!(item, Item::ToolResult { output, .. } if !is_elided(output)))
+        .map(|(index, _)| index)
+        .collect();
+    let elidable = results.len().saturating_sub(KEPT_TOOL_RESULTS);
+    let mut freed = 0_usize;
+    let mut count = 0_usize;
+    for index in results.into_iter().take(elidable) {
+        if measure(items) <= MAX_CONVERSATION_BYTES {
+            break;
+        }
+        let Item::ToolResult { output, .. } = &mut items[index] else {
+            continue;
+        };
+        let was = serde_json::to_string(output).map_or(0, |json| json.len());
+        *output = serde_json::json!({
+            "elided": format!(
+                "{was} bytes of this result were dropped to keep the conversation inside its \
+                 bound. The call it answered is still above; read it again if you need it."
+            ),
+        });
+        freed += was;
+        count += 1;
+    }
+
+    if count > 0 {
+        // Said out loud: a model that suddenly cannot see a file it read has a right to a reason,
+        // and so does anyone reading the record afterwards.
+        sink.emit(LoopEvent::Warning {
+            code: "conversation-compacted".to_owned(),
+            message: format!(
+                "the conversation passed {MAX_CONVERSATION_BYTES} bytes, so {count} old tool \
+                 result(s) were elided, freeing {freed} bytes. The most recent \
+                 {KEPT_TOOL_RESULTS} are untouched."
+            ),
+        });
+    }
+}
+
+/// Whether this output has already been elided, so nothing is counted or elided twice.
+fn is_elided(output: &serde_json::Value) -> bool {
+    output.get("elided").is_some()
+}
+
 /// Keeps an oversized call out of the conversation that gets replayed.
 ///
 /// The call still happened and the model still has to see that it did, so the item stays. Its
@@ -435,6 +526,9 @@ impl<'a> AgentLoop<'a> {
                 return Ok(stop);
             }
 
+            // Before the request is built, so the turn that pays for a compaction is the one
+            // that benefits from it.
+            compact(&mut state.items, sink);
             state.turns += 1;
             sink.emit(LoopEvent::TurnStarted { turn: state.turns });
             let outcome = {

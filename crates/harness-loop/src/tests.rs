@@ -895,3 +895,101 @@ fn a_spend_ceiling_on_a_run_that_cannot_price_itself_is_refused_before_the_first
         "nothing was spent proving the ceiling could not be kept"
     );
 }
+
+// --- keeping the conversation inside a bound ----------------------------------------------------
+
+/// A conversation with `n` big tool results, in call order.
+fn fat_conversation(n: usize) -> Vec<Item> {
+    let mut items = vec![Item::user("do the thing")];
+    for index in 0..n {
+        items.push(Item::ToolCall(ToolCall {
+            call_id: call_id(&format!("c{index}")),
+            name: tool_name("a"),
+            arguments: json!({}),
+        }));
+        items.push(Item::result(
+            call_id(&format!("c{index}")),
+            ToolOutcome::ok(json!({ "text": "x".repeat(40_000) })),
+        ));
+    }
+    items
+}
+
+fn elided(items: &[Item]) -> usize {
+    items
+        .iter()
+        .filter(|item| matches!(item, Item::ToolResult { output, .. } if output.get("elided").is_some()))
+        .count()
+}
+
+#[test]
+fn a_conversation_past_its_bound_loses_the_oldest_tool_output_and_nothing_else() {
+    // A stateless loop replays everything every turn, so cost is quadratic in length and the
+    // context window is a hard ceiling on it. What goes is bytes of old tool output - a file read
+    // whose contents were then edited is dead weight from the moment the edit landed.
+    let mut items = fat_conversation(10);
+    let before = items.len();
+    let mut sink = VecLoopSink::new();
+    super::compact(&mut items, &mut sink);
+
+    assert_eq!(items.len(), before, "every item stays; only payloads go");
+    assert!(elided(&items) > 0, "something was elided");
+    assert!(
+        matches!(&items[0], Item::UserText { .. }),
+        "the request itself is never touched"
+    );
+    assert_eq!(
+        sink.warnings().filter(|(code, _)| *code == "conversation-compacted").count(),
+        1,
+        "a model that suddenly cannot see a file it read has a right to a reason"
+    );
+}
+
+#[test]
+fn the_most_recent_results_survive_however_long_the_conversation_is() {
+    // The model is usually working from what it just read. Eliding that makes it read the file
+    // again, which costs more than the elision saved.
+    let mut items = fat_conversation(10);
+    super::compact(&mut items, &mut NullLoopSink);
+
+    let intact: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| matches!(item, Item::ToolResult { output, .. } if output.get("elided").is_none()))
+        .map(|(index, _)| index)
+        .collect();
+    assert!(
+        intact.len() >= super::KEPT_TOOL_RESULTS,
+        "at least the newest {} are whole, got {}",
+        super::KEPT_TOOL_RESULTS,
+        intact.len()
+    );
+    let last = items.len() - 1;
+    assert!(intact.contains(&last), "the newest result above all");
+}
+
+#[test]
+fn a_conversation_inside_its_bound_is_left_exactly_alone() {
+    // The threshold is a bound, not a target. Compaction rewrites the prefix and the turn after one
+    // pays full rate for everything, so doing it when nothing needs it would buy a cache miss for
+    // no saving at all.
+    let mut items = fat_conversation(1);
+    let before = items.clone();
+    let mut sink = VecLoopSink::new();
+    super::compact(&mut items, &mut sink);
+
+    assert_eq!(items, before);
+    assert_eq!(sink.warnings().count(), 0);
+}
+
+#[test]
+fn eliding_is_monotone_so_the_prefix_settles_again() {
+    // An item elided once stays elided. That is what makes the cost of a compaction one uncached
+    // turn rather than one per turn from then on.
+    let mut items = fat_conversation(10);
+    super::compact(&mut items, &mut NullLoopSink);
+    let after_first = items.clone();
+    super::compact(&mut items, &mut NullLoopSink);
+
+    assert_eq!(items, after_first, "a second pass changes nothing");
+}

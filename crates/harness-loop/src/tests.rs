@@ -939,7 +939,9 @@ fn a_conversation_past_its_bound_loses_the_oldest_tool_output_and_nothing_else()
         "the request itself is never touched"
     );
     assert_eq!(
-        sink.warnings().filter(|(code, _)| *code == "conversation-compacted").count(),
+        sink.warnings()
+            .filter(|(code, _)| *code == "conversation-compacted")
+            .count(),
         1,
         "a model that suddenly cannot see a file it read has a right to a reason"
     );

@@ -387,7 +387,8 @@ impl Backend for Embedded {
         // calls sharing an id would read each other's.
         let id = exec_identity(
             std::process::id(),
-            self.next_exec.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            self.next_exec
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         );
         let started = self
             .runtime

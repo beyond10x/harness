@@ -574,9 +574,9 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
         &options.model,
         instructions(options, tools.catalogue(), &context(&options.context)?)?,
     )
-        .with_sampling(sampling(options))
-        .with_budget(budget(options))
-        .with_prices(prices(options)?);
+    .with_sampling(sampling(options))
+    .with_budget(budget(options))
+    .with_prices(prices(options)?);
 
     install_interrupt(&cancel);
 
@@ -1031,9 +1031,7 @@ mod tests {
 
     /// A read-only catalogue over a temporary tree, for the instruction tests.
     fn a_catalogue(dir: &std::path::Path) -> harness_tools::Catalogue {
-        harness_tools::Catalogue::of(
-            harness_tools::LocalOperations::new(dir).expect("opens"),
-        )
+        harness_tools::Catalogue::of(harness_tools::LocalOperations::new(dir).expect("opens"))
     }
 
     #[test]

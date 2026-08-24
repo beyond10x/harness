@@ -438,7 +438,8 @@ mod tests {
     fn a_catalogue_question_touches_nothing_and_says_so() {
         // `tool_search` and `tool_describe` are questions about the list, not acts. A subject here
         // would name a file nobody read.
-        let line = r#"{"kind":"tool-requested","call_id":"c-9","name":"tool_search","arguments":{}}"#;
+        let line =
+            r#"{"kind":"tool-requested","call_id":"c-9","name":"tool_search","arguments":{}}"#;
         let events = convert_all(line);
         assert_eq!(events[0]["subjects"], json!([]));
     }

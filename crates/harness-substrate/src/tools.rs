@@ -93,7 +93,9 @@ impl Operations for ConfinedOperations {
         // It is bounded because a result is replayed on **every** later turn. A live run on
         // 2026-08-24 read three files in one turn and the next turn's replay grew by 24,630 tokens,
         // which then pushed the conversation past its bound and bought a prefix rewrite.
-        let limit = max_bytes.unwrap_or(MAX_READ_BYTES).min(MAX_READ_BYTES_CEILING);
+        let limit = max_bytes
+            .unwrap_or(MAX_READ_BYTES)
+            .min(MAX_READ_BYTES_CEILING);
         let text = self
             .backend
             .file_read(&self.workspace, path)

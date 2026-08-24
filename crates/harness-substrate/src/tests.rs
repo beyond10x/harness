@@ -378,7 +378,11 @@ fn base64_of(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
@@ -400,7 +404,10 @@ fn a_confined_read_is_bounded_and_says_so_rather_than_replaying_a_whole_large_fi
         .expect("read");
 
     assert_eq!(answer["bytes"], 200_000, "the whole size is still reported");
-    assert_eq!(answer["truncated"], true, "a partial read never looks whole");
+    assert_eq!(
+        answer["truncated"], true,
+        "a partial read never looks whole"
+    );
     assert_eq!(
         answer["text"].as_str().expect("text").len(),
         64 * 1024,
@@ -585,8 +592,11 @@ fn a_declared_rust_toolchain_never_mounts_the_operators_cargo_credential() {
     // cache. It was mounted whole for one commit, which handed every confined run the operator's
     // credential. Nothing about a build needs it, and a confinement that leaks one is not a
     // confinement.
-    let Ok(toolchain) = super::Toolchain::rust(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref())
-    else {
+    let Ok(toolchain) = super::Toolchain::rust(
+        std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .as_deref(),
+    ) else {
         // No toolchain on this machine; the rule below is still the rule.
         return;
     };

@@ -572,8 +572,9 @@ fn a_path_no_rule_names_is_unrestricted_because_a_scope_declares_where_writing_i
 fn reading_a_denied_path_is_still_reading_because_a_write_scope_bounds_writes() {
     let dir = tree();
     let mut verbs = Verbs::new(
-        Catalogue::of(Everything::at(dir.path(), &[]))
-            .scoped(Scope::of(vec![ScopeRule::parse("**=denied").expect("a rule")])),
+        Catalogue::of(Everything::at(dir.path(), &[])).scoped(Scope::of(vec![
+            ScopeRule::parse("**=denied").expect("a rule"),
+        ])),
     );
 
     let answer = verbs.call(&call(

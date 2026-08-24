@@ -66,13 +66,17 @@ impl Toolchain {
     pub fn rust(home: Option<&Path>) -> Result<Self, String> {
         let rustup = match std::env::var_os("RUSTUP_HOME") {
             Some(value) => PathBuf::from(value),
-            None => home
-                .map(|home| home.join(".rustup"))
-                .ok_or_else(|| "neither `RUSTUP_HOME` nor a home directory says where the Rust \
-                                 toolchain is".to_owned())?,
+            None => home.map(|home| home.join(".rustup")).ok_or_else(|| {
+                "neither `RUSTUP_HOME` nor a home directory says where the Rust \
+                                 toolchain is"
+                    .to_owned()
+            })?,
         };
         let rustup = rustup.canonicalize().map_err(|error| {
-            format!("the Rust toolchain's `rustup` directory ({}): {error}", rustup.display())
+            format!(
+                "the Rust toolchain's `rustup` directory ({}): {error}",
+                rustup.display()
+            )
         })?;
         if !rustup.is_dir() {
             return Err(format!(
@@ -94,7 +98,9 @@ impl Toolchain {
             .insert("RUSTUP_HOME".to_owned(), format!("{MOUNT_PREFIX}/rustup"));
         toolchain.env.insert(
             "PATH".to_owned(),
-            format!("{MOUNT_PREFIX}/rustup/toolchains/{TOOLCHAIN}/bin:/usr/local/bin:/usr/bin:/bin"),
+            format!(
+                "{MOUNT_PREFIX}/rustup/toolchains/{TOOLCHAIN}/bin:/usr/local/bin:/usr/bin:/bin"
+            ),
         );
         // **`CARGO_HOME` is inside the workspace, and that is not a convenience.**
         //
@@ -115,7 +121,9 @@ impl Toolchain {
             .env
             .insert("CARGO_HOME".to_owned(), format!("{WORKSPACE}/.cargo"));
         // The workspace, never the operator's home — which is not mounted and must not be implied.
-        toolchain.env.insert("HOME".to_owned(), WORKSPACE.to_owned());
+        toolchain
+            .env
+            .insert("HOME".to_owned(), WORKSPACE.to_owned());
         // A build tree the run may write to. Without it cargo writes beside the sources, which is
         // fine, but naming it keeps the output somewhere a caller can find and clear.
         toolchain

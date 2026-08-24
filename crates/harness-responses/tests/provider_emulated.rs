@@ -498,7 +498,10 @@ fn a_turn_that_had_already_answered_is_never_retried() {
     let mut tools = TestTools::default();
     let (_fixture, outcome, sink) = run("truncated", &mut tools);
 
-    assert!(outcome.is_err(), "a stream that stopped mid-answer is final");
+    assert!(
+        outcome.is_err(),
+        "a stream that stopped mid-answer is final"
+    );
     assert!(
         !sink.warnings().any(|(code, _)| code == "turn-retried"),
         "nothing was retried after the caller had seen output"

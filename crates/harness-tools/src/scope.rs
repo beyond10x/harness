@@ -120,10 +120,7 @@ impl Scope {
         if !matches!(operation, "file.write" | "file.edit") {
             return None;
         }
-        let rule = self
-            .0
-            .iter()
-            .find(|rule| glob_matches(&rule.paths, path))?;
+        let rule = self.0.iter().find(|rule| glob_matches(&rule.paths, path))?;
         match rule.write {
             WriteScope::Allowed => None,
             WriteScope::PartialOnly if operation == "file.edit" => None,
@@ -150,7 +147,11 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
             None => value.is_empty(),
             Some(b'*') => {
                 let crosses = pattern.get(1) == Some(&b'*');
-                let rest = if crosses { &pattern[2..] } else { &pattern[1..] };
+                let rest = if crosses {
+                    &pattern[2..]
+                } else {
+                    &pattern[1..]
+                };
                 for taken in 0..=value.len() {
                     if !crosses && value[..taken].contains(&b'/') {
                         break;
@@ -193,14 +194,19 @@ mod tests {
         let refusal = store()
             .refusal("file.write", ".engineering/planning/story/a.md")
             .expect("refused");
-        assert!(refusal.contains(".engineering/planning/story/a.md"), "{refusal}");
+        assert!(
+            refusal.contains(".engineering/planning/story/a.md"),
+            "{refusal}"
+        );
         assert!(refusal.contains("file_edit"), "{refusal}");
     }
 
     #[test]
     fn a_denied_path_refuses_both_and_says_it_is_the_scope_that_is_wrong() {
         assert!(store().refusal("file.write", "target/debug/x").is_some());
-        let refusal = store().refusal("file.edit", "target/debug/x").expect("refused");
+        let refusal = store()
+            .refusal("file.edit", "target/debug/x")
+            .expect("refused");
         assert!(refusal.contains("scoped wrongly"), "{refusal}");
     }
 
@@ -208,7 +214,11 @@ mod tests {
     fn a_path_no_rule_mentions_is_allowed_and_a_scope_nobody_wrote_restricts_nothing() {
         // This is a declaration of where writing is *restricted*. The document that produces these
         // rules is where a catch-all is mandatory; here an empty list is a deliberate absence.
-        assert!(store().refusal("file.write", "crates/cli/src/main.rs").is_none());
+        assert!(
+            store()
+                .refusal("file.write", "crates/cli/src/main.rs")
+                .is_none()
+        );
         assert!(Scope::default().refusal("file.write", "anything").is_none());
     }
 

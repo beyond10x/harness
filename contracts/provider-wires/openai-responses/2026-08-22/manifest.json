@@ -11,6 +11,7 @@
     "instructions",
     "max_output_tokens",
     "model",
+    "prompt_cache_key",
     "reasoning",
     "store",
     "stream",
@@ -46,8 +47,8 @@
   "files": [
     {
       "path": "fixtures/turn-request.json",
-      "bytes": 1270,
-      "sha256": "d36186efde0a0b12df6853714fadd95719e45f94deb074b328fb5d8355c2cee8"
+      "bytes": 1317,
+      "sha256": "1539dd2e1097b7a3ca1e7ccb17206abb4e1488581ac0a841f13cef2e3e229472"
     },
     {
       "path": "fixtures/turn-stream.sse",

@@ -2,6 +2,8 @@
 //!
 //! Everything vendor-shaped lives here. The loop above and the values below name no `OpenAI` field,
 //! which is what lets a second wire cost a second projection instead of a second loop.
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use harness_wire::{
     Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolName, ToolSpec, Usage,
@@ -268,6 +270,21 @@ fn compact(value: &Value) -> String {
     }
 }
 
+/// A stable name for the prefix every turn of this configuration resends.
+///
+/// Not a secret and not an identity: a digest of the three things that sit ahead of the
+/// conversation in every request. Two runs of the same configuration share it deliberately — they
+/// share the prefix, so they should share the cache.
+fn prefix_key(model: &str, instructions: &str, tools: &[ToolSpec]) -> String {
+    let mut hasher = DefaultHasher::new();
+    model.hash(&mut hasher);
+    instructions.hash(&mut hasher);
+    for tool in tools {
+        tool.name.as_str().hash(&mut hasher);
+    }
+    format!("b10x-{:016x}", hasher.finish())
+}
+
 /// Builds the request body for one turn.
 pub fn request_body(
     model: &str,
@@ -294,6 +311,30 @@ pub fn request_body(
     // Without this the model loses its own reasoning across every tool round trip under
     // `store: false`, and re-derives the plan on each call.
     body.insert("include".to_owned(), json!(["reasoning.encrypted_content"]));
+    // **The routing hint for prompt caching — sent, and measured not to help on one route.**
+    //
+    // This loop is stateless: every turn replays the whole conversation, so turn n resends turn
+    // n-1's prefix byte for byte. That is exactly the shape caching exists for, and without it the
+    // cost of a run is quadratic in its turns.
+    //
+    // Two live ten-turn runs against `chatgpt.com/backend-api/codex`, one before this field and one
+    // after, both reported `cached_tokens: 0` on **every** turn — 14,325 input tokens billed at the
+    // full uncached rate to resend text sent seconds earlier. So that endpoint either does not
+    // cache subscription traffic or does not report it, and the figure is the same either way.
+    //
+    // The field stays because it is what the API documents and the miss is the endpoint's, not
+    // ours: a gateway or the paid API may honour it, and there the difference is roughly tenfold on
+    // the dominant term. What it must not become is an assumption — the run's own record carries
+    // `cached_input_tokens` per turn, so whether it worked is a measurement rather than a belief.
+    //
+    // The key is the **stable prefix**, not the run: `instructions`, the model and the tool specs
+    // are what every turn shares and what a second run with the same configuration shares too.
+    // Keying on the run instead would give each run a private cache it fills once and discards,
+    // which is the same miss with extra steps.
+    body.insert(
+        "prompt_cache_key".to_owned(),
+        json!(prefix_key(model, instructions, tools)),
+    );
     if let Some(limit) = max_output_tokens {
         body.insert("max_output_tokens".to_owned(), json!(limit));
     }

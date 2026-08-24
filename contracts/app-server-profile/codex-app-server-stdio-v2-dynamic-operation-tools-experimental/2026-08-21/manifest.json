@@ -36,8 +36,8 @@
   "files": [
     {
       "path": "fixtures/walking-trace.jsonl",
-      "bytes": 4619,
-      "sha256": "383725938e48d293f2f4643d048811311942107b60f7b1f7c54ae7849473b5a3"
+      "bytes": 4553,
+      "sha256": "490fd04459e03a1ea697a21a0f4a2f19d857aad688e30fd2e55f6f9026b00bec"
     }
   ]
 }

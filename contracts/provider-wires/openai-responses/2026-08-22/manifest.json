@@ -46,13 +46,13 @@
   "files": [
     {
       "path": "fixtures/turn-request.json",
-      "bytes": 1459,
-      "sha256": "55368773a857f1959143a9050a7ffecf0d9c1e9321f1155158e12b9f28e2f00a"
+      "bytes": 1453,
+      "sha256": "479871a3d99271738bee2e26274ca42ecd7c8f08455c35a89d91b3e20f1da826"
     },
     {
       "path": "fixtures/turn-stream.sse",
-      "bytes": 3129,
-      "sha256": "91259a07f2f6ccd9b20897cbf93cda3ab76b1f6269fd164dc1c7f50999d61149"
+      "bytes": 3111,
+      "sha256": "bf80fc5547a1c4eac51897dbdb0194de4f3502ab60466ed4b8c09521394f7064"
     }
   ]
 }

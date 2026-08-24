@@ -85,11 +85,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   reaches a tool without consulting the approver, removes the gate rather than tuning it.
 - **The shipped toolset is read-only.** Adding a tool that writes or executes is its own change, with
   its own gate and its own entry in `STATUS.md` — never a flag on an existing one.
-- **Three pinned wire manifests carry former-brand identifiers on the wire.** The
-  `b10x_operation_search` tool name and the `b10x-emulated` model name are bytes a sender
-  on the other side verifies, which is why `scripts/check-brand.sh` exempts them (atlas ADR 0001
-  § *Wire-visible identifiers*). Renaming either is a **coordinated migration with an ADR in
-  atlas**, done by cutting a new contract version — never by rewriting a released one (invariant 13).
+- **Three pinned wire manifests carry wire-visible identifiers.** The `b10x_operation_search`
+  tool name and the `b10x-emulated` model name are bytes a sender on the other side verifies.
+  They were renamed off the former brand together with the agent-side sender and the manifests
+  re-pinned to the new bytes, so `contracts/` is no longer exempt from `scripts/check-brand.sh`
+  (atlas ADR 0001 § *Wire-visible identifiers*). Renaming either again is a **coordinated
+  migration with an ADR in atlas**, done by cutting a new contract version — never by rewriting
+  a released one (invariant 13).
 - **This repository is private.** Never commit credentials, tokens, key files or transcripts.
 
 ## Out of scope

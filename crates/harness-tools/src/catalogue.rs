@@ -45,18 +45,7 @@ impl Entry {
     /// model sent it; the tidy answer canonicalisation would give is exactly wrong for the one call
     /// whose whole problem is where it was going.
     pub fn subjects(&self, arguments: &Value) -> Vec<Subject> {
-        match self.operation {
-            "shell" => arguments
-                .get("argv")
-                .and_then(Value::as_array)
-                .and_then(|argv| argv.first())
-                .and_then(Value::as_str)
-                .map(|program| vec![Subject::process(program)])
-                .unwrap_or_default(),
-            _ => vec![Subject::file(
-                arguments.get("path").and_then(Value::as_str).unwrap_or("."),
-            )],
-        }
+        subjects_of_operation(self.operation, arguments)
     }
 
     /// The entry as a tool of its own, for a consumer that publishes flatly.
@@ -444,6 +433,43 @@ pub fn entry_names() -> BTreeMap<&'static str, &'static str> {
         ("search", "search"),
         ("shell", "run"),
     ])
+}
+
+/// The concrete things one entry's call would touch, without a catalogue to ask.
+///
+/// # Why a reader needs this and [`Entry::subjects`] will not do
+///
+/// The same argument [`operation_of`] carries. A run is judged **after** it happened, from its
+/// record: the catalogue that answered is gone, and what is left is the entry's name and the
+/// arguments it was called with. A consumer that kept its own copy of this rule is a copy that
+/// drifts, and the drift is the exact failure this vocabulary exists to remove.
+///
+/// Empty for an entry outside the vocabulary — it reached no tool, so it touched nothing.
+#[must_use]
+pub fn subjects_of(entry: &str, arguments: &Value) -> Vec<Subject> {
+    operation_of(entry)
+        .map(|operation| subjects_of_operation(operation, arguments))
+        .unwrap_or_default()
+}
+
+/// The one rule, shared by the live catalogue and by a reader of a finished run.
+///
+/// The path is reported **as the caller wrote it**. A gate has to see `../../etc/passwd` as the
+/// model sent it; the tidy answer canonicalisation would give is exactly wrong for the one call
+/// whose whole problem is where it was going.
+fn subjects_of_operation(operation: &str, arguments: &Value) -> Vec<Subject> {
+    match operation {
+        "shell" => arguments
+            .get("argv")
+            .and_then(Value::as_array)
+            .and_then(|argv| argv.first())
+            .and_then(Value::as_str)
+            .map(|program| vec![Subject::process(program)])
+            .unwrap_or_default(),
+        _ => vec![Subject::file(
+            arguments.get("path").and_then(Value::as_str).unwrap_or("."),
+        )],
+    }
 }
 
 /// The neutral operation one entry is, without a provider or a live catalogue.

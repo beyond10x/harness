@@ -39,10 +39,11 @@ mod local;
 mod operations;
 mod verbs;
 
-pub use catalogue::{Catalogue, Entry, entry_names, operation_of};
+pub use catalogue::{Catalogue, Entry, entry_names, operation_of, subjects_of};
 pub use local::LocalOperations;
 pub use operations::{Operations, Split};
 pub use verbs::{DESCRIBE_VERB, INVOKE_VERB, SEARCH_VERB, Verbs};
+pub use harness_wire::Subject;
 
 #[cfg(test)]
 mod tests;

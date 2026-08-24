@@ -101,6 +101,11 @@ pub fn convert(
                 // the input — so a reader could not tell a write from a read, and one written for
                 // another harness could not read this arm at all.
                 "operations": operations(&value),
+                // *Which* file or program, in the same neutral form. A path-scoped expectation
+                // reads `input.file_path` on a vendor's record and finds nothing here: the entry's
+                // arguments are nested one level down, under a name this loop chose. So the answer
+                // is stated rather than left to be dug for.
+                "subjects": subjects(&value),
                 // Nothing decided this call at a seam, because nothing was in a position to: the
                 // toolset it was drawn from is the policy. `false` here is a fact about the arm.
                 "decision_required": false,
@@ -253,6 +258,23 @@ fn operations(value: &Value) -> Vec<&'static str> {
         .collect()
 }
 
+/// The concrete things one `tool-requested` would touch, as `file:…` / `proc:…`.
+///
+/// Read from the catalogue's own rule rather than from the arguments directly, so this stream and
+/// a live gate answer the same question the same way.
+fn subjects(value: &Value) -> Vec<String> {
+    if value["name"].as_str() != Some(harness_tools::INVOKE_VERB) {
+        return Vec::new();
+    }
+    let Some(entry) = value["arguments"]["name"].as_str() else {
+        return Vec::new();
+    };
+    harness_tools::subjects_of(entry, &value["arguments"]["arguments"])
+        .into_iter()
+        .map(|subject| subject.as_str().to_owned())
+        .collect()
+}
+
 fn opaque(line: &str) -> Value {
     json!({
         "event": "opaque",
@@ -360,6 +382,29 @@ mod tests {
 {"kind":"usage","model":"m","input_tokens":50,"output_tokens":5,"cached_input_tokens":40}
 {"kind":"cost","model":"m","micro_usd":233}
 {"kind":"finished","stop":{"kind":"completed"}}"#;
+
+    #[test]
+    fn a_call_names_which_file_it_touched_in_a_form_a_reader_can_select_on() {
+        // `RUN` invokes `file_read` on README.md. A path-scoped expectation reading `input.file_path`
+        // finds nothing on this wire - the entry's arguments are nested a level down under names
+        // this loop chose - so the record answers the question instead.
+        let events = convert_all(RUN);
+        let call = events
+            .iter()
+            .find(|event| event["event"] == "tool.requested")
+            .expect("a call");
+        assert_eq!(call["subjects"], json!(["file:README.md"]));
+        assert_eq!(call["operations"], json!(["file.read"]));
+    }
+
+    #[test]
+    fn a_catalogue_question_touches_nothing_and_says_so() {
+        // `tool_search` and `tool_describe` are questions about the list, not acts. A subject here
+        // would name a file nobody read.
+        let line = r#"{"kind":"tool-requested","call_id":"c-9","name":"tool_search","arguments":{}}"#;
+        let events = convert_all(line);
+        assert_eq!(events[0]["subjects"], json!([]));
+    }
 
     #[test]
     fn a_priced_run_states_its_cost_where_every_other_arm_states_theirs() {

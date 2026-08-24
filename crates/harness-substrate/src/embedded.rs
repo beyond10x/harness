@@ -347,12 +347,21 @@ impl Backend for Embedded {
                 profile: SandboxProfile::Workspace,
                 required: true,
             },
+            // **Sized for a build, not for an interpreter.** Two minutes of wall clock and two
+            // minutes of CPU were right when the only thing a confined run could execute was
+            // something under `/usr`; a declared toolchain makes a compiler reachable, and a
+            // compiler blows through both without finishing anything. A bound that makes a
+            // capability unusable is the same as not having it.
+            //
+            // CPU is the larger of the two because a build is parallel: `cargo` will happily use
+            // every core, so the CPU a wall-clock minute can consume is a multiple of it. Both are
+            // still bounds — a run that loops is stopped, which is the whole point of having them.
             limits: ExecLimits {
-                timeout_ms: 120_000,
+                timeout_ms: 900_000,
                 output_bytes: 1_048_576,
                 processes: 64,
-                memory_bytes: 1_073_741_824,
-                cpu_millis: 120_000,
+                memory_bytes: 8_589_934_592,
+                cpu_millis: 3_600_000,
             },
             wait: true,
             capsule: None,

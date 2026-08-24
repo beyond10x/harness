@@ -143,15 +143,33 @@ pub fn convert(
                 if let Some(micro) = value["micro_usd"].as_u64() {
                     spent_micro_usd = Some(spent_micro_usd.unwrap_or(0).saturating_add(micro));
                 }
-                opaque(&line)
+                // Read and used; the run's total goes out on `session.ended`. See the control-plane
+                // arm below for why emitting nothing is not a drop.
+                continue;
             }
             "finished" => {
                 ended = true;
                 finished(&value, spent_micro_usd)
             }
-            // `turn-started`, `tool-arguments-delta`, `approval-required`, `warning` and `rates`
-            // have no counterpart that any expectation reads. Carried as opaque rather than
-            // dropped, for the reason in this function's own documentation.
+            // **Control plane, not opaque.** `opaque` means *this build could not read it*, and a
+            // consumer reads it that way: an unread event could have been the tool call an
+            // expectation was looking for, so every count over the run goes `unk`. Sending this
+            // loop's own bookkeeping down that road put 130 opaque events in a twelve-call run and
+            // turned seven of eleven corpus rows undecidable — about a stream that had been read
+            // perfectly.
+            //
+            // A turn boundary and a warning are metaharness's own control-plane events: understood,
+            // projecting into no `trace-ir/1` family, and not uncertain.
+            "turn-started" => json!({"event": "turn.started", "turn": value["turn"]}),
+            "warning" => json!({
+                "event": "warning",
+                "code": value["code"],
+                "message": value["message"],
+            }),
+            // Read, understood, and modelled by no `trace-ir/1` family. Emitting nothing here is
+            // not the drop D4 forbids: D4 protects an event nobody could read, and these were read.
+            "tool-arguments-delta" | "approval-required" | "rates" => continue,
+            // A kind this build does not know, which is what `opaque` is for.
             _ => opaque(&line),
         };
         emit(output, mapped)?;
@@ -181,6 +199,11 @@ fn started(value: &Value, version: &str) -> Value {
         "output_style": Value::Null,
         "cwd": Value::Null,
         "offered_tools": value["published_tools"],
+        // **What the run could do**, beside what the model was offered. Behind three verbs the
+        // second is the same on every run, so a control asking *was there a writer to refuse*
+        // read a list of three verbs and answered that there was none - which reads as a defect
+        // and is a vocabulary mismatch.
+        "available_operations": value.get("operations").cloned().unwrap_or(Value::Null),
         "slash_commands": Value::Null,
         "skills": Value::Null,
         "agents": Value::Null,
@@ -209,7 +232,18 @@ fn finished(value: &Value, spent_micro_usd: Option<u64>) -> Value {
         "stop_reason": Value::Null,
         "terminal_reason": if kind == "completed" { "completed" } else { kind },
         "api_error_status": Value::Null,
-        "num_turns": stop.get("turns").cloned().unwrap_or(Value::Null),
+        // The loop's own count, beside the stop rather than inside it: only the two bound-bound
+        // stops carry one, so a reader asking how long a run was got an answer from a run that hit
+        // a ceiling and `null` from one that finished.
+        "num_turns": value
+            .get("turns")
+            .filter(|turns| !turns.is_null())
+            .or_else(|| stop.get("turns"))
+            // The stop's own count is the fallback, for a record written before the loop reported
+            // one beside it: a bound-bound stop has always carried the figure, and losing it on a
+            // replay of an older capture would be this converter taking a fact away.
+            .cloned()
+            .unwrap_or(Value::Null),
         "duration_ms": Value::Null,
         "duration_api_ms": Value::Null,
         "ttft_ms": Value::Null,
@@ -341,7 +375,10 @@ mod tests {
             kinds,
             vec![
                 "session.started",
-                "opaque",
+                // A turn boundary, as what it is. It crossed as `opaque` until a live corpus run
+                // showed what that costs: an unread event could have been any tool call, so seven
+                // of eleven rows went `unk` about a stream that had been read perfectly.
+                "turn.started",
                 "tool.requested",
                 "tool.result",
                 "usage",
@@ -432,21 +469,21 @@ mod tests {
     }
 
     #[test]
-    fn the_rate_card_line_crosses_as_opaque_rather_than_being_dropped() {
-        // No expectation reads it, and it is the only record of which rates produced the figure
-        // above - so it is carried, on the same rule every unmapped line is carried by.
+    fn a_line_this_build_understands_never_crosses_as_something_it_could_not_read() {
+        // `opaque` is a claim: *this build could not read that*. A consumer acts on it - an unread
+        // event could have been the tool call an expectation was looking for - so a run's own
+        // bookkeeping sent down that road turns counts `unk` for no reason. The rate card and the
+        // per-turn costs were read; the total below proves it, and the raw lines are still in the
+        // record metaharness retains.
         let events = convert_all(PRICED);
-        let carried = events
-            .iter()
-            .find(|event| event["event"] == "opaque" && event["vendor_subtype"] == "rates");
-        assert!(carried.is_some(), "{events:?}");
+        assert!(
+            !events.iter().any(|event| event["event"] == "opaque"),
+            "nothing here was unreadable: {events:?}"
+        );
         assert_eq!(
-            events
-                .iter()
-                .filter(|event| event["vendor_subtype"] == "cost")
-                .count(),
-            2,
-            "both priced turns are still visible as lines, whatever the total says"
+            events.last().expect("terminal")["total_cost_usd"],
+            json!(0.106_233),
+            "and the figure those lines carried still arrives"
         );
     }
 

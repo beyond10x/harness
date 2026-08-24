@@ -77,6 +77,14 @@ impl ToolPort for Verbs {
     /// the run. What it needs is the file or the program underneath, so the verb is unwrapped
     /// before the question is answered — which is the whole reason `subjects` is per-call rather
     /// than per-spec.
+    /// What the **catalogue** can do, which is the question the three verbs hide.
+    ///
+    /// The verbs are the same on every run; this is what differs, and it is what a reader of the
+    /// record actually wants to know about the run's reach.
+    fn operations(&self) -> Vec<&'static str> {
+        self.catalogue.operations()
+    }
+
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         if call.name.as_str() != INVOKE_VERB {
             return Vec::new();

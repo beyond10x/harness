@@ -110,6 +110,16 @@ impl Catalogue {
     }
 
     /// Every entry, in the order they were built.
+    /// Every neutral operation this catalogue can perform.
+    ///
+    /// What a reader of the record wants when the tool list says `tool_search`, `tool_describe`,
+    /// `tool_invoke` on every run: *what could this one actually do*. Derived from the entries the
+    /// publication gate admitted, so it is a fact about the machine and never a claim about it.
+    #[must_use]
+    pub fn operations(&self) -> Vec<&'static str> {
+        self.entries.iter().map(|entry| entry.operation).collect()
+    }
+
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }

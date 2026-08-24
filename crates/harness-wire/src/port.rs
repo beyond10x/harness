@@ -120,6 +120,26 @@ pub trait ToolPort {
         Vec::new()
     }
 
+    /// Every neutral operation this port can perform, whatever it publishes them as.
+    ///
+    /// # The question `specs()` stopped being able to answer
+    ///
+    /// *Could this run write a file?* used to be readable off the tool list: a port that published
+    /// `workspace_write` had a writer and one that did not, did not. Behind three verbs it is not:
+    /// the list is `tool_search`, `tool_describe`, `tool_invoke` on **every** run, and what stands
+    /// behind them is the catalogue — six entries on a machine that can confine a process, three on
+    /// one that cannot.
+    ///
+    /// A reader of a finished run needs the answer, and it is not a detail of the surface. It is
+    /// the whole of what an attribution control asks: *an absence of writes is a refusal only if
+    /// there was a writer to refuse*. Without it that control reports a run with no writer at all,
+    /// which reads as a defect and is a vocabulary mismatch.
+    ///
+    /// Empty by default — a flat port answers with its tool names and there is nothing behind them.
+    fn operations(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
     /// Runs exactly one call the loop already checked against [`ToolPort::specs`].
     ///
     /// A failure is an outcome with `failed` set, not an error: the model has to see that the tool

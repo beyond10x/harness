@@ -14,6 +14,14 @@ pub enum LoopEvent {
     Started {
         model: String,
         published_tools: Vec<ToolName>,
+        /// Every neutral operation this run could perform — see [`harness_wire::ToolPort::operations`].
+        ///
+        /// Beside the tool names rather than instead of them, because they answer different
+        /// questions and a reader needs both: what the model was **offered**, and what the run
+        /// could **do**. Behind three verbs the first is the same on every run and only the second
+        /// varies.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        operations: Vec<String>,
     },
     TurnStarted {
         turn: u64,
@@ -67,6 +75,14 @@ pub enum LoopEvent {
     },
     Finished {
         stop: LoopStop,
+        /// How many model turns the run took, counting the first.
+        ///
+        /// Beside the stop rather than inside it, because only two `LoopStop` variants carry a
+        /// turn count and both mean *a bound bound* — so a reader wanting "how long was this run"
+        /// got an answer from a run that hit a ceiling and `null` from one that finished, which is
+        /// backwards. An advisory bound on run length could not decide a single completed run.
+        #[serde(default)]
+        turns: u64,
     },
 }
 

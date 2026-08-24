@@ -46,12 +46,16 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
             LoopEvent::Started {
                 model,
                 published_tools,
+                operations,
             } => {
                 let names: Vec<&str> = published_tools
                     .iter()
                     .map(harness_wire::ToolName::as_str)
                     .collect();
                 self.note(&format!("model {model} · tools: {}", names.join(", ")));
+                if !operations.is_empty() {
+                    self.note(&format!("  can: {}", operations.join(", ")));
+                }
             }
             LoopEvent::TurnStarted { turn } => self.note(&format!("· turn {turn}")),
             LoopEvent::TextDelta { text } => {
@@ -93,7 +97,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
             LoopEvent::Warning { code, message } => {
                 let _ = writeln!(self.err, "warning [{code}] {message}");
             }
-            LoopEvent::Finished { stop } => {
+            LoopEvent::Finished { stop, .. } => {
                 let _ = writeln!(self.out);
                 let _ = self.out.flush();
                 self.note(&format!("{stop:?}"));
@@ -130,6 +134,7 @@ mod tests {
                 LoopEvent::Started {
                     model: "m".to_owned(),
                     published_tools: vec![ToolName::new("a").expect("valid")],
+                    operations: Vec::new(),
                 },
                 LoopEvent::TextDelta {
                     text: "the ".to_owned(),
@@ -139,6 +144,7 @@ mod tests {
                 },
                 LoopEvent::Finished {
                     stop: LoopStop::Completed,
+                    turns: 1,
                 },
             ],
             false,
@@ -156,6 +162,7 @@ mod tests {
                 },
                 LoopEvent::Finished {
                     stop: LoopStop::Completed,
+                    turns: 1,
                 },
             ],
             true,

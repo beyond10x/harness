@@ -374,11 +374,20 @@ impl<'a> AgentLoop<'a> {
                 .iter()
                 .map(|spec| spec.name.clone())
                 .collect(),
+            operations: self
+                .tools
+                .operations()
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .collect(),
         });
         self.announce_prices(priced, sink);
 
         let stop = self.drive(&mut state, deadline, sink)?;
-        sink.emit(LoopEvent::Finished { stop: stop.clone() });
+        sink.emit(LoopEvent::Finished {
+            stop: stop.clone(),
+            turns: state.turns,
+        });
         Ok(state.into_outcome(stop))
     }
 

@@ -710,7 +710,7 @@ fn a_cancelled_model_read_is_an_outcome_rather_than_a_failure() {
     assert!(
         sink.events()
             .iter()
-            .any(|event| matches!(event, LoopEvent::Finished { stop } if matches!(stop, LoopStop::Cancelled { .. }))),
+            .any(|event| matches!(event, LoopEvent::Finished { stop, .. } if matches!(stop, LoopStop::Cancelled { .. }))),
         "the terminal event says cancelled: {:?}",
         sink.events()
     );

@@ -513,3 +513,29 @@ fn an_exec_identity_is_the_shape_substrate_admits() {
          would read each other's"
     );
 }
+
+#[test]
+fn a_declared_rust_toolchain_never_mounts_the_operators_cargo_credential() {
+    // `~/.cargo` holds `credentials.toml` - a registry publishing token - beside the package
+    // cache. It was mounted whole for one commit, which handed every confined run the operator's
+    // credential. Nothing about a build needs it, and a confinement that leaks one is not a
+    // confinement.
+    let Ok(toolchain) = super::Toolchain::rust(std::env::var_os("HOME").map(std::path::PathBuf::from).as_deref())
+    else {
+        // No toolchain on this machine; the rule below is still the rule.
+        return;
+    };
+    for root in toolchain.roots() {
+        assert!(
+            !root.host_path.ends_with("/.cargo"),
+            "`{}` would carry credentials.toml into the sandbox",
+            root.host_path
+        );
+    }
+    // And cargo's home is somewhere it may actually write: it takes a `.package-cache` lock there
+    // before doing anything, and against a read-only mount it blocks forever with no output.
+    assert_eq!(
+        toolchain.env().get("CARGO_HOME").map(String::as_str),
+        Some("/workspace/.cargo")
+    );
+}

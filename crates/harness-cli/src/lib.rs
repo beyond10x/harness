@@ -40,17 +40,34 @@ pub use render::Renderer;
 /// searched for read-only tools, read two files, changed nothing, and reported the task done.
 /// **The instruction had asked it to.**
 ///
-/// So the text below states no effects at all. What a run can do differs from run to run — it is a
-/// question about the machine, answered by `tool_search` — and an instruction that answers it in
-/// advance can only ever be out of date.
+/// So this text states **no effects of its own**. What follows it is the catalogue, rendered from
+/// the live one by [`harness_tools::Catalogue::brief`], which cannot describe a tool this run does
+/// not have.
 const DEFAULT_INSTRUCTIONS: &str = "\
 You are the b10x coding harness. Everything you can do reaches you through three tools: \
 `tool_search` lists what this run has, `tool_describe` gives one entry's input schema, and \
-`tool_invoke` calls it. Begin by calling `tool_search` with no arguments. The catalogue differs \
-from run to run, so filtering it before you have seen it whole hides tools you may need, and what \
-is missing from a filtered list is not missing from the run. Ground every claim about the \
+`tool_invoke` calls it — `tool_invoke` is the only one that acts. Ground every claim about the \
 workspace in something you actually read, and say plainly when you have not looked. Never report \
 work as done unless a tool you called made it so.";
+
+/// The standing instruction, with this run's catalogue written into it.
+///
+/// **The catalogue belongs in the instructions, not in the conversation.** Discovering it through
+/// `tool_search` and `tool_describe` cost 33–44% of every tool call across three measured runs —
+/// four calls of ten spent finding out what exists, each a billed round trip that is then replayed
+/// in every later turn. And the answers landed in the conversation, which grows and is re-sent at
+/// the full input rate, rather than in the instructions, which are identical every turn and are
+/// what a prompt cache can hold.
+///
+/// The verbs are unchanged and still the only way to act. What is removed is the requirement to
+/// ask before doing anything.
+fn standing_instruction(catalogue: &harness_tools::Catalogue) -> String {
+    format!(
+        "{DEFAULT_INSTRUCTIONS}\n\nThis run's catalogue, which is what `tool_invoke` will \
+         accept — call `tool_search` only if you need to re-check it:\n\n{}",
+        catalogue.brief()
+    )
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -420,11 +437,19 @@ fn sampling(options: &RunOptions) -> Sampling {
     }
 }
 
-fn instructions(options: &RunOptions) -> Result<String, String> {
+/// The standing instruction for this run: the operator's file, or the default plus the catalogue.
+///
+/// An operator-named file is used **verbatim**, catalogue and all. Appending to it would be this
+/// function editing a document somebody wrote, and a run whose instruction is not the file it names
+/// is one nobody can reproduce from the file.
+fn instructions(
+    options: &RunOptions,
+    catalogue: &harness_tools::Catalogue,
+) -> Result<String, String> {
     match &options.instructions_file {
         Some(path) => fs::read_to_string(path)
             .map_err(|error| format!("reading `{}`: {error}", path.display())),
-        None => Ok(DEFAULT_INSTRUCTIONS.to_owned()),
+        None => Ok(standing_instruction(catalogue)),
     }
 }
 
@@ -448,7 +473,7 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     } else {
         Box::new(DenyAll)
     };
-    let config = LoopConfig::new(&options.model, instructions(options)?)
+    let config = LoopConfig::new(&options.model, instructions(options, tools.catalogue())?)
         .with_sampling(sampling(options))
         .with_budget(budget(options))
         .with_prices(prices(options)?);
@@ -822,9 +847,39 @@ mod tests {
         assert!(error.contains("provenance"), "{error}");
     }
 
+    /// A read-only catalogue over a temporary tree, for the instruction tests.
+    fn a_catalogue(dir: &std::path::Path) -> harness_tools::Catalogue {
+        harness_tools::Catalogue::of(
+            harness_tools::LocalOperations::new(dir).expect("opens"),
+        )
+    }
+
+    #[test]
+    fn the_default_instruction_carries_the_catalogue_so_nothing_has_to_be_discovered() {
+        // 33-44% of every tool call across three live runs was `tool_search` or `tool_describe`:
+        // four of ten spent finding out what exists, each a billed round trip replayed in every
+        // later turn. The answer is the same on every turn, so it belongs in the instructions -
+        // which are also the only half of a request a prompt cache can hold.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let catalogue = a_catalogue(dir.path());
+        let text = instructions(&options(&[]), &catalogue).expect("the default is available");
+
+        for entry in ["file_read", "dir_list", "search"] {
+            assert!(text.contains(entry), "`{entry}` is named up front: {text}");
+        }
+        assert!(text.contains("file.read"), "with its operation: {text}");
+        assert!(text.contains("max_bytes"), "and its arguments: {text}");
+        assert!(
+            !text.contains("file_write"),
+            "and nothing this read-only run does not have: {text}"
+        );
+    }
+
     #[test]
     fn the_default_instruction_points_at_the_catalogue_and_promises_no_effects() {
-        let text = instructions(&options(&[])).expect("the default is available");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let catalogue = a_catalogue(dir.path());
+        let text = instructions(&options(&[]), &catalogue).expect("the default is available");
         assert!(text.contains("tool_search"), "{text}");
         for stale in ["workspace_read", "workspace_list", "workspace_grep"] {
             assert!(!text.contains(stale), "`{stale}` no longer exists: {text}");
@@ -844,6 +899,12 @@ mod tests {
         let path = dir.path().join("instructions.md");
         fs::write(&path, "be terse").expect("write");
         let options = options(&["--instructions-file", path.to_str().expect("utf-8 path")]);
-        assert_eq!(instructions(&options).expect("readable"), "be terse");
+        let dir2 = tempfile::tempdir().expect("temporary directory");
+        // Verbatim, catalogue and all: appending to a document somebody wrote would make the run's
+        // instruction something the file alone cannot reproduce.
+        assert_eq!(
+            instructions(&options, &a_catalogue(dir2.path())).expect("readable"),
+            "be terse"
+        );
     }
 }

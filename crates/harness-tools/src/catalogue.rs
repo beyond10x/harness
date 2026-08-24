@@ -208,6 +208,45 @@ impl Catalogue {
         }))
     }
 
+    /// The whole catalogue as prose a standing instruction can carry.
+    ///
+    /// # Why the model should not have to ask
+    ///
+    /// The three verbs make discovery a *turn*: `tool_search` to learn what exists, then
+    /// `tool_describe` per entry to learn how to call it, and only then the work. Measured across
+    /// three live runs, **33% to 44% of every tool call was one of those two** — four calls of ten
+    /// spent finding out, each one a full model round trip that is billed, replayed in every later
+    /// turn, and adds nothing to the tree.
+    ///
+    /// It also puts the catalogue in the wrong half of the request. A `tool_search` answer lands in
+    /// the **conversation**, which grows and is re-sent at the full rate; this puts it in the
+    /// **instructions**, which are the same bytes on every turn and are what a prompt cache is able
+    /// to hold. The constant head of a request was about 450 tokens — under the 1,024-token minimum
+    /// a cache entry needs — and this is what lifts it over.
+    ///
+    /// The verbs stay. This is not a flat surface by the back door: `tool_invoke` is still the only
+    /// way to act, `tool_search` still answers a filtered question about a catalogue that may be
+    /// larger than this text, and a run may still describe an entry it wants to re-check. What
+    /// changes is that none of that is *required* before the first useful call.
+    ///
+    /// Rendered from the live catalogue, so it cannot describe a tool this run does not have — the
+    /// failure a hand-written instruction made twice.
+    #[must_use]
+    pub fn brief(&self) -> String {
+        use std::fmt::Write;
+        let mut text = String::new();
+        for entry in &self.entries {
+            let schema =
+                serde_json::to_string(&entry.input_schema).unwrap_or_else(|_| "{}".to_owned());
+            let _ = writeln!(
+                text,
+                "- `{}` ({}) — {}\n  arguments: {schema}",
+                entry.name, entry.operation, entry.summary
+            );
+        }
+        text
+    }
+
     /// Perform one entry.
     ///
     /// # Errors

@@ -74,17 +74,48 @@ impl ConfinedOperations {
     }
 }
 
+/// How much of a file one read answers with unless the caller asks for less.
+///
+/// The same figure the unconfined provider uses, so a run's replies do not change shape when it is
+/// confined.
+const MAX_READ_BYTES: u64 = 64 * 1024;
+
+/// The most a caller may ask for in one read, however large a number it names.
+const MAX_READ_BYTES_CEILING: u64 = 256 * 1024;
+
 impl Operations for ConfinedOperations {
-    fn file_read(&self, path: &str, _max_bytes: Option<u64>) -> Result<Value, String> {
-        // The daemon's own read ceiling governs; a caller's smaller one is not forwarded, because a
-        // truncation this side could not be reported as one and a partial read that looked whole is
-        // the failure the read tool's own reply exists to prevent.
-        self.backend
+    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String> {
+        // Bounded here, and reported. The earlier note said a truncation this side "could not be
+        // reported as one" — that was wrong: the whole text is in hand, so the exact total and the
+        // fact of truncation are both known, which is all a reply needs to keep a partial read from
+        // looking whole.
+        //
+        // It is bounded because a result is replayed on **every** later turn. A live run on
+        // 2026-08-24 read three files in one turn and the next turn's replay grew by 24,630 tokens,
+        // which then pushed the conversation past its bound and bought a prefix rewrite.
+        let limit = max_bytes.unwrap_or(MAX_READ_BYTES).min(MAX_READ_BYTES_CEILING);
+        let text = self
+            .backend
             .file_read(&self.workspace, path)
-            .map(
-                |text| json!({"path": path, "bytes": text.len(), "truncated": false, "text": text}),
-            )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        let total = text.len() as u64;
+        let truncated = total > limit;
+        // On a character boundary, so the reply is still a string the model can read.
+        let head = if truncated {
+            let mut end = usize::try_from(limit).unwrap_or(text.len()).min(text.len());
+            while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            &text[..end]
+        } else {
+            text.as_str()
+        };
+        Ok(json!({
+            "path": path,
+            "bytes": total,
+            "truncated": truncated,
+            "text": head,
+        }))
     }
 
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {

@@ -363,6 +363,71 @@ fn no_backend_at_all_contributes_nothing_that_outlives_a_call() {
     assert_eq!(entries, vec!["file_read", "dir_list", "search"]);
 }
 
+/// A backend answering one file of `bytes` bytes.
+fn a_file_of(bytes: usize) -> Scripted {
+    let data = base64_of(&"x".repeat(bytes));
+    Scripted::new(vec![(
+        200,
+        Box::leak(format!(r#"{{"content":{{"data":"{data}"}}}}"#).into_boxed_str()),
+    )])
+}
+
+/// The backend answers base64, so a fixture has to speak it.
+fn base64_of(text: &str) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = text.as_bytes();
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> (18 - 6 * i)) & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_confined_read_is_bounded_and_says_so_rather_than_replaying_a_whole_large_file() {
+    // A result is replayed on every later turn. A live run read three files in one turn and the
+    // next turn's replay grew by 24,630 tokens, which pushed the conversation past its bound.
+    let answer = provider(&confined(), a_file_of(200_000), &["cargo"])
+        .file_read("big.txt", None)
+        .expect("read");
+
+    assert_eq!(answer["bytes"], 200_000, "the whole size is still reported");
+    assert_eq!(answer["truncated"], true, "a partial read never looks whole");
+    assert_eq!(
+        answer["text"].as_str().expect("text").len(),
+        64 * 1024,
+        "bounded at the same figure the unconfined provider uses"
+    );
+}
+
+#[test]
+fn a_confined_read_the_caller_bounded_more_tightly_is_answered_at_that_bound() {
+    let answer = provider(&confined(), a_file_of(10_000), &["cargo"])
+        .file_read("big.txt", Some(100))
+        .expect("read");
+
+    assert_eq!(answer["text"].as_str().expect("text").len(), 100);
+    assert_eq!(answer["truncated"], true);
+}
+
+#[test]
+fn a_confined_read_inside_the_bound_is_answered_whole_and_says_it_is_whole() {
+    let answer = provider(&confined(), a_file_of(120), &["cargo"])
+        .file_read("small.txt", None)
+        .expect("read");
+
+    assert_eq!(answer["truncated"], false);
+    assert_eq!(answer["text"].as_str().expect("text").len(), 120);
+}
+
 #[test]
 fn a_run_with_no_declared_programs_is_not_offered_even_where_it_could_be() {
     let entries = entry_names(&Catalogue::of(provider(

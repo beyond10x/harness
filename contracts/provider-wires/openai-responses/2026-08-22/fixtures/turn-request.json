@@ -61,5 +61,5 @@
     }
   ],
   "top_p": 0.95,
-  "prompt_cache_key": "b10x-f608f453ae93cd4a"
+  "prompt_cache_key": "b10x-session-fixture"
 }

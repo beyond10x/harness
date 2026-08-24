@@ -26,6 +26,25 @@ pub use sse::{MAX_EVENT_BYTES, MAX_STREAM_BYTES, SseEvent, SseReader};
 /// Identifies this projection. Opaque items carry it and may not be replayed into another wire.
 pub const WIRE: &str = "openai-responses";
 
+/// What this client calls itself on the wire.
+///
+/// Its own name and not a vendor's. A route that serves several clients is entitled to know which
+/// one is calling, and a harness that answered with somebody else's name would be making its runs
+/// unexplainable in exactly the way its credential handling exists to prevent.
+const ORIGINATOR: &str = "b10x-harness";
+
+/// A name for one conversation, stable for the life of a client and distinct between runs.
+///
+/// Not a UUID and not from a crate: what the wire needs is a string that is the same on every turn
+/// of one run and different across runs, and the clock plus this process is enough for that. It
+/// identifies nothing about the machine or the account.
+fn new_session() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    format!("b10x-{:x}-{:x}", std::process::id(), nanos)
+}
+
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Applies to each individual read, not to the turn.
 ///
@@ -90,6 +109,13 @@ impl Endpoint {
 pub struct ResponsesClient {
     wire: WireId,
     endpoint: Endpoint,
+    /// This run's conversation identity.
+    ///
+    /// One value for the life of the client, which is the life of a run: it names the conversation
+    /// on the wire (`session-id`) and routes every turn to the same prompt cache
+    /// (`prompt_cache_key`). Both are the same string on purpose — that is the shape the endpoint
+    /// was observed honouring, serving `codex` at 85% cached where this loop was getting nothing.
+    session: String,
     /// [`None`] sends no `authorization` header at all.
     ///
     /// Not the same as an empty credential, which is refused below: an empty bearer means a
@@ -149,6 +175,7 @@ impl ResponsesClient {
         Ok(Self {
             wire: WireId::new(WIRE).expect("the wire id constant is valid"),
             endpoint,
+            session: new_session(),
             bearer,
             http,
             cancel: Cancel::new(),
@@ -183,6 +210,13 @@ impl ResponsesClient {
             .post(self.endpoint.responses_url())
             .header("accept", "text/event-stream")
             .header("content-type", "application/json")
+            // Who is calling and which conversation this turn belongs to. Named honestly: this is
+            // not codex and does not claim to be, and the endpoint is reached with a credential the
+            // caller pointed us at. What the headers buy is a conversation the far end can
+            // recognise across turns, which is what a prompt cache is keyed on.
+            .header("originator", ORIGINATOR)
+            .header("session-id", &self.session)
+            .header("x-client-request-id", &self.session)
             .json(body);
         // Held only for as long as it takes to become a header, and dropped before the send that
         // can block — the same custody the credential had before it became optional.
@@ -388,6 +422,7 @@ impl ModelPort for ResponsesClient {
         // the far side.
         project::check_tool_names(&request.tools)?;
         let body = project::request_body(
+            &self.session,
             &request.model,
             &request.instructions,
             &request.items,

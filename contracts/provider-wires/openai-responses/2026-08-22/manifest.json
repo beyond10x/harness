@@ -47,8 +47,8 @@
   "files": [
     {
       "path": "fixtures/turn-request.json",
-      "bytes": 1317,
-      "sha256": "1539dd2e1097b7a3ca1e7ccb17206abb4e1488581ac0a841f13cef2e3e229472"
+      "bytes": 1316,
+      "sha256": "f642a99983e9e3b437cdcb0041b93f2bc384f71735b6ad2c50f11c7e0b739361"
     },
     {
       "path": "fixtures/turn-stream.sse",

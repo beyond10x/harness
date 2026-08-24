@@ -75,6 +75,8 @@ fn canonical_request() -> Value {
         envelope: Envelope::default(),
     }];
     request_body(
+        // Fixed here so the pinned fixture stays byte-stable; a real run's is per-conversation.
+        "b10x-session-fixture",
         "daemonloom-emulated",
         "be useful",
         &items,

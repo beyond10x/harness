@@ -1,19 +1,19 @@
-{"direction":"client","frame":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"daemonloom_agent_harness"},"capabilities":{"experimentalApi":true}}}}
-{"direction":"server","frame":{"id":1,"result":{"userAgent":{"name":"daemonloom-harness","profile":"codex-app-server-stdio-v2-dynamic-operation-tools-experimental","version":"0.1.0"}}}}
+{"direction":"client","frame":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"b10x_agent_harness"},"capabilities":{"experimentalApi":true}}}}
+{"direction":"server","frame":{"id":1,"result":{"userAgent":{"name":"b10x-harness","profile":"codex-app-server-stdio-v2-dynamic-operation-tools-experimental","version":"0.1.0"}}}}
 {"direction":"client","frame":{"method":"initialized","params":{}}}
 {"direction":"client","frame":{"id":2,"method":"thread/resume","params":{"threadId":"whatever"}}}
-{"direction":"server","frame":{"id":2,"error":{"code":-32601,"message":"`thread/resume` is pinned but not implemented by daemonloom-harness"}}}
-{"direction":"client","frame":{"id":3,"method":"thread/start","params":{"developerInstructions":"be useful","dynamicTools":[{"type":"function","name":"daemonloom_operation_search","description":"Search only operations in this run's immutable effective capability catalog.","deferLoading":false,"inputSchema":{"type":"object","additionalProperties":false,"required":["query"],"properties":{"query":{"type":"string","maxLength":512}}}}]}}}
+{"direction":"server","frame":{"id":2,"error":{"code":-32601,"message":"`thread/resume` is pinned but not implemented by b10x-harness"}}}
+{"direction":"client","frame":{"id":3,"method":"thread/start","params":{"developerInstructions":"be useful","dynamicTools":[{"type":"function","name":"b10x_operation_search","description":"Search only operations in this run's immutable effective capability catalog.","deferLoading":false,"inputSchema":{"type":"object","additionalProperties":false,"required":["query"],"properties":{"query":{"type":"string","maxLength":512}}}}]}}}
 {"direction":"server","frame":{"id":3,"result":{"thread":{"id":"thr-1"}}}}
 {"direction":"server","frame":{"method":"thread/started","params":{"thread":{"id":"thr-1"}}}}
 {"direction":"client","frame":{"id":4,"method":"turn/start","params":{"threadId":"thr-1","input":[{"type":"text","text":"what can you do here?"}]}}}
 {"direction":"server","frame":{"id":4,"result":{"turn":{"id":"turn-2"}}}}
 {"direction":"server","frame":{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-2","status":"inProgress","items":[]}}}}
 {"direction":"server","frame":{"method":"thread/tokenUsage/updated","params":{"threadId":"thr-1","turnId":"turn-2","tokenUsage":{"total":{"inputTokens":42,"cachedInputTokens":7,"outputTokens":8,"reasoningOutputTokens":0,"totalTokens":50},"last":{"inputTokens":42,"cachedInputTokens":7,"outputTokens":8,"reasoningOutputTokens":0,"totalTokens":50}}}}}
-{"direction":"server","frame":{"method":"item/started","params":{"threadId":"thr-1","turnId":"turn-2","startedAtMs":1,"item":{"type":"dynamicToolCall","id":"call_daemonloom_001","tool":"daemonloom_operation_search","status":"inProgress"}}}}
-{"direction":"server","frame":{"id":1,"method":"item/tool/call","params":{"arguments":{"query":"workspace"},"callId":"call_daemonloom_001","threadId":"thr-1","tool":"daemonloom_operation_search","turnId":"turn-2"}}}
+{"direction":"server","frame":{"method":"item/started","params":{"threadId":"thr-1","turnId":"turn-2","startedAtMs":1,"item":{"type":"dynamicToolCall","id":"call_b10x_001","tool":"b10x_operation_search","status":"inProgress"}}}}
+{"direction":"server","frame":{"id":1,"method":"item/tool/call","params":{"arguments":{"query":"workspace"},"callId":"call_b10x_001","threadId":"thr-1","tool":"b10x_operation_search","turnId":"turn-2"}}}
 {"direction":"client","frame":{"id":1,"result":{"contentItems":[{"type":"inputText","text":"{\"operations\":[\"workspace.status\"]}"}],"success":true}}}
-{"direction":"server","frame":{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"dynamicToolCall","id":"call_daemonloom_001","tool":"daemonloom_operation_search","status":"completed"}}}}
+{"direction":"server","frame":{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"dynamicToolCall","id":"call_b10x_001","tool":"b10x_operation_search","status":"completed"}}}}
 {"direction":"server","frame":{"method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-2","itemId":"msg-3","delta":"I can read "}}}
 {"direction":"server","frame":{"method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-2","itemId":"msg-3","delta":"workspace.status."}}}
 {"direction":"server","frame":{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-2","item":{"type":"agentMessage","id":"msg-3","text":"I can read workspace.status."}}}}
@@ -23,7 +23,7 @@
 {"direction":"server","frame":{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-4","status":"inProgress","items":[]}}}}
 {"direction":"server","frame":{"method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-4","itemId":"msg-5","delta":"Starting"}}}
 {"direction":"client","frame":{"id":6,"method":"turn/steer","params":{"threadId":"thr-1","expectedTurnId":"turn-4","input":[{"type":"text","text":"actually stop"}]}}}
-{"direction":"server","frame":{"id":6,"error":{"code":-32601,"message":"`turn/steer` is pinned but not implemented by daemonloom-harness"}}}
+{"direction":"server","frame":{"id":6,"error":{"code":-32601,"message":"`turn/steer` is pinned but not implemented by b10x-harness"}}}
 {"direction":"client","frame":{"id":7,"method":"turn/interrupt","params":{"threadId":"thr-1","turnId":"turn-4"}}}
 {"direction":"server","frame":{"id":7,"result":{}}}
 {"direction":"server","frame":{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-4","status":"interrupted","items":[]}}}}

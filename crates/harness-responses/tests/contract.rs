@@ -77,7 +77,7 @@ fn canonical_request() -> Value {
     request_body(
         // Fixed here so the pinned fixture stays byte-stable; a real run's is per-conversation.
         "b10x-session-fixture",
-        "daemonloom-emulated",
+        "b10x-emulated",
         "be useful",
         &items,
         &tools,
@@ -124,7 +124,7 @@ fn the_manifest_names_exactly_the_request_fields_the_harness_sends() {
 fn the_pinned_stream_decodes_into_the_expected_turn() {
     let mut sink = VecSink::new();
     let outcome = decode_stream(
-        "daemonloom-emulated",
+        "b10x-emulated",
         fixture("turn-stream.sse").as_bytes(),
         &mut sink,
     )
@@ -135,7 +135,7 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
     assert_eq!(
         outcome.usage,
         Some(Usage {
-            model: "daemonloom-emulated".to_owned(),
+            model: "b10x-emulated".to_owned(),
             input_tokens: 42,
             output_tokens: 11,
             cached_input_tokens: 7,

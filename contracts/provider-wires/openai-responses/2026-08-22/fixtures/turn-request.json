@@ -42,7 +42,7 @@
     }
   ],
   "max_output_tokens": 4096,
-  "model": "daemonloom-emulated",
+  "model": "b10x-emulated",
   "reasoning": {
     "effort": "medium"
   },

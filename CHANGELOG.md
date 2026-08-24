@@ -88,7 +88,7 @@ the commit history carries the full reasoning per change.
 - Carry sampling on a turn. `TurnRequest` gains an optional `Sampling` — temperature, top_p and a
   reasoning effort — which `LoopConfig` sets once and the loop sends on every turn, because a
   stateless loop replays the whole conversation and a value carried only on the first request would
-  apply only to the first request. `daemonloom-harness run` exposes `--temperature`, `--top-p` and
+  apply only to the first request. `b10x-harness run` exposes `--temperature`, `--top-p` and
   `--reasoning-effort`.
 
   A field nobody set is **absent**, not defaulted. Writing a provider's own default here would take
@@ -107,7 +107,7 @@ the commit history carries the full reasoning per change.
   gateway fixes thinking and effort when it launches a pod, so a per-request effort reaches it and
   changes nothing. Which endpoint honours what is `runtime/agent`'s route registry's question.
 
-- Establish `runtime/harness`, Daemonloom's own agent loop, as a component separate from the Codex
+- Establish `runtime/harness`, B10x's own agent loop, as a component separate from the Codex
   and Claude bridges in `runtime/agent`. It carries no bridge and depends on nothing else in the
   monorepo; the arrow points inward, so a future consumer embeds it rather than the reverse. The
   split is accepted by architecture ADR 0052.
@@ -135,7 +135,7 @@ the commit history carries the full reasoning per change.
   result all return to the model as failed outcomes, so it learns the effect did not happen; the
   oversized payload is kept out of the replayed conversation so one bad call cannot poison every
   later turn.
-- Add `daemonloom-harness`, the command-line shell, with a bounded read-only workspace toolset —
+- Add `b10x-harness`, the command-line shell, with a bounded read-only workspace toolset —
   `workspace.list`, `workspace.read`, `workspace.grep` — that refuses any path resolving outside the
   workspace, including through a symlink, and reports its own truncation rather than implying a
   partial answer is whole. Credentials come from an explicitly named file or environment variable
@@ -151,7 +151,7 @@ the commit history carries the full reasoning per change.
   cases through the built binary over a real workspace. This is `provider_emulated` evidence and is
   never promoted to a claim about a real provider; no live run has happened.
 - Register the component in the monorepo gate, `scripts/check-local.sh`.
-- Add bridge mode: `daemonloom-harness app-server` serves Daemonloom's own loop over the pinned
+- Add bridge mode: `b10x-harness app-server` serves B10x's own loop over the pinned
   Codex app-server JSON-RPC format on stdio, under the client's operation-tools profile. The real
   bridge has not driven it and no gate compares the two inventories; all evidence is this
   component's own client. `runtime/agent` already drives a process speaking that

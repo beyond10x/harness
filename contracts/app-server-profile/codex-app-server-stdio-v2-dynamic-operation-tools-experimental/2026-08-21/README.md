@@ -11,7 +11,7 @@ An earlier revision declared `codex-app-server-stdio-v2`. That is the client's *
 it registers no dynamic tools, refuses `item/tool/call` as an out-of-profile server method, and
 cannot classify a `dynamicToolCall` item at all. A server declaring it while emitting tool frames
 looks compatible and fails at the first tool call. The operation-tools profile is the one that
-carries generic Daemonloom operation tools, which is exactly the intended consumer.
+carries generic B10x operation tools, which is exactly the intended consumer.
 
 Its price is a capability handshake: the client must send `capabilities.experimentalApi` at
 `initialize`. Registering tools without it is refused by name at `thread/start`, while a text-only
@@ -28,7 +28,7 @@ other. A protocol is the seam; a shared crate would have been a coupling.
 
 | | |
 | --- | --- |
-| Product | `daemonloom-harness` — never `codex-cli` |
+| Product | `b10x-harness` — never `codex-cli` |
 | Transport | JSON lines on stdio, one frame per line, flushed per frame |
 | Frame bound | 8 MiB, matching the client's `MAX_LINE_BYTES`, capped at the read |
 | Tool answer bound | 256 KiB, matching the client's `MAX_DYNAMIC_TOOL_RESPONSE_BYTES` |

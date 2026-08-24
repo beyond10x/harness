@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
-MODEL = "daemonloom-emulated"
+MODEL = "b10x-emulated"
 
 RECORD_LOCK = threading.Lock()
 

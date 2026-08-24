@@ -90,7 +90,7 @@ impl Bridge {
             "--base-url",
             &endpoint.base_url,
             "--model",
-            "daemonloom-emulated",
+            "b10x-emulated",
             "--api-key-env",
             "B10X_HARNESS_TEST_KEY",
         ];

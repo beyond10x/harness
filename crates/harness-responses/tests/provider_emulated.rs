@@ -59,7 +59,7 @@ impl Fixture {
     }
 
     fn client(&self) -> ResponsesClient {
-        let endpoint = Endpoint::new(&self.base_url, "daemonloom-emulated", 32_000)
+        let endpoint = Endpoint::new(&self.base_url, "b10x-emulated", 32_000)
             .expect("the fixture endpoint is well formed");
         ResponsesClient::new(endpoint, Arc::new(StaticBearer::new("test-key")))
             .expect("the client builds")
@@ -131,7 +131,7 @@ fn run(
     let mut client = fixture.client();
     let mut approvals = ApproveAll;
     let mut sink = VecLoopSink::new();
-    let config = LoopConfig::new("daemonloom-emulated", "be useful")
+    let config = LoopConfig::new("b10x-emulated", "be useful")
         .with_budget(Budget::default().with_max_turns(5));
     let outcome = AgentLoop::new(&mut client, tools, &mut approvals, config)
         .run("read the readme", &mut sink);
@@ -408,7 +408,7 @@ fn a_cancel_placed_before_the_run_stops_it_before_it_reaches_the_endpoint() {
         &mut client,
         &mut tools,
         &mut approvals,
-        LoopConfig::new("daemonloom-emulated", "be useful"),
+        LoopConfig::new("b10x-emulated", "be useful"),
     )
     .run("read the readme", &mut sink);
 
@@ -447,7 +447,7 @@ fn a_cancel_during_a_stream_stops_it_mid_answer() {
         &mut client,
         &mut tools,
         &mut approvals,
-        LoopConfig::new("daemonloom-emulated", "be useful"),
+        LoopConfig::new("b10x-emulated", "be useful"),
     )
     .run("take your time", &mut sink)
     .expect("cancellation is an outcome");

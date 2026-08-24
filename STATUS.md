@@ -4,7 +4,7 @@ Observed on 2026-08-21, after the Responses wire, bridge mode, and an independen
 
 | Area | State | Next evidence |
 | --- | --- | --- |
-| Source | canonical repository `beyond10x/harness`; extracted from the daemonloom monorepo at 1e074923; own workspace, own gate, no dependency on any other repository | keep the no-dependency boundary as the component grows |
+| Source | canonical repository `beyond10x/harness`; own workspace, own gate, no dependency on any other repository | keep the no-dependency boundary as the component grows |
 | Architecture | the split from `runtime/agent`'s bridges is accepted by ADR 0052 | none pending; the component is registered in `architecture/STATUS.md` |
 | Neutral values | `harness-wire` implements items, tool specs, turns, usage, stream events, the three ports and every size bound; positive and adversarial tests pass | none pending for the Responses slice; the Messages wire is what tests whether the abstraction holds |
 | Responses wire | `POST {base}/responses` streaming, SSE decode, request projection, tool-call decode, reasoning-item preservation, usage, stop reasons, cancellation, and typed status mapping pass against a real socket | characterize one authorized live endpoint and retain the evidence |

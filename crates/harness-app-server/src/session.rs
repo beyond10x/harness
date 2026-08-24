@@ -449,14 +449,14 @@ mod tests {
     fn a_registration_becomes_a_publishable_tool() {
         let tools = decode_dynamic_tools(Some(&json!([{
             "type": "function",
-            "name": "daemonloom_operation_search",
+            "name": "b10x_operation_search",
             "description": "search",
             "deferLoading": false,
             "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
         }])))
         .expect("a well formed registration decodes");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name.as_str(), "daemonloom_operation_search");
+        assert_eq!(tools[0].name.as_str(), "b10x_operation_search");
         assert_eq!(tools[0].approval, harness_wire::Approval::NotRequired);
         assert_eq!(tools[0].input_schema["type"], json!("object"));
     }

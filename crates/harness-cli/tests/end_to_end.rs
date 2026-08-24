@@ -87,7 +87,7 @@ fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
         "--base-url",
         &fixture.base_url,
         "--model",
-        "daemonloom-emulated",
+        "b10x-emulated",
         "--api-key-env",
         "B10X_HARNESS_TEST_KEY",
         "--input",

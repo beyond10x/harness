@@ -8,7 +8,6 @@
   "request_fields": [
     "include",
     "input",
-    "instructions",
     "max_output_tokens",
     "model",
     "prompt_cache_key",
@@ -47,8 +46,8 @@
   "files": [
     {
       "path": "fixtures/turn-request.json",
-      "bytes": 1316,
-      "sha256": "f642a99983e9e3b437cdcb0041b93f2bc384f71735b6ad2c50f11c7e0b739361"
+      "bytes": 1459,
+      "sha256": "55368773a857f1959143a9050a7ffecf0d9c1e9321f1155158e12b9f28e2f00a"
     },
     {
       "path": "fixtures/turn-stream.sse",

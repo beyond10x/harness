@@ -221,6 +221,12 @@ class Handler(BaseHTTPRequestHandler):
                 "stream": body.get("stream"),
                 "include": body.get("include"),
                 "instructions": body.get("instructions"),
+                # The standing instruction now rides at the head of `input` as a developer message,
+                # because that is the region this wire's cache prefix is computed over.
+                "first_input_role": (body.get("input") or [{}])[0].get("role"),
+                "first_input_text": (
+                    ((body.get("input") or [{}])[0].get("content") or [{}])[0].get("text")
+                ),
                 "tool_names": [tool.get("name") for tool in body.get("tools", [])],
                 "input": body.get("input", []),
                 "max_output_tokens": body.get("max_output_tokens"),

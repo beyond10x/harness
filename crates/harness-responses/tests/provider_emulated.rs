@@ -172,7 +172,13 @@ fn the_request_is_stateless_authenticated_and_asks_for_reasoning() {
     assert_eq!(first["include"], json!(["reasoning.encrypted_content"]));
     assert_eq!(first["accept"], json!("text/event-stream"));
     assert_eq!(first["has_authorization"], json!(true));
-    assert_eq!(first["instructions"], json!("be useful"));
+    // At the head of `input` as a `developer` message, not in a top-level `instructions` field.
+    // Both are documented and the model reads them the same way; only one of them is inside the
+    // region this endpoint computes a cache prefix over, and the measured difference on a real run
+    // was 18% cached against 58%.
+    assert_eq!(first["instructions"], json!(null), "not top-level any more");
+    assert_eq!(first["first_input_role"], json!("developer"));
+    assert_eq!(first["first_input_text"], json!("be useful"));
     assert_eq!(first["tool_names"], json!(["workspace_read"]));
 }
 

@@ -280,11 +280,24 @@ pub fn request_body(
 ) -> Value {
     let mut body = Map::new();
     body.insert("model".to_owned(), json!(model));
-    body.insert("instructions".to_owned(), json!(instructions));
-    body.insert(
-        "input".to_owned(),
-        Value::Array(items.iter().map(item_to_input).collect()),
-    );
+    // **The standing instruction goes at the head of `input`, not in `instructions`.**
+    //
+    // Both are documented and the model reads them the same way — `developer` is the Responses
+    // API's own replacement for a system message. What differs is the cache. A run whose whole
+    // constant head sat in `instructions` measured 15–18% cached while `codex`, on the same route
+    // and the same account, measured 85%; the one structural difference left, after the prefix was
+    // proven stable and the head was lifted over the 1,024-token minimum, is that codex sends no
+    // top-level `instructions` at all and puts its entire prompt inside `input`.
+    //
+    // So this follows the observation. It is also the shape that makes the head *count*: `input`
+    // now begins with a thousand tokens that are identical on every turn of the run.
+    let mut input = vec![json!({
+        "type": "message",
+        "role": "developer",
+        "content": [{"type": "input_text", "text": instructions}],
+    })];
+    input.extend(items.iter().map(item_to_input));
+    body.insert("input".to_owned(), Value::Array(input));
     body.insert(
         "tools".to_owned(),
         Value::Array(tools.iter().map(tool_to_wire).collect()),

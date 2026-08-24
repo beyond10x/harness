@@ -4,6 +4,16 @@
   ],
   "input": [
     {
+      "type": "message",
+      "role": "developer",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "be useful"
+        }
+      ]
+    },
+    {
       "content": [
         {
           "text": "read the readme",
@@ -31,7 +41,6 @@
       "type": "function_call_output"
     }
   ],
-  "instructions": "be useful",
   "max_output_tokens": 4096,
   "model": "daemonloom-emulated",
   "reasoning": {

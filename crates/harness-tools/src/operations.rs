@@ -19,6 +19,8 @@
 //! them apart. Which one a run holds is a deployment decision, not a different set of things the
 //! model may do.
 
+use std::time::Duration;
+
 use serde_json::Value;
 
 /// What performs a catalogue entry.
@@ -81,6 +83,25 @@ pub trait Operations {
     ///
     /// The program is not one this run may start, or it could not be launched.
     fn run(&self, argv: &[String]) -> Result<Value, String>;
+
+    /// [`run`](Self::run), told how much of the run's wall-clock budget is left.
+    ///
+    /// A program is the one thing here that outlives the call that started it by minutes, and
+    /// the loop's deadline check between calls cannot reach into it. An implementation that
+    /// starts a process bounds it by the smaller of its own ceiling and `remaining`, and says in
+    /// the result that it did. `None` is a run with no deadline.
+    ///
+    /// Defaulted to the unbounded [`run`](Self::run), so an implementation that has nothing to
+    /// bound needs nothing more — but one that starts a process without honouring this is one a
+    /// deadline cannot stop.
+    ///
+    /// # Errors
+    ///
+    /// As [`run`](Self::run).
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+        let _ = remaining;
+        self.run(argv)
+    }
 
     /// Where a write to `path` would land, relative to the workspace root, with every link followed.
     ///
@@ -189,6 +210,10 @@ impl Operations for Split {
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {
         self.effects.run(argv)
+    }
+
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+        self.effects.run_within(argv, remaining)
     }
 
     /// The provider that performs the write is the one that knows where it lands.

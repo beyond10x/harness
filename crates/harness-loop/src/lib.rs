@@ -720,7 +720,7 @@ impl<'a> AgentLoop<'a> {
                 return Some(stop);
             }
             sink.emit(LoopEvent::ToolRequested(call.clone()));
-            let result = self.invoke(&call, sink);
+            let result = self.invoke(&call, deadline, sink);
             sink.emit(LoopEvent::ToolCompleted {
                 call_id: call.call_id.clone(),
                 failed: result.failed,
@@ -735,7 +735,12 @@ impl<'a> AgentLoop<'a> {
     /// Every refusal here comes back as a failed outcome rather than an error, because the model
     /// has to learn that the effect did not happen. Ending the run instead would leave it
     /// believing the call succeeded.
-    fn invoke(&mut self, call: &ToolCall, sink: &mut dyn LoopSink) -> ToolOutcome {
+    fn invoke(
+        &mut self,
+        call: &ToolCall,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> ToolOutcome {
         let Some(spec) = self.published(&call.name) else {
             sink.emit(LoopEvent::Warning {
                 code: "unpublished-tool".to_owned(),
@@ -793,7 +798,11 @@ impl<'a> AgentLoop<'a> {
             }
         }
 
-        let result = self.tools.call(call);
+        // With the time left on the clock, so a call that starts something bounds it by that: the
+        // deadline check between calls cannot reach into a call already running, and one `run` of
+        // a suite is longer than most budgets.
+        let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        let result = self.tools.call_within(call, remaining);
         if exceeds(&result.output, MAX_TOOL_RESULT_BYTES) {
             // Not truncated: a truncated result reads to the model exactly like a complete one.
             return ToolOutcome::failed(format!(

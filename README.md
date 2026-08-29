@@ -35,7 +35,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | command line (`run`, `tools`, `app-server`, `events`) | implemented |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
 | substrate confinement, embedded | working, including execution — but `run` has been *published*, not yet *exercised* against a confined process |
-| substrate over a socket | **blocked and parked** — see `STATUS.md` |
+| substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
 | live provider | first live run 2026-08-23. It found a real defect on turn 1 that the emulator could not: the whole workspace toolset was named illegally for that wire |
 | embedding | **not started.** Nothing embeds this component yet |
 
@@ -76,6 +76,7 @@ credential it was not pointed at, so a run can always be explained afterwards.
 | `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — a directory not called `ws_…`, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
 | `--yes` | approve what asks. Every write and every `run` asks — the loop judges each call's declared risk against a ceiling that defaults to low — and without `--yes` the default approver denies them and the model is told |
+| `--approve-up-to <risk>` | raise that ceiling instead: `medium` lets `file_write` through unasked, `high` lets `run` through too. A `file_edit` asks whatever the ceiling (non-idempotent), so it still needs `--yes`; the two flags do not combine |
 
 Exit status distinguishes the three outcomes a caller acts on differently: `0` the model answered,
 `2` the run stopped for a named reason, `1` the harness could not run.
@@ -151,7 +152,8 @@ not list is **warned about by name** rather than reported as free.
 Approval is a **blocking call**, not a protocol round trip that can land after the effect. What
 asks is derived from the call, never declared by the tool: the loop reads the envelope of the
 catalogue entry a `tool_invoke` names and asks when its risk is above the run's unattended ceiling
-(default low), or when it is a non-idempotent write. The default approver denies; `--yes` approves.
+(default low, `--approve-up-to` raises it), or when it is a non-idempotent write. The default
+approver denies; `--yes` approves.
 
 ## Two shells, one loop
 

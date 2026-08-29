@@ -27,6 +27,15 @@ Not done, cleanup only: the duplicated token steps in `gate.yml` (GitHub Actions
 anchors; a composite action is the fix), the `Adopted` struct's ceremony, and `dir_list`'s
 undocumented third `kind` value.
 
-Open follow-ups: pass the remaining wall-clock budget into `Operations::run` (finding 9);
-`--approve-up-to <risk>` from the first review; run `tests/live.rs` against a daemon to confirm
-the `op` hypothesis (finding 2).
+Follow-ups, done the same day:
+
+| follow-up | outcome |
+|---|---|
+| remaining wall-clock budget into `Operations::run` | `ToolPort::call_within` → `Catalogue::invoke_within` → `Operations::run_within`; the unconfined kill timer and the confined `timeout_ms` are the smaller of their ceiling and what is left; result says `timeout_ms`. 4 tests. |
+| `--approve-up-to <risk>` | on `run`; `conflicts_with = "yes"`; `file_edit` still asks whatever the ceiling (non-idempotent). 1 test. |
+| `tests/live.rs` against a daemon | **run, and the hypothesis was half right.** `op` was missing — and it is a caller-minted operation id, not the operation's name. Three more client defects behind it: no read query, exec output never fetched (`exec_id` vs `id`), 10 s read timeout on a call that waits for the exit. All fixed; the live test passes against a daemon built from `f1cfc1c` in a delegated scope, including a 12 s confined exec. |
+
+Still open: the embedded driver's exec is unexercised on this machine (needs the same delegated
+scope); `bridge_mode::an_unknown_request_mid_turn_is_refused_without_killing_the_server` failed
+once under a loaded gate (`completed` where `interrupted` was expected) and passed 5/5 alone —
+a race between the `slow` fixture and the interrupt, not yet pinned.

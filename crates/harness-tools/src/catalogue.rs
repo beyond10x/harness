@@ -274,6 +274,23 @@ impl Catalogue {
     /// The name is not one the catalogue holds — refused **here**, with nothing performed and
     /// nothing sent anywhere — or the operation itself failed, in which case the words are its own.
     pub fn invoke(&self, name: &str, arguments: &Value) -> Result<Value, String> {
+        self.invoke_within(name, arguments, None)
+    }
+
+    /// [`invoke`](Self::invoke), told how much of the run's wall-clock budget is left.
+    ///
+    /// Only `run` has anything to bound; the figure is handed to
+    /// [`Operations::run_within`] and every other entry ignores it.
+    ///
+    /// # Errors
+    ///
+    /// As [`invoke`](Self::invoke).
+    pub fn invoke_within(
+        &self,
+        name: &str,
+        arguments: &Value,
+        remaining: Option<std::time::Duration>,
+    ) -> Result<Value, String> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
         // **Refused here, by the tool, because here is where this loop's policy lives.** Every
         // other arm adjudicates at a decision seam; this one has none and never grows one, so a
@@ -341,7 +358,7 @@ impl Catalogue {
                     };
                     argv.push(text.to_owned());
                 }
-                self.operations.run(&argv)
+                self.operations.run_within(&argv, remaining)
             }
             other => Err(format!("`{other}` is not an operation this build performs")),
         }

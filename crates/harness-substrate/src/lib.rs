@@ -50,6 +50,7 @@
 //! route that streams would need a different client rather than a flag on this one.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -159,6 +160,11 @@ impl Facts {
     }
 }
 
+/// How long one confined exec may run when the run itself sets no shorter bound.
+///
+/// Fifteen minutes: sized for a build, argued at the limits below.
+const EXEC_TIMEOUT_MS: u64 = 900_000;
+
 /// The one exec a confined backend starts, whichever backend is starting it.
 ///
 /// **Both paths build it here, and that is the point.** The embedded driver asked for confinement
@@ -175,7 +181,14 @@ pub(crate) fn confined_exec_input(
     snapshot: String,
     env: ExecEnvironment,
     read_only_roots: Vec<ReadOnlyRoot>,
+    remaining: Option<Duration>,
 ) -> ExecStartInput {
+    // The smaller of the ceiling below and what the run has left on its clock. The loop's
+    // deadline check between calls cannot reach into an exec the daemon is holding open, so the
+    // bound the daemon enforces has to be the run's as well as the build's.
+    let timeout_ms = remaining
+        .and_then(|left| u64::try_from(left.as_millis()).ok())
+        .map_or(EXEC_TIMEOUT_MS, |left| left.min(EXEC_TIMEOUT_MS));
     ExecStartInput {
         workspace: workspace.to_owned(),
         argv: argv.to_vec(),
@@ -201,7 +214,7 @@ pub(crate) fn confined_exec_input(
         // core, so the CPU a wall-clock minute can consume is a multiple of it. Both are still
         // bounds — a run that loops is stopped, which is the whole point of having them.
         limits: ExecLimits {
-            timeout_ms: 900_000,
+            timeout_ms,
             output_bytes: 1_048_576,
             // A parallel build is hundreds of processes and threads, not dozens: `cargo` fans out
             // across every core and each `rustc` spawns its own codegen threads. At 64 the run did

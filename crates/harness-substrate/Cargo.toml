@@ -16,9 +16,9 @@ harness-tools = { workspace = true }
 harness-wire = { workspace = true }
 # **The one dependency on a sibling component, and both boundaries it crosses are argued in
 # `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
-# daemon artifact and the wire contract; this imports the driver. The socket path could not be made
-# to work against the daemon this machine happens to run, and embedding turns a 422 nobody could
-# diagnose into a compile error.
+# daemon artifact and the wire contract; this imports the driver. The socket path works against a
+# daemon built from this revision (verified 2026-08-29); embedding stays because it needs no
+# deployment, and because the wire types turn a 422 nobody could diagnose into a compile error.
 #
 # **Pinned by revision, never by path.** A `path` into a sibling checkout builds against whatever
 # happens to be checked out there, and `--locked` cannot lock it — the gate was green against a tree

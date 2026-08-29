@@ -22,6 +22,8 @@
 //! Substrate reaches the same place from the other side: `exec.start`'s first capability predicate
 //! is `exec.argv-only`. Neither component will run a shell, and neither had to be told by the other.
 
+use std::time::Duration;
+
 use harness_tools::Operations;
 use serde_json::{Value, json};
 
@@ -165,6 +167,10 @@ impl Operations for ConfinedOperations {
     }
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {
+        self.run_within(argv, None)
+    }
+
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
         // The catalogue refuses an empty argv before it gets here, but this is a public trait
         // method and an embedder can call it directly; a refusal by name is what the unconfined
         // provider answers, and a panic mid-turn is not.
@@ -178,7 +184,7 @@ impl Operations for ConfinedOperations {
             ));
         }
         self.backend
-            .exec(&self.workspace, argv)
+            .exec(&self.workspace, argv, remaining)
             .map_err(|error| error.to_string())
     }
 

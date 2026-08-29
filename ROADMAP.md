@@ -120,9 +120,6 @@ Not done, and stated so nobody reads the absence as working:
 - **mid-run renewal.** The check below happens once, before the first request. A run that starts
   with a fresh token and outlives it still fails by name partway through, which is the case
   `story:oauth-token-renewal` is titled after;
-- **a live refresh.** The token endpoint has been discriminated against itself — a deliberately
-  invalid refresh token to it answers `401 token_expired` — but no **successful** exchange has been
-  measured, because the one run that would rotates the operator's own credential;
 - **a live contract version for the Anthropic route.** The run below happened; its *bytes* were not
   captured, so `contracts/provider-wires/anthropic-messages/2026-08-29b` — the current pin — is
   still `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
@@ -150,6 +147,10 @@ And the ChatGPT/Codex half, which closes the phase:
   `18d066fc428e5e98-0003a176`. Same control as above — an unparseable token to the same endpoint
   answers `401 unauthorized_unknown` — so the success is the credential's and not the endpoint's
   indifference. `ROADMAP` predicted this needed no new code, and it did not;
+- **a live refresh, 2026-08-29T23:26Z.** The renewal was run against the operator's own credential:
+  `credential-renewed{expires_unix: 1788909974, refresh_token_rotated: true, byte_preserving: true}`,
+  all three tokens rotated, 4 of 11 lines of `~/.codex/auth.json` changed with its key order, mode
+  and unread keys intact, and `codex` itself still authenticating against the file afterwards;
 - **a `codex` provider, and renewal.** Every value in it was read off that run. Unlike any provider
   before it, it carries a token endpoint, a client id and a pointer to the refresh token, so a run
   whose token is within fifteen minutes of expiring renews it and **writes the new one back**. That

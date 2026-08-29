@@ -2,12 +2,13 @@
 format: aep.planning-md/1
 id: story:codex-live-refresh-measured
 kind: story
-status: draft
+status: implemented
 title: A successful refresh against the live authorization server is measured
 relations:
 - derived_from: epic:subscription-auth-finished
 - depends_on: story:codex-provider
-revision: 1
+- serves: vision:b10x-owns-its-loop
+revision: 5
 ---
 ## What is unmeasured
 
@@ -58,3 +59,27 @@ One renewal against the live authorization server that returns `200`, observed e
 If instead it returns a non-200, that is equally a result: it means the token endpoint or the client
 id in `crates/harness-cli/src/provider.rs` is wrong for a real credential, and the entry must lose
 its renewal until somebody measures the right one.
+
+## Outcome — 2026-08-29T23:26:14Z
+
+**Measured. The success path works and the write is byte-preserving against the real file.**
+
+| | |
+|---|---|
+| event | `credential-renewed{provider: codex, expires_unix: 1788909974, refresh_token_rotated: true, byte_preserving: true}` |
+| new expiry | `2026-09-08T23:26:14Z`, replacing `2026-09-08T12:39:11Z` |
+| rotation | **all three tokens replaced** — access, refresh and id. That vendor rotates, so this is now a measured fact rather than an assumption |
+| the file | 4 of 11 lines changed, line count and key order identical; `auth_mode`, `OPENAI_API_KEY: null` and `account_id` intact; mode still `600` |
+| the owner | `codex exec` authenticates against the rewritten file afterwards — the byte-preserving claim checked against the program that owns it, not a fixture |
+
+The run that carried it also exercised the provider end to end: `gpt-5.6-sol`,
+`credential_source: "provider:codex"`, one turn, 5565 input / 5 output, `finished{completed}`.
+
+### One contrivance, named
+
+The token had nine days left, and the shipped margin is fifteen minutes, so the path does not open
+on demand. `RENEWAL_MARGIN` was set to thirty days in a working-tree build, the run was made, and the
+constant was reverted — `git diff` empty afterwards. **Every other line of the path is the shipped
+one**: the same staleness check, the same exchange, the same splice, the same atomic write, the same
+event. What was not exercised is the fifteen-minute number itself, which is a constant with no
+behaviour of its own.

@@ -67,17 +67,27 @@ release — as a `404` from the far side, which nothing here can explain.
 So a provider ships short names, and they work wherever a model is named — in the config, or as
 `--model haiku` on the command line:
 
-| alias | resolves to |
-|---|---|
-| `haiku` | `claude-haiku-4-5-20251001` |
-| `sonnet` | `claude-sonnet-5` |
-| `opus` | `claude-opus-5` |
-| `fable` | `claude-fable-5` |
+| alias | resolves to | |
+|---|---|---|
+| `opus` | `claude-opus-5` | **`claude`'s default** |
+| `sonnet` | `claude-sonnet-5` | |
+| `haiku` | `claude-haiku-4-5-20251001` | |
+| `fable` | `claude-fable-5` | |
+
+The **default is itself written as an alias**, so one table answers *which one is current* and a
+release does not strand every config that never named a model.
+
+`opus` is the default deliberately: the capable model, at materially more per run than `haiku`.
+If that is the wrong trade for you, `[providers.claude] model = "haiku"` is one line and
+`--model haiku` is none.
 
 An alias is **this build's** answer to *which one is current*, so a run that asked for `haiku` is
 pinned by the binary it ran under rather than by whatever a config was last edited. A name the
 table does not know passes through untouched, so a model released after your binary is still
 reachable by its exact identifier.
+
+Aliases resolve **wherever a model is named** — a typed `--model`, a `[default] model`, a
+profile's, an override's, and the provider's own default. All four go through the same table.
 
 Add your own, merged over the shipped set — a same-named one wins, which is how you correct a stale
 built-in without waiting for a release:

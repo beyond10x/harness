@@ -1044,13 +1044,14 @@ fn apply_provider(
             .base_url
             .clone_from(&Some(provider.base_url.clone()));
     }
-    // **The alias is expanded whether the model was typed or defaulted.** `--model haiku` is the
-    // point of having aliases at all, and a name the table does not know passes through, so a
-    // model released after this binary is still reachable.
-    options.model = Some(options.model.as_deref().map_or_else(
-        || provider.model.clone(),
-        |wanted| provider.exact_model(wanted),
-    ));
+    // **Expanded wherever the name came from, not only from the command line.** A typed
+    // `--model haiku`, a `[default] model`, a profile's, and the provider's own default all pass
+    // through the same table. `[providers.claude] model = "sonnet"` is the shape the guide
+    // documents, and it reached the endpoint verbatim until this ran on the default too — the
+    // built-in default is itself written as an alias now, so there is one place that answers
+    // *which one is current*. A name the table does not know passes through, so a model released
+    // after this binary is still reachable by its exact identifier.
+    options.model = Some(provider.exact_model(options.model.as_deref().unwrap_or(&provider.model)));
     if options.wire.is_none() {
         options.wire = Some(match provider.wire.as_str() {
             "anthropic-messages" => Wire::AnthropicMessages,
@@ -2554,7 +2555,8 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
                 println!("--wire {}", provider.wire);
                 println!(
                     "--model {}",
-                    resolved.profile.model.as_ref().unwrap_or(&provider.model)
+                    provider
+                        .exact_model(resolved.profile.model.as_deref().unwrap_or(&provider.model))
                 );
                 match &provider.credential {
                     provider::Credential::OauthFile { path, pointer } => {
@@ -2606,7 +2608,8 @@ fn providers_command(verb: &ProvidersCommand) -> Result<(), String> {
             let provider = provider::resolve(name, &config.providers)?;
             println!("base-url  {}", provider.base_url);
             println!("wire      {}", provider.wire);
-            println!("model     {}", provider.model);
+            // Resolved, because an alias is what a reader would otherwise have to expand by hand.
+            println!("model     {}", provider.exact_model(&provider.model));
             match &provider.credential {
                 provider::Credential::OauthFile { path, pointer } => {
                     // Printed before a token is spent: a defaulted credential path is only

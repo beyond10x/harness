@@ -103,9 +103,15 @@ pub fn built_in() -> Vec<Provider> {
             name: "claude".to_owned(),
             base_url: "https://api.anthropic.com/v1".to_owned(),
             wire: "anthropic-messages".to_owned(),
-            // Haiku rather than the largest model: a default that quietly costs ten times as much
-            // per run is a default nobody chose. `[providers.claude] model = …` is one line.
-            model: "claude-haiku-4-5-20251001".to_owned(),
+            // **Written as an alias, and that is the point of having them.** A default naming a
+            // dated identifier goes stale on the vendor's next release and takes every run with
+            // it; `opus` is resolved by the table below, so this build's answer to *which one is
+            // current* is in one place.
+            //
+            // Opus and not the cheapest model: the operator chose the capable default, knowing it
+            // costs materially more per run than haiku. `[providers.claude] model = "haiku"` is
+            // one line for anyone who wants the other trade, and `--model haiku` is none.
+            model: "opus".to_owned(),
             credential: Credential::OauthFile {
                 path: "~/.claude/.credentials.json".to_owned(),
                 pointer: "/claudeAiOauth/accessToken".to_owned(),
@@ -419,5 +425,39 @@ mod alias_tests {
             "claude-opus-5",
             "and the rest survive"
         );
+    }
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+
+    #[test]
+    fn the_shipped_default_is_itself_an_alias_so_one_table_answers_which_is_current() {
+        // The failure this prevents: a default naming a dated identifier goes stale on the
+        // vendor's next release and takes every run that did not name a model with it, as a 404
+        // from the far side. Writing the default as an alias means the table is the only place
+        // that has to change.
+        let claude = resolve("claude", &BTreeMap::new()).expect("resolves");
+        assert_eq!(claude.model, "opus", "the default is written as the alias");
+        assert_eq!(
+            claude.exact_model(&claude.model),
+            "claude-opus-5",
+            "and resolves through the same table as a typed `--model opus`"
+        );
+    }
+
+    #[test]
+    fn an_alias_in_a_config_override_resolves_rather_than_reaching_the_endpoint_verbatim() {
+        // `[providers.claude] model = "sonnet"` is the shape the guide documents, and it went to
+        // the API as the literal string `sonnet` until expansion covered the default too.
+        let over = ProviderOverride {
+            model: Some("sonnet".to_owned()),
+            ..ProviderOverride::default()
+        };
+        let mut map = BTreeMap::new();
+        map.insert("claude".to_owned(), over);
+        let claude = resolve("claude", &map).expect("resolves");
+        assert_eq!(claude.exact_model(&claude.model), "claude-sonnet-5");
     }
 }

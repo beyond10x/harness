@@ -23,7 +23,7 @@ pub use bound::{
 pub use cancel::Cancel;
 pub use envelope::{AccessKind, Effect, Envelope, Idempotency, Risk, Subject};
 pub use id::{CallId, InvalidId, ToolName, WireId};
-pub use item::{Item, ToolCall, ToolOutcome};
+pub use item::{Item, Refusal, ToolCall, ToolOutcome};
 pub use port::{ModelPort, StreamEvent, StreamSink, ToolPort, VecSink};
 pub use turn::{Approval, Sampling, StopReason, ToolSpec, TurnOutcome, TurnRequest, Usage};
 

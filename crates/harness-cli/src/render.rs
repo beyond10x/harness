@@ -608,6 +608,38 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_program_is_printed_by_code_before_the_result_it_explains() {
+        // What a person watching the run sees, in the order the loop emitted it. Read off the
+        // failed result alone this was a program that would not start; the code says it is a rule.
+        let (_, err) = render(
+            vec![
+                LoopEvent::ToolRequested(a_call("run")),
+                LoopEvent::Warning {
+                    code: "program-refused".to_owned(),
+                    message: "`sh` is not a program this run may start. Declared: cargo."
+                        .to_owned(),
+                },
+                LoopEvent::ToolCompleted {
+                    call_id: harness_wire::CallId::new("call-1").expect("valid"),
+                    failed: true,
+                },
+                LoopEvent::Finished {
+                    stop: LoopStop::Completed,
+                    turns: 1,
+                },
+            ],
+            false,
+        );
+        let warning = err
+            .find("warning [program-refused] `sh` is not a program this run may start")
+            .unwrap_or_else(|| panic!("the code and the sentence are both printed: {err}"));
+        let failed = err
+            .find("← failed")
+            .unwrap_or_else(|| panic!("the result is printed too: {err}"));
+        assert!(warning < failed, "the warning comes first: {err}");
+    }
+
+    #[test]
     fn warnings_are_reported_even_when_quiet() {
         let mut out = Vec::new();
         let mut err = Vec::new();

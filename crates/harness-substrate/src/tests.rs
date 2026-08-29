@@ -702,8 +702,23 @@ fn a_program_outside_the_declared_set_is_refused_locally_and_the_set_is_listed()
     let refused = confined_provider
         .run(&["sh".to_owned(), "-c".to_owned(), "rm -rf /".to_owned()])
         .expect_err("refused");
-    assert!(refused.contains("`sh` is not a program"), "{refused}");
-    assert!(refused.contains("cargo"), "the set is listed: {refused}");
+    assert!(
+        refused.message().contains("`sh` is not a program"),
+        "{refused}"
+    );
+    assert!(
+        refused.message().contains("cargo"),
+        "the set is listed: {refused}"
+    );
+    // And named, so a reader of the record counts it without matching that sentence.
+    assert_eq!(
+        refused.refusal(),
+        Some(&harness_tools::Refusal::ProgramNotDeclared {
+            program: "sh".to_owned(),
+            declared: vec!["cargo".to_owned()],
+        }),
+        "{refused}"
+    );
     assert!(
         script.seen.lock().expect("not poisoned").is_empty(),
         "and nothing was sent: the refusal is local"

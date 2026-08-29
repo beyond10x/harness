@@ -45,13 +45,13 @@ impl Operations for Everything {
     fn file_edit(&self, path: &str, _old: &str, new: &str) -> Result<Value, String> {
         self.file_write(path, new)
     }
-    fn run(&self, argv: &[String]) -> Result<Value, String> {
+    fn run(&self, argv: &[String]) -> Result<Value, Refused> {
         if !self.programs.iter().any(|allowed| allowed == &argv[0]) {
-            return Err(format!(
-                "`{}` is not a program this run may start. Declared: {}.",
-                argv[0],
-                self.programs.join(", ")
-            ));
+            return Err(Refusal::ProgramNotDeclared {
+                program: argv[0].clone(),
+                declared: self.programs.clone(),
+            }
+            .into());
         }
         self.ran.lock().expect("not poisoned").push(argv.to_vec());
         Ok(json!({"stdout": "", "exit": 0}))
@@ -222,6 +222,46 @@ fn invoking_reaches_the_provider_and_carries_its_own_words_back() {
         "{}",
         output(&answer)
     );
+    // And it is on the answer as a **value**, not only in the sentence. Downstream, the sentence is
+    // all that distinguished this from a compile error, so counting refusals meant matching prose.
+    assert_eq!(
+        answer.refusal,
+        Some(Refusal::ProgramNotDeclared {
+            program: "sh".to_owned(),
+            declared: vec!["cargo".to_owned()],
+        })
+    );
+    // One author for the words: what the model reads is what the name renders.
+    assert_eq!(
+        output(&answer),
+        answer.refusal.expect("named just above").message()
+    );
+}
+
+#[test]
+fn a_failure_that_is_not_a_refusal_carries_no_name() {
+    // The other half of the claim, and the one that keeps the first worth reading: if every failed
+    // call were named, *the run would not do this* would be as unreadable as it was before.
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_read", "arguments": {"path": "nowhere.rs"}}),
+    ));
+    assert!(answer.failed, "{}", output(&answer));
+    assert_eq!(answer.refusal, None, "a missing file is not a refusal");
+}
+
+#[test]
+fn a_declared_program_runs_and_is_never_named_as_a_refusal() {
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "run", "arguments": {"argv": ["cargo", "test"]}}),
+    ));
+    assert!(!answer.failed, "{}", output(&answer));
+    assert_eq!(answer.refusal, None);
 }
 
 #[test]
@@ -298,7 +338,6 @@ fn the_local_provider_offers_nothing_that_outlives_the_call() {
     for refused in [
         local.file_write("a.txt", "x"),
         local.file_edit("a.txt", "x", "y"),
-        local.run(&["cargo".to_owned()]),
     ] {
         assert!(
             refused
@@ -306,6 +345,16 @@ fn the_local_provider_offers_nothing_that_outlives_the_call() {
                 .contains("is not offered by this workspace")
         );
     }
+    // Not offered at all is a different answer from *offered and this program is outside the set*,
+    // and only the second is a refusal this run made by rule.
+    let refused = local.run(&["cargo".to_owned()]).expect_err("refused");
+    assert!(
+        refused
+            .message()
+            .contains("is not offered by this workspace"),
+        "{refused}"
+    );
+    assert_eq!(refused.refusal(), None, "a missing tool is not a refusal");
 }
 
 // --- the unconfined provider, which has to be asked for by name ----------------------------------
@@ -430,7 +479,19 @@ fn run_starts_a_declared_program_in_the_tree_and_nothing_else() {
 
     let refused = local.run(&["/bin/echo".to_owned()]).expect_err("refused");
     assert!(
-        refused.contains("is not a program this run may start"),
+        refused
+            .message()
+            .contains("is not a program this run may start"),
+        "{refused}"
+    );
+    // The words are what the model reads; the name beside them is what a reader of the record
+    // counts, and neither is derived from the other.
+    assert_eq!(
+        refused.refusal(),
+        Some(&Refusal::ProgramNotDeclared {
+            program: "/bin/echo".to_owned(),
+            declared: vec!["/bin/sh".to_owned()],
+        }),
         "{refused}"
     );
 }
@@ -871,8 +932,8 @@ impl Operations for Brittle {
     fn file_edit(&self, path: &str, _old: &str, _new: &str) -> Result<Value, String> {
         Err(format!("`{path}`: this provider only reads"))
     }
-    fn run(&self, _argv: &[String]) -> Result<Value, String> {
-        Err("this provider starts nothing".to_owned())
+    fn run(&self, _argv: &[String]) -> Result<Value, Refused> {
+        Err("this provider starts nothing".into())
     }
 }
 
@@ -897,6 +958,7 @@ fn a_call_that_panics_is_a_refusal_in_its_own_position_and_its_siblings_still_an
     assert!(answers[0].is_ok(), "{:?}", answers[0]);
     assert!(answers[2].is_ok(), "the sibling after it did its work too");
     let refusal = answers[1].as_ref().expect_err("refused");
+    let refusal = refusal.message();
     assert!(refusal.contains("`file_read`"), "{refusal}");
     assert!(refusal.contains("panicked while running"), "{refusal}");
     assert!(

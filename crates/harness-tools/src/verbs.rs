@@ -37,7 +37,8 @@ use harness_wire::{
 };
 use serde_json::{Value, json};
 
-use crate::Catalogue;
+use crate::catalogue::outcome;
+use crate::{Catalogue, Refused};
 
 /// Find the tools this run has.
 pub const SEARCH_VERB: &str = "tool_search";
@@ -119,7 +120,7 @@ impl Verbs {
     /// `&self` rather than `&mut self`: nothing here mutates, and
     /// [`call_batch`](ToolPort::call_batch) needs to answer the verbs that are not invocations
     /// while the invocations are running on their own threads.
-    fn answer(&self, call: &ToolCall, remaining: Option<Duration>) -> Result<Value, String> {
+    fn answer(&self, call: &ToolCall, remaining: Option<Duration>) -> Result<Value, Refused> {
         let arguments = &call.arguments;
         match call.name.as_str() {
             SEARCH_VERB => Ok(self.catalogue.search(
@@ -127,8 +128,8 @@ impl Verbs {
                 arguments.get("effect").and_then(Value::as_str),
             )),
             DESCRIBE_VERB => match arguments.get("name").and_then(Value::as_str) {
-                Some(name) => self.catalogue.describe(name),
-                None => Err("`name` is required and names one tool".to_owned()),
+                Some(name) => self.catalogue.describe(name).map_err(Refused::from),
+                None => Err("`name` is required and names one tool".into()),
             },
             INVOKE_VERB => match arguments.get("name").and_then(Value::as_str) {
                 Some(name) => self.catalogue.invoke_within(
@@ -136,7 +137,7 @@ impl Verbs {
                     arguments.get("arguments").unwrap_or(&NO_ARGUMENTS),
                     remaining,
                 ),
-                None => Err("`name` is required and names the tool to call".to_owned()),
+                None => Err("`name` is required and names the tool to call".into()),
             },
             // An entry called by its own name is performed rather than refused; see
             // [`Self::invoked_entry`]. A name that is neither a verb nor an entry is refused by
@@ -245,15 +246,6 @@ impl ToolPort for Verbs {
                 None => outcome(self.answer(call, remaining)),
             })
             .collect()
-    }
-}
-
-/// What the model reads: a failure is an outcome, never an error, or the next turn assumes the
-/// effect landed.
-fn outcome(result: Result<Value, String>) -> ToolOutcome {
-    match result {
-        Ok(output) => ToolOutcome::ok(output),
-        Err(message) => ToolOutcome::failed(message),
     }
 }
 

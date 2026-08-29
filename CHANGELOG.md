@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A program the run may not start is a named refusal in the record, not an error like any other.**
+  The `run` tool refusing a program outside the declared set was a failed tool result whose only
+  distinguishing mark was its sentence — on the record it read as `tool-completed`, `failed: true`,
+  the same shape as a compile error or a missing file. An evaluation asking *did the surface refuse
+  what is outside it?* had to grep prose for it, and across the metaharness seam, where every tool
+  result's content is `null`, there was no prose left to grep: the row read `0 refusal(s)` for a run
+  where the refusal plainly happened.
+
+  Both providers now answer `Refusal::ProgramNotDeclared { program, declared }` beside the sentence
+  (`harness_wire::Refusal`, carried on `ToolOutcome::refusal`), and the loop emits
+  `warning [program-refused]` immediately before the `tool-completed` it explains — the same order
+  `unpublished-tool` uses. The words are unchanged and are now written in exactly one place
+  (`Refusal::message`), so what the model reads, what the conversation holds and what the record
+  carries cannot drift apart. Nothing else changes: the call still fails, and the model still learns
+  the effect did not happen.
+
+  A warning crosses the `metaharness.event/1` converter generically, so this needed no converter
+  code. The unnamed failures stay unnamed on purpose — if every failed call carried a name, *the run
+  would not do this* would be as unreadable as it was before.
+
 - **`--driver <PATH>` — a program on this host that a confined `run` can actually start.**
   Allow-listing a program by absolute host path admitted its *name*, never its *bytes*: the sandbox
   reaches `/usr`, `/bin`, `/lib`, `/lib64` and the workspace and nothing else, so every exec of a
@@ -284,6 +304,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   secrets to read the private substrate dependency, provisioned by atlas's `bot-ci-secrets.sh`.
 
 ### Changed
+
+- **An approver's denial crosses the evaluation converter as a warning, not as a seam decision.**
+  `b10x-harness events` mapped `approval-resolved` to `tool.decided`, and every `DecidedBy` that
+  event has — `Embedder`, `Frame`, `Deadline`, `Adapter` — names a *metaharness-side* decider. This
+  loop's approver is none of them: it is the run's own gate, inside the harness, and describing it
+  as a seam decision put the driven arm's treatment on top of the arm that measures the opposite
+  claim. A denial is now `warning` / `approval-denied`, naming the call; a granted approval emits
+  nothing, because the request and its result already say the call proceeded. The metaharness-side
+  b10x seam maps it the same way, so one run described through the two paths does not differ.
+  `LoopEvent::ApprovalResolved` is unchanged and still carries no reason, so neither does the
+  warning.
 
 - **`file_read` stops counting lines after 16 MiB.** Counting `lines.total` had become a full
   sequential scan of the file on every read, which a deadline cannot reach into; past the bound
@@ -612,6 +643,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   omitted the `2026-08-22` wire pin and named the profile directory wrongly; design 0001 said
   nothing in it was implemented after most of it shipped in 0.1.0. AGENTS.md now records that
   bridge mode's approver is the client's, not `DenyAll`, and why.
+- **`--context` is pinned on both sides** (`crates/harness-cli/tests/context.rs`). A declared
+  context or hooks file that is absent refuses the run — exit `1`, `{"kind": "refused"}` under
+  `--json` — with no request sent and no session filed, and a context file that is present reaches
+  the standing instruction labelled by its own path. Both refusals were documented and untested, so
+  nothing would have caught either decaying into a warning.
 
 ### Known gaps
 

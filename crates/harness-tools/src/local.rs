@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::{Operations, ReadWindow, SearchOptions};
+use crate::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
 
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_READ_BYTES: u64 = 64 * 1024;
@@ -518,19 +518,19 @@ impl LocalOperations {
         argv: &[String],
         programs: &[String],
         remaining: Option<Duration>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, Refused> {
         let Some(program) = argv.first() else {
-            return Err("`argv` must name a program".to_owned());
+            return Err("`argv` must name a program".into());
         };
         if !programs.iter().any(|allowed| allowed == program) {
-            return Err(format!(
-                "`{program}` is not a program this run may start. Declared: {}.",
-                if programs.is_empty() {
-                    "none".to_owned()
-                } else {
-                    programs.join(", ")
-                }
-            ));
+            // Named, not only worded. The sentence is [`Refusal::message`]'s and is what the model
+            // reads; the value beside it is what makes *the run would not start this* countable on
+            // the record instead of being one more failed call.
+            return Err(Refusal::ProgramNotDeclared {
+                program: program.clone(),
+                declared: programs.to_vec(),
+            }
+            .into());
         }
 
         let mut command = std::process::Command::new(program);
@@ -557,7 +557,7 @@ impl LocalOperations {
         }
         let mut child = command
             .spawn()
-            .map_err(|error| format!("`{program}`: {error}"))?;
+            .map_err(|error| Refused::from(format!("`{program}`: {error}")))?;
 
         // Drained on threads rather than after `wait`: a child that fills a pipe buffer blocks
         // until somebody reads it, and a `wait` that has not read is the deadlock.
@@ -576,14 +576,14 @@ impl LocalOperations {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => {}
-                Err(error) => return Err(format!("`{program}`: {error}")),
+                Err(error) => return Err(format!("`{program}`: {error}").into()),
             }
             if Instant::now() >= deadline {
                 killed = true;
                 let _ = child.kill();
                 break child
                     .wait()
-                    .map_err(|error| format!("`{program}`: {error}"))?;
+                    .map_err(|error| Refused::from(format!("`{program}`: {error}")))?;
             }
             std::thread::sleep(Duration::from_millis(25));
         };
@@ -1128,13 +1128,13 @@ impl Operations for LocalOperations {
         self.edit(path, old, new)
     }
 
-    fn run(&self, argv: &[String]) -> Result<Value, String> {
+    fn run(&self, argv: &[String]) -> Result<Value, Refused> {
         self.run_within(argv, None)
     }
 
-    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, Refused> {
         let Some(programs) = self.programs.as_deref() else {
-            return Err(Self::unavailable("run"));
+            return Err(Self::unavailable("run").into());
         };
         self.exec(argv, programs, remaining)
     }

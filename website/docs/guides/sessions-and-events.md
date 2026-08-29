@@ -93,6 +93,32 @@ Each line is one object with a kebab-case `kind`. The main event groups are:
 The `started` event names the model, tools published to it, neutral operations, and any requested
 tool withheld by the machine. The `finished` event carries the typed stop and total model turns.
 
+### Warning codes
+
+A `warning` event carries a `code` and a `message`. The code is the stable half: match on it rather
+than on the words, which are written for a person.
+
+| Code | What happened |
+|---|---|
+| `unpublished-tool` | The model called a tool this run never published. Nothing ran. |
+| `unpublished-tool-routed` | Under `--surface verbs`, the model called a catalogue entry by its bare name. The call was routed to that entry under the same gate; the wasted spelling is recorded. |
+| `program-refused` | `run` was asked for a program outside the set this run declared. Nothing ran. The message names the program and the declared set. |
+| `conversation-compacted` | The conversation passed its bound and old tool results were elided. A `compacted` event beside it carries the figures. |
+| `summary-failed` | A compaction's summary turn failed or answered with no text. The conversation keeps its elided form and the run goes on. |
+| `answer-nudged` | Under `--output-schema` the model ended in prose, so it was told once more to call the answer tool. |
+| `batch-miscounted` | A tool port answered a batch with the wrong number of outcomes, so the loop re-ran the calls one at a time. |
+| `unpriced-model` | The rate card does not price this model, so the run reports no cost at all. The message lists what the card does price. |
+| `hook-failed` | The stop hook could not decide, so the run ends rather than being kept alive by a hook that crashed. |
+| `stop-hook-exhausted` | A stop hook blocked the end of the run up to its limit; the run ends anyway. |
+
+Provider wires forward their own codes through the same event — `unknown-stream-event` for a stream
+item the wire does not model, `turn-retried` for a stream that broke and is being attempted again.
+An unmodelled item is warned about and preserved, never dropped.
+
+`program-refused` is what makes *the surface refused what is outside it* countable. The refusal is
+also a failed tool result — the model has to learn the effect did not happen — but on its own that
+is the same shape as a compile error, so the warning is what tells a rule from a fault.
+
 ### Retried streams invalidate earlier deltas
 
 When a turn's stream breaks after output has been observed, Harness can retry the unchanged turn. A
@@ -115,4 +141,7 @@ b10x-harness events --in run.jsonl --out evaluation.jsonl
 ```
 
 It converts observations only. It does not add the per-call control seam used to drive vendor
-harnesses.
+harnesses. An `approval-resolved` denial therefore crosses as a `warning` with code
+`approval-denied` rather than as a seam decision: the approver is the run's own gate, inside the
+harness, and nothing on the metaharness side decided the call. An approval that was granted emits
+nothing — the request and its result already say the call proceeded.

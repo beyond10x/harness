@@ -449,6 +449,122 @@ fn a_tool_call_round_trips_and_the_result_is_replayed_next_turn() {
 }
 
 #[test]
+fn a_program_outside_the_declared_set_is_a_named_refusal_before_its_result() {
+    // The row that read `0 refusal(s)` on a run where the refusal happened. A refused program came
+    // back as `ToolCompleted { failed: true }` — the shape of a compile error — so the only way to
+    // count it was to match the sentence, and downstream (where every result's content is `null`)
+    // there was no sentence to match.
+    let refusal = harness_wire::Refusal::ProgramNotDeclared {
+        program: "sh".to_owned(),
+        declared: vec!["cargo".to_owned(), "git".to_owned()],
+    };
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "run",
+                json!({"argv": ["sh", "-c", "id"]}),
+            )])),
+            Ok(answer("understood")),
+        ]),
+        ScriptedTools::new(vec![spec("run", Approval::NotRequired)])
+            .answering("run", ToolOutcome::refused(refusal.clone())),
+    );
+    let (outcome, sink) = harness.run();
+    outcome.expect("a refusal is an outcome, so the run keeps turning");
+
+    // The order is `unpublished-tool`'s: the warning, then the result it explains.
+    let sequence: Vec<String> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::Warning { code, .. } => Some(format!("warning:{code}")),
+            LoopEvent::ToolCompleted { call_id, failed } => {
+                Some(format!("completed:{call_id}:{failed}"))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sequence,
+        vec![
+            "warning:program-refused".to_owned(),
+            "completed:call-1:true".to_owned()
+        ],
+        "{:?}",
+        sink.events()
+    );
+
+    // The warning's words are the refusal's own, which are the words the model read.
+    let (code, message) = sink.warnings().next().expect("one warning");
+    assert_eq!(code, "program-refused");
+    assert_eq!(message, refusal.message());
+    assert!(message.contains("`sh` is not a program this run may start"));
+    assert!(
+        message.contains("cargo, git"),
+        "the set is named: {message}"
+    );
+}
+
+#[test]
+fn a_declared_program_completes_with_no_refusal_warning() {
+    // The other half: if the code fired on any failed `run` it would say nothing about the surface.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "run",
+                json!({"argv": ["cargo", "test"]}),
+            )])),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("run", Approval::NotRequired)])
+            .answering("run", ToolOutcome::ok(json!({"exit": 0}))),
+    );
+    let (outcome, sink) = harness.run();
+    outcome.expect("it runs");
+    assert!(
+        !sink.warnings().any(|(code, _)| code == "program-refused"),
+        "{:?}",
+        sink.events()
+    );
+}
+
+#[test]
+fn a_run_that_failed_on_its_own_terms_is_not_reported_as_a_refusal() {
+    // A program that was allowed to start and exited non-zero, or could not be launched at all, is
+    // the tool failing. Naming that a refusal would make the code useless for the question it was
+    // added to answer.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "run",
+                json!({"argv": ["cargo", "test"]}),
+            )])),
+            Ok(answer("noted")),
+        ]),
+        ScriptedTools::new(vec![spec("run", Approval::NotRequired)]).answering(
+            "run",
+            ToolOutcome::failed("`cargo`: No such file or directory"),
+        ),
+    );
+    let (outcome, sink) = harness.run();
+    outcome.expect("it runs");
+    assert!(
+        sink.events()
+            .iter()
+            .any(|event| matches!(event, LoopEvent::ToolCompleted { failed: true, .. })),
+        "the failure is still reported"
+    );
+    assert!(
+        !sink.warnings().any(|(code, _)| code == "program-refused"),
+        "{:?}",
+        sink.events()
+    );
+}
+
+#[test]
 fn the_first_request_carries_the_person_input_and_the_published_tools() {
     let mut harness = Harness::new(
         ScriptedModel::new(vec![Ok(answer("ok"))]),

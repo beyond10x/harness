@@ -94,15 +94,13 @@ impl ToolPort for Flat {
     }
 
     fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
-        match self
-            .catalogue
-            .invoke_within(call.name.as_str(), &call.arguments, remaining)
-        {
-            Ok(output) => ToolOutcome::ok(output),
-            // Including the unknown name: `invoke_within` refuses it by name, listing every tool
-            // this run has, which is the answer the model's next move needs.
-            Err(message) => ToolOutcome::failed(message),
-        }
+        // Including the unknown name: `invoke_within` refuses it by name, listing every tool this
+        // run has, which is the answer the model's next move needs.
+        crate::catalogue::outcome(self.catalogue.invoke_within(
+            call.name.as_str(),
+            &call.arguments,
+            remaining,
+        ))
     }
 
     /// Runs the batch side by side, one thread per call.
@@ -118,10 +116,7 @@ impl ToolPort for Flat {
         self.catalogue
             .invoke_batch(&named, remaining)
             .into_iter()
-            .map(|result| match result {
-                Ok(output) => ToolOutcome::ok(output),
-                Err(message) => ToolOutcome::failed(message),
-            })
+            .map(crate::catalogue::outcome)
             .collect()
     }
 }

@@ -25,7 +25,7 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use harness_tools::{Operations, ReadWindow, SearchOptions};
+use harness_tools::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
 use serde_json::{Value, json};
 
 use crate::{Backend, Facts, Withheld};
@@ -324,26 +324,29 @@ impl Operations for ConfinedOperations {
         Err(Self::unavailable("find through a confined workspace"))
     }
 
-    fn run(&self, argv: &[String]) -> Result<Value, String> {
+    fn run(&self, argv: &[String]) -> Result<Value, Refused> {
         self.run_within(argv, None)
     }
 
-    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, Refused> {
         // The catalogue refuses an empty argv before it gets here, but this is a public trait
         // method and an embedder can call it directly; a refusal by name is what the unconfined
         // provider answers, and a panic mid-turn is not.
         let Some(program) = argv.first() else {
-            return Err("`argv` must name a program".to_owned());
+            return Err("`argv` must name a program".into());
         };
         if !self.programs.iter().any(|allowed| allowed == program) {
-            return Err(format!(
-                "`{program}` is not a program this run may start. Declared: {}.",
-                self.programs.join(", ")
-            ));
+            // The same named refusal the unconfined provider answers, in the same words — the
+            // sentence has one author, [`Refusal::message`], so the two providers cannot drift.
+            return Err(Refusal::ProgramNotDeclared {
+                program: program.clone(),
+                declared: self.programs.clone(),
+            }
+            .into());
         }
         self.backend
             .exec(&self.workspace, argv, remaining)
-            .map_err(|error| error.to_string())
+            .map_err(|error| Refused::from(error.to_string()))
     }
 
     fn programs(&self) -> &[String] {

@@ -1145,7 +1145,11 @@ fn refused_name(call: &ToolCall, invoked: &ToolSpec) -> String {
 /// than having it overwritten: the tool said that, and replacing it would destroy an answer to
 /// make room for a comment on it.
 fn with_hook_note(result: ToolOutcome, note: String) -> ToolOutcome {
-    let ToolOutcome { mut output, failed } = result;
+    let ToolOutcome {
+        mut output,
+        failed,
+        refusal,
+    } = result;
     let note = serde_json::Value::String(note);
     let joins = output.as_object().is_some_and(|fields| {
         fields
@@ -1168,8 +1172,13 @@ fn with_hook_note(result: ToolOutcome, note: String) -> ToolOutcome {
         output = serde_json::json!({"output": said, "hook_notes": [note]});
     }
     // `failed` is the tool's own, untouched: a note is not a verdict, and a hook cannot make a
-    // call that happened read as one that did not.
-    ToolOutcome { output, failed }
+    // call that happened read as one that did not. Nor is the refusal: a note about a refused call
+    // is a comment on the refusal, not a second opinion about whether it happened.
+    ToolOutcome {
+        output,
+        failed,
+        refusal,
+    }
 }
 
 /// What is left of one ceiling once what has been spent against it is taken off, or the ceiling's
@@ -1192,7 +1201,28 @@ fn remainder(
 }
 
 /// Puts one call's answer in the record and in the conversation.
+///
+/// # A refusal the run made by rule is said out loud, before the result
+///
+/// A refusal is a failed outcome so the model learns the effect did not happen (invariant 9), and
+/// on the record that made it `ToolCompleted { failed: true }` — the same shape as a compile error
+/// or a missing file. *Did the surface refuse what is outside it?* was therefore unanswerable
+/// without matching the sentence's text, and an evaluation asking it read `0 refusal(s)` on a run
+/// where the refusal plainly happened.
+///
+/// So the named ones get a `Warning`, exactly as an unpublished tool does — and in the same order
+/// as that one, which emits before the outcome it refuses with: **the warning, then the
+/// `ToolCompleted`**. The code and the words are the refusal's own
+/// ([`harness_wire::Refusal::code`], [`harness_wire::Refusal::message`]), so the record's sentence
+/// and the model's are one string. Nothing about the call changes: it still failed, and it still
+/// says so.
 fn complete(call: &ToolCall, result: ToolOutcome, state: &mut RunState, sink: &mut dyn LoopSink) {
+    if let Some(refusal) = &result.refusal {
+        sink.emit(LoopEvent::Warning {
+            code: refusal.code().to_owned(),
+            message: refusal.message(),
+        });
+    }
     sink.emit(LoopEvent::ToolCompleted {
         call_id: call.call_id.clone(),
         failed: result.failed,
@@ -2464,6 +2494,9 @@ impl<'a> AgentLoop<'a> {
                     // A bound the child hit, a wire error, a cancellation: the parent has to learn
                     // the sub-task did not finish, or it reads a half-answer as a whole one.
                     failed: !stop.is_completed(),
+                    // A delegate is not refused by a rule of the run's; whatever refusals happened
+                    // inside it were already reported as the child's own events.
+                    refusal: None,
                 };
                 // The same bound every result meets. The preamble is what tells the child to
                 // report well inside it; this is what happens when it did not.

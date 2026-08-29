@@ -21,6 +21,7 @@
 
 use std::time::Duration;
 
+use harness_wire::Refusal;
 use serde_json::Value;
 
 /// Which part of a file one read answers with.
@@ -84,11 +85,99 @@ pub struct SearchOptions {
     pub max_results: Option<usize>,
 }
 
+/// What an operation answers when it did not do the thing: a sentence, and sometimes a name for it.
+///
+/// # Why this is not a plain `String`, and not a typed error either
+///
+/// The `Err` of an operation is a **sentence the model reads** — a tool that failed has to say so
+/// in words the next turn can act on — and this crate deliberately never replaced that with an
+/// error enum, because the enum would have to be rendered into a sentence anyway and the two would
+/// drift.
+///
+/// That argument holds for *failures* and fails for one *refusal*. `run` refusing a program outside
+/// the declared set is not the tool failing; it is the run's own rule saying no, and it is the
+/// thing an evaluation asks about by name. Left as prose it reached the record as
+/// `ToolCompleted { failed: true }` — the shape of a compile error — and the only way to count it
+/// downstream was to match the sentence.
+///
+/// So the sentence stays and the name rides beside it. [`Refusal::message`] is where the words are
+/// written, so the tag and the prose are one string with one author rather than two descriptions of
+/// one decision. A provider with nothing to name writes `Err("…".to_owned().into())` and nothing
+/// changes for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refused {
+    message: String,
+    refusal: Option<Refusal>,
+}
+
+impl Refused {
+    /// The words the model reads.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Which rule of the run's own refused this, when it was a rule and not a failure.
+    #[must_use]
+    pub fn refusal(&self) -> Option<&Refusal> {
+        self.refusal.as_ref()
+    }
+
+    /// The message, given away.
+    #[must_use]
+    pub fn into_message(self) -> String {
+        self.message
+    }
+
+    /// The two halves, given away together.
+    #[must_use]
+    pub fn into_parts(self) -> (String, Option<Refusal>) {
+        (self.message, self.refusal)
+    }
+}
+
+impl From<String> for Refused {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            refusal: None,
+        }
+    }
+}
+
+impl From<&str> for Refused {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_owned())
+    }
+}
+
+/// A named refusal, saying itself in its own words.
+impl From<Refusal> for Refused {
+    fn from(refusal: Refusal) -> Self {
+        Self {
+            message: refusal.message(),
+            refusal: Some(refusal),
+        }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
 /// What performs a catalogue entry.
 ///
-/// Every method answers `Result<Value, String>`: the `Err` is a sentence the model reads, because a
-/// tool that failed has to say so in words the next turn can act on. A typed error here would have
-/// to be rendered into one anyway, and the two would drift.
+/// Every reading and writing method answers `Result<Value, String>`: the `Err` is a sentence the
+/// model reads, because a tool that failed has to say so in words the next turn can act on. A typed
+/// error there would have to be rendered into one anyway, and the two would drift.
+///
+/// [`run`](Operations::run) is the exception and [`Refused`] carries the reason: execution is the
+/// one operation with a **declared set** a call can fall outside of, and that refusal is a fact
+/// about the run rather than a failure of the tool. It keeps its sentence and gains a name.
 ///
 /// # `Send + Sync`, and what it bought
 ///
@@ -177,8 +266,9 @@ pub trait Operations: Send + Sync {
     ///
     /// # Errors
     ///
-    /// The program is not one this run may start, or it could not be launched.
-    fn run(&self, argv: &[String]) -> Result<Value, String>;
+    /// The program is not one this run may start — [`Refusal::ProgramNotDeclared`], which is the
+    /// one refusal here that is named rather than only worded — or it could not be launched.
+    fn run(&self, argv: &[String]) -> Result<Value, Refused>;
 
     /// [`run`](Self::run), told how much of the run's wall-clock budget is left.
     ///
@@ -194,7 +284,7 @@ pub trait Operations: Send + Sync {
     /// # Errors
     ///
     /// As [`run`](Self::run).
-    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, Refused> {
         let _ = remaining;
         self.run(argv)
     }
@@ -303,11 +393,11 @@ impl Operations for Split {
         self.effects.file_edit(path, old, new)
     }
 
-    fn run(&self, argv: &[String]) -> Result<Value, String> {
+    fn run(&self, argv: &[String]) -> Result<Value, Refused> {
         self.effects.run(argv)
     }
 
-    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, Refused> {
         self.effects.run_within(argv, remaining)
     }
 

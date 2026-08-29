@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:answer-prose-rate-measured
 kind: story
-status: draft
+status: implemented
 title: How often a real model ends in prose under answer is a number
 relations:
 - derived_from: epic:measured-not-emulated
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 5
 ---
 ## Evidence
 

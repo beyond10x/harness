@@ -1,6 +1,14 @@
 # Design 0001 — the tool envelope, where effects land, and what a step sees
 
-**Status:** proposed, 2026-08-23. Nothing here is implemented.
+**Status:** proposed 2026-08-23; **landed in `0.1.0`** (2026-08-24), with the deviations recorded
+here rather than left for a reader to notice. § 1 — `ToolSpec::envelope` and `ToolPort::subjects`
+exist; `approval` is still on the spec and marked for retirement (`crates/harness-wire/src/turn.rs`).
+§ 2 — publication follows substrate's facts as designed, but the embedded backend **imports
+`substrate-host`** rather than speaking only the wire, argued in
+`crates/harness-substrate/src/embedded.rs`; the socket client exists beside it and is parked
+(`STATUS.md`). § 3 — the three-verb amendment below is what shipped. § 4 — a group is a context
+scope and `gives:` is in the notation (`crates/harness-flow/src/run.rs`, `StepContext`). § 5 — all
+five steps landed. The text below is left as argued.
 
 ## The problem, in one line
 

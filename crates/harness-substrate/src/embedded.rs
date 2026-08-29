@@ -38,9 +38,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
 use substrate_wire::{
-    ConfinementRequest, EmptySource, ExecEnvironment, ExecLimits, ExecOutputQuery, ExecStartInput,
-    FileMode, FileReadQuery, NetworkMode, OutputStream, SandboxProfile, WorkspaceCreateInput,
-    WorkspaceSource,
+    EmptySource, ExecEnvironment, ExecOutputQuery, FileMode, FileReadQuery, OutputStream,
+    WorkspaceCreateInput, WorkspaceSource,
 };
 
 use crate::{Backend, Facts, SubstrateError};
@@ -52,6 +51,16 @@ use crate::{Backend, Facts, SubstrateError};
 /// before it.
 pub(crate) fn exec_identity(process: u32, sequence: u64) -> String {
     format!("ex_{process}_{sequence}")
+}
+
+/// One workspace's identity, in the shape the driver admits.
+///
+/// `^ws_[A-Za-z0-9_]+$`, and unique per call. It was `ws_{lease}_{pid}` — no sequence — so two
+/// creates with the same lease in one process minted the **same** id, and the second silently took
+/// the first's directory instead of opening its own. Its own function for the reason
+/// [`exec_identity`] is one: the rule is then testable without a driver.
+pub(crate) fn workspace_identity(lease_ttl_ms: u64, process: u32, sequence: u64) -> String {
+    format!("ws_{lease_ttl_ms}_{process}_{sequence}")
 }
 
 /// Substrate's driver, held in this process.
@@ -67,6 +76,9 @@ pub struct Embedded {
     /// Makes each exec's identity distinct. substrate keys an execution's output and lifetime on
     /// it, so two calls sharing one would read each other's.
     next_exec: std::sync::atomic::AtomicU64,
+    /// The same for workspaces. The lease and the pid are not enough to tell two apart: a run that
+    /// opens two workspaces with one lease would otherwise be handed one directory twice.
+    next_workspace: std::sync::atomic::AtomicU64,
 }
 
 impl std::fmt::Debug for Embedded {
@@ -132,6 +144,7 @@ impl Embedded {
             runtime,
             root,
             next_exec: std::sync::atomic::AtomicU64::new(0),
+            next_workspace: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -223,7 +236,16 @@ impl Backend for Embedded {
         // hyphen. A name that passes the first and fails the second reaches `mkdirat` and comes back
         // as `workspace.path-escape` — which reads as a containment failure and is a naming rule.
         // Meeting the stricter of the two is the only thing a caller can do about that.
-        let id = format!("ws_{}_{}", lease_ttl_ms, std::process::id());
+        //
+        // The sequence is what makes it *this* workspace: the lease and the pid are properties of
+        // the run, not of the directory, so two creates with one lease minted one id and the second
+        // caller was handed the first's tree.
+        let id = workspace_identity(
+            lease_ttl_ms,
+            std::process::id(),
+            self.next_workspace
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        );
         let root_name = self
             .driver
             .workspace_root_identity(&id)
@@ -324,13 +346,14 @@ impl Backend for Embedded {
             .driver
             .workspace_root_identity(workspace)
             .map_err(|error| Self::refused("workspace identity", &error))?;
-        // `sandbox.capability_snapshot` is the field the wire path never found: substrate refuses
-        // an exec whose admitted snapshot is stale, so the run has to name the one it probed.
         let snapshot = self.driver.machine();
-        let input = ExecStartInput {
-            workspace: workspace.to_owned(),
-            argv: argv.to_vec(),
-            env: ExecEnvironment {
+        // Built by [`crate::confined_exec_input`], which the socket path calls too: two call sites
+        // assembling this separately is how they came to ask for different things.
+        let input = crate::confined_exec_input(
+            workspace,
+            argv,
+            snapshot.snapshot.clone(),
+            ExecEnvironment {
                 // Nothing inherited. An exec that saw this process's environment would carry a
                 // credential into a confined workspace, which is the one thing confinement is for.
                 // What is set here is only what a declared toolchain needs to be findable, and it
@@ -338,40 +361,8 @@ impl Backend for Embedded {
                 allow: Vec::new(),
                 set: self.toolchain.env().clone(),
             },
-            // substrate mounts these read-only and reports them in the observation (its ADR 0010).
-            // Empty unless the caller declared a toolchain, which is every existing consumer.
-            read_only_roots: self.toolchain.roots().to_vec(),
-            sandbox: ConfinementRequest {
-                capability_snapshot: snapshot.snapshot.clone(),
-                network: NetworkMode::None,
-                profile: SandboxProfile::Workspace,
-                required: true,
-            },
-            // **Sized for a build, not for an interpreter.** Two minutes of wall clock and two
-            // minutes of CPU were right when the only thing a confined run could execute was
-            // something under `/usr`; a declared toolchain makes a compiler reachable, and a
-            // compiler blows through both without finishing anything. A bound that makes a
-            // capability unusable is the same as not having it.
-            //
-            // CPU is the larger of the two because a build is parallel: `cargo` will happily use
-            // every core, so the CPU a wall-clock minute can consume is a multiple of it. Both are
-            // still bounds — a run that loops is stopped, which is the whole point of having them.
-            limits: ExecLimits {
-                timeout_ms: 900_000,
-                output_bytes: 1_048_576,
-                // A parallel build is hundreds of processes and threads, not dozens: `cargo`
-                // fans out across every core and each `rustc` spawns its own codegen threads.
-                // At 64 the run did not fail cleanly — it died inside the standard library with
-                // `failed to spawn thread: Resource temporarily unavailable`, which reads as a
-                // machine under load rather than as a bound somebody set.
-                processes: 2_048,
-                memory_bytes: 8_589_934_592,
-                cpu_millis: 3_600_000,
-            },
-            wait: true,
-            capsule: None,
-            lease_ttl_ms: None,
-        };
+            self.toolchain.roots().to_vec(),
+        );
         // **substrate's own shape, which this never had.** `admit` requires `^ex_[A-Za-z0-9_]+$`
         // and this was `exec-<pid>-<argv joined by dashes>`: wrong prefix, and a program path is
         // full of `/` and `.`. Every exec was refused `exec.identity-invalid` before it started —

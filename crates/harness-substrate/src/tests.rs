@@ -460,9 +460,18 @@ fn a_program_outside_the_declared_set_is_refused_locally_and_the_set_is_listed()
     );
 }
 
+/// A machine document in the envelope every route answers, naming a capability snapshot.
+///
+/// An exec over the socket reads this first and refuses without it, so any script that reaches
+/// `/v1/execs` begins here.
+const MACHINE_WITH_SNAPSHOT: &str = r#"{"result":{"driver":"host","driver_version":"0.2.0",
+    "snapshot":"cap_7f3a","facts":{"workspace.guarded-io":true,"exec.argv-only":true,
+    "exec.cgroup-limits":{"cpu":true,"memory":true,"processes":true}}}}"#;
+
 #[test]
 fn a_declared_program_is_sent_as_an_argv_and_never_as_a_command_line() {
     let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
         (200, r#"{"result":{"exec_id":"e-1"}}"#),
         (200, r#"{"result":{"exit_status":0,"stdout":"ok"}}"#),
     ]);
@@ -473,15 +482,230 @@ fn a_declared_program_is_sent_as_an_argv_and_never_as_a_command_line() {
 
     let seen = script.seen.lock().expect("not poisoned");
     assert_eq!(
-        (seen[0].0.as_str(), seen[0].1.as_str()),
+        (seen[1].0.as_str(), seen[1].1.as_str()),
         ("POST", "/v1/execs")
     );
-    let sent = seen[0].2.as_ref().expect("a body");
+    let sent = seen[1].2.as_ref().expect("a body");
     assert_eq!(sent["input"]["argv"], json!(["cargo", "test"]));
     assert!(
         sent["input"].get("command").is_none(),
         "there is no command line anywhere in it: {sent}"
     );
+}
+
+#[test]
+fn an_exec_over_the_socket_asks_for_confinement_by_name() {
+    // What this pins: the socket path posted `{workspace_id, argv}` and nothing else, so it asked
+    // for an exec **without asking for confinement** - and whether that ran unconfined or was
+    // refused was the daemon's choice rather than this harness's.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, r#"{"result":{"exec_id":"ex_1"}}"#),
+        (200, r#"{"result":{}}"#),
+    ]);
+    let client = Client::with(script.clone());
+    client
+        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .expect("ran");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(
+        seen.iter()
+            .map(|(method, path, _)| (method.as_str(), path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("GET", "/v1/machine"),
+            ("POST", "/v1/execs"),
+            ("GET", "/v1/execs/ex_1/output"),
+        ]
+    );
+
+    let body = seen[1].2.as_ref().expect("a body");
+    // The daemon's mutation decoder reads `op` before it reads anything, and refuses a body with
+    // any third key. Every body this client posted until 2026-08-29 had `input` alone, so the
+    // confinement it asked for never reached a daemon that could read it.
+    assert_eq!(body["op"], json!("exec.start"), "{body}");
+    assert_eq!(
+        body.as_object().expect("an object").len(),
+        2,
+        "`op` and `input`, nothing else: {body}"
+    );
+    let sent = &body["input"];
+    // `required` is spelled `require` on the wire - `ConfinementRequest` renames it - which is
+    // exactly why this body is serialised from the wire crate's type instead of hand-written.
+    assert_eq!(sent["sandbox"]["require"], json!(true), "{sent}");
+    assert_eq!(
+        sent["sandbox"]["network"],
+        serde_json::to_value(substrate_wire::NetworkMode::None).expect("serialises"),
+        "{sent}"
+    );
+    assert_eq!(
+        sent["sandbox"]["capability_snapshot"],
+        json!("cap_7f3a"),
+        "the exec names the snapshot it was admitted against: {sent}"
+    );
+    assert_eq!(sent["argv"], json!(["/usr/bin/true"]));
+    assert_eq!(sent["wait"], json!(true));
+    assert_eq!(sent["limits"]["timeout_ms"], json!(900_000));
+    assert_eq!(sent["env"]["allow"], json!([]));
+}
+
+#[test]
+fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
+    // The daemon states one snapshot for its lifetime; asking before every exec was a round trip
+    // that bought nothing and let publication and admission read two different documents.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, r#"{"result":{"exec_id":"ex_1"}}"#),
+        (200, r#"{"result":{}}"#),
+        (200, r#"{"result":{"exec_id":"ex_2"}}"#),
+        (200, r#"{"result":{}}"#),
+    ]);
+    let client = Client::with(script.clone());
+    client.machine().expect("probed");
+    client
+        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .expect("ran");
+    client
+        .exec("ws_a", &["/usr/bin/false".to_owned()])
+        .expect("ran");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(
+        seen.iter()
+            .map(|(method, path, _)| (method.as_str(), path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("GET", "/v1/machine"),
+            ("POST", "/v1/execs"),
+            ("GET", "/v1/execs/ex_1/output"),
+            ("POST", "/v1/execs"),
+            ("GET", "/v1/execs/ex_2/output"),
+        ],
+        "one probe, then the execs"
+    );
+    for start in [&seen[1], &seen[3]] {
+        let body = start.2.as_ref().expect("a body");
+        assert_eq!(
+            body["input"]["sandbox"]["capability_snapshot"],
+            json!("cap_7f3a")
+        );
+    }
+}
+
+#[test]
+fn every_mutating_route_posts_the_operation_id_beside_its_input() {
+    let script = Scripted::new(vec![
+        (200, r#"{"result":{"id":"ws_new"}}"#),
+        (200, r#"{"result":{}}"#),
+    ]);
+    let client = Client::with(script.clone());
+    client.workspace_create(60_000).expect("opened");
+    client
+        .file_write("ws_new", "a.txt", "hello")
+        .expect("written");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    let ops: Vec<(&str, &str, Value)> = seen
+        .iter()
+        .map(|(method, path, body)| {
+            let body = body.as_ref().expect("a body");
+            assert_eq!(body.as_object().expect("an object").len(), 2, "{body}");
+            (method.as_str(), path.as_str(), body["op"].clone())
+        })
+        .collect();
+    assert_eq!(
+        ops,
+        vec![
+            ("POST", "/v1/workspaces", json!("workspace.create")),
+            (
+                "PUT",
+                "/v1/workspaces/ws_new/files/a.txt",
+                json!("workspace.file.write")
+            ),
+        ]
+    );
+}
+
+#[test]
+fn an_exec_over_the_socket_is_refused_when_the_daemon_states_no_snapshot() {
+    // A daemon that names no snapshot cannot admit a confined exec, so the honest answer is a
+    // refusal here rather than a start that may or may not have been confined over there.
+    let script = Scripted::new(vec![(
+        200,
+        r#"{"result":{"driver":"host","facts":{"exec.argv-only":true}}}"#,
+    )]);
+    let client = Client::with(script.clone());
+    let refused = client
+        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .expect_err("refused");
+
+    assert!(
+        matches!(refused, SubstrateError::Refused { status: 0, .. }),
+        "no HTTP happened, so there is no status to quote: {refused:?}"
+    );
+    assert!(refused.to_string().contains("snapshot"), "{refused}");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert!(
+        !seen
+            .iter()
+            .any(|(method, path, _)| method == "POST" && path == "/v1/execs"),
+        "and nothing was started: {seen:?}"
+    );
+}
+
+#[test]
+fn the_embedded_and_socket_paths_build_one_exec_input() {
+    // Both call this, so a later edit to one path cannot quietly ask for something weaker than the
+    // other. The figures are the ones argued at the builder.
+    let input = super::confined_exec_input(
+        "ws_a",
+        &["/usr/bin/true".to_owned()],
+        "cap_7f3a".to_owned(),
+        substrate_wire::ExecEnvironment {
+            allow: Vec::new(),
+            set: std::collections::BTreeMap::new(),
+        },
+        Vec::new(),
+    );
+
+    assert!(input.sandbox.required);
+    assert_eq!(input.sandbox.network, substrate_wire::NetworkMode::None);
+    assert_eq!(
+        input.sandbox.profile,
+        substrate_wire::SandboxProfile::Workspace
+    );
+    assert_eq!(input.sandbox.capability_snapshot, "cap_7f3a");
+    assert_eq!(input.limits.timeout_ms, 900_000);
+    assert_eq!(input.limits.output_bytes, 1_048_576);
+    assert_eq!(input.limits.processes, 2_048);
+    assert_eq!(input.limits.memory_bytes, 8_589_934_592);
+    assert_eq!(input.limits.cpu_millis, 3_600_000);
+    assert!(input.wait);
+    assert!(input.capsule.is_none());
+    assert!(input.lease_ttl_ms.is_none());
+}
+
+#[test]
+fn two_workspaces_opened_with_one_lease_are_two_workspaces() {
+    // It was `ws_{lease}_{pid}`: a run that opened two workspaces with the same TTL minted the same
+    // id twice, and the second caller was handed the first's tree with whatever was already in it.
+    let first = super::embedded::workspace_identity(600_000, 4242, 0);
+    let second = super::embedded::workspace_identity(600_000, 4242, 1);
+    assert_ne!(first, second);
+
+    // `^ws_[A-Za-z0-9_]+$` - the stricter of the driver's two disagreeing checks. A name that
+    // passes the other one reaches `mkdirat` and comes back as `workspace.path-escape`, which
+    // reads as a containment failure and is a naming rule.
+    for id in [&first, &second] {
+        assert!(id.starts_with("ws_"), "{id}");
+        assert!(
+            id.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'),
+            "{id}"
+        );
+    }
 }
 
 #[test]

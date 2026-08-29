@@ -1,0 +1,9 @@
+# Fetch git dependencies with the system `git`, not cargo's built-in client.
+#
+# The one git dependency — `beyond10x/substrate`, pinned by revision in
+# `crates/harness-substrate/Cargo.toml` — is a private repository. The credential that reaches it
+# belongs to the system git: the SSH agent and `url.<base>.insteadOf` on a developer machine, a
+# token-bearing `insteadOf` in CI (`.github/workflows/gate.yml`). Cargo's own fetcher honours
+# neither, and fails with an authentication error that names nothing.
+[net]
+git-fetch-with-cli = true

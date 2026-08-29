@@ -36,6 +36,9 @@ pub enum LoopEvent {
     ToolRequested(ToolCall),
     ApprovalRequired {
         call_id: CallId,
+        /// What is being decided. For a verb over a catalogue this is the **entry** — `run`,
+        /// `file_write` — and not the verb it came through; the `ToolRequested` event with the
+        /// same `call_id` carries the verb and its arguments.
         name: ToolName,
     },
     ApprovalResolved {

@@ -14,13 +14,20 @@ workspace = true
 [dependencies]
 harness-tools = { workspace = true }
 harness-wire = { workspace = true }
-# **A path dependency on a sibling repository, and both boundaries it crosses are argued in
+# **The one dependency on a sibling component, and both boundaries it crosses are argued in
 # `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
 # daemon artifact and the wire contract; this imports the driver. The socket path could not be made
 # to work against the daemon this machine happens to run, and embedding turns a 422 nobody could
 # diagnose into a compile error.
-substrate-host = { path = "../../../substrate/crates/substrate-host" }
-substrate-wire = { path = "../../../substrate/crates/substrate-wire" }
+#
+# **Pinned by revision, never by path.** A `path` into a sibling checkout builds against whatever
+# happens to be checked out there, and `--locked` cannot lock it — the gate was green against a tree
+# no lockfile named (AGENTS.md invariant 2). The revision is substrate `0.2.0` plus its brand sweep,
+# three commits: the tag itself still carries the former brand in a wire hash domain
+# (`EXECUTION_CAPSULE_HASH_DOMAIN`), and the org fence says it appears nowhere. When substrate tags
+# again, this becomes `tag = "<version>"` and nothing else changes.
+substrate-host = { git = "https://github.com/beyond10x/substrate", rev = "f1cfc1c022020e494b9ad63ee725be27ecd313d3", version = "0.2.0" }
+substrate-wire = { git = "https://github.com/beyond10x/substrate", rev = "f1cfc1c022020e494b9ad63ee725be27ecd313d3", version = "0.2.0" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

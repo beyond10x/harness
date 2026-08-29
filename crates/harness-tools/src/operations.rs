@@ -82,6 +82,28 @@ pub trait Operations {
     /// The program is not one this run may start, or it could not be launched.
     fn run(&self, argv: &[String]) -> Result<Value, String>;
 
+    /// Where a write to `path` would land, relative to the workspace root, with every link followed.
+    ///
+    /// The write scope is matched against the path as the caller spelled it, and a link inside
+    /// the workspace is a second spelling of its target that no lexical check can see: under
+    /// `target/**=denied`, a write to `ok/link` that points at `target/x` overwrote `target/x`.
+    /// The catalogue puts this answer through the scope as well, so the rule sees where the bytes
+    /// go and not only what the call said.
+    ///
+    /// Defaulted to the path as written, which is exactly right for a provider whose writes never
+    /// follow a link — substrate's guarded filesystem resolves with `RESOLVE_NO_SYMLINKS` — and
+    /// for one that has no tree to look at. A provider that *does* follow links on the way to a
+    /// write has to answer here, or its scope is a spelling check.
+    ///
+    /// # Errors
+    ///
+    /// The path leaves the workspace or leads nowhere it could write. The catalogue does not act
+    /// on the error: the write itself refuses the same path with the same words, and one answer
+    /// to one question is the point.
+    fn lands(&self, path: &str) -> Result<String, String> {
+        Ok(path.to_owned())
+    }
+
     /// The programs [`run`](Self::run) will accept.
     ///
     /// Empty means execution is not offered at all, and the catalogue leaves the entry out — so the
@@ -167,6 +189,11 @@ impl Operations for Split {
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {
         self.effects.run(argv)
+    }
+
+    /// The provider that performs the write is the one that knows where it lands.
+    fn lands(&self, path: &str) -> Result<String, String> {
+        self.effects.lands(path)
     }
 
     fn programs(&self) -> &[String] {

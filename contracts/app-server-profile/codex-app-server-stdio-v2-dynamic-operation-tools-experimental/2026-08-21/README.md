@@ -95,3 +95,12 @@ as a client over real pipes, against a deterministic local model endpoint.
 **The real bridge has not driven this server.** That crosses a component boundary and has not been
 run. Until it has, this profile is evidence that the frames match what the client's own source says
 it sends and expects — not evidence that the two processes have ever spoken.
+
+## Edited after release — 2026-08-24
+
+This version's fixtures and manifest were rewritten once after `0.1.0` was tagged: the org-wide
+brand sweep (`a54ec76`, `6aded80`) renamed the former-brand identifiers the fixtures carried and
+re-pinned the digests to the new bytes (atlas ADR 0001, *Wire-visible identifiers*). That is the
+one exception to invariant 13 — a released version is immutable — and it is recorded here so a
+reader comparing this directory against the tag is not left guessing. Any further change to what
+is sent or accepted cuts a new dated version; this directory is not edited again.

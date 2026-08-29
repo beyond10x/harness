@@ -22,7 +22,7 @@ pub struct Budget {
     /// Output tokens offered to the provider for any single turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens_per_turn: Option<u64>,
-    /// Wall-clock ceiling, checked between turns.
+    /// Wall-clock ceiling, checked between turns and between the tool calls of one turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_duration_ms: Option<u64>,
     /// Total spend across the run, in millionths of a US dollar.

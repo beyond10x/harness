@@ -18,4 +18,4 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-serde_yaml = "0.9"
+serde_yaml_ng = "0.10"

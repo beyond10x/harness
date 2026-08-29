@@ -133,6 +133,43 @@ impl<O: Write, E: Write> Renderer<O, E> {
     /// the toolset they asked for — which is exactly what happened.
     ///
     /// Nothing at all for a run that was refused nothing: absence stays absence.
+    /// The opening line: what this run is, and what it was refused.
+    ///
+    /// Split out of [`Self::emit`] because that match is the whole renderer and one arm growing a
+    /// field should not be what pushes it over a lint. Takes the event by reference and matches
+    /// again rather than taking the fields, so a field added to `Started` later is a compile error
+    /// here and not a silent omission from what a person watching a run is shown.
+    fn started(&mut self, event: &LoopEvent) {
+        let LoopEvent::Started {
+            model,
+            published_tools,
+            operations,
+            withheld,
+            skills,
+            // Not rendered: this loop publishes none yet, and a `agents: []` line every run would
+            // be noise. It is in the record, which is where a comparison reads it.
+            agents: _,
+        } = event
+        else {
+            return;
+        };
+        let names: Vec<&str> = published_tools
+            .iter()
+            .map(harness_wire::ToolName::as_str)
+            .collect();
+        self.note(&format!("model {model} · tools: {}", names.join(", ")));
+        if !operations.is_empty() {
+            self.note(&format!("  can: {}", operations.join(", ")));
+        }
+        // **Shown, because a run given skills and a run given none are different experiments.**
+        // The bodies are not here — the model loads those — but which library it had is the sort
+        // of thing a person comparing two runs afterwards has no other way to see.
+        if !skills.is_empty() {
+            self.note(&format!("  skills: {}", skills.join(", ")));
+        }
+        self.withheld(withheld);
+    }
+
     fn withheld(&mut self, withheld: &[harness_loop::Withheld]) {
         for withheld in withheld {
             let _ = writeln!(
@@ -179,22 +216,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
             return;
         }
         match event {
-            LoopEvent::Started {
-                model,
-                published_tools,
-                operations,
-                withheld,
-            } => {
-                let names: Vec<&str> = published_tools
-                    .iter()
-                    .map(harness_wire::ToolName::as_str)
-                    .collect();
-                self.note(&format!("model {model} · tools: {}", names.join(", ")));
-                if !operations.is_empty() {
-                    self.note(&format!("  can: {}", operations.join(", ")));
-                }
-                self.withheld(&withheld);
-            }
+            LoopEvent::Started { .. } => self.started(&event),
             LoopEvent::TurnStarted { turn } => self.note(&format!("· turn {turn}")),
             // Whatever streamed for the turn is void, and the person who read it has to be told:
             // a stdout that cannot be un-printed gets a marker line instead.
@@ -487,6 +509,8 @@ mod tests {
                     published_tools: vec![ToolName::new("a").expect("valid")],
                     operations: Vec::new(),
                     withheld: Vec::new(),
+                    skills: Vec::new(),
+                    agents: Vec::new(),
                 },
                 LoopEvent::TextDelta {
                     text: "the ".to_owned(),
@@ -821,6 +845,8 @@ mod tests {
                 tool: "run".to_owned(),
                 reason: "`exec.argv-only` must be true and this machine says nothing.".to_owned(),
             }],
+            skills: Vec::new(),
+            agents: Vec::new(),
         };
 
         let (out, err) = render(vec![started()], false);
@@ -1006,6 +1032,8 @@ mod tests {
                 published_tools: vec![ToolName::new("file_read").expect("valid")],
                 operations: vec!["file.read".to_owned()],
                 withheld: Vec::new(),
+                skills: Vec::new(),
+                agents: Vec::new(),
             }],
             false,
         );

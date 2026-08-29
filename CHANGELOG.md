@@ -9,6 +9,97 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`--skills-dir` and `--plugin-dir` — the operator's own instructions, in the on-disk format
+  Claude Code already writes.** A skill library written for that harness had to be rewritten to
+  reach a run here, so an evaluation comparing the two arms compared who had rewritten their
+  instructions rather than comparing the harnesses. Both flags are on `run` and on `tools`, and
+  both are repeatable. `--skills-dir <DIR>` reads `<DIR>/<name>/SKILL.md` — YAML frontmatter
+  carrying `name` and `description`, the document after. `--plugin-dir <DIR>` reads
+  `<DIR>/skills/` the same way and qualifies each skill `<plugin>:<skill>` from the `name` in
+  `<DIR>/.claude-plugin/plugin.json`: exactly `--skills-dir <DIR>/skills` plus that qualification,
+  named separately so this harness and the vendor's take the same flag with the same argument. The
+  qualification is not cosmetic — two plugins may both ship a `planning`, and a run that followed
+  whichever was read first would be following instructions nobody chose.
+
+  **Reading a vendor's file format is not becoming a client of a vendor's protocol**, which is the
+  distinction `README.md` now draws where it goes on refusing an MCP client, and it is why skills
+  could be added while an MCP client stays refused (invariant 1 does not move). A format has no
+  reach: nothing opens a socket, nothing gives a third party a say in what a run may do, and the
+  bytes are read once, before the first request, out of a directory the operator named.
+
+  **The descriptions reach the model and the bodies do not.** One line per skill in the standing
+  instruction — the half of the request a prompt cache holds — and the body arrives only when the
+  model calls the new `skill` tool by name. This loop is stateless and replays the whole
+  conversation every turn (invariant 4), so a body placed in the instruction is billed on turn one
+  and again on turn forty, on every run, including every run that never wanted that skill.
+  `--context` is the flag for the files a run genuinely needs throughout; a library of skills is
+  the other case. Progressive disclosure is also what Claude Code does with these same documents,
+  which is what makes the two arms readable against each other at all: a run handed every body
+  eagerly and a run that loaded one on demand are not the same experiment.
+  The tool's input schema enumerates the available names as a JSON Schema `enum`, so a name this
+  run does not have is refused by the provider before it is sent, instead of costing a turn to find
+  out.
+
+  **The parser refuses rather than guesses.** No YAML dependency was taken — the workspace rule
+  that kept `hyper` out of `harness-substrate`. What that costs is stated rather than hidden: it
+  reads `key: value` at the top level of a frontmatter block and understands nothing else, and a
+  document using a key this build does not read refuses the run **by name** rather than being
+  half-read. A key that was skipped is a rule its author wrote that the run would not have applied,
+  and nobody reading the record afterwards would know which rule was missing.
+
+  `LoopEvent::Started` gains `skills` and `agents`, **both always serialised, empty included** —
+  the rule `withheld` was fixed to earlier the same day. Skip-when-empty makes *this run had none*
+  and *this build does not say* the same record to a reader outside the process, and "the model was
+  never offered the guidance" and "we cannot tell whether it was" are different findings about a
+  run. Names only: what a skill says is what the `skill` tool answers with, and a body in a session
+  record would be in every reader's face on every run. `b10x-harness tools` answers a `skills` list
+  under the same rule, and the terminal renderer puts the names on the opening line, because a run
+  given skills and a run given none are different experiments. `agents` rides beside it under the
+  same rule, and a plugin carrying only one of the two is accepted and contributes the one.
+
+- **`--agents-dir <DIR>`, and `--plugin-dir`'s `agents/` half: named sub-agents in the vendor's
+  format.** `<DIR>/<name>.md`, frontmatter `name`, `description` and an optional `tools` list, the
+  body after as that agent's own standing instruction. A delegate call may now name one —
+  `delegate(task, agent)` — and the names are a schema `enum` for the reason the `skill` tool's
+  are, so a wrong one is refused before it is sent. A run with no agents publishes no `agent` key
+  at all, so the option does not exist rather than existing and always failing.
+
+  **A declared toolset can only narrow, never widen, and that is the whole of the security
+  claim.** `delegate.rs` has always said delegation widens nothing — the child does exactly what
+  the parent's catalogue admits, entry for entry — and an agent's `tools:` is intersected with
+  what the *parent was admitted*, not with the port's whole list, so a child of an already
+  narrowed run cannot climb back out by naming an agent. What the agent asked for and did not get
+  is a `withheld` record in the child's own session, naming the tool: an agent whose author
+  granted it something this machine never admitted is a fact about the run, and an absence would
+  read as one that never wanted it.
+
+  The narrowing is enforced at **one** chokepoint, and it had to be moved there. Filtering only
+  the published toolset left the tool reachable by name — the model has the name from its own
+  instructions and does not have to guess — so a hidden tool was still callable. A permission
+  boundary that only hides is not one. It now filters what is published *and* refuses the call,
+  by the same rule that already refuses a tool the run never published, so the two cannot
+  disagree. A test asserts exactly that, and is what found it.
+
+  What is **not** narrowed: an entry reached through a verb. Under the `verbs` surface the call
+  names `tool_invoke` and the entry is an argument, so this admits the verb and the entry is
+  decided inside the port. Named agents are a flat-surface feature until that is answered, and
+  the code says so where a reader will meet it.
+
+  Vendor tool names are mapped in the CLI layer so the loop stays vendor-free — `Read`→`file_read`,
+  `Grep`→`search`, `Glob`→`find`, `Bash`→`run`, `Write`→`file_write`, `Edit`→`file_edit`,
+  `LS`→`dir_list`. A name outside that table refuses the document, for the reason an unknown
+  frontmatter key does: a permission its author granted and this build quietly dropped is one the
+  run would not have, with nothing saying so. `tools: []` is refused too — an empty list means the
+  parent's whole catalogue, so an author writing *no tools* would otherwise get everything, which
+  is the one misreading here that hands out power.
+
+  **Measured:** the driven evaluation's native arm went from 30 pass / 1 fail to **30 pass / 0
+  fail**, `EVAL_EXIT=0`, with `the-skill-was-offered` now reporting `skill
+  engineering-protocols:planning is among 2 offered at event 0`. Before this the arm was launched
+  without `--plugin-dir` at all, and the model was left to discover the subject CLI's own `skill
+  load` verb by itself. Contract version **2026-08-29.3** (`contracts/cli/b10x-harness/`), strictly
+  additive — flags added, nothing renamed or removed.
+
 - **`b10x-harness workflow` — the loop walks a workflow itself, and the governor stays a program
   outside it.** `crates/harness-flow` could plan and walk a graph and nothing bound it: every
   `StepRunner` lived in its own `tests.rs`, and the only way a workflow reached this loop was an

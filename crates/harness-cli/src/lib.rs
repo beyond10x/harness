@@ -6,12 +6,14 @@
 //! them to [`harness_loop`]. Everything interesting happens in the loop, which is what lets the
 //! same core run embedded in another process or behind a bridge without a second implementation.
 
+pub mod agents;
 pub mod approve;
 pub mod contract;
 pub mod environment;
 pub mod hooks;
 mod metaharness;
 mod render;
+pub mod skills;
 pub mod transcript;
 mod workflow;
 
@@ -77,6 +79,14 @@ struct Owned<'a> {
     delegate: Option<&'a str>,
     /// The answer tool's name, under `--output-schema`.
     answer: Option<&'a str>,
+    /// The named agents this run may delegate as, under `--agents-dir` and `--plugin-dir`.
+    agents: Option<&'a harness_loop::Agents>,
+    /// The skills this run offers, under `--skills-dir` and `--plugin-dir`.
+    ///
+    /// The whole value rather than a name, because the instruction needs the one-line-per-skill
+    /// block and the name check needs the tool name, and reading them out of one place is how
+    /// they cannot disagree.
+    skills: Option<&'a harness_loop::Skills>,
 }
 
 /// The standing instruction for this run, written for the surface the model is offered.
@@ -140,6 +150,22 @@ fn standing_instruction(
             "\n\nFinish by calling `{name}` with the result, once and on its own. Nothing you \
              write outside it is read as the answer."
         );
+    }
+    // **The descriptions and never the bodies.** This is the whole of what a run that never loads
+    // a skill is told about it, and it is what makes the tool reachable at all — a `skill` entry
+    // whose library is unlisted is a tool the model has no reason to call. The bodies stay behind
+    // the call, because a stateless loop replays its conversation and a body here is billed on
+    // every turn of every run, including the ones that never wanted it.
+    if let Some(skills) = owned.skills.filter(|skills| !skills.is_empty()) {
+        text.push_str(&skills.brief());
+    }
+    // Only where a delegate exists to run them with: an agent named in the instruction that the
+    // model has no tool to invoke is a turn spent discovering that.
+    if let Some(agents) = owned
+        .agents
+        .filter(|agents| !agents.is_empty() && owned.delegate.is_some())
+    {
+        text.push_str(&agents.brief());
     }
     // Where the run may write, in the instruction as well as in the tool. The tool is what makes
     // it true; this is what stops the model spending a turn discovering it by being refused.
@@ -302,7 +328,7 @@ enum Command {
     /// List the sessions on this machine, newest first.
     Sessions(SessionsOptions),
     /// Print the tools this harness publishes, without contacting an endpoint.
-    Tools(ToolsOptions),
+    Tools(Box<ToolsOptions>),
     /// Serve one connection over the pinned Codex app-server JSON-RPC format, on stdio.
     ///
     /// Tools arrive from the client on `thread/start`; the workspace toolset is not published
@@ -596,6 +622,50 @@ struct RunOptions {
     /// was told to have is a run nobody can reproduce.
     #[arg(long, value_name = "FILE")]
     context: Vec<PathBuf>,
+    /// A directory of skills the run may load by name. Repeatable.
+    ///
+    /// `<DIR>/<name>/SKILL.md`, YAML frontmatter with `name` and `description`, the document
+    /// after. That is the on-disk shape Claude Code writes, read here so a plugin written for it
+    /// runs unchanged and a comparison between the two harnesses is a comparison of harnesses.
+    /// Reading a vendor's **file format** is not becoming a client of a vendor **protocol** — the
+    /// distinction `README.md` draws where it refuses an MCP client; nothing here speaks to a
+    /// server or gives anyone a say in what this run may do.
+    ///
+    /// **The descriptions are given to the model and the bodies are not.** A skill costs a `skill`
+    /// call when the model decides it wants one, rather than input tokens on every turn of every
+    /// run — which is what `--context` does, deliberately, for the files a run genuinely needs
+    /// throughout. A document this build cannot read refuses the run by name rather than being
+    /// skipped: a skill half-read is a rule its author wrote that the run would not apply.
+    #[arg(long, value_name = "DIR")]
+    skills_dir: Vec<PathBuf>,
+    /// A directory of named agents a delegate may be run as. Repeatable.
+    ///
+    /// `<DIR>/<name>.md`, YAML frontmatter with `name`, `description` and an optional `tools`
+    /// list, the body after as the agent's own standing instruction. The vendor's shape, read
+    /// here for the same reason `--skills-dir` reads theirs.
+    ///
+    /// **A declared toolset can only narrow this run, never widen it.** The names are mapped to
+    /// this harness's own and then intersected with what this run was admitted, so an agent
+    /// naming a tool the machine did not give the parent does not get it — and the child's record
+    /// says by name what it asked for and did not get, rather than going silent. A vendor tool
+    /// name this build does not map refuses the document: a permission its author granted and
+    /// this build quietly dropped is one the run would not have, with nothing saying so.
+    ///
+    /// Only where `--delegate` published a delegate to run them with.
+    #[arg(long, value_name = "DIR")]
+    agents_dir: Vec<PathBuf>,
+    /// A plugin directory, whose `skills/` and `agents/` are read as the two flags above read them.
+    ///
+    /// Exactly equivalent to `--skills-dir <DIR>/skills` and `--agents-dir <DIR>/agents`, with
+    /// each name qualified `<plugin>:<name>` from the plugin's own manifest — the vendor's
+    /// namespacing, and not cosmetic: two plugins may both ship a `planning`, and a bare name is
+    /// also not what an expectation comparing two harnesses names.
+    ///
+    /// Named separately so this and the
+    /// vendor arm of a comparison take the same flag with the same argument. Repeatable, and
+    /// composes with both.
+    #[arg(long, value_name = "DIR")]
+    plugin_dir: Vec<PathBuf>,
     /// A rate card, so the run reports what it cost.
     ///
     /// A JSON document naming its own `source` and `as_of` date and holding
@@ -811,6 +881,19 @@ struct ToolsOptions {
     /// no evidence. The digest of what was staged is reported by `tools`.
     #[arg(long, value_name = "PATH")]
     driver: Option<PathBuf>,
+    /// The skills a `run` would be offered, so `tools` answers with them.
+    ///
+    /// The same declaration `run` takes. It belongs in this answer for the reason `--write-scope`
+    /// does: "what can this run do?" is not answered by a list of tools alone once some of what
+    /// the model is given arrives from somewhere else.
+    #[arg(long, value_name = "DIR")]
+    skills_dir: Vec<PathBuf>,
+    /// The named agents a `run` would be offered, so `tools` answers with them.
+    #[arg(long, value_name = "DIR")]
+    agents_dir: Vec<PathBuf>,
+    /// A plugin directory, whose `skills/` and `agents/` are read as the two flags above read them.
+    #[arg(long, value_name = "DIR")]
+    plugin_dir: Vec<PathBuf>,
 }
 
 /// Reads a credential from exactly the place the caller named, or none.
@@ -1190,9 +1273,13 @@ fn prepare(
     // tool it publishes. A caller that resolved its own schema and left this `None` would get a run
     // under a schema that was never told to finish by calling `answer`.
     let delegation = delegation(options);
+    let skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
+    let agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
     let owned = Owned {
         delegate: delegation.as_ref().map(|tool| tool.name.as_str()),
         answer: answer.as_ref().map(|tool| tool.name.as_str()),
+        skills: skills.as_ref(),
+        agents: agents.as_ref(),
     };
     let config = LoopConfig::new(
         &options.model,
@@ -1211,6 +1298,8 @@ fn prepare(
     .with_context_window(Some(options.context_window))
     .with_output_schema(answer)
     .with_delegation(delegation)
+    .with_skills(skills)
+    .with_agents(agents)
     // Reported in the record and acted on nowhere: what the machine would not admit was already
     // decided when the catalogue was built, and this is the sentence saying so.
     .with_withheld(withheld_events(&withheld));
@@ -1270,6 +1359,104 @@ fn schema(path: Option<&std::path::Path>) -> Result<Option<harness_loop::OutputS
 /// Whether this run may delegate, and how long a delegate may work.
 ///
 /// [`None`] publishes no `delegate` at all, which is what every run did before this flag existed.
+/// The skills this run offers, from every directory the caller named.
+///
+/// `--plugin-dir <D>` is read as `--skills-dir <D>/skills`, in the order the flags were given so a
+/// caller can predict which of two same-named skills wins — the first, because a later directory
+/// silently replacing an earlier one is how a run ends up following instructions nobody chose.
+///
+/// # Errors
+///
+/// Names the directory or the document that could not be read. A named directory that is not there
+/// refuses the run, exactly as `--context` does: a run given fewer skills than it was told to have
+/// is one nobody can reproduce.
+fn skills_from(
+    skills_dir: &[PathBuf],
+    plugin_dir: &[PathBuf],
+) -> Result<Option<harness_loop::Skills>, String> {
+    if skills_dir.is_empty() && plugin_dir.is_empty() {
+        return Ok(None);
+    }
+    let mut skills: Vec<harness_loop::Skill> = Vec::new();
+    let mut take = |loaded: Vec<harness_loop::Skill>| {
+        for skill in loaded {
+            // First wins. A later directory silently replacing an earlier one is how a run ends up
+            // following instructions nobody chose.
+            if !skills.iter().any(|held| held.name == skill.name) {
+                skills.push(skill);
+            }
+        }
+    };
+    for directory in skills_dir {
+        if !directory.is_dir() {
+            return Err(format!(
+                "the skills directory `{}` is not there",
+                directory.display()
+            ));
+        }
+        take(skills::skills_in(directory)?);
+    }
+    for directory in plugin_dir {
+        if !directory.is_dir() {
+            return Err(format!(
+                "the plugin directory `{}` is not there",
+                directory.display()
+            ));
+        }
+        // Qualified `<plugin>:<skill>` from the plugin's own manifest, as the vendor does: two
+        // plugins may both ship a `planning`, and a bare name is also not what an expectation
+        // comparing the two arms names.
+        take(skills::skills_in_plugin(directory)?);
+    }
+    Ok(Some(harness_loop::Skills::new(skills)))
+}
+
+/// The named agents this run may delegate as, from every directory the caller named.
+///
+/// Same shape and same first-wins rule as [`skills_from`], for the same reason: a later directory
+/// silently replacing an earlier one is how a run ends up running an agent nobody chose.
+///
+/// # Errors
+///
+/// Names the directory or document that could not be read, including a vendor tool name this
+/// build does not map — which refuses rather than dropping the tool, because a permission an
+/// author granted and this build ignored is one the run would not have with nothing saying so.
+fn agents_from(
+    agents_dir: &[PathBuf],
+    plugin_dir: &[PathBuf],
+) -> Result<Option<harness_loop::Agents>, String> {
+    if agents_dir.is_empty() && plugin_dir.is_empty() {
+        return Ok(None);
+    }
+    let mut agents: Vec<harness_loop::Agent> = Vec::new();
+    let mut take = |loaded: Vec<harness_loop::Agent>| {
+        for agent in loaded {
+            if !agents.iter().any(|held| held.name == agent.name) {
+                agents.push(agent);
+            }
+        }
+    };
+    for directory in agents_dir {
+        if !directory.is_dir() {
+            return Err(format!(
+                "the agents directory `{}` is not there",
+                directory.display()
+            ));
+        }
+        take(agents::agents_in(directory)?);
+    }
+    for directory in plugin_dir {
+        if !directory.is_dir() {
+            return Err(format!(
+                "the plugin directory `{}` is not there",
+                directory.display()
+            ));
+        }
+        take(agents::agents_in_plugin(directory)?);
+    }
+    Ok(Some(harness_loop::Agents::new(agents)))
+}
+
 fn delegation(options: &RunOptions) -> Option<harness_loop::Delegation> {
     options
         .delegate
@@ -2028,6 +2215,8 @@ fn adopted(
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
+    let tools_skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
+    let tools_agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
     let confined_toolchain = toolchain(options.toolchain.as_deref(), options.driver.as_deref())?;
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let Publication { tools, withheld } = published(
@@ -2073,6 +2262,15 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // difference between a six-entry catalogue nobody wanted a seventh entry in and one
             // that was refused it.
             "withheld": withheld,
+            // And what the run is given beyond its tools. Always a list, empty included, for the
+            // reason `withheld` is: a reader cannot otherwise tell *none were declared* from
+            // *this build does not say*.
+            "skills": tools_skills
+                .as_ref()
+                .map_or_else(Vec::new, harness_loop::Skills::names),
+            "agents": tools_agents
+                .as_ref()
+                .map_or_else(Vec::new, harness_loop::Agents::names),
             // The staged driver, by its sandbox path and the digest of the bytes that were staged.
             // substrate mounts a declared root read-only and reports it, and computes no digest
             // over one — so "this run pinned the build its evidence is recorded against" is a
@@ -2891,6 +3089,8 @@ mod tests {
             Owned {
                 delegate: Some("delegate"),
                 answer: Some("answer"),
+                skills: None,
+                agents: None,
             },
         )
         .expect("the default is available");

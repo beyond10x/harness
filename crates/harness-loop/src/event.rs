@@ -68,6 +68,19 @@ pub enum LoopEvent {
         /// one. Observers may keep reading absence as *did not say* and be right.
         #[serde(default)]
         withheld: Vec<Withheld>,
+        /// The skills this run offered, by name, and the agents it published.
+        ///
+        /// **Always written, both of them, empty included** — the rule `withheld` above was fixed
+        /// to. A reader outside this process cannot tell *this run had none* from *this build does
+        /// not say* unless the record says which, and "the model was never offered the guidance"
+        /// and "we cannot tell whether it was" are different findings about a run.
+        ///
+        /// Names only. What a skill says is what the `skill` tool answers with, and putting a body
+        /// in a session record would put it in every reader's face on every run.
+        #[serde(default)]
+        skills: Vec<String>,
+        #[serde(default)]
+        agents: Vec<String>,
     },
     TurnStarted {
         turn: u64,
@@ -302,6 +315,8 @@ mod tests {
                 tool: "run".to_owned(),
                 reason: "`exec.argv-only` must be true and this machine says nothing.".to_owned(),
             }],
+            skills: Vec::new(),
+            agents: Vec::new(),
         };
         let encoded = serde_json::to_value(&event).expect("serializes");
         assert_eq!(encoded["withheld"][0]["tool"], serde_json::json!("run"));
@@ -329,12 +344,15 @@ mod tests {
             published_tools: Vec::new(),
             operations: Vec::new(),
             withheld: Vec::new(),
+            skills: Vec::new(),
+            agents: Vec::new(),
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
-            encoded, r#"{"kind":"started","model":"m","published_tools":[],"withheld":[]}"#,
-            "a run that was refused nothing says `[]`, and only a build older than the field is \
-             silent"
+            encoded,
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[]}"#,
+            "a run that was refused nothing, offered no skill and published no agent says `[]` to \
+             each; only a build older than the field is silent"
         );
 
         // And a record written before the field existed still reads, as a run that withheld

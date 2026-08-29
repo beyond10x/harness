@@ -440,6 +440,14 @@ These suites drive real processes over real sockets and pipes:
   owns. An MCP client would make the loop a client of a protocol whose tools nothing here confines
   — metaharness is the MCP side of this family — and an image item is a new neutral value on both
   wires that nothing measuring this harness has asked for.
+
+  **Reading a vendor's on-disk file format is not the same act as becoming a client of its
+  protocol**, which is why skills and agents could be added (`--skills-dir`,
+  `--agents-dir`, `--plugin-dir`, in the layout Claude Code writes) while an MCP client stays
+  refused. A file format has no reach: nothing opens
+  a socket, nothing gives a third party a say in what a run may do, and the bytes are read once,
+  before the run starts, out of a directory the operator named. A protocol has all three.
+
 - No realtime media or provider-side sessions. Sessions here are **this harness's own file on this
   machine**: nothing is retained on the far side and the whole conversation is replayed every turn
   (invariant 4).

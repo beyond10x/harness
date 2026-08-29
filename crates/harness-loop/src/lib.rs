@@ -50,6 +50,7 @@
 //! [`None`] by default), so every invocation written before they existed means what it did.
 //! Design: `docs/design/0002-sub-agents-structured-output-hooks.md` § 0.
 
+mod agent;
 mod answer;
 mod approval;
 mod budget;
@@ -57,6 +58,7 @@ mod delegate;
 mod event;
 mod hook;
 mod price;
+mod skill;
 
 use std::time::{Duration, Instant};
 
@@ -67,6 +69,7 @@ use harness_wire::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use agent::{Agent, Agents};
 pub use answer::{
     DEFAULT_ANSWER_DESCRIPTION, DEFAULT_ANSWER_NAME, MAX_ANSWER_NUDGES, OutputSchema,
     OutputSchemaError,
@@ -80,6 +83,7 @@ pub use delegate::{
 pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink, Withheld};
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
+pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
 
 /// How many times a `stop` hook may keep one run working after the model tried to end it.
 ///
@@ -307,6 +311,31 @@ pub struct LoopConfig {
     ///
     /// [`None`] publishes no `delegate`, which is what every run did before this existed.
     pub delegation: Option<Delegation>,
+
+    /// The named agents a delegate may be run as, or [`None`] for the generic delegate only.
+    ///
+    /// Loaded by the caller from the vendor's `agents/<name>.md` format. Each carries its own
+    /// standing instruction and its own declared toolset, and the toolset can only ever narrow
+    /// what this run was admitted — see [`Agent::admitted`].
+    pub agents: Option<Agents>,
+
+    /// Which of the port's tools this run may use, or [`None`] for all of them.
+    ///
+    /// **A narrowing and never a widening.** Set only when a named agent declared a toolset: the
+    /// value is that declaration already intersected with what the parent was admitted, so a
+    /// child cannot reach a tool its parent did not have by naming one. `None` is what every run
+    /// a caller starts has, and what a delegate with no agent has.
+    ///
+    /// Enforced in one place — [`AgentLoop::port_specs`] — which both the published toolset and
+    /// the admission check read, so a tool filtered out of the list is also refused when called.
+    /// Two chokepoints would be two chances to disagree.
+    pub admits: Option<Vec<harness_wire::ToolName>>,
+
+    /// The skills this run may load, or [`None`] to publish no `skill` tool.
+    ///
+    /// Loaded by the caller and never discovered: a skill directory this loop went and looked for
+    /// would be instructions the model follows that nobody declared.
+    pub skills: Option<Skills>,
     /// Tools this run asked for that its machine would not admit, as whoever built the tool port
     /// found them.
     ///
@@ -338,6 +367,9 @@ impl LoopConfig {
             retry_backoff: TURN_RETRY_BACKOFF,
             output_schema: None,
             delegation: None,
+            agents: None,
+            admits: None,
+            skills: None,
             withheld: Vec::new(),
         }
     }
@@ -363,6 +395,27 @@ impl LoopConfig {
     #[must_use]
     pub fn with_delegation(mut self, delegation: Option<Delegation>) -> Self {
         self.delegation = delegation;
+        self
+    }
+
+    /// Lets a delegate be run as one of the operator's named agents.
+    #[must_use]
+    pub fn with_agents(mut self, agents: Option<Agents>) -> Self {
+        self.agents = agents;
+        self
+    }
+
+    /// Narrows this run to a subset of what its port publishes.
+    #[must_use]
+    pub fn with_admitted(mut self, admits: Option<Vec<harness_wire::ToolName>>) -> Self {
+        self.admits = admits;
+        self
+    }
+
+    /// Lets the model load the operator's skills by name, one call each.
+    #[must_use]
+    pub fn with_skills(mut self, skills: Option<Skills>) -> Self {
+        self.skills = skills;
         self
     }
 
@@ -1385,6 +1438,8 @@ enum Owned {
     /// The delegation this run is configured with, carried so the call does not have to read it
     /// back out of `self.config` while the child holds every one of the loop's ports.
     Delegate(Delegation),
+    /// The skills this run publishes, carried for the same reason as the two above.
+    Skill(Skills),
 }
 
 impl Owned {
@@ -1397,7 +1452,39 @@ impl Owned {
         match self {
             Self::Answer(schema) => schema.spec(),
             Self::Delegate(delegation) => delegation.spec(),
+            Self::Skill(skills) => skills.spec(),
         }
+    }
+}
+
+/// Answers the run's own `skill` call with what the skill says.
+///
+/// Reads nothing from a filesystem: the bodies were loaded before the run started, by the caller,
+/// so a skill cannot change under a run that is already using it and a loop cannot be made to read
+/// a path the model named.
+///
+/// A name this run does not have is a **failed outcome, not a stop**: the model asked for
+/// something that is not there, the list it should have chosen from is in its own instructions,
+/// and it can choose again on the next turn. The refusal names what is available rather than only
+/// what was wrong, because a model told "no" and not "these" spends the next turn guessing.
+fn load_skill(skills: &Skills, call: &ToolCall) -> ToolOutcome {
+    let Some(name) = call
+        .arguments
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return ToolOutcome::failed(format!(
+            "`{}` takes a `name`, a string, naming one of: {}.",
+            call.name,
+            skills.names().join(", ")
+        ));
+    };
+    match skills.body(name) {
+        Some(body) => ToolOutcome::ok(serde_json::Value::String(body.to_owned())),
+        None => ToolOutcome::failed(format!(
+            "`{name}` is not a skill this run has. It has: {}.",
+            skills.names().join(", ")
+        )),
     }
 }
 
@@ -1595,11 +1682,13 @@ impl<'a> AgentLoop<'a> {
             // The loop's own tools among them: the event answers *what was the model offered*,
             // and a reader who saw `delegate` in the record but not here would have to guess
             // where it came from.
+            // **After narrowing, not before.** This answers *what was the model offered*, and a
+            // narrowed child offered four of its parent's seven must not be recorded as having
+            // had seven — that is the record saying a run could do things it could not.
             published_tools: self
-                .tools
-                .specs()
-                .iter()
-                .map(|spec| spec.name.clone())
+                .port_specs()
+                .into_iter()
+                .map(|spec| spec.name)
                 .chain(self.owned_specs().into_iter().map(|spec| spec.name))
                 .collect(),
             operations: self
@@ -1612,6 +1701,22 @@ impl<'a> AgentLoop<'a> {
             // reader cannot tell an absence that was refused from an absence nobody wanted
             // without this one.
             withheld: self.config.withheld.clone(),
+            // What the run was given to reach for beyond its tools. Named here rather than left
+            // to be inferred from `published_tools`: `skill` appearing there says a skill tool
+            // exists, not which skills it can load, and those are the question an evaluation
+            // comparing two harnesses actually asks.
+            skills: self
+                .config
+                .skills
+                .as_ref()
+                .map(Skills::names)
+                .unwrap_or_default(),
+            agents: self
+                .config
+                .agents
+                .as_ref()
+                .map(Agents::names)
+                .unwrap_or_default(),
         });
         self.announce_prices(priced, sink);
 
@@ -1793,7 +1898,7 @@ impl<'a> AgentLoop<'a> {
     }
 
     fn request(&self, state: &RunState) -> TurnRequest {
-        let mut tools = self.tools.specs().to_vec();
+        let mut tools = self.port_specs();
         tools.extend(self.owned_specs());
         TurnRequest {
             model: self.config.model.clone(),
@@ -1822,7 +1927,22 @@ impl<'a> AgentLoop<'a> {
         if let Some(delegation) = self.config.delegation.as_ref()
             && delegation.depth > 0
         {
-            specs.push(delegation.spec());
+            // The names this run actually has, so the `agent` argument exists only where it can
+            // be answered and carries an `enum` a provider can refuse against.
+            let agents = self
+                .config
+                .agents
+                .as_ref()
+                .map(Agents::names)
+                .unwrap_or_default();
+            specs.push(delegation.spec_with_agents(&agents));
+        }
+        // A set with nothing in it publishes nothing: a `skill` tool whose only legal argument is
+        // an empty enum is a tool the model can only be refused by.
+        if let Some(skills) = self.config.skills.as_ref()
+            && !skills.is_empty()
+        {
+            specs.push(skills.spec());
         }
         specs
     }
@@ -2334,6 +2454,7 @@ impl<'a> AgentLoop<'a> {
             Owned::Delegate(delegation) => {
                 (self.delegate(delegation, call, state, deadline, sink), None)
             }
+            Owned::Skill(skills) => (load_skill(skills, call), None),
         };
         let result = self.after_call_hook(call, &invoked, result, sink);
         complete(call, result, state, sink);
@@ -2374,6 +2495,12 @@ impl<'a> AgentLoop<'a> {
         {
             return Some(Owned::Delegate(delegation.clone()));
         }
+        if let Some(skills) = self.config.skills.as_ref()
+            && !skills.is_empty()
+            && skills.name == call.name
+        {
+            return Some(Owned::Skill(skills.clone()));
+        }
         None
     }
 
@@ -2406,6 +2533,56 @@ impl<'a> AgentLoop<'a> {
     /// and the parent's own check — the one at the top of [`AgentLoop::run_calls`], before the
     /// next call of this same turn — refuses the rest and ends the run. Special-casing it here
     /// would be a second implementation of that.
+    /// Which named agent a delegate call asked for, and the toolset it leaves the child.
+    ///
+    /// Split out of [`Self::delegate`] because that function is the whole of running a child and
+    /// resolving *which* child is a separate question with its own failure modes.
+    ///
+    /// # Errors
+    ///
+    /// A [`ToolOutcome`] the caller returns as-is. An unknown name is **not** silently the generic
+    /// delegate: the model was given the list in its own instructions, and running something other
+    /// than what it asked for is worse than telling it the name was wrong.
+    #[allow(clippy::type_complexity)]
+    fn agent_for(
+        &self,
+        call: &ToolCall,
+    ) -> Result<(Option<Agent>, Vec<String>, Vec<Withheld>), ToolOutcome> {
+        let named = call
+            .arguments
+            .get("agent")
+            .and_then(serde_json::Value::as_str);
+        let agent = match (named, self.config.agents.as_ref()) {
+            (None, _) => None,
+            (Some(name), Some(agents)) => match agents.get(name) {
+                Some(agent) => Some(agent.clone()),
+                None => {
+                    return Err(ToolOutcome::failed(format!(
+                        "`{name}` is not an agent this run has. It has: {}.",
+                        agents.names().join(", ")
+                    )));
+                }
+            },
+            (Some(name), None) => {
+                return Err(ToolOutcome::failed(format!(
+                    "`{name}` is not an agent this run has; this run has none."
+                )));
+            }
+        };
+        // **The parent's own admitted set, never the port's whole list.** A child of a narrowed
+        // run must not be able to climb back out by naming an agent.
+        let parent_tools: Vec<String> = self
+            .port_specs()
+            .iter()
+            .map(|spec| spec.name.as_str().to_owned())
+            .collect();
+        let (admitted, refused) = agent.as_ref().map_or_else(
+            || (parent_tools.clone(), Vec::new()),
+            |agent| agent.admitted(&parent_tools),
+        );
+        Ok((agent, admitted, refused))
+    }
+
     fn delegate(
         &mut self,
         delegation: &Delegation,
@@ -2440,11 +2617,36 @@ impl<'a> AgentLoop<'a> {
             task: task.to_owned(),
         });
 
+        let (agent, admitted, refused) = match self.agent_for(call) {
+            Ok(resolved) => resolved,
+            Err(refusal) => return refusal,
+        };
+
         let child = LoopConfig {
             // The parent's standing instruction whole, so the delegate knows where it is and what
             // its tools are for, and the preamble after it — which is everything that is true only
-            // of a child.
-            instructions: format!("{}\n\n{DELEGATE_PREAMBLE}", self.config.instructions),
+            // of a child. A named agent's own body goes after both: it is the most specific thing
+            // this child is, and it must not be able to argue away the preamble in front of it.
+            instructions: match &agent {
+                None => format!("{}\n\n{DELEGATE_PREAMBLE}", self.config.instructions),
+                Some(agent) => format!(
+                    "{}\n\n{DELEGATE_PREAMBLE}\n\n{}",
+                    self.config.instructions, agent.instructions
+                ),
+            },
+            // What the agent asked for and did not get, in the child's own record rather than
+            // nowhere: an agent whose author granted it a tool this machine never admitted is a
+            // fact about the run, and an absence would read as one that never wanted it.
+            withheld: refused,
+            admits: agent.as_ref().map(|_| {
+                admitted
+                    .iter()
+                    .filter_map(|name| harness_wire::ToolName::new(name).ok())
+                    .collect()
+            }),
+            // A delegate publishes no agents of its own, for the reason it publishes no delegate:
+            // one level, so a tree nobody can read afterwards cannot be built by accident.
+            agents: None,
             budget,
             // Its report is its text; a schema for a child is milestone M2 of design 0002.
             output_schema: None,
@@ -2734,6 +2936,31 @@ impl<'a> AgentLoop<'a> {
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> ToolOutcome {
+        // **Narrowing is checked here and not only in what was published.** `self.tools.invoked`
+        // below answers for a call the *port* recognises, and it does not know this run was
+        // narrowed — so without this guard a tool filtered out of the toolset was still reachable
+        // by naming it, which a model can do from its own instructions without guessing. A
+        // permission boundary that only hides is not one. Found by the test that asserts it.
+        //
+        // What this does **not** narrow is an entry reached through a verb: under the `verbs`
+        // surface the call names `tool_invoke` and the entry is an argument, so this admits the
+        // verb and the entry is decided inside the port. Named agents are a flat-surface feature
+        // until that is answered, and this comment is the record of which half is done.
+        if let Some(admitted) = &self.config.admits
+            && !admitted.contains(&call.name)
+        {
+            sink.emit(LoopEvent::Warning {
+                code: "unpublished-tool".to_owned(),
+                message: format!(
+                    "the model called `{}`, which this run was not admitted",
+                    call.name
+                ),
+            });
+            return ToolOutcome::failed(format!(
+                "`{}` is not one of this run's tools; call only what was published",
+                call.name
+            ));
+        }
         let published = self.published(&call.name);
         // The spec that decides is the **invoked** one, not the published verb's: a verb over a
         // catalogue has one spec that must honestly declare every effect any entry can have, so
@@ -2902,12 +3129,28 @@ impl<'a> AgentLoop<'a> {
         noted
     }
 
+    /// What this run's port publishes, after any narrowing the run was configured with.
+    ///
+    /// The one place the filter is applied. [`AgentLoop::request`] renders this to the model and
+    /// [`AgentLoop::published`] admits calls from it, so a tool a named agent was not given is
+    /// absent from the toolset *and* refused if the model names it anyway — the same publication
+    /// rule the machine's own capabilities already follow, applied to a second question.
+    fn port_specs(&self) -> Vec<ToolSpec> {
+        let specs = self.tools.specs();
+        match &self.config.admits {
+            None => specs.to_vec(),
+            Some(admitted) => specs
+                .iter()
+                .filter(|spec| admitted.contains(&spec.name))
+                .cloned()
+                .collect(),
+        }
+    }
+
     fn published(&self, name: &harness_wire::ToolName) -> Option<ToolSpec> {
-        self.tools
-            .specs()
-            .iter()
+        self.port_specs()
+            .into_iter()
             .find(|spec| &spec.name == name)
-            .cloned()
     }
 
     /// The stop hook (design 0002 § 3): the operator's last word on a run that would end here.

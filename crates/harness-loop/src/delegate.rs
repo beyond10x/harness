@@ -92,6 +92,29 @@ impl Delegation {
     /// effects, and the gate never asks about the delegation — it asks about what the delegate
     /// then does. Non-idempotent because two delegations of one task are two runs.
     pub fn spec(&self) -> ToolSpec {
+        self.spec_with_agents(&[])
+    }
+
+    /// The same tool, offering the named agents this run actually has.
+    ///
+    /// The names are a schema `enum` for the reason the `skill` tool's are: a model that has to
+    /// guess a name spends a call finding out, and the provider can refuse an `enum` violation
+    /// without this loop being asked at all. A run with no agents gets no `agent` key, so the
+    /// option does not exist rather than existing and always failing.
+    #[must_use]
+    pub fn spec_with_agents(&self, agents: &[String]) -> ToolSpec {
+        let mut spec = self.bare_spec();
+        if agents.is_empty() {
+            if let Some(properties) = spec.input_schema["properties"].as_object_mut() {
+                properties.remove("agent");
+            }
+        } else {
+            spec.input_schema["properties"]["agent"]["enum"] = json!(agents);
+        }
+        spec
+    }
+
+    fn bare_spec(&self) -> ToolSpec {
         ToolSpec {
             name: self.name.clone(),
             description: DELEGATE_DESCRIPTION.to_owned(),
@@ -101,6 +124,13 @@ impl Delegation {
                     "task": {
                         "type": "string",
                         "description": "Everything the delegate needs: the goal, the constraints, and what to report."
+                    },
+                    // **Optional, and its absence is the generic delegate.** A run with no agents
+                    // publishes this schema without the key at all — see `spec_with_agents` — so a
+                    // model on such a run cannot spend a call naming one.
+                    "agent": {
+                        "type": "string",
+                        "description": "Which named agent to run this as. Omit for a delegate with these same tools."
                     }
                 },
                 "required": ["task"],

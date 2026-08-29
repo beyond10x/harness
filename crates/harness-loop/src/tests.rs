@@ -4954,3 +4954,105 @@ fn the_stop_hook_is_not_asked_about_a_delegates_ending_though_the_childs_calls_s
         "five parent turns and the child's two"
     );
 }
+
+#[test]
+fn a_narrowed_run_is_offered_less_and_refused_the_rest_by_the_same_rule() {
+    // The property a named agent turns on. `delegate.rs` says delegation widens nothing — the
+    // child does exactly what the parent's catalogue admits — and an agent declaring a toolset
+    // must only be able to take away from that. A filter that hid a tool from the list but let a
+    // call through would be a permission boundary that is not one: the model has the name from
+    // its own instructions, and guessing it would be enough.
+    let mut narrowed = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "write", json!({}))])),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("read", Approval::NotRequired),
+            spec("write", Approval::NotRequired),
+        ]),
+    );
+    narrowed.config = narrowed
+        .config
+        .clone()
+        .with_admitted(Some(vec![tool_name("read")]));
+    let (_, sink) = narrowed.run();
+
+    assert_eq!(
+        published_names(&narrowed.model.seen[0]),
+        vec!["read"],
+        "the model is offered only what it was admitted"
+    );
+    assert!(
+        narrowed.tools.calls.is_empty(),
+        "and a call naming the tool that was filtered out never reaches the port"
+    );
+    assert!(
+        sink.events().iter().any(|event| matches!(
+            event,
+            LoopEvent::Warning { code, .. } if code == "unpublished-tool"
+        )),
+        "refused by the rule that already refuses a tool the run never published, rather than by \
+         a second rule that could disagree with it: {:?}",
+        bare_kinds(&sink)
+    );
+}
+
+#[test]
+fn a_delegate_run_as_a_named_agent_is_narrowed_to_what_its_author_declared() {
+    // The property the whole named-agent feature turns on. An agent file says
+    // `tools: [Read, Grep]`; the child must get those and not the parent's `write`. The failure
+    // this prevents is the quiet one: an agent its author wrote as read-only silently handed
+    // write and exec, with the record showing a child that had the parent's whole catalogue.
+    let agents = Agents::new(vec![Agent {
+        name: "reader".to_owned(),
+        description: "Reads and reports.".to_owned(),
+        tools: vec!["read".to_owned(), "absent".to_owned()],
+        instructions: "You only read.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "reader"}),
+            )])),
+            // The child's own turn: it names the tool its author did not give it.
+            Ok(asks_for(&[("call-2", "write", json!({}))])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("read", Approval::NotRequired),
+            spec("write", Approval::NotRequired),
+        ]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, _sink) = harness.run();
+
+    let child_request = harness
+        .model
+        .seen
+        .iter()
+        .find(|request| request.instructions.contains("You only read."))
+        .expect("the agent's own body reaches the child, after the delegate preamble");
+    assert_eq!(
+        published_names(child_request),
+        vec!["read"],
+        "the child is offered what its author declared, intersected with what the parent had — \
+         never `write`, which the agent did not ask for, and never `absent`, which the parent \
+         does not have"
+    );
+    assert!(
+        harness
+            .tools
+            .calls
+            .iter()
+            .all(|call| call.name.as_str() != "write"),
+        "and naming it anyway does not reach the port"
+    );
+}

@@ -256,7 +256,12 @@ fn started(value: &Value, version: &str) -> Value {
         // nothing withheld. A `null` here would say *nobody looked* about a converter that did.
         "withheld": value.get("withheld").cloned().unwrap_or_else(|| json!([])),
         "slash_commands": Value::Null,
-        "skills": Value::Null,
+        // **From the record, and `[]` rather than `null` when there are none.** Same argument as
+        // `withheld` above: this converter lives in the binary that writes the record, so it knows
+        // the loop states these — a `null` here would say *nobody looked* about a converter that
+        // did. `slash_commands`, `agents` and `plugins` stay `null` because this loop genuinely
+        // has no such concept to report yet, which is a different silence.
+        "skills": value.get("skills").cloned().unwrap_or_else(|| json!([])),
         "agents": Value::Null,
         "plugins": Value::Null,
         "mcp_servers": Value::Null,

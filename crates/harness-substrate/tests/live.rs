@@ -58,9 +58,36 @@ fn a_confined_workspace_takes_a_write_reads_it_back_and_runs_a_declared_program(
     );
 
     if facts.confines_execution() {
-        tools
+        let result = tools
             .run(&["/bin/echo".to_owned(), "confined".to_owned()])
             .expect("the confined process runs");
+        assert_eq!(
+            result["stdout"],
+            serde_json::json!("confined\n"),
+            "what the program said comes back: {result}"
+        );
+        assert_eq!(
+            result["exit"]["exit"]["code"],
+            serde_json::json!(0),
+            "{result}"
+        );
+
+        // And a program that outlives the probe's ten seconds is waited for, not reported
+        // unreachable: the start holds the connection open until the exit.
+        let sleeping = ConfinedOperations::new(
+            Client::at(&socket),
+            &facts,
+            &workspace,
+            vec!["/bin/sleep".to_owned()],
+        );
+        let result = sleeping
+            .run(&["/bin/sleep".to_owned(), "12".to_owned()])
+            .expect("a twelve-second program is waited for");
+        assert_eq!(
+            result["exit"]["exit"]["code"],
+            serde_json::json!(0),
+            "{result}"
+        );
     }
 
     // A program outside the declared set never reaches the daemon at all.

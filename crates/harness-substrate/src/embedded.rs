@@ -34,6 +34,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
@@ -341,7 +342,12 @@ impl Backend for Embedded {
         })
     }
 
-    fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
+    fn exec(
+        &self,
+        workspace: &str,
+        argv: &[String],
+        remaining: Option<Duration>,
+    ) -> Result<Value, SubstrateError> {
         let root_name = self
             .driver
             .workspace_root_identity(workspace)
@@ -362,6 +368,7 @@ impl Backend for Embedded {
                 set: self.toolchain.env().clone(),
             },
             self.toolchain.roots().to_vec(),
+            remaining,
         );
         // **substrate's own shape, which this never had.** `admit` requires `^ex_[A-Za-z0-9_]+$`
         // and this was `exec-<pid>-<argv joined by dashes>`: wrong prefix, and a program path is

@@ -57,7 +57,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   scenario names — and `the_two_wires_serve_the_same_scenarios` compares the two emulators' own
   declarations, so a case added to one and not the other fails the gate instead of being noticed a
   release later.
-
+- **`--approve-up-to <risk>`** on `run`: raises the loop's unattended ceiling (`low` by default)
+  so a `file_write` (`medium`) or a `run` (`high`) goes through without asking, while everything
+  above it still asks and — with no approver attached — is refused. A `file_edit` asks whatever
+  the ceiling, because it is non-idempotent, and still needs `--yes`; the two flags do not
+  combine, since `--yes` approves everything.
 - **A CI gate**, `.github/workflows/gate.yml`: `scripts/gate.sh` on `stable`, and a build on the
   declared `rust-version`. It needs the `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY` repository
   secrets to read the private substrate dependency, provisioned by atlas's `bot-ci-secrets.sh`.
@@ -105,21 +109,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   catalogue **silently** — the operator asked for write+exec, got a read-only run, and the model
   reported the task done. Each case now exits 1 with the reason. The embedded driver is opened
   once per run instead of twice.
-- **The socket client's exec asks for confinement.** `Client::exec` posted `{workspace_id, argv}`
-  and nothing else — no `sandbox`, no limits — so whether it ran unconfined was the daemon's
-  choice. It now probes `/v1/machine`, refuses by name when the daemon states no capability
-  snapshot, and posts a body serialised from `substrate-wire`'s own `ExecStartInput` (`require:
-  true`, `network: "none"`, the same limits the embedded path uses), built by one shared function
-  so the two paths cannot drift. The parked socket path is still parked; what changed is that it
-  can no longer run unconfined the day it is revived. Every mutating body — `exec`,
-  `workspace_create`, `file_write` — now carries `op` beside `input`, the shape substrate's
-  decoder requires; each lacked it and was refused `request.schema-invalid` before being read.
-  The capability snapshot is asked for **once per client** and held, not before every exec, and
-  the CLI probes and serves with one client, so publication and admission read one document.
+- **The socket path works, and it was run.** Verified on 2026-08-29 against a daemon built from
+  the pinned substrate revision (`f1cfc1c`) in a delegated user scope: `workspace_create`,
+  `file_write`, `file_read`, a confined `/bin/echo` through `run` and a twelve-second
+  `/bin/sleep` through `run` (`tests/live.rs`, ignored by default, `B10X_SUBSTRATE_SOCKET`).
+  Four things stood between the client and that daemon, none of them the daemon's:
+  - **`op` was missing, and then it was the wrong thing.** Every mutating body carried `input`
+    alone, which the decoder refuses before it reads the input; `op` is a **caller-minted
+    operation id** (`common.json#/$defs/operation-id`, 16–128 of `[A-Za-z0-9_-]`, an idempotency
+    key the daemon reserves against the request's hash), not the operation's name — sending
+    `"workspace.create"` there was refused for the `.`. The client mints one per mutation from
+    time, process and a sequence.
+  - **A read needs its query.** `GET …/files/{path}` without `?mode=file&offset=0&limit_bytes=…`
+    is refused at `query`; the ceiling asked for is the daemon's own `workspace.read-limit-bytes`.
+  - **The exec's output was never fetched.** The start answers the exec resource under `result`
+    with its `id`; the client looked for `exec_id`, fell through to answering the start document,
+    and the model would have got an exit code and no output. Both streams are now read
+    (`…/output?stream=…&offset=0&limit_bytes=…`) and projected into the shape the embedded path
+    answers: `stdout`, `stderr`, `stdout_truncated`, `output_complete`, `exit`.
+  - **A program longer than ten seconds was reported unreachable.** `wait: true` holds the
+    connection open until the exit, and the transport's read timeout was the probe's ten seconds;
+    an exec now waits its own `timeout_ms` plus that.
+  Before any of that, `Client::exec` posted `{workspace_id, argv}` and nothing else — no
+  `sandbox`, no limits — so whether it ran unconfined was the daemon's choice. It now posts a body
+  serialised from `substrate-wire`'s own `ExecStartInput` (`require: true`, `network: "none"`,
+  the same limits the embedded path uses), built by one shared function so the two paths cannot
+  drift, and refuses by name when the daemon states no capability snapshot. The snapshot is asked
+  for **once per client** and held, and the CLI probes and serves with one client, so publication
+  and admission read one document.
 - **The wall-clock deadline is checked between the tool calls of one turn**, not only between
   turns, so a turn of several slow calls stops at the first one past the deadline instead of
-  running all of them. A call already running still runs to its own timeout (600 s unconfined,
-  900 s confined): nothing yet passes the remaining budget into a call. It also has tests.
+  running all of them. And what is left on the clock is handed into each call —
+  `ToolPort::call_within` → `Catalogue::invoke_within` → `Operations::run_within` — so a `run`
+  is bounded by the smaller of its provider's own ceiling (600 s unconfined, 900 s confined) and
+  the time the run has left, and its result says `timeout_ms` so a kill at the deadline is not
+  read as the program's slowness. Before this a one-minute budget could not stop a fifteen-minute
+  `cargo test`. It also has tests.
 - **A scoped run's paths are relative, and a write is judged by where it lands.**
   `Scope::refusal` normalises `./`, `.` and `..` lexically before matching and refuses an
   absolute path when any rule is declared — a denied `target/**` used to be bypassed by

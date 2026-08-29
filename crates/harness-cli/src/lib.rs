@@ -21,7 +21,7 @@ use harness_app_server::ServerConfig;
 use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopCancel, LoopConfig, LoopStop,
 };
-use harness_wire::{ModelPort, Sampling, StaticBearer};
+use harness_wire::{ModelPort, Risk, Sampling, StaticBearer};
 
 pub use render::Renderer;
 
@@ -110,6 +110,31 @@ enum Wire {
     OpenaiResponses,
     /// `POST {base-url}/messages`.
     AnthropicMessages,
+}
+
+/// The highest risk a call may carry without a person being asked — `harness_wire::Risk`, as
+/// the command line spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ApproveUpTo {
+    /// Wrong is cheap and visible: reads.
+    Low,
+    /// Wrong costs work to undo: `file_write`.
+    Medium,
+    /// Wrong costs something that is not work: `run`.
+    High,
+    /// Wrong cannot be undone.
+    Destructive,
+}
+
+impl From<ApproveUpTo> for Risk {
+    fn from(ceiling: ApproveUpTo) -> Self {
+        match ceiling {
+            ApproveUpTo::Low => Self::Low,
+            ApproveUpTo::Medium => Self::Medium,
+            ApproveUpTo::High => Self::High,
+            ApproveUpTo::Destructive => Self::Destructive,
+        }
+    }
 }
 
 /// Whether a declared scope is stated in the instruction as well as bound into the tools.
@@ -329,7 +354,8 @@ struct RunOptions {
     /// Ceiling on output tokens offered for any single turn.
     #[arg(long)]
     max_output_tokens_per_turn: Option<u64>,
-    /// Wall-clock ceiling in milliseconds, checked between turns.
+    /// Wall-clock ceiling in milliseconds. Checked between turns and between the calls of one
+    /// turn, and what is left is the bound on every `run` the tools start.
     #[arg(long)]
     max_duration_ms: Option<u64>,
     /// Where this run may write, as `<glob>=<allowed|partial-only|denied>`. Repeatable, ordered.
@@ -398,6 +424,16 @@ struct RunOptions {
     /// denied, which is a confined run that can do nothing but read.
     #[arg(long)]
     yes: bool,
+    /// Run calls at or below this risk without asking. Default `low`.
+    ///
+    /// The ceiling the loop judges each call's declared risk against. A `file_write` is `medium`
+    /// and a `run` is `high`, so at `high` both run unasked and only a destructive call asks.
+    /// Above the ceiling the approver decides, and with none attached that is a refusal the model
+    /// is told about. A `file_edit` asks whatever the ceiling — non-idempotent, so a repeat is not
+    /// the same act as one call — and needs `--yes`. `--yes` approves everything and makes this
+    /// moot, so the two do not combine.
+    #[arg(long, value_name = "RISK", conflicts_with = "yes")]
+    approve_up_to: Option<ApproveUpTo>,
     /// Emit one JSON event per line on stdout instead of prose.
     #[arg(long)]
     json: bool,
@@ -673,6 +709,11 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+/// The ceiling the loop judges each call against: what was asked for, or `Low`.
+fn ceiling(options: &RunOptions) -> Risk {
+    options.approve_up_to.map_or(Risk::Low, Into::into)
+}
+
 fn budget(options: &RunOptions) -> Budget {
     Budget {
         max_turns: options.max_turns,
@@ -764,7 +805,8 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     )
     .with_sampling(sampling(options))
     .with_budget(budget(options))
-    .with_prices(prices(options)?);
+    .with_prices(prices(options)?)
+    .with_unattended_ceiling(ceiling(options));
 
     install_interrupt(&cancel);
 
@@ -1353,6 +1395,38 @@ mod tests {
         assert_eq!(budget.max_output_tokens, Some(900));
         assert_eq!(budget.max_cost_microunits, None, "none was asked for");
         assert!(budget.validate(false).is_ok());
+    }
+
+    #[test]
+    fn the_approval_ceiling_reaches_the_loop_and_does_not_combine_with_yes() {
+        assert_eq!(
+            ceiling(&options(&[])),
+            Risk::Low,
+            "the default asks about everything but reads"
+        );
+        assert_eq!(
+            ceiling(&options(&["--approve-up-to", "medium"])),
+            Risk::Medium
+        );
+        assert_eq!(ceiling(&options(&["--approve-up-to", "high"])), Risk::High);
+        assert!(
+            parse(&[
+                "b10x-harness",
+                "run",
+                "--base-url",
+                "https://gw.example/v1",
+                "--model",
+                "m",
+                "--input",
+                "hi",
+                "--approve-up-to",
+                "high",
+                "--yes",
+            ])
+            .is_err(),
+            "--yes approves everything, so a ceiling beside it would be a flag that does nothing"
+        );
+        assert!(parse(&["b10x-harness", "run", "--approve-up-to", "critical"]).is_err());
     }
 
     #[test]

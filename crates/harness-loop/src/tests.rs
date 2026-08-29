@@ -136,6 +136,8 @@ struct ScriptedTools {
     envelope: Option<Envelope>,
     invoked: Option<ToolSpec>,
     delay: Option<Duration>,
+    /// What the loop said was left on the clock, per call.
+    remaining: Vec<Option<Duration>>,
 }
 
 impl ScriptedTools {
@@ -148,6 +150,7 @@ impl ScriptedTools {
             envelope: None,
             invoked: None,
             delay: None,
+            remaining: Vec::new(),
         }
     }
 
@@ -198,6 +201,11 @@ impl ToolPort for ScriptedTools {
             },
             None => published.clone(),
         })
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        self.remaining.push(remaining);
+        self.call(call)
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
@@ -908,6 +916,42 @@ fn the_deadline_is_checked_between_calls_in_one_turn() {
     assert!(
         refused.iter().all(|text| text.contains("deadline")),
         "{refused:?}"
+    );
+}
+
+#[test]
+fn the_time_left_on_the_clock_reaches_the_tool_that_runs_the_call() {
+    // The deadline check between calls cannot reach into a call already running, so the loop
+    // says how long is left and the tool bounds what it starts by that.
+    let scripted = || {
+        (
+            ScriptedModel::new(vec![
+                Ok(asks_for(&[("call-1", "a", json!({}))])),
+                Ok(answer("done")),
+            ]),
+            ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+        )
+    };
+
+    let (model, tools) = scripted();
+    let mut harness = Harness::new(model, tools).budgeted(Budget {
+        max_duration_ms: Some(10_000),
+        ..Budget::default()
+    });
+    let _ = harness.run();
+    let left = harness.tools.remaining[0].expect("a deadline is a bound on every call");
+    assert!(
+        left <= Duration::from_millis(10_000) && left > Duration::from_millis(5_000),
+        "what is left is the budget less what the loop has spent: {left:?}"
+    );
+
+    let (model, tools) = scripted();
+    let mut harness = Harness::new(model, tools);
+    let _ = harness.run();
+    assert_eq!(
+        harness.tools.remaining,
+        vec![None],
+        "no deadline is no bound, not a bound of zero"
     );
 }
 

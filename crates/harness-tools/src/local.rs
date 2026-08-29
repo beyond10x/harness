@@ -351,7 +351,12 @@ impl LocalOperations {
         }
     }
 
-    fn exec(&self, argv: &[String], programs: &[String]) -> Result<Value, String> {
+    fn exec(
+        &self,
+        argv: &[String],
+        programs: &[String],
+        remaining: Option<Duration>,
+    ) -> Result<Value, String> {
         let Some(program) = argv.first() else {
             return Err("`argv` must name a program".to_owned());
         };
@@ -399,7 +404,11 @@ impl LocalOperations {
         let out = std::thread::spawn(move || drain(out));
         let err = std::thread::spawn(move || drain(err));
 
-        let deadline = Instant::now() + Duration::from_secs(MAX_RUN_SECONDS);
+        // The smaller of this module's ceiling and what the run has left: the loop's deadline
+        // check between calls cannot reach into this one, so the bound has to be set here.
+        let ceiling = Duration::from_secs(MAX_RUN_SECONDS);
+        let bound = remaining.map_or(ceiling, |left| left.min(ceiling));
+        let deadline = Instant::now() + bound;
         let mut killed = false;
         let status = loop {
             match child.try_wait() {
@@ -427,6 +436,9 @@ impl LocalOperations {
             "truncated": stdout_truncated || stderr_truncated,
             // Named, because a killed process's exit code says nothing about the task.
             "timed_out": killed,
+            // And how long it was given, so a kill at the run's deadline is not read as the
+            // program's own slowness.
+            "timeout_ms": u64::try_from(bound.as_millis()).unwrap_or(u64::MAX),
         }))
     }
 
@@ -598,10 +610,14 @@ impl Operations for LocalOperations {
     }
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {
+        self.run_within(argv, None)
+    }
+
+    fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, String> {
         let Some(programs) = self.programs.as_deref() else {
             return Err(Self::unavailable("run"));
         };
-        self.exec(argv, programs)
+        self.exec(argv, programs, remaining)
     }
 
     /// The same resolution a write does, answered as the workspace-relative name the write would
@@ -827,6 +843,38 @@ mod tests {
         let stdout = value["stdout"].as_str().expect("stdout");
         assert!(!stdout.contains("CARGO_MANIFEST_DIR="), "{stdout}");
         assert!(stdout.contains("PATH="), "{stdout}");
+    }
+
+    #[test]
+    fn a_program_is_bounded_by_what_the_run_has_left_and_the_result_says_so() {
+        let sleep = Path::new("/bin/sleep");
+        if !sleep.exists() {
+            return;
+        }
+        let inside = workspace();
+        let operations = LocalOperations::unconfined(inside.path(), vec!["/bin/sleep".to_owned()])
+            .expect("the workspace opens");
+
+        let started = Instant::now();
+        let value = operations
+            .run_within(
+                &["/bin/sleep".to_owned(), "30".to_owned()],
+                Some(Duration::from_millis(200)),
+            )
+            .expect("the program starts");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the program was killed at the bound, not at its own end"
+        );
+        assert_eq!(value["timed_out"], json!(true));
+        assert_eq!(value["timeout_ms"], json!(200));
+
+        // No deadline is the module's own ceiling, not a bound of nothing.
+        let value = operations
+            .run(&["/bin/sleep".to_owned(), "0".to_owned()])
+            .expect("the program runs");
+        assert_eq!(value["timed_out"], json!(false));
+        assert_eq!(value["timeout_ms"], json!(MAX_RUN_SECONDS * 1000));
     }
 
     #[test]

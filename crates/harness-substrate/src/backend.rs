@@ -11,6 +11,8 @@
 //! derived from kernel peer credentials, and an embedded driver has no such boundary because there
 //! is no peer. See [`Embedded`](crate::Embedded).
 
+use std::time::Duration;
+
 use serde_json::Value;
 
 use crate::{Facts, SubstrateError};
@@ -52,9 +54,18 @@ pub trait Backend {
     /// **An argv, never a command line.** Substrate's own `exec.start` predicate is
     /// `exec.argv-only`; nothing here builds a string a shell would then take apart.
     ///
+    /// `remaining` is what the run has left on its wall clock, or `None` for a run with no
+    /// deadline; the exec's own timeout is the smaller of the crate's ceiling and this, because
+    /// the loop cannot reach into an exec the daemon is holding open.
+    ///
     /// # Errors
     ///
     /// Returns [`SubstrateError`] when the run could not be started. A program that exits non-zero
     /// is **not** an error: it is a result, and the caller needs to see it.
-    fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError>;
+    fn exec(
+        &self,
+        workspace: &str,
+        argv: &[String],
+        remaining: Option<Duration>,
+    ) -> Result<Value, SubstrateError>;
 }

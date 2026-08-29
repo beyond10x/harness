@@ -19,8 +19,8 @@ observation was 2026-08-21.
 | Subscription auth | **a `BearerSource` exists; it does not renew.** `harness_credential::SubscriptionToken` reads a token from a file or an environment variable the caller **names**, optionally at a caller-named JSON pointer, and re-reads it on **every** call — so a token an owner outside this process renews is followed without restarting the run. It declares `CredentialKind::Oauth`, and the Messages wire presents that as `authorization: Bearer` **plus** `anthropic-beta: oauth-2025-04-20`, while a key issued to a program goes to `x-api-key`. There is still no default path and no vendor directory anything here looks in, and no fallback when the named source is missing. The ChatGPT/Codex finding stands: that route takes its access token as a plain bearer and needs no per-route header | **renewal, and one authorized run on each route.** Nothing here holds a refresh token or calls an authorization server, so a token nobody renews expires and the run fails by name. The Anthropic header shapes are `provider_emulated`: no subscription route has been contacted |
 | Live provider | **first live run: 2026-08-23**, against `https://chatgpt.com/backend-api/codex` under the operator's own ChatGPT subscription credential, model `gpt-5.6-sol`. Two turns, two tool round trips, usage reported, `finished{completed}`. It found a real defect on turn 1 — the whole workspace toolset was named illegally for this wire (see the changelog) — which is exactly what the emulator could not find | pin a `2026-08-23` contract from live bytes rather than emulated ones; the current pin is still emulator-derived |
 | Embedding | **not started.** Nothing embeds this component yet | a `runtime/agent` direct-provider adapter binding `ToolPort` to its capability compiler |
-| Substrate confinement | **working, embedded, including execution.** `Backend` has two implementations and the tools cannot tell them apart: `Embedded` holds substrate's `HostDriver` in this process, `Client` reaches a daemon over a socket. Workspace adoption means the tree a run reads is the tree it writes. With a delegated cgroup the toolset is six tools — `workspace_list/read/grep`, `workspace_write`, `workspace_edit`, `run`; without one it is five; with no backend at all it is the three this component has always shipped | exec has been *published* and not yet *exercised*: no confined process has been started through `run` |
-| Substrate over a socket | **blocked, and parked.** `POST /v1/workspaces` on the daemon this machine runs answers `422 request.schema-invalid` at `input` for every body derivable from the committed 0.2.0 and 0.4.0 contracts. That daemon embeds `substrate-wire/0.4.0`, reports `driver_version 0.2.0`, and was installed on 2026-08-16 from a source this repository does not have. Embedding made the question moot for a simple run; the socket path is what an integrated deployment will need. **Hypothesis, 2026-08-29, not yet run against that daemon:** every body this client posted carried `input` alone, and the pinned daemon's mutation decoder refuses a body without a top-level `op` as `request.schema-invalid` at `input` before it reads the input (`substrate-daemon/src/app/operations.rs`, `decode_mutation`). The client now posts `{op, input}` on every mutating route | the daemon's own accepted `workspace.create` body, or a daemon built from `beyond10x/substrate`. `tests/live.rs` is the standing probe |
+| Substrate confinement | **working, embedded, including execution.** `Backend` has two implementations and the tools cannot tell them apart: `Embedded` holds substrate's `HostDriver` in this process, `Client` reaches a daemon over a socket. Workspace adoption means the tree a run reads is the tree it writes. With a delegated cgroup the toolset is six tools — `workspace_list/read/grep`, `workspace_write`, `workspace_edit`, `run`; without one it is five; with no backend at all it is the three this component has always shipped | exec has been *exercised* over the socket (2026-08-29: `/bin/echo` and a 12 s `/bin/sleep` through `run`, cgroup-confined); the embedded driver's exec is still unexercised on this machine, which needs the same delegated scope |
+| Substrate over a socket | **working, verified live 2026-08-29.** Against a daemon built from `beyond10x/substrate` at the pinned revision `f1cfc1c`, started in a delegated user scope (`systemd-run --user --scope -p "Delegate=cpu memory pids"`, the daemon moved into a child cgroup so the root is process-free): `workspace_create`, `file_write`, `file_read`, a confined `/bin/echo` and a 12 s `/bin/sleep` through `run`, and `b10x-harness tools --substrate` publishes six entries. What had blocked it was the client, not the daemon — no `op` (a caller-minted operation id, not the operation's name), no read query, the exec's output never fetched, a 10 s read timeout on a call that waits for the exit; see `CHANGELOG.md`. The daemon installed on this machine on 2026-08-16 (wire 0.4.0) was not re-tried | `tests/live.rs` is the standing probe (`B10X_SUBSTRATE_SOCKET`); an integrated deployment that runs a daemon as a service |
 
 ## What this component does not claim
 
@@ -33,7 +33,7 @@ observation was 2026-08-21.
 
 ## Test counts
 
-450 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29, after the second review's fixes and the second wire):
+456 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29, after the second review's fixes, its follow-ups, and the second wire):
 
 | Crate | Unit | Integration |
 | --- | --- | --- |
@@ -41,12 +41,12 @@ observation was 2026-08-21.
 | `harness-credential` | 7 | — |
 | `harness-responses` | 39 | 18 provider-emulated, 4 contract |
 | `harness-messages` | 45 | 20 provider-emulated, 6 contract |
-| `harness-loop` | 66 | — |
+| `harness-loop` | 67 | — |
 | `harness-flow` | 27 | — |
-| `harness-substrate` | 35 | 4 embedded-live; `live` ignored, it needs a daemon |
-| `harness-tools` | 50 | — |
+| `harness-substrate` | 38 | 4 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
+| `harness-tools` | 51 | — |
 | `harness-app-server` | 19 | 5 contract |
-| `harness-cli` | 39 | 12 end-to-end, 17 bridge-mode |
+| `harness-cli` | 40 | 12 end-to-end, 17 bridge-mode |
 
 The provider-emulated, end-to-end and bridge-mode suites drive real processes: a local HTTP endpoint
 over a socket, and the built binary over pipes. The two provider-emulated suites are the **same**

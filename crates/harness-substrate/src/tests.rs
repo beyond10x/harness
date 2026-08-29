@@ -468,12 +468,25 @@ const MACHINE_WITH_SNAPSHOT: &str = r#"{"result":{"driver":"host","driver_versio
     "snapshot":"cap_7f3a","facts":{"workspace.guarded-io":true,"exec.argv-only":true,
     "exec.cgroup-limits":{"cpu":true,"memory":true,"processes":true}}}}"#;
 
+/// What a daemon answers `POST /v1/execs` with under `wait: true`: the exec resource, exited.
+const EXEC_EXITED: &str = r#"{"result":{"id":"ex_1","kind":"exec","workspace":"ws_a","state":"exited",
+    "exit":{"code":0,"signal":null}}}"#;
+/// One stream of it, whole: `ok\n`.
+const STDOUT_SLICE: &str = r#"{"result":{"exec":"ex_1","stream":"stdout","offset":0,"returned_bytes":3,
+    "next_offset":3,"eof":true,"truncated":false,"content":{"encoding":"base64","data":"b2sK"}}}"#;
+const STDERR_SLICE: &str = r#"{"result":{"exec":"ex_1","stream":"stderr","offset":0,"returned_bytes":0,
+    "next_offset":0,"eof":true,"truncated":false,"content":{"encoding":"base64","data":""}}}"#;
+/// The output routes, as the client must spell them: `ExecOutputQuery` is closed and needs all three.
+const STDOUT_ROUTE: &str = "/v1/execs/ex_1/output?stream=stdout&offset=0&limit_bytes=1048576";
+const STDERR_ROUTE: &str = "/v1/execs/ex_1/output?stream=stderr&offset=0&limit_bytes=1048576";
+
 #[test]
 fn a_declared_program_is_sent_as_an_argv_and_never_as_a_command_line() {
     let script = Scripted::new(vec![
         (200, MACHINE_WITH_SNAPSHOT),
-        (200, r#"{"result":{"exec_id":"e-1"}}"#),
-        (200, r#"{"result":{"exit_status":0,"stdout":"ok"}}"#),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
     ]);
     let confined_provider = provider(&confined(), script.clone(), &["cargo"]);
     confined_provider
@@ -500,12 +513,13 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
     // refused was the daemon's choice rather than this harness's.
     let script = Scripted::new(vec![
         (200, MACHINE_WITH_SNAPSHOT),
-        (200, r#"{"result":{"exec_id":"ex_1"}}"#),
-        (200, r#"{"result":{}}"#),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
     ]);
     let client = Client::with(script.clone());
     client
-        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
         .expect("ran");
 
     let seen = script.seen.lock().expect("not poisoned");
@@ -516,7 +530,8 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
         vec![
             ("GET", "/v1/machine"),
             ("POST", "/v1/execs"),
-            ("GET", "/v1/execs/ex_1/output"),
+            ("GET", STDOUT_ROUTE),
+            ("GET", STDERR_ROUTE),
         ]
     );
 
@@ -524,7 +539,10 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
     // The daemon's mutation decoder reads `op` before it reads anything, and refuses a body with
     // any third key. Every body this client posted until 2026-08-29 had `input` alone, so the
     // confinement it asked for never reached a daemon that could read it.
-    assert_eq!(body["op"], json!("exec.start"), "{body}");
+    assert!(
+        is_operation_id(body["op"].as_str().expect("an op")),
+        "{body}"
+    );
     assert_eq!(
         body.as_object().expect("an object").len(),
         2,
@@ -556,18 +574,20 @@ fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
     // that bought nothing and let publication and admission read two different documents.
     let script = Scripted::new(vec![
         (200, MACHINE_WITH_SNAPSHOT),
-        (200, r#"{"result":{"exec_id":"ex_1"}}"#),
-        (200, r#"{"result":{}}"#),
-        (200, r#"{"result":{"exec_id":"ex_2"}}"#),
-        (200, r#"{"result":{}}"#),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
     ]);
     let client = Client::with(script.clone());
     client.machine().expect("probed");
     client
-        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
         .expect("ran");
     client
-        .exec("ws_a", &["/usr/bin/false".to_owned()])
+        .exec("ws_a", &["/usr/bin/false".to_owned()], None)
         .expect("ran");
 
     let seen = script.seen.lock().expect("not poisoned");
@@ -578,13 +598,15 @@ fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
         vec![
             ("GET", "/v1/machine"),
             ("POST", "/v1/execs"),
-            ("GET", "/v1/execs/ex_1/output"),
+            ("GET", STDOUT_ROUTE),
+            ("GET", STDERR_ROUTE),
             ("POST", "/v1/execs"),
-            ("GET", "/v1/execs/ex_2/output"),
+            ("GET", STDOUT_ROUTE),
+            ("GET", STDERR_ROUTE),
         ],
         "one probe, then the execs"
     );
-    for start in [&seen[1], &seen[3]] {
+    for start in [&seen[1], &seen[4]] {
         let body = start.2.as_ref().expect("a body");
         assert_eq!(
             body["input"]["sandbox"]["capability_snapshot"],
@@ -593,8 +615,36 @@ fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
     }
 }
 
+/// `common.json#/$defs/operation-id`: 16 to 128 of `[A-Za-z0-9_-]`.
+fn is_operation_id(value: &str) -> bool {
+    (16..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 #[test]
-fn every_mutating_route_posts_the_operation_id_beside_its_input() {
+fn an_operation_id_is_the_shape_the_contract_admits_and_no_two_are_alike() {
+    // `op` is a caller-minted idempotency key, not the operation's name: `"workspace.create"`
+    // has a `.` and was refused by a live daemon for exactly that.
+    let id = super::client::operation_identity(1_756_432_000_000_000_000, 3_914_145, 0);
+    assert!(is_operation_id(&id), "{id}");
+    assert!(!is_operation_id("workspace.create"));
+    assert!(!is_operation_id("op_short"));
+    assert_ne!(
+        super::client::operation_identity(1, 2, 3),
+        super::client::operation_identity(1, 2, 4),
+        "two calls on one client"
+    );
+    assert_ne!(
+        super::client::operation_identity(1, 2, 3),
+        super::client::operation_identity(1, 3, 3),
+        "two processes"
+    );
+}
+
+#[test]
+fn every_mutating_route_posts_a_fresh_operation_id_beside_its_input() {
     let script = Scripted::new(vec![
         (200, r#"{"result":{"id":"ws_new"}}"#),
         (200, r#"{"result":{}}"#),
@@ -606,25 +656,65 @@ fn every_mutating_route_posts_the_operation_id_beside_its_input() {
         .expect("written");
 
     let seen = script.seen.lock().expect("not poisoned");
-    let ops: Vec<(&str, &str, Value)> = seen
+    let ops: Vec<(&str, &str, String)> = seen
         .iter()
         .map(|(method, path, body)| {
             let body = body.as_ref().expect("a body");
             assert_eq!(body.as_object().expect("an object").len(), 2, "{body}");
-            (method.as_str(), path.as_str(), body["op"].clone())
+            let op = body["op"].as_str().expect("an op").to_owned();
+            assert!(is_operation_id(&op), "{body}");
+            (method.as_str(), path.as_str(), op)
         })
         .collect();
-    assert_eq!(
-        ops,
-        vec![
-            ("POST", "/v1/workspaces", json!("workspace.create")),
-            (
-                "PUT",
-                "/v1/workspaces/ws_new/files/a.txt",
-                json!("workspace.file.write")
-            ),
-        ]
-    );
+    assert_eq!(ops[0].0, "POST");
+    assert_eq!(ops[0].1, "/v1/workspaces");
+    assert_eq!(ops[1].0, "PUT");
+    assert_eq!(ops[1].1, "/v1/workspaces/ws_new/files/a.txt");
+    assert_ne!(ops[0].2, ops[1].2, "one id per mutation, never reused");
+}
+
+#[test]
+fn an_exec_over_the_socket_answers_what_the_program_said_and_how_it_ended() {
+    // Read off a live daemon on 2026-08-29: the start answers the exec resource under `result`
+    // with its `id`, and the output is two slices, one per stream, each base64. The client looked
+    // for `exec_id`, fell through to answering the start document, and the model got an exit
+    // code and never the output.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
+    ]);
+    let confined_provider = provider(&confined(), script.clone(), &["/usr/bin/true"]);
+    let answer = confined_provider
+        .run(&["/usr/bin/true".to_owned()])
+        .expect("ran");
+
+    assert_eq!(answer["stdout"], json!("ok\n"), "{answer}");
+    assert_eq!(answer["stderr"], json!(""), "{answer}");
+    assert_eq!(answer["stdout_truncated"], json!(false));
+    assert_eq!(answer["output_complete"], json!(true));
+    assert_eq!(answer["exit"]["exit"]["code"], json!(0), "{answer}");
+    assert_eq!(answer["exit"]["state"], json!("exited"), "{answer}");
+
+    // A slice the daemon cut, or one with more behind it, is not the whole answer.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, EXEC_EXITED),
+        (
+            200,
+            r#"{"result":{"exec":"ex_1","stream":"stdout","offset":0,"returned_bytes":3,
+                "next_offset":3,"eof":false,"truncated":false,
+                "content":{"encoding":"base64","data":"b2sK"}}}"#,
+        ),
+        (200, STDERR_SLICE),
+    ]);
+    let confined_provider = provider(&confined(), script, &["/usr/bin/true"]);
+    let answer = confined_provider
+        .run(&["/usr/bin/true".to_owned()])
+        .expect("ran");
+    assert_eq!(answer["stdout_truncated"], json!(true), "{answer}");
+    assert_eq!(answer["output_complete"], json!(false), "{answer}");
 }
 
 #[test]
@@ -637,7 +727,7 @@ fn an_exec_over_the_socket_is_refused_when_the_daemon_states_no_snapshot() {
     )]);
     let client = Client::with(script.clone());
     let refused = client
-        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
         .expect_err("refused");
 
     assert!(
@@ -668,6 +758,7 @@ fn the_embedded_and_socket_paths_build_one_exec_input() {
             set: std::collections::BTreeMap::new(),
         },
         Vec::new(),
+        None,
     );
 
     assert!(input.sandbox.required);
@@ -685,6 +776,60 @@ fn the_embedded_and_socket_paths_build_one_exec_input() {
     assert!(input.wait);
     assert!(input.capsule.is_none());
     assert!(input.lease_ttl_ms.is_none());
+}
+
+#[test]
+fn an_exec_is_bounded_by_what_the_run_has_left_and_never_above_the_ceiling() {
+    // The loop's deadline check between calls cannot reach into an exec the daemon is holding
+    // open, so the timeout the daemon enforces is the smaller of the build ceiling and the clock.
+    let build = |remaining| {
+        super::confined_exec_input(
+            "ws_a",
+            &["/usr/bin/true".to_owned()],
+            "cap_7f3a".to_owned(),
+            substrate_wire::ExecEnvironment {
+                allow: Vec::new(),
+                set: std::collections::BTreeMap::new(),
+            },
+            Vec::new(),
+            remaining,
+        )
+        .limits
+        .timeout_ms
+    };
+    assert_eq!(build(None), 900_000, "no deadline is the ceiling");
+    assert_eq!(
+        build(Some(std::time::Duration::from_secs(30))),
+        30_000,
+        "half a minute left is half a minute"
+    );
+    assert_eq!(
+        build(Some(std::time::Duration::from_secs(3600))),
+        900_000,
+        "an hour left is still the ceiling"
+    );
+
+    // And it reaches the wire through the provider.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
+    ]);
+    let confined_provider = provider(&confined(), script.clone(), &["/usr/bin/true"]);
+    confined_provider
+        .run_within(
+            &["/usr/bin/true".to_owned()],
+            Some(std::time::Duration::from_millis(1_500)),
+        )
+        .expect("ran");
+    let seen = script.seen.lock().expect("not poisoned");
+    let sent = seen[1].2.as_ref().expect("a body");
+    assert_eq!(
+        sent["input"]["limits"]["timeout_ms"],
+        json!(1_500),
+        "{sent}"
+    );
 }
 
 #[test]

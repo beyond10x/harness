@@ -21,6 +21,8 @@
 //! or guesses the arguments. Whether that costs turns in practice is an experiment, not a claim —
 //! and it is the one the first live run under this surface answers.
 
+use std::time::Duration;
+
 use harness_wire::{
     AccessKind, Approval, Effect, Envelope, Idempotency, Risk, Subject, ToolCall, ToolName,
     ToolOutcome, ToolPort, ToolSpec,
@@ -132,6 +134,10 @@ impl ToolPort for Verbs {
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        self.call_within(call, None)
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
         let arguments = &call.arguments;
         let result = match call.name.as_str() {
             SEARCH_VERB => Ok(self.catalogue.search(
@@ -143,11 +149,12 @@ impl ToolPort for Verbs {
                 None => Err("`name` is required and names one tool".to_owned()),
             },
             INVOKE_VERB => match arguments.get("name").and_then(Value::as_str) {
-                Some(name) => self.catalogue.invoke(
+                Some(name) => self.catalogue.invoke_within(
                     name,
                     arguments
                         .get("arguments")
                         .unwrap_or(&Value::Object(serde_json::Map::new())),
+                    remaining,
                 ),
                 None => Err("`name` is required and names the tool to call".to_owned()),
             },

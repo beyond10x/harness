@@ -10,11 +10,19 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
+use substrate_wire::OutputStream;
 
 use crate::{Backend, Facts, SubstrateError, base64};
+
+/// The most one read asks the daemon for when the daemon has not said what it admits.
+///
+/// The same figure the confined provider caps a reply at; a daemon that states a lower ceiling
+/// is asked for that instead.
+const READ_LIMIT_BYTES: u64 = 256 * 1024;
 
 /// How long to wait on a local daemon that is not answering.
 ///
@@ -35,6 +43,26 @@ pub trait Transport {
         path: &str,
         body: Option<&Value>,
     ) -> Result<(u16, String), SubstrateError>;
+
+    /// [`request`](Self::request), waiting up to `read_timeout` for the answer.
+    ///
+    /// An exec started with `wait: true` holds the connection open until the program exits, so
+    /// the ten seconds a probe is given would cut a build off mid-way and report the daemon
+    /// unreachable. Defaulted to [`request`](Self::request) for a transport that does not wait.
+    ///
+    /// # Errors
+    ///
+    /// As [`request`](Self::request).
+    fn request_within(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        read_timeout: Duration,
+    ) -> Result<(u16, String), SubstrateError> {
+        let _ = read_timeout;
+        self.request(method, path, body)
+    }
 }
 
 /// The real transport: a Unix socket the operator's daemon listens on.
@@ -58,6 +86,16 @@ impl Transport for UnixTransport {
         path: &str,
         body: Option<&Value>,
     ) -> Result<(u16, String), SubstrateError> {
+        self.request_within(method, path, body, TIMEOUT)
+    }
+
+    fn request_within(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        read_timeout: Duration,
+    ) -> Result<(u16, String), SubstrateError> {
         let unreachable = |source: std::io::Error| SubstrateError::Unreachable {
             path: self.socket.display().to_string(),
             source,
@@ -65,7 +103,7 @@ impl Transport for UnixTransport {
 
         let mut stream = UnixStream::connect(&self.socket).map_err(unreachable)?;
         stream
-            .set_read_timeout(Some(TIMEOUT))
+            .set_read_timeout(Some(read_timeout))
             .map_err(unreachable)?;
         stream
             .set_write_timeout(Some(TIMEOUT))
@@ -139,18 +177,47 @@ impl Transport for UnixTransport {
 /// startup and a tool talks to per call.
 pub struct Client {
     transport: Box<dyn Transport + Send + Sync>,
-    /// The capability snapshot the first `GET /v1/machine` answered, held for the client's life.
+    /// The machine document the first `GET /v1/machine` answered, held for the client's life.
     ///
     /// An exec has to name the snapshot it was admitted against, and the daemon states one
     /// snapshot for its own lifetime — so it is asked for once and kept, not fetched before every
     /// exec. The one event that changes it is a daemon restart, and a per-exec probe would not
     /// close that either: the restart can land between the probe and the start, and the daemon
     /// refuses the stale name then exactly as it does now. What the per-exec probe *did* do was
-    /// let publication and admission read two different documents.
-    snapshot: OnceLock<String>,
+    /// let publication and admission read two different documents. A read takes its byte ceiling
+    /// from the same document.
+    machine: OnceLock<Facts>,
+    /// The next operation id's sequence number, per client.
+    next_operation: AtomicU64,
 }
 
-/// The body every mutating route takes: the operation's id beside its input, and nothing else.
+/// One mutation's identity, in the shape substrate admits: `common.json#/$defs/operation-id`,
+/// 16 to 128 of `[A-Za-z0-9_-]`, **minted by the caller**.
+///
+/// `op` is not the operation's name. It is an idempotency key the daemon reserves against the
+/// request's hash: the same id with the same body answers the same result, and the same id with
+/// a different body is refused. This client sent `"workspace.create"` there for one afternoon and
+/// the daemon refused it `request.schema-invalid` at `input` — the `.` is outside the charset, and
+/// the refusal names the value it was given, which is how it read as the daemon's own operation
+/// name. Verified against a daemon built from the pinned revision on 2026-08-29.
+///
+/// Time, process and a sequence, so two clients in one process, two processes in one second and
+/// two calls on one client all mint different ids — and a daemon whose state outlives this process
+/// cannot see an id it reserved before. Its own function so the shape is testable without a
+/// daemon, for the reason [`crate::embedded::exec_identity`] is one.
+pub(crate) fn operation_identity(nanos: u128, process: u32, sequence: u64) -> String {
+    format!("op_{nanos}_{process}_{sequence}")
+}
+
+/// One stream of one finished exec, as the model will read it.
+struct Output {
+    text: String,
+    truncated: bool,
+    eof: bool,
+    slice: Value,
+}
+
+/// The body every mutating route takes: a fresh operation id beside the input, and nothing else.
 ///
 /// The daemon's decoder reads `op` before it reads anything — a body without it is refused
 /// `request.schema-invalid` before the input is looked at, and a body with a third key is refused
@@ -175,8 +242,21 @@ impl Client {
     pub fn with(transport: impl Transport + Send + Sync + 'static) -> Self {
         Self {
             transport: Box::new(transport),
-            snapshot: OnceLock::new(),
+            machine: OnceLock::new(),
+            next_operation: AtomicU64::new(0),
         }
+    }
+
+    /// A fresh operation id for one mutation.
+    fn operation(&self) -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        operation_identity(
+            nanos,
+            std::process::id(),
+            self.next_operation.fetch_add(1, Ordering::Relaxed),
+        )
     }
 
     /// `GET /v1/machine` — what this machine can confine.
@@ -209,10 +289,16 @@ impl Client {
                 reason: error.to_string(),
             }
         })?;
-        if let Some(Value::String(snapshot)) = &facts.snapshot {
-            let _ = self.snapshot.set(snapshot.clone());
-        }
+        let _ = self.machine.set(facts.clone());
         Ok(facts)
+    }
+
+    /// The machine document already held, or the one the daemon states when asked now.
+    fn facts(&self) -> Result<Facts, SubstrateError> {
+        match self.machine.get() {
+            Some(facts) => Ok(facts.clone()),
+            None => self.machine(),
+        }
     }
 
     /// The snapshot an exec is admitted against: the one already held, or the one the daemon
@@ -222,11 +308,7 @@ impl Client {
     /// convention `embedded.rs::refused` uses, and for the same reason: the refusal happened on
     /// this side of the wire, so quoting a status would name a daemon that never answered.
     fn admitted_snapshot(&self) -> Result<String, SubstrateError> {
-        if let Some(snapshot) = self.snapshot.get() {
-            return Ok(snapshot.clone());
-        }
-        let facts = self.machine()?;
-        match facts.snapshot {
+        match self.facts()?.snapshot {
             None => Err(SubstrateError::Refused {
                 status: 0,
                 body: "the substrate daemon's machine document carries no capability snapshot. An \
@@ -288,7 +370,7 @@ impl Client {
             "PUT",
             &route,
             Some(&mutation(
-                "workspace.file.write",
+                &self.operation(),
                 &serde_json::json!({
                     "content": {"encoding": "base64", "data": base64::encode(text.as_bytes())}
                 }),
@@ -304,7 +386,21 @@ impl Client {
     /// Returns [`SubstrateError`] when the daemon cannot be reached, refuses, or answers a document
     /// with no text in it.
     pub fn file_read(&self, workspace: &str, path: &str) -> Result<String, SubstrateError> {
-        let route = format!("/v1/workspaces/{workspace}/files/{path}");
+        // **The query is not optional.** `FileReadQuery` in `file` mode needs `offset` and
+        // `limit_bytes` both present and nothing else; a bare `GET` is refused
+        // `request.schema-invalid` at `query`, which is what every read this client made until
+        // 2026-08-29 got. The ceiling is the daemon's own `workspace.read-limit-bytes` where the
+        // client has probed it — asking for more is refused by the operation's predicate — and
+        // the figure the confined provider bounds its replies at otherwise.
+        let limit = self
+            .machine
+            .get()
+            .and_then(|facts| facts.get("workspace.read-limit-bytes"))
+            .and_then(Value::as_u64)
+            .unwrap_or(READ_LIMIT_BYTES);
+        let route = format!(
+            "/v1/workspaces/{workspace}/files/{path}?mode=file&offset=0&limit_bytes={limit}"
+        );
         let (status, body) = self.transport.request("GET", &route, None)?;
         let value = Self::decode(status, body)?;
         let data = value
@@ -336,7 +432,7 @@ impl Client {
             "POST",
             "/v1/workspaces",
             Some(&mutation(
-                "workspace.create",
+                &self.operation(),
                 &serde_json::json!({"source": "empty", "labels": {}, "lease_ttl_ms": lease_ttl_ms}),
             )),
         )?;
@@ -369,7 +465,12 @@ impl Client {
     /// [`SubstrateError::Refused`] before sending anything when the machine document carries no
     /// capability snapshot to name. A program that exits non-zero is **not** an error: it is a
     /// result, and the caller needs to see it.
-    pub fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
+    pub fn exec(
+        &self,
+        workspace: &str,
+        argv: &[String],
+        remaining: Option<Duration>,
+    ) -> Result<Value, SubstrateError> {
         let snapshot = self.admitted_snapshot()?;
         let input = crate::confined_exec_input(
             workspace,
@@ -383,28 +484,94 @@ impl Client {
                 set: BTreeMap::new(),
             },
             Vec::new(),
+            remaining,
         );
+        let timeout_ms = input.limits.timeout_ms;
+        let output_bytes = input.limits.output_bytes;
         // Serialised by the wire crate's own type, never hand-written: which field is `require` and
         // which is `required` is substrate's to say, and a body assembled here is a second opinion
         // about it.
         let input = serde_json::to_value(&input).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),
         })?;
-        let (status, body) =
-            self.transport
-                .request("POST", "/v1/execs", Some(&mutation("exec.start", &input)))?;
+        // `wait: true` holds the connection open until the program exits, so the answer is waited
+        // for as long as the exec itself may run, plus the slack a probe gets.
+        let (status, body) = self.transport.request_within(
+            "POST",
+            "/v1/execs",
+            Some(&mutation(&self.operation(), &input)),
+            Duration::from_millis(timeout_ms) + TIMEOUT,
+        )?;
         let started = Self::decode(status, body)?;
-        let Some(id) = started
-            .pointer("/result/exec_id")
-            .or_else(|| started.pointer("/exec_id"))
-            .and_then(Value::as_str)
-        else {
-            return Ok(started);
+        // The resource is the `result`, and its `id` is what the output routes take. Read off a
+        // live daemon on 2026-08-29: this looked for `exec_id`, and because a miss fell through to
+        // answering the start document, the model got an exit code and never the program's output.
+        let observed = started
+            .get("result")
+            .cloned()
+            .unwrap_or_else(|| started.clone());
+        let Some(id) = observed.get("id").and_then(Value::as_str) else {
+            return Err(SubstrateError::Unreadable {
+                reason: format!("no exec id in {started}"),
+            });
         };
-        let (status, body) =
-            self.transport
-                .request("GET", &format!("/v1/execs/{id}/output"), None)?;
-        Self::decode(status, body)
+        let stdout = self.output(id, OutputStream::Stdout, output_bytes)?;
+        let stderr = self.output(id, OutputStream::Stderr, output_bytes)?;
+        // The shape the embedded path answers, so a run's replies do not change when it is
+        // confined over a socket instead of in-process — and `stdout_truncated` is part of it: a
+        // partial answer that looked whole would be read as the whole answer.
+        Ok(serde_json::json!({
+            "stdout": stdout.text,
+            "stderr": stderr.text,
+            "stdout_truncated": stdout.truncated,
+            "stderr_truncated": stderr.truncated,
+            "output_complete": stdout.eof && stderr.eof,
+            "exit": observed,
+            "slice": stdout.slice,
+        }))
+    }
+
+    /// `GET /v1/execs/{id}/output` — one stream of one exec, from its start.
+    ///
+    /// The query is not optional: `ExecOutputQuery` needs `stream`, `offset` and `limit_bytes`,
+    /// and the ceiling is the one the exec was started with, which the daemon's
+    /// `exec.output-limit-bytes` predicate already admitted.
+    fn output(
+        &self,
+        id: &str,
+        stream: OutputStream,
+        limit_bytes: u64,
+    ) -> Result<Output, SubstrateError> {
+        // The wire crate spells the stream; nothing here guesses at `stdout` versus `Stdout`.
+        let stream = serde_json::to_value(stream)
+            .ok()
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .unwrap_or_default();
+        let route =
+            format!("/v1/execs/{id}/output?stream={stream}&offset=0&limit_bytes={limit_bytes}");
+        let (status, body) = self.transport.request("GET", &route, None)?;
+        let value = Self::decode(status, body)?;
+        let slice = value.get("result").cloned().unwrap_or(value);
+        let data = slice
+            .pointer("/content/data")
+            .and_then(Value::as_str)
+            .ok_or_else(|| SubstrateError::Unreadable {
+                reason: format!("no output content in {slice}"),
+            })?;
+        let bytes = base64::decode(data).map_err(|reason| SubstrateError::Unreadable { reason })?;
+        let eof = slice.get("eof").and_then(Value::as_bool).unwrap_or(false);
+        Ok(Output {
+            text: String::from_utf8_lossy(&bytes).into_owned(),
+            // Cut by the daemon at its own ceiling, or more to read past this slice: either way
+            // the model has not seen all of it.
+            truncated: slice
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || !eof,
+            eof,
+            slice,
+        })
     }
 
     fn decode(status: u16, body: String) -> Result<Value, SubstrateError> {
@@ -434,7 +601,12 @@ impl Backend for Client {
         Client::file_read(self, workspace, path)
     }
 
-    fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
-        Client::exec(self, workspace, argv)
+    fn exec(
+        &self,
+        workspace: &str,
+        argv: &[String],
+        remaining: Option<Duration>,
+    ) -> Result<Value, SubstrateError> {
+        Client::exec(self, workspace, argv, remaining)
     }
 }

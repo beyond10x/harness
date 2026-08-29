@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::WireError;
@@ -167,6 +169,21 @@ pub trait ToolPort {
     /// A failure is an outcome with `failed` set, not an error: the model has to see that the tool
     /// ran and did not work, or it will assume the effect landed.
     fn call(&mut self, call: &ToolCall) -> ToolOutcome;
+
+    /// [`call`](Self::call), told how much of the run's wall-clock budget is left.
+    ///
+    /// The loop checks its deadline between calls, and a call already running is beyond its
+    /// reach: a `run` of a test suite holds the turn open for its own timeout — ten or fifteen
+    /// minutes — whatever a one-minute budget said. So the loop says how long is left and a port
+    /// that starts something bounds it by that. `None` is a run with no deadline.
+    ///
+    /// Defaulted to an unbounded [`call`](Self::call), which is right for a port whose calls
+    /// return promptly and for one that has nothing to bound. No clock is read here: the figure is
+    /// the loop's, computed with the loop's clock and handed over.
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        let _ = remaining;
+        self.call(call)
+    }
 }
 
 #[cfg(test)]

@@ -26,8 +26,8 @@ harness-wire = { workspace = true }
 # tag after the brand sweep — `0.2.0` still carried the former brand in a wire hash domain
 # (`EXECUTION_CAPSULE_HASH_DOMAIN`) — and identical to the previously pinned revision `f1cfc1c` in
 # `substrate-host` and `substrate-wire`; the release added the website and the version.
-substrate-host = { git = "https://github.com/beyond10x/substrate", tag = "0.2.1", version = "0.2.1" }
-substrate-wire = { git = "https://github.com/beyond10x/substrate", tag = "0.2.1", version = "0.2.1" }
+substrate-host = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
+substrate-wire = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

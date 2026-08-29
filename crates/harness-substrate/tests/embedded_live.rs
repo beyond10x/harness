@@ -115,23 +115,45 @@ fn a_tree_that_already_exists_is_adopted_rather_than_replaced_by_an_empty_one() 
 }
 
 #[test]
-fn a_directory_the_driver_cannot_represent_is_refused_by_name_and_says_what_to_do() {
+fn a_project_directory_is_adopted_under_its_own_name_and_a_bad_one_says_what_to_do() {
+    // **This test asserted the opposite until substrate 0.2.2**, and the reversal is the feature:
+    // `work-native` was refused for not beginning `ws_`, which meant a run could only ever be
+    // pointed at a scratch copy of a project rather than the project. The prefix was substrate's
+    // resource-id scheme, never its containment — that is `openat2` beneath the pinned root
+    // descriptor with symlinks refused, and it has not moved.
     let root = tempfile::tempdir().expect("a temporary root");
-    std::fs::create_dir(root.path().join("work-native")).expect("a badly named tree");
+    std::fs::create_dir(root.path().join("work-native")).expect("a project tree");
     let embedded = Embedded::open(root.path(), None).expect("the driver opens");
 
-    let error = embedded
-        .workspace_adopt("work-native")
-        .expect_err("refused")
-        .to_string();
-    assert!(error.contains("must begin `ws_`"), "{error}");
-    assert!(
-        error.contains("Rename the directory"),
-        "and what to do: {error}"
+    assert_eq!(
+        embedded
+            .workspace_adopt("work-native")
+            .expect("a hyphenated project directory is a workspace now"),
+        "work-native",
+        "the id is the directory's own name, so the two cannot disagree"
     );
 
+    // What still refuses, and it is everything that carries containment: a name that is not one
+    // path component, and one that would read as a flag where the name reaches an argv.
+    for bad in [".", "..", "a/b", "-rf", ""] {
+        let error = embedded
+            .workspace_adopt(bad)
+            .expect_err("refused")
+            .to_string();
+        // Either refusal is correct and which one fires is not this test's business: the driver
+        // checks the root identity first and answers `workspace.path-escape`, and this crate's own
+        // charset check answers with a sentence naming the rule. What matters is that none of
+        // these ever becomes a workspace.
+        assert!(
+            error.contains("one path component")
+                || error.contains("not a directory to adopt")
+                || error.contains("path-escape"),
+            "`{bad}` must be refused: {error}"
+        );
+    }
+
     let error = embedded
-        .workspace_adopt("ws_absent")
+        .workspace_adopt("absent")
         .expect_err("refused")
         .to_string();
     assert!(error.contains("is not a directory to adopt"), "{error}");

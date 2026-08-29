@@ -2459,15 +2459,19 @@ fn adopted(
     };
     // Checked here, before the driver is opened, so the message a rename fixes is the harness's own
     // and names the flag the operator typed rather than surfacing a driver's refusal from inside.
-    if !name.starts_with("ws_")
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.starts_with('-')
         || !name
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
     {
         return Err(format!(
-            "`--substrate-embedded` cannot adopt `{name}`: the directory must be named `ws_` \
-             followed by alphanumerics and underscores, because substrate's guarded filesystem \
-             represents no other name. Rename it, or drop the flag for a read-only run."
+            "`--substrate-embedded` cannot adopt `{name}`: a workspace directory's name must be \
+             one path component of alphanumerics, `_` and `-`, and may not begin with `-`. That \
+             is what keeps it a single component the guarded filesystem can open beneath its \
+             root. Point at a directory whose name qualifies, or drop the flag for a read-only run."
         ));
     }
     let driver = harness_substrate::Embedded::open_with(

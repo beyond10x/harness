@@ -142,6 +142,21 @@ impl Embedded {
             })?;
         let mut config = HostConfig::minimum(&root);
         config.cgroup_root = cgroup_root;
+        // **Not under the workspace root, which is now somebody's source tree.**
+        // `HostConfig::minimum` puts the capsule directory beside the workspaces it serves, which
+        // was right when that root was a scratch directory this process made. A run pointed at a
+        // real checkout would create `.substrate-capsules` in its parent — writing into the
+        // operator's own tree, uninvited, to hold something that is this harness's business and
+        // not the project's.
+        if let Some(state) = std::env::var_os("XDG_STATE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(".local/state"))
+            })
+        {
+            config.capsule_root = state.join("b10x-harness/capsules");
+        }
         let driver = HostDriver::open(config).map_err(|error| SubstrateError::Unreadable {
             reason: format!("the embedded driver did not open: {error:?}"),
         })?;
@@ -195,17 +210,29 @@ impl Embedded {
         self.driver
             .workspace_root_identity(name)
             .map_err(|error| Self::refused("workspace identity", &error))?;
-        if !name.starts_with("ws_")
+        // **The `ws_` prefix requirement is gone, and it was never the containment.** It is
+        // substrate's resource-id scheme — a workspace's directory name *is* its id — and what
+        // stops a name escaping is the driver's own `openat2` beneath the pinned root descriptor
+        // with symlinks refused, plus the name being a single path component. Dropping it (0.2.2)
+        // is what lets a run be pointed at a directory the operator already owns rather than a
+        // `ws_`-named scratch copy of it.
+        //
+        // The charset is still checked here, mirroring the driver's, so this refuses by name with
+        // a sentence a caller can act on instead of the driver's flat path-escape.
+        if name.is_empty()
+            || name == "."
+            || name == ".."
+            || name.starts_with('-')
             || !name
                 .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
         {
             return Err(SubstrateError::Refused {
                 status: 0,
                 body: format!(
-                    "`{name}` cannot be a workspace: a name must begin `ws_` and hold only \
-                     alphanumerics and underscores. Rename the directory, or let \
-                     `workspace_create` open a fresh one."
+                    "`{name}` cannot be a workspace: a name must be one path component of \
+                     alphanumerics, `_` and `-`, and may not begin with `-`. Point at the \
+                     directory itself, or let `workspace_create` open a fresh one."
                 ),
             });
         }

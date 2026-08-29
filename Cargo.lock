@@ -1540,8 +1540,8 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "substrate-host"
-version = "0.2.1"
-source = "git+https://github.com/beyond10x/substrate?tag=0.2.1#b772811591d3e7e000f0accdbb22941bb38e21c6"
+version = "0.2.2"
+source = "git+https://github.com/beyond10x/substrate?tag=0.2.2#43c5a10f6049aa2d3a23fe7691238835b749202e"
 dependencies = [
  "async-trait",
  "base64",
@@ -1561,8 +1561,8 @@ dependencies = [
 
 [[package]]
 name = "substrate-wire"
-version = "0.2.1"
-source = "git+https://github.com/beyond10x/substrate?tag=0.2.1#b772811591d3e7e000f0accdbb22941bb38e21c6"
+version = "0.2.2"
+source = "git+https://github.com/beyond10x/substrate?tag=0.2.2#43c5a10f6049aa2d3a23fe7691238835b749202e"
 dependencies = [
  "base64",
  "chrono",

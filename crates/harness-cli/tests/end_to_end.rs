@@ -447,12 +447,20 @@ fn tools_over_an_adopted_embedded_workspace_publishes_the_writing_entries() {
 
 #[test]
 fn an_embedded_workspace_with_the_wrong_name_refuses_the_run_by_name() {
-    let (_root, workspace) = adoptable_workspace("not_a_ws");
+    // **`not_a_ws` used to be the wrong name and is now a right one.** Since substrate 0.2.2 a
+    // workspace is named by its own directory rather than by the `ws_` id scheme, so what is left
+    // to refuse is a name that is not one path component — here a dot, which would let the guarded
+    // filesystem be asked for something other than a child of its root.
+    let (_root, workspace) = adoptable_workspace("bad.name");
     let output = run(&["tools", "--substrate-embedded"], &workspace);
 
     assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
-    assert!(output.stderr.contains("ws_"), "{}", output.stderr);
-    assert!(output.stderr.contains("not_a_ws"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("one path component"),
+        "{}",
+        output.stderr
+    );
+    assert!(output.stderr.contains("bad.name"), "{}", output.stderr);
     // The failure this replaces: a silent read-only catalogue, which the operator asked to write
     // into and the model then reported as done without writing anything.
     assert!(

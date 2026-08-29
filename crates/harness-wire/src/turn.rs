@@ -197,7 +197,8 @@ impl TurnRequest {
             && !self.tools.iter().any(|tool| &tool.name == named)
         {
             return Err(WireError::protocol(format!(
-                "this turn is held to `{named}` and does not publish it; a tool choice names one                  of the turn's own tools"
+                "this turn is held to `{named}` and does not publish it; a tool choice names \
+                 one of the turn's own tools"
             )));
         }
         let mut seen = BTreeSet::new();

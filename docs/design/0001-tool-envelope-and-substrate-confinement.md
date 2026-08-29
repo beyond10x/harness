@@ -109,6 +109,41 @@ Not disabled, not gated, not refused at call time: absent from `specs()`, so the
 it, never plans around it, and never spends a turn being told no. The toolset is a function of what
 the machine can confine, computed once at startup from substrate's own probe.
 
+### Amendment (2026-08-29): silent to the model, stated to everyone else
+
+The paragraph above is right about the model and was wrong about the record. Publication by absence
+means the run's own account of itself cannot distinguish two very different machines: one where a
+`run` entry was never wanted, and one where it was **declared** and refused. On a real run they were
+confused for weeks — a driven session whose only legal route was starting a program got six entries
+instead of seven, no error, no warning and no fact anywhere, hand-wrote files instead, and the
+failure was read as the model's.
+
+The fix is additive and changes no gate. Where a program set was declared and the machine does not
+confine execution, `Facts::withheld` produces a `Withheld { tool, reason }` naming the predicate
+that failed **as the machine stated it**:
+
+| what the machine said | reason |
+|---|---|
+| no facts at all (`Facts::none()`) | states no capability facts at all — no daemon answered, or none was asked for |
+| `exec.argv-only` absent or `false` | must be true and this machine says `nothing` / `false` |
+| `exec.cgroup-limits` short | must state `cpu`, `memory` and `processes`, and names the ones it does not |
+| `workspace.guarded-io` absent, with a confinement named | must be true and this machine says `nothing` — takes `file_write` and `file_edit` with it |
+
+Every reason a *stated* fact produced also carries one line about cgroups, because the term of
+substrate's exec conjunction that fails on a developer machine is `probe_cgroup`, which reads the
+**probing process's** own `/proc/self/cgroup` — so a login shell in `session-M.scope` and the same
+command under `systemd-run --user --scope` get different answers from one machine, and a reason that
+named only the absent fact would send a reader into substrate's configuration for a fault in how the
+harness was started. The *no facts at all* reason carries no such line: nothing probed anything.
+
+**Declared, and only declared.** A run that named no programs withholds nothing — inventing the want
+would put a line about `run` in front of every read-only run there has ever been.
+
+It travels as `LoopConfig::withheld` → `LoopEvent::Started { withheld }` (additive, skipped when
+empty, so older records are byte-identical) → one `note:` line on stderr and a `withheld` array in
+`b10x-harness tools`. It is reported and acted on nowhere: the tool is still absent from `specs()`,
+so nothing about the first tier moved.
+
 ### Three tiers, and which is which
 
 | tier | question | decided by | example refusal |

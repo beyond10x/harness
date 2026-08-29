@@ -77,7 +77,7 @@ pub use delegate::{
     DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_TURNS, DELEGATE_PREAMBLE, Delegation,
     MAX_DELEGATION_DEPTH,
 };
-pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink};
+pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink, Withheld};
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 
@@ -307,6 +307,22 @@ pub struct LoopConfig {
     ///
     /// [`None`] publishes no `delegate`, which is what every run did before this existed.
     pub delegation: Option<Delegation>,
+    /// Tools this run asked for that its machine would not admit, as whoever built the tool port
+    /// found them.
+    ///
+    /// Reported once, in [`LoopEvent::Started`], beside what the run *does* have. It changes
+    /// nothing the loop does: the withheld tool is not published, no call can name it, and no
+    /// approval or refusal involves it. It exists because the publication gate works by absence,
+    /// and an absence nobody states is indistinguishable from a run that never wanted the tool.
+    ///
+    /// **Configured rather than asked of the port**, because the fact is not the port's to know.
+    /// `ToolPort` lives in `harness-wire`, which reads no machine and performs no I/O
+    /// (`AGENTS.md` invariant 3); what a machine refused to confine is `harness_substrate`'s
+    /// answer, and the shell that assembled the two is the one place that has both. A delegate
+    /// inherits it with the rest of the config, because it runs over the same port.
+    ///
+    /// Empty is a run that got everything it asked for, and is the default.
+    pub withheld: Vec<Withheld>,
 }
 
 impl LoopConfig {
@@ -322,7 +338,18 @@ impl LoopConfig {
             retry_backoff: TURN_RETRY_BACKOFF,
             output_schema: None,
             delegation: None,
+            withheld: Vec::new(),
         }
+    }
+
+    /// States which declared tools this run's machine would not admit.
+    ///
+    /// Additive to the record and to nothing else: it is reported at [`LoopEvent::Started`] and no
+    /// decision is taken on it.
+    #[must_use]
+    pub fn with_withheld(mut self, withheld: Vec<Withheld>) -> Self {
+        self.withheld = withheld;
+        self
     }
 
     /// Asks for the run's answer in one shape, by publishing it as a tool the model calls.
@@ -1551,6 +1578,10 @@ impl<'a> AgentLoop<'a> {
                 .into_iter()
                 .map(ToOwned::to_owned)
                 .collect(),
+            // The other half of the same question. The two lists above say what the run has; a
+            // reader cannot tell an absence that was refused from an absence nobody wanted
+            // without this one.
+            withheld: self.config.withheld.clone(),
         });
         self.announce_prices(priced, sink);
 

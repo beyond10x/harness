@@ -16,6 +16,11 @@
 //! never sees it, never plans around it and never spends a turn being told no. The toolset is a
 //! function of the machine, computed once from substrate's own probe.
 //!
+//! **The absence is silent to the model and stated to everyone else.** A tool that was *declared*
+//! and could not be admitted leaves a [`Withheld`] record naming it and the predicate that decided
+//! — see [`Facts::withheld`] and the module that computes it. Without that record a run whose only
+//! legal route was running a program looked exactly like a run that never wanted one.
+//!
 //! # Three tiers, and this crate owns the first
 //!
 //! | tier | question | decided by |
@@ -66,6 +71,7 @@ mod embedded;
 mod predicate;
 mod toolchain;
 mod tools;
+mod withheld;
 
 pub use backend::Backend;
 pub use client::{Client, Transport, UnixTransport};
@@ -73,6 +79,7 @@ pub use embedded::Embedded;
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
 pub use toolchain::Toolchain;
 pub use tools::ConfinedOperations;
+pub use withheld::Withheld;
 
 /// What substrate says this machine can do.
 ///
@@ -138,6 +145,9 @@ impl Facts {
     ///
     /// The single question the `run` tool's existence turns on, asked in one place so three callers
     /// cannot disagree about which facts count.
+    ///
+    /// `false` takes the tool away silently, which is right for the model and wrong for a reader:
+    /// [`Facts::withheld`] is the other half, and says which of these two facts decided.
     pub fn confines_execution(&self) -> bool {
         self.get("exec.argv-only") == Some(&Value::Bool(true))
             && self

@@ -1127,7 +1127,7 @@ fn prepare(
         credential,
         &cancel,
     )?;
-    let tools = published(
+    let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
         options.surface,
@@ -1167,7 +1167,10 @@ fn prepare(
     // What makes compaction token-aware rather than a fixed 192 KiB of bytes.
     .with_context_window(Some(options.context_window))
     .with_output_schema(answer)
-    .with_delegation(delegation);
+    .with_delegation(delegation)
+    // Reported in the record and acted on nowhere: what the machine would not admit was already
+    // decided when the catalogue was built, and this is the sentence saying so.
+    .with_withheld(withheld_events(&withheld));
     // A hook is unconfined — it is the operator's own program — but it is not handed this run's
     // credential. The child would otherwise inherit the whole environment, including whichever
     // variable `--api-key-env` or `--oauth-token-env` named, and a hook that echoed it into its
@@ -1756,6 +1759,34 @@ impl harness_wire::ToolPort for Published {
     }
 }
 
+/// What this machine publishes, and what it would not.
+///
+/// Two answers to one question, and the second is the one that used to be missing. The publication
+/// gate takes a tool away **silently** — which is right for the model, and is why a run whose only
+/// legal route was starting a program got six entries instead of seven and nobody could tell that
+/// from a run that never wanted a seventh. So the toolset travels with the record of what was
+/// declared and refused, and every place that states the run's shape states both.
+struct Publication {
+    tools: Published,
+    /// Declared and not admitted, with the predicate that decided. Empty is the ordinary answer.
+    withheld: Vec<harness_substrate::Withheld>,
+}
+
+/// The record substrate computed, in the loop's own vocabulary.
+///
+/// Two types and one mapping rather than one shared type, because `harness-loop` depends on
+/// `harness-wire` alone and neither of them may read a machine (`AGENTS.md` invariant 3). The fact
+/// is substrate's; the record is the loop's; this shell is the one place holding both.
+fn withheld_events(withheld: &[harness_substrate::Withheld]) -> Vec<harness_loop::Withheld> {
+    withheld
+        .iter()
+        .map(|withheld| harness_loop::Withheld {
+            tool: withheld.tool.clone(),
+            reason: withheld.reason.clone(),
+        })
+        .collect()
+}
+
 /// The tools this machine admits, which is the machine's answer and not a flag's.
 ///
 /// **The publication gate, in one function**, and it is unchanged by either surface: what the
@@ -1777,7 +1808,7 @@ fn published(
     workspace_name: Option<String>,
     surface: Surface,
     confinement: &Confinement<'_>,
-) -> Result<Published, String> {
+) -> Result<Publication, String> {
     let Confinement {
         substrate,
         embedded,
@@ -1795,17 +1826,26 @@ fn published(
 
     if *embedded {
         let workspace = adopted(&reading, workspace_name, *cgroup_root, toolchain)?;
-        return Ok(publish(
-            harness_tools::Catalogue::of(harness_tools::Split::new(
-                reading,
-                workspace.confined(programs.to_vec()),
-            ))
-            .scoped(scope.clone()),
-        ));
+        let confined = workspace.confined(programs.to_vec());
+        let withheld = confined.withheld().to_vec();
+        return Ok(Publication {
+            tools: publish(
+                harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
+                    .scoped(scope.clone()),
+            ),
+            withheld,
+        });
     }
 
     let Some(socket) = *substrate else {
-        return Ok(read_only());
+        // No confinement was asked for, so no workspace was expected and its absence is not
+        // reported. A **program set** declared with nowhere to run it is a different thing: the
+        // operator named commands and this run has no tool that could start one, which is exactly
+        // the silence this record exists to break.
+        return Ok(Publication {
+            tools: read_only(),
+            withheld: harness_substrate::Facts::none().withheld(programs, false),
+        });
     };
     let client = harness_substrate::Client::at(socket);
     // `machine()` and not `probe()`. `probe`'s "unreachable is not an error" is for a harness
@@ -1825,10 +1865,14 @@ fn published(
         *workspace_id,
         programs.to_vec(),
     );
-    Ok(publish(
-        harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
-            .scoped(scope.clone()),
-    ))
+    let withheld = confined.withheld().to_vec();
+    Ok(Publication {
+        tools: publish(
+            harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
+                .scoped(scope.clone()),
+        ),
+        withheld,
+    })
 }
 
 /// One embedded driver, its machine facts and the adopted workspace, held together.
@@ -1915,7 +1959,7 @@ fn adopted(
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
-    let tools = published(
+    let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
         options.surface,
@@ -1929,6 +1973,15 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             scope: write_scope(&options.write_scope)?,
         },
     )?;
+    // On stderr, where it cannot be mistaken for part of the document and cannot be missed by a
+    // person reading a screen of JSON — the same line the run's own renderer prints, so the
+    // command a person checks a machine with and the run they then start say the same thing.
+    for withheld in &withheld {
+        eprintln!(
+            "{}",
+            render::withheld_line(&withheld.tool, &withheld.reason)
+        );
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
@@ -1943,6 +1996,12 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // `flat` the two lists name the same entries; under `verbs` they do not, and that
             // difference is exactly what a reader has to be able to see.
             "catalogue": tools.catalogue().search(None, None),
+            // And what it **cannot** do that it was asked to. Always present, empty included:
+            // this command exists to state a machine's shape, and a reader who found no key could
+            // not tell *nothing was withheld* from *this build does not answer that*. It is the
+            // difference between a six-entry catalogue nobody wanted a seventh entry in and one
+            // that was refused it.
+            "withheld": withheld,
         }))
         .map_err(|error| error.to_string())?
     );

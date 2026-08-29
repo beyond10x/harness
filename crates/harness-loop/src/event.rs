@@ -4,6 +4,26 @@ use serde::{Deserialize, Serialize};
 use crate::LoopStop;
 use crate::hook::{HookDecision, HookPoint};
 
+/// One tool a run declared and its machine would not admit.
+///
+/// # Why this is a plain pair of strings and not a shared type
+///
+/// The fact is computed where the machine is known — `harness_substrate` reads substrate's own
+/// capability facts and names the predicate that failed — and this crate depends only on
+/// `harness_wire`, which performs no I/O and knows nothing about any machine (`AGENTS.md`
+/// invariant 3). So the loop carries what it can honestly carry: the entry that does not exist and
+/// the sentence saying why, both already written by whoever knew. Nothing here interprets either.
+///
+/// The `reason` is meant to be read, not matched on. It names the fact the machine stated — or did
+/// not — in the vocabulary a substrate refusal already uses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Withheld {
+    /// The tool that is not published here — the catalogue **entry**, never the surface's verb.
+    pub tool: String,
+    /// The predicate that failed, as the machine stated it.
+    pub reason: String,
+}
+
 /// Everything a person or a shell can observe while the loop runs.
 ///
 /// Deliberately closed and vendor-neutral: the terminal renderer, the bridge shell and the test
@@ -23,6 +43,22 @@ pub enum LoopEvent {
         /// varies.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         operations: Vec<String>,
+        /// Tools this run **asked for** that the machine would not admit, and why.
+        ///
+        /// The publication gate works by absence — a tool the machine cannot confine is never
+        /// published, so the model never plans around it — and an absence in this record reads
+        /// identically to a run that never wanted the tool. It is not: a driven session whose only
+        /// legal route was running a program was published six entries instead of seven, no error
+        /// and no warning, hand-wrote files instead, and the failure read as a model failure for
+        /// weeks.
+        ///
+        /// Beside `published_tools` and `operations`, which say what the run *has*. This says what
+        /// it was *denied*, which is the only field that can distinguish those two silences.
+        ///
+        /// Empty on every run that got what it asked for, and skipped when empty, so a record
+        /// written before this field existed and one written after are byte-identical.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        withheld: Vec<Withheld>,
     },
     TurnStarted {
         turn: u64,
@@ -245,6 +281,49 @@ mod tests {
             sink.warnings().collect::<Vec<_>>(),
             vec![("unknown-tool", "nope")]
         );
+    }
+
+    #[test]
+    fn a_started_event_states_what_the_machine_would_not_admit() {
+        let event = LoopEvent::Started {
+            model: "m".to_owned(),
+            published_tools: vec![ToolName::new("tool_invoke").expect("valid")],
+            operations: vec!["file.read".to_owned()],
+            withheld: vec![Withheld {
+                tool: "run".to_owned(),
+                reason: "`exec.argv-only` must be true and this machine says nothing.".to_owned(),
+            }],
+        };
+        let encoded = serde_json::to_value(&event).expect("serializes");
+        assert_eq!(encoded["withheld"][0]["tool"], serde_json::json!("run"));
+        assert_eq!(
+            serde_json::from_value::<LoopEvent>(encoded).expect("deserializes"),
+            event
+        );
+    }
+
+    #[test]
+    fn a_run_that_was_refused_nothing_writes_the_record_it_always_wrote() {
+        // The field is additive or it is a break: a driver reading this stream — metaharness reads
+        // exactly this one — must see the same bytes for a run whose machine admitted everything.
+        let started = LoopEvent::Started {
+            model: "m".to_owned(),
+            published_tools: Vec::new(),
+            operations: Vec::new(),
+            withheld: Vec::new(),
+        };
+        let encoded = serde_json::to_string(&started).expect("serializes");
+        assert_eq!(
+            encoded,
+            r#"{"kind":"started","model":"m","published_tools":[]}"#
+        );
+
+        // And a record written before the field existed still reads, as a run that withheld
+        // nothing rather than as one nobody can parse.
+        let old: LoopEvent =
+            serde_json::from_str(r#"{"kind":"started","model":"m","published_tools":[]}"#)
+                .expect("an older record deserializes");
+        assert_eq!(old, started);
     }
 
     #[test]

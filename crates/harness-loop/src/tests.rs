@@ -1270,6 +1270,44 @@ fn the_run_announces_what_it_published_before_the_first_turn() {
 }
 
 #[test]
+fn the_run_also_announces_what_it_asked_for_and_was_not_given() {
+    // The other half of the same sentence, and the one that was missing. What a run *has* was
+    // always in this event; what it was *refused* was in nothing at all, so a catalogue short of
+    // the one tool the task needed looked exactly like a catalogue nobody had asked more of.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("ok"))]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    );
+    harness.config = harness.config.clone().with_withheld(vec![Withheld {
+        tool: "run".to_owned(),
+        reason: "`exec.argv-only` must be true and this machine says nothing.".to_owned(),
+    }]);
+    let (_, sink) = harness.run();
+    let Some(LoopEvent::Started { withheld, .. }) = sink.events().first() else {
+        panic!("the run starts by saying what it can do");
+    };
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    assert_eq!(withheld[0].tool, "run");
+    assert!(
+        withheld[0].reason.contains("exec.argv-only"),
+        "{withheld:?}"
+    );
+}
+
+#[test]
+fn a_run_refused_nothing_announces_nothing() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("ok"))]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    );
+    let (_, sink) = harness.run();
+    let Some(LoopEvent::Started { withheld, .. }) = sink.events().first() else {
+        panic!("the run starts by saying what it can do");
+    };
+    assert!(withheld.is_empty(), "absence stays absence: {withheld:?}");
+}
+
+#[test]
 fn a_cancelled_model_read_is_an_outcome_rather_than_a_failure() {
     let mut harness = Harness::new(
         ScriptedModel::new(vec![Err(WireError::cancelled())]),

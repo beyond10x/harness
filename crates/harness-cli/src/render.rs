@@ -94,6 +94,24 @@ impl<O: Write, E: Write> Renderer<O, E> {
         let _ = self.out.flush();
     }
 
+    /// What this run asked for and its machine would not admit, one line each.
+    ///
+    /// Straight to stderr, past `--quiet`, for the same reason a warning goes past it: this is not
+    /// progress, it is a fact about what the run can do, and the run that needed it most was an
+    /// unattended one. A person who read the tool list and not this would take a shorter list for
+    /// the toolset they asked for — which is exactly what happened.
+    ///
+    /// Nothing at all for a run that was refused nothing: absence stays absence.
+    fn withheld(&mut self, withheld: &[harness_loop::Withheld]) {
+        for withheld in withheld {
+            let _ = writeln!(
+                self.err,
+                "{}",
+                withheld_line(&withheld.tool, &withheld.reason)
+            );
+        }
+    }
+
     /// One line of a delegate's own run, indented, so a reader can see who is acting.
     ///
     /// The child's **text** is not rendered: it is its report to the parent, not this run's
@@ -134,6 +152,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 model,
                 published_tools,
                 operations,
+                withheld,
             } => {
                 let names: Vec<&str> = published_tools
                     .iter()
@@ -143,6 +162,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 if !operations.is_empty() {
                     self.note(&format!("  can: {}", operations.join(", ")));
                 }
+                self.withheld(&withheld);
             }
             LoopEvent::TurnStarted { turn } => self.note(&format!("· turn {turn}")),
             // Whatever streamed for the turn is void, and the person who read it has to be told:
@@ -235,6 +255,19 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
     }
 }
 
+/// The one line that says a declared tool does not exist on this machine, and why.
+///
+/// Written here rather than in each caller so the run's own record and `b10x-harness tools` — the
+/// command a person checks a machine with before starting a run — say the same sentence. Two
+/// spellings of this would be two things to keep true, and the whole defect this closes was two
+/// halves of the system disagreeing silently about what the run could do.
+///
+/// `note:` and not `warning:`: nothing went wrong. The machine answered honestly and the toolset
+/// followed it. What is being reported is that the answer was *no*.
+pub fn withheld_line(tool: &str, reason: &str) -> String {
+    format!("note: `{tool}` is not published on this machine: {reason}")
+}
+
 /// The one line a requested call becomes, at whatever depth it was requested.
 ///
 /// Cut at 200 characters because a `file_write` body is not a progress line; the call itself is
@@ -310,6 +343,7 @@ mod tests {
                     model: "m".to_owned(),
                     published_tools: vec![ToolName::new("a").expect("valid")],
                     operations: Vec::new(),
+                    withheld: Vec::new(),
                 },
                 LoopEvent::TextDelta {
                     text: "the ".to_owned(),
@@ -588,5 +622,57 @@ mod tests {
         let err = String::from_utf8(err).expect("utf-8");
         assert!(!err.contains("turn 1"), "quiet drops progress: {err}");
         assert!(err.contains("unpublished-tool"), "{err}");
+    }
+
+    #[test]
+    fn a_tool_the_machine_would_not_admit_is_stated_at_the_start_and_survives_quiet() {
+        // The line that was missing. A person reading this run saw six tools and had no way to
+        // know a seventh had been asked for and refused; the run hand-wrote files instead and the
+        // failure read as the model's for weeks.
+        let started = || LoopEvent::Started {
+            model: "m".to_owned(),
+            published_tools: vec![ToolName::new("tool_invoke").expect("valid")],
+            operations: vec!["file.read".to_owned()],
+            withheld: vec![harness_loop::Withheld {
+                tool: "run".to_owned(),
+                reason: "`exec.argv-only` must be true and this machine says nothing.".to_owned(),
+            }],
+        };
+
+        let (out, err) = render(vec![started()], false);
+        assert!(
+            err.contains(
+                "note: `run` is not published on this machine: `exec.argv-only` must be \
+                          true and this machine says nothing."
+            ),
+            "the tool and the predicate, on one line: {err}"
+        );
+        assert!(out.is_empty(), "stdout stays the answer: {out:?}");
+
+        // Quiet drops progress, not the shape of the run — the run that most needed this line was
+        // an unattended one.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        {
+            let mut renderer = Renderer::new(&mut out, &mut err, false, true);
+            renderer.emit(started());
+        }
+        let err = String::from_utf8(err).expect("utf-8");
+        assert!(!err.contains("model m"), "quiet drops progress: {err}");
+        assert!(err.contains("note: `run` is not published"), "{err}");
+    }
+
+    #[test]
+    fn a_run_that_was_refused_nothing_says_nothing_about_it() {
+        let (_, err) = render(
+            vec![LoopEvent::Started {
+                model: "m".to_owned(),
+                published_tools: vec![ToolName::new("file_read").expect("valid")],
+                operations: vec!["file.read".to_owned()],
+                withheld: Vec::new(),
+            }],
+            false,
+        );
+        assert!(!err.contains("note:"), "absence stays absence: {err}");
     }
 }

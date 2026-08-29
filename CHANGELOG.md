@@ -451,6 +451,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A run that was refused the one tool it needed now says so, instead of looking like a run that
+  never asked.** Publication is by absence: a tool this machine cannot confine is not published, so
+  the model never plans around it. That is right, and it was also the whole failure — six catalogue
+  entries where seven were declared read exactly like six that were declared, with no error, no
+  warning and no fact anywhere in the record. A driven session whose only legal route was running a
+  program was handed no tool that could start one, hand-wrote the files instead, and the failure was
+  read as the model's for weeks. It was the machine's: substrate reports the exec facts only where
+  its own cgroup probe passed, and that probe reads the **probing process's** `/proc/self/cgroup`, so
+  the same `b10x-harness tools` answers seven entries under `systemd-run --user --scope` and six from
+  a login shell, whose `session-M.scope` is a sibling of the manager scope a delegated root lives
+  under.
+
+  A **declared** program set the machine will not admit now produces a `Withheld { tool, reason }`
+  record naming the predicate that decided as the machine stated it — `exec.argv-only` absent or
+  `false`, `exec.cgroup-limits` short of `cpu`/`memory`/`processes`, or no capability facts at all —
+  and every reason a stated fact produced carries one line pointing at the caller's own cgroup rather
+  than at substrate's configuration. `workspace.guarded-io` absent with a confinement named is
+  covered the same way, taking `file_write` and `file_edit` with it. It reaches every place the run's
+  shape is stated: one `note:` line on stderr before the first turn (past `--quiet`, like a warning,
+  because the run that needed it most was unattended), a `withheld` field on the `started` event
+  under `--json`, and a `withheld` array in `b10x-harness tools` — the command the defect was found
+  with — beside the same line on its stderr.
+
+  Additive throughout and no gate moved: the tool is still absent from what the model sees, no call
+  can name it, and `LoopEvent::Started`'s new field is skipped when empty, so the record of a run
+  that was refused nothing is byte-identical to the one it wrote before. **A run that declared no
+  programs states nothing**, because absence stays absence and a read-only run is owed no sentence
+  about a tool it never wanted.
+
 - **A run that failed now files what it spent, not only what it said.** A wire failure on turn
   twenty handed the shell its nineteen turns of conversation and none of their figures: the usage
   and cost of every turn that did happen scrolled past on stderr and then died with the process,

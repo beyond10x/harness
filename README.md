@@ -73,7 +73,7 @@ credential it was not pointed at, so a run can always be explained afterwards.
 
 | flag | effect |
 |---|---|
-| `--json` | one event per line on stdout instead of prose |
+| `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations` and — only when there is one — `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
 | `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — a directory not called `ws_…`, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
@@ -144,6 +144,23 @@ systemd-run --user --scope --property="Delegate=cpu memory pids" -- ./run.sh
 and inside, pass the scope's containing slice as `--cgroup-root`. Without it the run has six tools
 and no `run`; with it, seven. That is the toolset following the machine rather than a flag.
 
+**And the run says which one it got.** The toolset is silent to the model on purpose — a tool it
+cannot have is one it never plans around — but that silence used to reach everybody else too: six
+entries where seven were asked for read exactly like six that were asked for, and a session whose
+only legal route was starting a program hand-wrote files instead while the record said nothing. So a
+program set that was **declared** and could not be admitted is now stated, naming the predicate that
+decided:
+
+```text
+note: `run` is not published on this machine: `exec.argv-only` must be true and this machine says nothing. substrate states the exec facts only where its own cgroup probe passed, and that probe reads the probing process's `/proc/self/cgroup` and fails when it is outside the configured cgroup root — the embedded driver probes *this* process, and a login shell sits in `user.slice/user-N.slice/session-M.scope`, a sibling of the `user@N.service` manager scope, so the same machine answers differently under `systemd-run --user --scope`.
+```
+
+One line on stderr before the run, a `withheld` array in `b10x-harness tools`, and a `withheld`
+field on the `started` event under `--json`. A run that declared **no** programs states nothing:
+absence stays absence, and a read-only run is owed no sentence about a tool it never wanted. The
+same record covers `file_write` and `file_edit` when a confinement was named and the machine states
+no `workspace.guarded-io`.
+
 The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes substrate's
 root, and reads and writes land in the same place. The directory must therefore be named
 `ws_something` — substrate's guarded filesystem will not represent any other name — and one that is
@@ -176,7 +193,8 @@ operations, published under one of two surfaces.
 
 Four entries with no backend, six with a confined workspace, seven inside a delegated cgroup. The
 catalogue is what the machine can perform, and a tool the machine cannot confine is one no surface
-ever lists. Reads are bounded to the workspace root and every path is re-checked after
+ever lists — and one that was *asked for* and could not be admitted is reported beside the list it
+is missing from, rather than only being missing (see [*Running with confinement*](#running-with-confinement)). Reads are bounded to the workspace root and every path is re-checked after
 canonicalization — including each entry a search walks into — so a symlink inside the workspace
 cannot be used to read outside it.
 

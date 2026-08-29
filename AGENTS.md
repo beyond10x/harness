@@ -72,6 +72,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
     binary accepts. A change cuts a new version directory. Three interfaces, and the third was
     learned the hard way: `--substrate-embedded` changed from taking a value to bare, and a
     consumer pinned to `0.1.0` was refused by clap before any harness code ran.
+
+    **Released means reachable on `origin/main`**, not "in a tagged release" and not "out of
+    `CHANGELOG.md`'s `[Unreleased]`". From the moment a version directory is pushed, somebody can
+    pin to it, and what they pinned to must not move under them. Two sessions read this differently
+    on 2026-08-29 — one took an `[Unreleased]` changelog entry as licence to regenerate
+    `cli/b10x-harness/2026-08-29.1` in place, hours after it was pushed — so the definition is
+    written down rather than left to be inferred.
+
+    **A second cut on the same day takes a `.N` suffix**: `2026-08-29`, then `2026-08-29.1`, then
+    `2026-08-29.2`. The scheme is date-based and cannot otherwise express two cuts in one day, and
+    the alternative — dating a directory tomorrow — puts a false date on a pinned artefact.
 14. **Both halves must hold for each contract**: a Python checker verifies the manifest against its
     fixtures, and a Rust test verifies the code produces exactly those bytes or holds exactly those
     constants. A change to what is sent, accepted or emitted re-pins the fixture *and* enters the

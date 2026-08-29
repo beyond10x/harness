@@ -91,7 +91,7 @@ fails on any difference but the framing.
 
 ## Phase 4: subscription authentication
 
-**Status: the source exists and the Anthropic route is authorized; renewal and the ChatGPT/Codex run do not.**
+**Status: done. Both routes are authorized, and one of them renews its own credential.**
 
 ChatGPT/Codex and Claude subscription routes: OAuth plus per-route headers, as further
 `BearerSource` implementations. Last, because they carry credential-custody questions an API key
@@ -105,7 +105,9 @@ Done:
   nothing it was not pointed at, and a source that searched on failure would be an ambient
   credential fallback whichever way it was spelled;
 - re-read on **every** call rather than cached at construction, which is the whole of the renewal
-  story here: an owner outside this process that renews the token is followed on the next turn;
+  story *for that type*: an owner outside this process that renews the token is followed on the next
+  turn. Renewing one is a separate function a caller invokes before the run, never something a
+  bearer source does quietly mid-turn;
 - per-route presentation, keyed off the neutral `CredentialKind`: `authorization: Bearer` plus
   `anthropic-beta: oauth-2025-04-20` for a subscription token, `x-api-key` for a key issued to a
   program. The header names are pinned in the Messages contract and checked against the function the
@@ -115,11 +117,12 @@ Done:
 
 Not done, and stated so nobody reads the absence as working:
 
-- **renewal.** Nothing here holds a refresh token or calls an authorization server. A token nobody
-  renews expires and the run fails by name;
-- **the ChatGPT/Codex authorized run.** That route has not been contacted. It needs no new code at
-  all: it takes its access token as a plain bearer, which `StaticBearer` already does — what is
-  missing is the run that says so;
+- **mid-run renewal.** The check below happens once, before the first request. A run that starts
+  with a fresh token and outlives it still fails by name partway through, which is the case
+  `story:oauth-token-renewal` is titled after;
+- **a live refresh.** The token endpoint has been discriminated against itself — a deliberately
+  invalid refresh token to it answers `401 token_expired` — but no **successful** exchange has been
+  measured, because the one run that would rotates the operator's own credential;
 - **a live contract version for the Anthropic route.** The run below happened; its *bytes* were not
   captured, so `contracts/provider-wires/anthropic-messages/2026-08-29b` — the current pin — is
   still `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
@@ -139,8 +142,25 @@ Done since, and it is the Anthropic half of this phase's exit:
   200 could be an endpoint indifferent to which header carried the credential, and the emulator
   cannot tell the difference.
 
+And the ChatGPT/Codex half, which closes the phase:
+
+- **one authorized run, 2026-08-30.** Two turns against `https://chatgpt.com/backend-api/codex` on
+  `gpt-5.6-sol`, the token read from a named file at a named pointer (`~/.codex/auth.json`,
+  `/tokens/access_token`): `file_read` called and answered, `finished{completed}`, session
+  `18d066fc428e5e98-0003a176`. Same control as above — an unparseable token to the same endpoint
+  answers `401 unauthorized_unknown` — so the success is the credential's and not the endpoint's
+  indifference. `ROADMAP` predicted this needed no new code, and it did not;
+- **a `codex` provider, and renewal.** Every value in it was read off that run. Unlike any provider
+  before it, it carries a token endpoint, a client id and a pointer to the refresh token, so a run
+  whose token is within fifteen minutes of expiring renews it and **writes the new one back**. That
+  is the harness editing a file another program owns, and the bound is that it happens only for a
+  credential the provider itself defaulted — a source the operator typed is read and never
+  written — that `providers show codex` prints the file, the endpoint and the client before
+  anything is spent, and that a run which renewed says so in the record with no part of the
+  credential in it.
+
 **Exit:** one authorized run on each, with the credential never leaving the source that owns it.
-Anthropic: met. ChatGPT/Codex: not met.
+**Both met.**
 
 ## Phase 5: embedding and live characterization
 

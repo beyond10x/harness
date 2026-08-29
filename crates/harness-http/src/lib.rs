@@ -28,12 +28,14 @@
 //! It knows nothing about turns, items, tools or usage: those are the projection's, and the
 //! projection stays in the wire that names the fields.
 
+mod exchange;
 mod retry;
 mod sse;
 mod status;
 mod transport;
 mod witness;
 
+pub use exchange::{JsonExchange, JsonPost, MAX_EXCHANGE_BODY_BYTES};
 pub use retry::RetryPolicy;
 pub use sse::{Framing, MAX_EVENT_BYTES, MAX_STREAM_BYTES, SseEvent, SseReader};
 pub use status::status_error;

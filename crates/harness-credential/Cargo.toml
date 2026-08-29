@@ -11,9 +11,12 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# `harness-http` for the one POST a renewal is, and nothing else: a second HTTP client in the tree
+# of a binary that handles credentials is a second thing to audit. `tempfile` is a dependency and
+# not a dev-dependency because the atomic write that keeps a credential store from being caught
+# half-written is shipped behaviour, not a test fixture.
 [dependencies]
+harness-http = { workspace = true }
 harness-wire = { workspace = true }
 serde_json = { workspace = true }
-
-[dev-dependencies]
 tempfile = { workspace = true }

@@ -192,6 +192,23 @@ impl LoopSink for BridgeSink {
             LoopEvent::Warning { code, message } => {
                 eprintln!("warning [{code}] {message}");
             }
+            // Nor has a credential renewal — and unlike the frames below, this one is an act on
+            // the operator's disk rather than something the client already knows. A bridged run
+            // reaches this only if it was started with a provider that renews, which nothing does
+            // today; if that changes, the machine's owner is told out loud rather than by the
+            // file's timestamp. Never the token: `CredentialRenewal` carries none.
+            LoopEvent::CredentialRenewed(renewal) => {
+                eprintln!(
+                    "renewed [{}] {} rewritten{}",
+                    renewal.provider,
+                    renewal.source,
+                    if renewal.refresh_token_rotated {
+                        ", refresh token rotated"
+                    } else {
+                        ""
+                    }
+                );
+            }
             // The tool round trip is owned by `BridgeTools`, which has to interleave a request and
             // its response; announcing it twice would desynchronise the client's call bookkeeping.
             LoopEvent::ToolRequested(_)

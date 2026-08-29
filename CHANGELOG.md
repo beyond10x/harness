@@ -9,6 +9,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A `codex` provider, and it renews its own credential.** `b10x-harness run` against a ChatGPT
+  subscription is now `[default] provider = "codex"` — endpoint `https://chatgpt.com/backend-api/codex`,
+  wire `openai-responses`, model `gpt-5.6-sol`, credential `~/.codex/auth.json` at
+  `/tokens/access_token`. Every one of those values was read off the completed two-turn run of
+  2026-08-30 (`story:chatgpt-codex-authorized-run`) rather than off a vendor's documentation.
+  `openai` stays what it was: that entry bills an API key, this one bills a person's plan, and they
+  are two providers because they are two things to be.
+
+  Unlike every provider before it, `codex` carries **renewal facts**: a token endpoint, a client id
+  and the pointer to the refresh token beside the access token. When the token a run is about to
+  use is within fifteen minutes of expiring, the run presents that refresh token to
+  `https://auth.openai.com/oauth/token`, takes the new one, and writes it back into
+  `~/.codex/auth.json` before the first request. Staleness is decided by decoding the access
+  token's own `exp` — the signature is not verified, because this is not authenticating anybody,
+  it is asking the credential when it expects to stop working. A token whose expiry cannot be read
+  is left alone rather than guessed at.
+
+  **This is the harness writing to a file another program owns**, which is a larger softening than
+  the defaulted credential path that preceded it, and it is bounded the same way — by being
+  readable before it happens and stated after. `providers show codex` prints the file, the token
+  endpoint, the client id and the refresh pointer before anything is spent. The write itself is
+  atomic (written beside the original, parsed back to check it says what it should, then renamed
+  over it) and byte-preserving (only the token values move; key order, indentation and keys this
+  build has never heard of survive exactly — where that cannot be proven safe the document is
+  re-serialised and the record says so). The file's own mode is carried across, so a store is
+  never widened by being renewed.
+
+  A credential the operator named themselves — `--oauth-token-file`, or an `oauth-token-file` in a
+  `[providers.codex]` table — switches the renewal off: those pointers describe one vendor's
+  document, and applying them to a file somebody named by hand would at best refuse and at worst
+  rewrite something this build had no business touching. `claude` carries no renewal either, and
+  that is deliberate rather than pending: its credential file holds a refresh token, but the
+  authorization server and client that would accept it have not been read off anything here, and a
+  guessed token endpoint sends a live refresh token to a server nobody verified.
+
+- **`credential-renewed`, a new event, emitted before `started`.** The record of a run that
+  rewrote somebody's credential store: the file, the provider whose renewal was used, when the new
+  credential runs out, whether the refresh token on disk was retired, and whether the rewrite
+  preserved every other byte. It carries **no part of the credential** — not a prefix, not a
+  length, not a digest, because a digest of a token is an oracle for it — so the JSONL stream stays
+  a thing you can forward to explain a run. Printed on stderr **even under `--quiet`**: quiet is a
+  request for less progress noise, not for a side effect on your disk to go unmentioned. A run that
+  renewed nothing emits nothing here; unlike the always-written lists on `started`, this is an act,
+  and an act that did not happen has no empty form.
+
+- **`harness-http` gained `JsonExchange`**: one plain POST with a JSON body and a JSON answer, for
+  the request that is not a turn. It does not retry, deliberately — an authorization server that
+  rotates a refresh token has already spent the old one by the time it answers, so a second attempt
+  cannot succeed and a first attempt whose answer was lost has left the caller holding a credential
+  the server no longer honours. `harness-credential` takes it rather than a second HTTP client: a
+  binary that handles credentials should have one transport to audit.
+
 - **A turn can be held to one tool, and the answer nudge holds one.** `TurnRequest::tool_choice`
   is a new neutral value — `auto`, `required`, or a named tool — projected by both wires in their
   own spellings (`{"type": "tool", "name": …}` and `{"type": "any"}` on the Messages route;

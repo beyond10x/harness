@@ -231,6 +231,13 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
         }
         match event {
             LoopEvent::Started { .. } => self.started(&event),
+            // **Printed even under `--quiet`, like a warning and for the same reason.** This is
+            // the one line saying that a run rewrote a file it does not own. A person who asked
+            // for silence asked for less progress noise, not for a side effect on their disk to
+            // go unmentioned.
+            LoopEvent::CredentialRenewed(renewal) => {
+                let _ = writeln!(self.err, "{}", renewed_line(&renewal));
+            }
             LoopEvent::TurnStarted { turn } => self.note(&format!("· turn {turn}")),
             // Whatever streamed for the turn is void, and the person who read it has to be told:
             // a stdout that cannot be un-printed gets a marker line instead.
@@ -460,6 +467,30 @@ fn requested(call: &harness_wire::ToolCall) -> String {
     )
 }
 
+/// What a person is told when their credential store was rewritten.
+///
+/// Names the file, when the new credential runs out, and whether the refresh token on disk was
+/// retired — the last because it is what decides whether an older copy of that file is still worth
+/// anything. Never the token, and nothing derived from one.
+fn renewed_line(renewal: &harness_loop::CredentialRenewal) -> String {
+    format!(
+        "renewed [{}] {}{}{}",
+        renewal.provider,
+        renewal.source,
+        match renewal.expires_unix {
+            Some(unix) => format!(", valid to {}", crate::utc_stamp(unix)),
+            // Not "it does not expire": this build could not read a date out of what it was
+            // given, and saying so is the difference between a fact and a silence.
+            None => ", expiry not stated by the new token".to_owned(),
+        },
+        if renewal.refresh_token_rotated {
+            ", refresh token rotated"
+        } else {
+            ""
+        }
+    )
+}
+
 /// One progress line for the events that only ever become a note.
 fn owned_line(event: &LoopEvent) -> String {
     match event {
@@ -512,6 +543,53 @@ mod tests {
             String::from_utf8(out).expect("utf-8"),
             String::from_utf8(err).expect("utf-8"),
         )
+    }
+
+    fn a_renewal() -> harness_loop::CredentialRenewal {
+        harness_loop::CredentialRenewal {
+            source: "/home/you/.codex/auth.json".to_owned(),
+            provider: "codex".to_owned(),
+            expires_unix: Some(1_788_871_151),
+            refresh_token_rotated: true,
+            byte_preserving: true,
+        }
+    }
+
+    #[test]
+    fn a_rewritten_credential_file_is_named_on_stderr_and_never_reaches_stdout() {
+        let (out, err) = render(vec![LoopEvent::CredentialRenewed(a_renewal())], false);
+        assert_eq!(out, "", "stdout is the run's answer and nothing else");
+        assert!(err.contains("/home/you/.codex/auth.json"), "{err}");
+        assert!(err.contains("codex"), "{err}");
+        assert!(
+            err.contains("refresh token rotated"),
+            "the fact that decides whether an older copy of that file is still worth anything: \
+             {err}"
+        );
+    }
+
+    #[test]
+    fn a_rewritten_credential_file_is_named_even_under_quiet() {
+        // **Deliberate, and the same rule a warning gets.** `--quiet` asks for less progress
+        // noise. It is not a request for a side effect on somebody's disk to go unmentioned.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        {
+            let mut renderer = Renderer::new(&mut out, &mut err, false, true);
+            LoopSink::emit(&mut renderer, LoopEvent::CredentialRenewed(a_renewal()));
+        }
+        let err = String::from_utf8(err).expect("utf-8");
+        assert!(err.contains("/home/you/.codex/auth.json"), "{err}");
+    }
+
+    #[test]
+    fn a_new_token_this_build_cannot_date_says_so_rather_than_implying_it_never_expires() {
+        let mut renewal = a_renewal();
+        renewal.expires_unix = None;
+        renewal.refresh_token_rotated = false;
+        let (_, err) = render(vec![LoopEvent::CredentialRenewed(renewal)], false);
+        assert!(err.contains("expiry not stated"), "{err}");
+        assert!(!err.contains("rotated"), "{err}");
     }
 
     #[test]

@@ -17,5 +17,7 @@
 //! [`harness_wire::CredentialKind`], which is what a source here declares.
 
 mod oauth;
+mod renewal;
 
 pub use oauth::{NamedSource, SubscriptionToken};
+pub use renewal::{AuthDocument, Renewed, TokenEndpoint, expiry_of, is_stale, renew_if_stale};

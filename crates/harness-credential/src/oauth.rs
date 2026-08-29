@@ -9,12 +9,17 @@
 //! credential came from wherever the process happened to start is a run nobody can explain
 //! afterwards.
 //!
-//! It also **does not refresh**. A subscription token expires, and renewing it means holding a
-//! refresh token and calling an authorization server — custody this component has not been given.
-//! What it does instead is re-read the named source **on every call**, so a token an owner outside
-//! this process renews is picked up on the next turn without the run being restarted. That is the
-//! whole of the renewal story here, and the run fails by name when the source has gone stale
-//! rather than pretending otherwise.
+//! It also **does not refresh**, and that is still true of this type. A subscription token
+//! expires, and renewing it means holding a refresh token and calling an authorization server.
+//! What this does instead is re-read the named source **on every call**, so a token an owner
+//! outside this process renews is picked up on the next turn without the run being restarted, and
+//! the run fails by name when the source has gone stale rather than pretending otherwise.
+//!
+//! [`crate::renew_if_stale`] is the other half, and it is deliberately not reachable from here: it
+//! is something a **caller** does once, before the run, having been pointed at the refresh token
+//! and the authorization server by name. A bearer source that could quietly renew would be a
+//! credential this process rewrote on somebody's disk in the middle of a turn, with nothing in the
+//! record saying it had.
 
 use std::path::{Path, PathBuf};
 

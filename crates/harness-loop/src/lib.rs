@@ -80,7 +80,9 @@ pub use delegate::{
     DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_TURNS, DELEGATE_PREAMBLE, Delegation,
     MAX_DELEGATION_DEPTH,
 };
-pub use event::{LoopEvent, LoopSink, NullLoopSink, ProfileRef, VecLoopSink, Withheld};
+pub use event::{
+    CredentialRenewal, LoopEvent, LoopSink, NullLoopSink, ProfileRef, VecLoopSink, Withheld,
+};
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
@@ -319,6 +321,14 @@ pub struct LoopConfig {
     /// Where this run's credential came from, for the record: `named`, or `provider:<name>`.
     pub credential_source: String,
 
+    /// A credential this run renewed before it started, when it did. Acted on nowhere.
+    ///
+    /// The renewal happened in the caller — it is a file read, an HTTP POST and a file write, none
+    /// of which this crate may do (`AGENTS.md` invariant 3) — and arrives here for the same reason
+    /// `profiles` and `withheld` do: the loop owns the event stream, so a fact that belongs in the
+    /// record has to be handed to it. [`None`] is the ordinary run, which renewed nothing.
+    pub credential_renewal: Option<CredentialRenewal>,
+
     /// The named agents a delegate may be run as, or [`None`] for the generic delegate only.
     ///
     /// Loaded by the caller from the vendor's `agents/<name>.md` format. Each carries its own
@@ -377,6 +387,7 @@ impl LoopConfig {
             agents: None,
             profiles: Vec::new(),
             credential_source: "named".to_owned(),
+            credential_renewal: None,
             admits: None,
             skills: None,
             withheld: Vec::new(),
@@ -418,6 +429,13 @@ impl LoopConfig {
     #[must_use]
     pub fn with_credential_source(mut self, source: String) -> Self {
         self.credential_source = source;
+        self
+    }
+
+    /// States that the caller renewed this run's credential, and rewrote the file holding it.
+    #[must_use]
+    pub fn with_credential_renewal(mut self, renewal: Option<CredentialRenewal>) -> Self {
+        self.credential_renewal = renewal;
         self
     }
 
@@ -1736,6 +1754,12 @@ impl<'a> AgentLoop<'a> {
             .max_duration()
             .map(|span| Instant::now() + span);
 
+        // Before `Started`, because it happened before the run: the credential was stale, it was
+        // renewed, and somebody's file on disk was rewritten — all of it upstream of the first
+        // request. A reader of the record sees the acts in the order they occurred.
+        if let Some(renewal) = self.config.credential_renewal.clone() {
+            sink.emit(LoopEvent::CredentialRenewed(renewal));
+        }
         sink.emit(LoopEvent::Started {
             model: self.config.model.clone(),
             // The loop's own tools among them: the event answers *what was the model offered*,

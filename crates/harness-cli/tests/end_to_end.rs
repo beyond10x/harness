@@ -1909,3 +1909,71 @@ fn a_machine_with_no_config_directory_is_told_what_to_type_rather_than_panicking
          {stderr}"
     );
 }
+
+/// `providers show codex` states the write before anything is spent.
+///
+/// **The condition on which a built-in provider is allowed to renew at all.** A defaulted
+/// credential path is paid for by being readable without running anything (`provider.rs` § *The
+/// credential is defaulted*); a defaulted credential path that will also be **rewritten** owes the
+/// same reader more — which other field of that file gets read, and which server it is presented
+/// to. If this ever stops printing, the renewal is no longer accountable and should go with it.
+#[test]
+fn providers_show_states_the_file_it_will_rewrite_and_the_server_it_will_talk_to() {
+    let empty_config = tempfile::tempdir().expect("a temporary directory");
+    let shown = Command::new(BINARY)
+        .args(["providers", "show", "codex"])
+        // An empty config directory, so this is the shipped table and not an operator's override.
+        .env("XDG_CONFIG_HOME", empty_config.path())
+        .output()
+        .expect("the binary runs");
+    assert!(shown.status.success(), "{shown:?}");
+    let text = String::from_utf8_lossy(&shown.stdout);
+    for expected in [
+        "https://chatgpt.com/backend-api/codex",
+        "openai-responses",
+        "/tokens/access_token",
+        "https://auth.openai.com/oauth/token",
+        "app_EMoamEEZ73f0CkXaXp7hrann",
+        "/tokens/refresh_token",
+    ] {
+        assert!(text.contains(expected), "`{expected}` is not in:\n{text}");
+    }
+}
+
+/// And the provider that does not renew says so, rather than saying nothing.
+///
+/// The same silence rule the `Started` event's always-written lists exist for: a reader cannot tell
+/// *this provider never writes your credential file* from *this build does not say* unless one of
+/// them is stated.
+#[test]
+fn a_provider_that_never_rewrites_your_credential_file_says_so() {
+    let empty_config = tempfile::tempdir().expect("a temporary directory");
+    let shown = Command::new(BINARY)
+        .args(["providers", "show", "claude"])
+        .env("XDG_CONFIG_HOME", empty_config.path())
+        .output()
+        .expect("the binary runs");
+    assert!(shown.status.success(), "{shown:?}");
+    let text = String::from_utf8_lossy(&shown.stdout);
+    assert!(text.contains("never writes it"), "{text}");
+    assert!(
+        !text.contains("auth.openai.com"),
+        "a provider with no measured renewal must not borrow another's: {text}"
+    );
+}
+
+/// `providers list` offers the `ChatGPT` route beside the API-key one.
+#[test]
+fn the_shipped_table_offers_both_openai_routes_under_different_names() {
+    let empty_config = tempfile::tempdir().expect("a temporary directory");
+    let listed = Command::new(BINARY)
+        .args(["providers", "list"])
+        .env("XDG_CONFIG_HOME", empty_config.path())
+        .output()
+        .expect("the binary runs");
+    assert!(listed.status.success(), "{listed:?}");
+    let text = String::from_utf8_lossy(&listed.stdout);
+    for name in ["claude", "openai", "codex"] {
+        assert!(text.contains(name), "`{name}` is not in:\n{text}");
+    }
+}

@@ -41,6 +41,45 @@ pub struct ProfileRef {
     pub sha256: String,
 }
 
+/// A credential this run renewed before it started, and wrote back where its owner keeps it.
+///
+/// **The record of a side effect on a file this harness does not own.** A run that renews a
+/// subscription token rewrites a vendor's credential store — the strongest thing a harness does to
+/// a machine short of the tools it publishes — and the only thing that separates that from a
+/// program quietly editing your home directory is that the run says it did, names the file, and
+/// says what the new credential is good for.
+///
+/// **Nothing here is derived from the token.** Not a prefix, not a length, not a digest: a digest
+/// of a credential is an oracle for it, and the fields below are the ones a person actually needs
+/// to answer *was this run's credential fresh, and what did it change*.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialRenewal {
+    /// The document that was rewritten.
+    pub source: String,
+    /// The provider whose renewal was used — the entry that named the endpoint and the client.
+    pub provider: String,
+    /// When the credential this run holds expires, from its own `exp`.
+    ///
+    /// [`None`] when the new token is not a JWT: the renewal still happened, and this build simply
+    /// cannot date what it got. Absence here is *not* "it does not expire".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_unix: Option<u64>,
+    /// Whether the authorization server retired the refresh token that was on disk.
+    ///
+    /// **The field that matters after something goes wrong.** When it is true, a backup of that
+    /// file taken before this run no longer holds a credential that works, so restoring one is not
+    /// the recovery it looks like — the owner has to log in again.
+    pub refresh_token_rotated: bool,
+    /// Whether every byte the renewal did not have to change survived it.
+    ///
+    /// `true` on the ordinary path: only the token values moved, and the owner's key order,
+    /// indentation and any key this build never heard of are exactly where they were. `false` is a
+    /// document that had to be re-serialised — still correct, still complete, and reordered. Said
+    /// out loud because "your credential file looks different" is a thing somebody notices later
+    /// and has no other way to explain.
+    pub byte_preserving: bool,
+}
+
 /// What `credential_source` says when nothing named a provider.
 fn named_credential() -> String {
     "named".to_owned()
@@ -121,6 +160,14 @@ pub enum LoopEvent {
         #[serde(default = "named_credential")]
         credential_source: String,
     },
+    /// A credential was renewed and written back, before the first turn.
+    ///
+    /// Emitted once, ahead of [`LoopEvent::Started`], because that is when it happened: the run
+    /// held a stale token, renewed it, and rewrote the file its owner keeps it in — all before
+    /// anything was sent to a model. A run that renewed nothing emits nothing here, which is the
+    /// ordinary case and reads correctly as one: unlike the always-written lists on `Started`,
+    /// this is an *act*, and an act that did not happen has no empty form.
+    CredentialRenewed(CredentialRenewal),
     TurnStarted {
         turn: u64,
     },
@@ -404,6 +451,50 @@ mod tests {
             serde_json::from_str(r#"{"kind":"started","model":"m","published_tools":[]}"#)
                 .expect("an older record deserializes");
         assert_eq!(old, started);
+    }
+
+    #[test]
+    fn a_renewal_is_recorded_with_no_part_of_the_credential_in_it() {
+        // **The whole safety property of this event.** It exists to say that a run rewrote
+        // somebody's credential file; if saying so put any part of the credential in the record,
+        // the JSONL a person forwards to explain a run would be a thing that has to be handled
+        // like a secret. Not a prefix, not a length, not a digest — a digest of a token is an
+        // oracle for it.
+        let event = LoopEvent::CredentialRenewed(CredentialRenewal {
+            source: "/home/you/.codex/auth.json".to_owned(),
+            provider: "codex".to_owned(),
+            expires_unix: Some(1_788_871_151),
+            refresh_token_rotated: true,
+            byte_preserving: true,
+        });
+        let encoded = serde_json::to_string(&event).expect("serializes");
+        assert_eq!(
+            encoded,
+            r#"{"kind":"credential-renewed","source":"/home/you/.codex/auth.json","provider":"codex","expires_unix":1788871151,"refresh_token_rotated":true,"byte_preserving":true}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<LoopEvent>(&encoded).expect("deserializes"),
+            event
+        );
+    }
+
+    #[test]
+    fn a_renewal_whose_new_token_cannot_be_dated_omits_the_expiry_rather_than_inventing_one() {
+        // Absent means *this build could not read a date out of what it got*. A zero, or a
+        // now-plus-a-guess, would read as a fact.
+        let event = LoopEvent::CredentialRenewed(CredentialRenewal {
+            source: "/home/you/.codex/auth.json".to_owned(),
+            provider: "codex".to_owned(),
+            expires_unix: None,
+            refresh_token_rotated: false,
+            byte_preserving: false,
+        });
+        let encoded = serde_json::to_string(&event).expect("serializes");
+        assert!(!encoded.contains("expires_unix"), "{encoded}");
+        assert_eq!(
+            serde_json::from_str::<LoopEvent>(&encoded).expect("deserializes"),
+            event
+        );
     }
 
     #[test]

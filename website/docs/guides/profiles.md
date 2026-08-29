@@ -48,8 +48,19 @@ b10x-harness providers list          # what this build ships, and what you have 
 b10x-harness providers show claude   # the effective endpoint, wire, model and credential path
 ```
 
-Two are built in: `claude` (Anthropic Messages, subscription OAuth) and `openai` (OpenAI Responses,
-`OPENAI_API_KEY`). Override any field without restating the rest — a provider is a bag of
+Three are built in:
+
+| provider | route | credential |
+|---|---|---|
+| `claude` | Anthropic Messages | subscription OAuth, `~/.claude/.credentials.json` |
+| `openai` | OpenAI Responses | `OPENAI_API_KEY` |
+| `codex` | OpenAI Responses, **ChatGPT subscription** | subscription OAuth, `~/.codex/auth.json` |
+
+`openai` and `codex` are two providers because they are two things to be: one bills an API key, the
+other bills a person's ChatGPT plan, at a different endpoint. A single entry would make *which am I
+billing* unanswerable from the config.
+
+Override any field without restating the rest — a provider is a bag of
 independent connection facts, so changing the model must not silently drop the endpoint it is
 served from:
 
@@ -100,8 +111,9 @@ cheap = "claude-haiku-4-5-20251001"
 `session.started.model` always records what the alias resolved to. **An alias is a convenience at
 the command line, never in the evidence.**
 
-`openai` ships no aliases: that vendor's current identifiers have not been read off a working
-account here, and an alias pointing at a model that does not exist is worse than none.
+`openai` and `codex` ship no aliases: that vendor's current identifiers have not been read off a
+working account here in a form worth pinning short names to, and an alias pointing at a model that
+does not exist is worse than none.
 
 ### The credential is defaulted, and the record says so
 
@@ -120,6 +132,52 @@ reports `"named"`.
 
 If the file a provider names is not there, the run refuses at startup rather than failing at its
 first request.
+
+### `codex` renews a stale token, and rewrites the file it came from
+
+A subscription token expires. When `codex` supplies the credential and that token is within fifteen
+minutes of expiring, the run presents the refresh token beside it to the vendor's authorization
+server, takes the new one, and **writes it back into `~/.codex/auth.json`** before the first
+request.
+
+That is a bigger step than defaulting a path, so it is bounded the same way — by being readable and
+by being said:
+
+```console
+$ b10x-harness providers show codex
+...
+renews               yes, when the token is within 15 minutes of expiring
+token-endpoint       https://auth.openai.com/oauth/token
+client-id            app_EMoamEEZ73f0CkXaXp7hrann
+refresh-pointer      /tokens/refresh_token
+```
+
+and a run that actually renewed says so, on stderr and in the record, **even under `--quiet`**:
+
+```
+renewed [codex] /home/you/.codex/auth.json, valid to 2026-09-18, refresh token rotated
+```
+
+Four rules hold that write down:
+
+- **Only a credential a provider defaulted.** Name your own with `--oauth-token-file` or
+  `[providers.codex] oauth-token-file = …` and the renewal switches off: this build reads the file
+  you named and never writes it.
+- **Atomic.** The new document is written beside the original, parsed back to check it says what it
+  should, and only then renamed over it. A crash in the middle leaves the old file intact.
+- **Byte-preserving.** Only the token values move. Key order, indentation and keys this build has
+  never heard of survive exactly — it is another program's file. Where that cannot be proven safe
+  the document is re-serialised instead, and the record's `byte_preserving: false` says so.
+- **No part of the credential is recorded.** Not a prefix, not a length, not a digest.
+
+`refresh token rotated` in that line is worth reading: it means the refresh token that was on disk
+has been retired, so a backup of that file taken before the run no longer holds a working
+credential. Recovery is `codex login`, not restoring the copy.
+
+`claude` does **not** renew, and that is deliberate rather than pending: its credential file holds a
+refresh token, but the authorization server and client that would accept it have not been read off
+a working install here. A guessed token endpoint is the same mistake as a guessed credential path,
+with a worse failure — it presents your refresh token to a server nobody verified.
 
 ## Profiles
 

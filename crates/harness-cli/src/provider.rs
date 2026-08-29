@@ -26,9 +26,24 @@
 //! # Only what has been measured is here
 //!
 //! `claude`'s values are the ones a live run actually used on 2026-08-29, read out of the eval that
-//! drives it. `codex` is deliberately absent: its subscription credential location has not been
-//! read off a working install, and inventing a vendor path is the one mistake this table exists to
-//! avoid. Add it when somebody measures it.
+//! drives it. `codex`'s are the ones a live run used on 2026-08-30 — endpoint, wire, model and
+//! credential pointer all read off that run rather than off a vendor's documentation — and its
+//! renewal facts were read off the credential this machine holds and the `codex` binary that wrote
+//! it. Nothing in this table is inferred from a plausible-looking URL.
+//!
+//! # `codex` renews, and that is a larger softening than a defaulted path
+//!
+//! A provider that names a renewal is a provider that will make this binary **read a refresh token
+//! it does not send to the model, and write to a file another program owns.** Both are stated
+//! rather than assumed: `providers show codex` prints the token endpoint and the client id before
+//! anything is spent, and a run that actually renewed emits `credential-renewed` naming the file it
+//! rewrote. See `harness_credential::renew_if_stale` for what the write itself guarantees.
+//!
+//! `claude` carries no renewal, and the reason is the rule above: `~/.claude/.credentials.json`
+//! holds a refresh token, but the authorization server and client id that would accept it have not
+//! been read off anything here. A guessed token endpoint is the same mistake as a guessed
+//! credential path, with a worse failure — it presents somebody's refresh token to a URL nobody
+//! verified.
 
 use std::collections::BTreeMap;
 
@@ -45,6 +60,30 @@ pub enum Credential {
     OauthFile { path: String, pointer: String },
     /// An environment variable holding the key.
     ApiKeyEnv { name: String },
+}
+
+/// How a provider's OAuth document is renewed when the token in it has gone stale.
+///
+/// **Connection facts, like everything else here, and it still grants nothing.** The refresh token
+/// this presents is already on the operator's disk, issued to them, by the vendor they logged in
+/// to; naming where to present it adds no capability the machine did not already have. What it
+/// does add is a write, and that is why the run announces one.
+///
+/// Every field is measured off a working install. A `client_id` guessed wrong fails closed; a
+/// `token_endpoint` guessed wrong sends a live refresh token somewhere nobody checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Renewal {
+    /// The authorization server's token endpoint.
+    pub token_endpoint: String,
+    /// The OAuth client the credential was issued to. Public by construction — this flow has no
+    /// client secret, which is why one is not here to be leaked.
+    pub client_id: String,
+    /// Pointer to the refresh token, in the same document as the access token.
+    pub refresh_pointer: String,
+    /// Pointer to the id token, when the store keeps one beside the others.
+    pub id_token_pointer: Option<String>,
+    /// Pointer to the store's own "last renewed" stamp, so its owner's next read is not misled.
+    pub renewed_at_pointer: Option<String>,
 }
 
 /// One way to reach a model.
@@ -69,6 +108,11 @@ pub struct Provider {
     /// edited. `session.started.model` records what it resolved to, so the record still names the
     /// exact model — an alias is a convenience at the command line, never in the evidence.
     pub aliases: BTreeMap<String, String>,
+    /// How to renew this provider's credential, for the routes whose renewal has been measured.
+    ///
+    /// [`None`] is a provider whose token this build will read and never rewrite — which is every
+    /// provider that existed before `codex`, and remains the default a new entry gets.
+    pub renewal: Option<Renewal>,
 }
 
 /// The operator's override of one provider, field by field.
@@ -125,6 +169,11 @@ pub fn built_in() -> Vec<Provider> {
             .into_iter()
             .map(|(short, exact)| (short.to_owned(), exact.to_owned()))
             .collect(),
+            // Not because this route cannot be renewed — that file holds a refresh token — but
+            // because the authorization server and client id that would accept it have not been
+            // read off anything here. See the module doc: a guessed token endpoint is where a
+            // live refresh token goes to somebody nobody checked.
+            renewal: None,
         },
         Provider {
             name: "openai".to_owned(),
@@ -141,6 +190,49 @@ pub fn built_in() -> Vec<Provider> {
             // and an alias pointing at a model that does not exist is worse than no alias — it
             // fails at the far side, where nothing here can say why. `--model` still works.
             aliases: BTreeMap::new(),
+            // An API key does not expire and has nothing to present to an authorization server.
+            renewal: None,
+        },
+        // **The ChatGPT subscription route, not the API one.** `openai` above bills an API key;
+        // this bills a person's ChatGPT plan, through a different endpoint, with a token obtained
+        // by logging in rather than by issuing a key. They are two providers because they are two
+        // things to be, not two spellings of one.
+        Provider {
+            name: "codex".to_owned(),
+            // Every value below was read off the run recorded in
+            // `.engineering/planning/story/chatgpt-codex-authorized-run.md` — a completed
+            // two-turn run on 2026-08-30 with a failing control beside it — rather than off a
+            // vendor's documentation.
+            base_url: "https://chatgpt.com/backend-api/codex".to_owned(),
+            wire: "openai-responses".to_owned(),
+            model: "gpt-5.6-sol".to_owned(),
+            credential: Credential::OauthFile {
+                path: "~/.codex/auth.json".to_owned(),
+                pointer: "/tokens/access_token".to_owned(),
+            },
+            // As `openai`: this vendor's identifiers have not been read off a working account in a
+            // form worth pinning short names to. The default above is the one that has run.
+            aliases: BTreeMap::new(),
+            renewal: Some(Renewal {
+                // Read out of the `codex` binary on a machine that has one — the URL it itself
+                // presents this refresh token to. The issuer's OIDC discovery document advertises
+                // `/api/accounts/oauth/token` as well; this is the one the tool that wrote the file
+                // uses, and following the writer is the safer of two measured answers.
+                token_endpoint: "https://auth.openai.com/oauth/token".to_owned(),
+                // Not a secret and not a guess: it is the `client_id` claim of the access token in
+                // that file, and the `aud` of the id token beside it. This flow has no client
+                // secret.
+                client_id: "app_EMoamEEZ73f0CkXaXp7hrann".to_owned(),
+                refresh_pointer: "/tokens/refresh_token".to_owned(),
+                // Rewritten with the rest, so the document does not end up describing two
+                // different sessions — an id token from one login beside an access token from the
+                // next.
+                id_token_pointer: Some("/tokens/id_token".to_owned()),
+                // The store's own field. Left stale it would only cost its owner a redundant
+                // refresh, but a harness that rewrote three of a file's four related fields would
+                // be leaving a document that contradicts itself.
+                renewed_at_pointer: Some("/last_refresh".to_owned()),
+            }),
         },
     ]
 }
@@ -191,6 +283,14 @@ pub fn resolve(
     // interchangeable field by field: a `path` left over from an OAuth default beside an
     // `api-key-env` would be two credentials, and the run would use whichever the reader looked at
     // first.
+    // **A credential the operator named is never renewed by this build.** The renewal below knows
+    // one document's layout — which pointer holds the refresh token, which holds the stamp — and
+    // that knowledge is about the file the provider named, not about whatever file an override
+    // points at. Renewing someone else's document against those pointers would at best refuse and
+    // at worst rewrite a file this had no business touching.
+    if over.api_key_env.is_some() || over.oauth_token_file.is_some() {
+        provider.renewal = None;
+    }
     match (&over.api_key_env, &over.oauth_token_file) {
         (Some(name), None) => {
             provider.credential = Credential::ApiKeyEnv { name: name.clone() };
@@ -425,6 +525,108 @@ mod alias_tests {
             "claude-opus-5",
             "and the rest survive"
         );
+    }
+}
+
+#[cfg(test)]
+mod codex_tests {
+    use super::*;
+
+    #[test]
+    fn the_codex_entry_is_what_one_live_run_measured_and_not_what_a_vendor_page_says() {
+        // Every value here was read off the completed run of 2026-08-30 recorded in
+        // `.engineering/planning/story/chatgpt-codex-authorized-run.md`. If one of them is edited
+        // without a run behind it, this test is where that has to be argued.
+        let codex = resolve("codex", &BTreeMap::new()).expect("resolves");
+        assert_eq!(codex.base_url, "https://chatgpt.com/backend-api/codex");
+        assert_eq!(codex.wire, "openai-responses");
+        assert_eq!(codex.model, "gpt-5.6-sol");
+        assert_eq!(
+            codex.credential,
+            Credential::OauthFile {
+                path: "~/.codex/auth.json".to_owned(),
+                pointer: "/tokens/access_token".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn codex_is_the_subscription_route_and_openai_is_the_api_one() {
+        // Two providers because they are two things to be: a ChatGPT plan and an API key, at
+        // different endpoints, with credentials of different shapes. A single entry would make
+        // *which am I billing* unanswerable from the config.
+        let codex = resolve("codex", &BTreeMap::new()).expect("resolves");
+        let openai = resolve("openai", &BTreeMap::new()).expect("resolves");
+        assert_ne!(codex.base_url, openai.base_url);
+        assert!(matches!(codex.credential, Credential::OauthFile { .. }));
+        assert!(matches!(openai.credential, Credential::ApiKeyEnv { .. }));
+    }
+
+    #[test]
+    fn only_the_provider_whose_renewal_was_measured_declares_one() {
+        // `claude`'s credential file holds a refresh token too. What it does not have is a token
+        // endpoint and a client id read off anything here — and a guessed token endpoint is where
+        // somebody's live refresh token goes to a server nobody checked.
+        let renewing: Vec<String> = built_in()
+            .into_iter()
+            .filter(|provider| provider.renewal.is_some())
+            .map(|provider| provider.name)
+            .collect();
+        assert_eq!(renewing, vec!["codex".to_owned()]);
+    }
+
+    #[test]
+    fn the_codex_renewal_names_the_server_the_writer_of_that_file_uses() {
+        let codex = resolve("codex", &BTreeMap::new()).expect("resolves");
+        let renewal = codex.renewal.expect("codex renews");
+        assert_eq!(
+            renewal.token_endpoint,
+            "https://auth.openai.com/oauth/token"
+        );
+        assert_eq!(renewal.client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
+        assert_eq!(renewal.refresh_pointer, "/tokens/refresh_token");
+        assert_eq!(renewal.renewed_at_pointer.as_deref(), Some("/last_refresh"));
+    }
+
+    #[test]
+    fn naming_your_own_credential_turns_the_renewal_off() {
+        // **The rule that keeps this from writing to a file nobody offered it.** The pointers above
+        // describe one vendor's document; applied to a file the operator named by hand they would
+        // at best refuse and at worst rewrite something this build had no business touching.
+        for over in [
+            ProviderOverride {
+                oauth_token_file: Some("/somewhere/else.json".to_owned()),
+                ..ProviderOverride::default()
+            },
+            ProviderOverride {
+                api_key_env: Some("MY_KEY".to_owned()),
+                ..ProviderOverride::default()
+            },
+        ] {
+            let mut map = BTreeMap::new();
+            map.insert("codex".to_owned(), over);
+            let codex = resolve("codex", &map).expect("resolves");
+            assert_eq!(
+                codex.renewal, None,
+                "a credential the operator named is read and never rewritten"
+            );
+        }
+    }
+
+    #[test]
+    fn an_override_that_touches_no_credential_keeps_the_renewal() {
+        // The other half: changing the model must not quietly cost the renewal, for the same
+        // reason changing the model must not quietly cost the endpoint.
+        let mut map = BTreeMap::new();
+        map.insert(
+            "codex".to_owned(),
+            ProviderOverride {
+                model: Some("gpt-5.6-sol-mini".to_owned()),
+                ..ProviderOverride::default()
+            },
+        );
+        let codex = resolve("codex", &map).expect("resolves");
+        assert!(codex.renewal.is_some());
     }
 }
 

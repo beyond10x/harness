@@ -477,6 +477,13 @@ struct RunOptions {
     /// The profiles that configured this run, for its record. Set by [`apply_profiles`] alone.
     #[arg(skip)]
     applied_profiles: Vec<profile::ProfileRef>,
+    /// The provider's renewal facts, when the provider that supplied the credential has some.
+    ///
+    /// Not a flag, and set by [`apply_provider`] alone — on the same branch that defaults the
+    /// credential, so a source the operator typed is never renewed by this build. Holding it here
+    /// rather than re-resolving the provider later keeps one answer to *whose file is this*.
+    #[arg(skip)]
+    credential_renewal: Option<(String, provider::Renewal)>,
     /// Endpoint origin plus API prefix, for example `https://llmgw.example/v1`.
     ///
     /// Optional only because a provider can supply it — `[default] provider = "claude"`. A run with
@@ -1058,7 +1065,8 @@ fn apply_provider(
             "openai-responses" => Wire::OpenaiResponses,
             other => {
                 return Err(format!(
-                    "provider `{name}` names the wire `{other}`, which this build does not                          speak. It speaks `anthropic-messages` and `openai-responses`."
+                    "provider `{name}` names the wire `{other}`, which this build does not \
+                     speak. It speaks `anthropic-messages` and `openai-responses`."
                 ));
             }
         });
@@ -1076,7 +1084,9 @@ fn apply_provider(
                 let path = provider::expand_home(&path);
                 if !std::path::Path::new(&path).is_file() {
                     return Err(format!(
-                        "provider `{name}` reads its credential from `{path}`, which is not                              there. Log in to that vendor, or name another source with                              `--oauth-token-file` or `[providers.{name}]`."
+                        "provider `{name}` reads its credential from `{path}`, which is not \
+                         there. Log in to that vendor, or name another source with \
+                         `--oauth-token-file` or `[providers.{name}]`."
                     ));
                 }
                 options.oauth_token_file = Some(std::path::PathBuf::from(path));
@@ -1089,6 +1099,11 @@ fn apply_provider(
         // What the record will say. Not `named`: the operator chose the provider, and the
         // provider chose the path, and a reader is entitled to know which.
         options.credential_from_provider = Some(name.to_owned());
+        // And, for the providers that have measured renewal facts, how to renew what was just
+        // defaulted. **Inside this branch deliberately**: `named_already` above means the operator
+        // typed their own source, and a file somebody named by hand is one this build reads and
+        // never rewrites.
+        options.credential_renewal = provider.renewal.map(|renewal| (name.to_owned(), renewal));
     }
     Ok(())
 }
@@ -1206,6 +1221,85 @@ fn require_endpoint_and_model(options: &RunOptions, source: Option<&str>) -> Res
     Err(format!(
         "no endpoint or model: type `--base-url` and `--model`{config}."
     ))
+}
+
+/// How close to expiry a token has to be before a run renews it rather than spending it.
+///
+/// **Fifteen minutes is a trade, and it is worth naming which way.** Too small and a run that
+/// starts with nine minutes left dies mid-turn with a 401 the model cannot recover from; too large
+/// and every run rewrites a credential store that was working, spending a refresh the vendor may
+/// rate-limit and rotating a token that a parallel `codex` session is still holding.
+///
+/// Fifteen covers a turn and the retries under it. A run longer than that which *started* fresh is
+/// not covered — nothing here renews mid-run, and the credential source re-reads its file on every
+/// call, so the recovery for that case is the one that already existed: whoever owns the file
+/// renews it, and the next turn picks it up.
+const RENEWAL_MARGIN: std::time::Duration = std::time::Duration::from_mins(15);
+
+/// Renews this run's credential when it is about to expire, and rewrites the file holding it.
+///
+/// **Only for a credential a provider defaulted.** [`apply_provider`] sets `credential_renewal` on
+/// the same branch that defaults the path, so a source the operator typed with `--oauth-token-file`
+/// is read and never written: the pointers below describe one vendor's document, and applying them
+/// to a file somebody named by hand would at best refuse and at worst rewrite something this had no
+/// business touching.
+///
+/// Returns [`None`] for the ordinary run, where nothing was stale, nothing was sent and nothing was
+/// written.
+///
+/// # Errors
+///
+/// Names the document and what refused. **A failed renewal refuses the run**, rather than starting
+/// it on a token this build has just established is inside its last fifteen minutes: the run would
+/// spend its first request finding out the same thing, and the far side's `401` cannot say *log in
+/// to that vendor again* the way this can.
+fn renew_credential(
+    options: &RunOptions,
+) -> Result<Option<harness_loop::CredentialRenewal>, String> {
+    let Some((provider_name, renewal)) = &options.credential_renewal else {
+        return Ok(None);
+    };
+    // Both come from the same branch of `apply_provider`, so this is a guard rather than a case:
+    // a renewal without a document to renew is a provider table that contradicts itself.
+    let (Some(path), Some(access_pointer)) = (
+        options.oauth_token_file.as_ref(),
+        options.oauth_token_pointer.as_ref(),
+    ) else {
+        return Ok(None);
+    };
+    let now = unix_now();
+    let renewed = harness_credential::renew_if_stale(
+        &harness_credential::AuthDocument {
+            path: path.clone(),
+            access_pointer: access_pointer.clone(),
+            refresh_pointer: renewal.refresh_pointer.clone(),
+            id_token_pointer: renewal.id_token_pointer.clone(),
+            renewed_at_pointer: renewal.renewed_at_pointer.clone(),
+        },
+        &harness_credential::TokenEndpoint {
+            url: renewal.token_endpoint.clone(),
+            client_id: renewal.client_id.clone(),
+        },
+        now,
+        RENEWAL_MARGIN,
+        &environment::utc_rfc3339(now),
+    )
+    .map_err(|error| {
+        format!(
+            "renewing the credential provider `{provider_name}` reads from `{}`: {error}. The run \
+             was refused rather than started on a token about to be refused by the far side — log \
+             in to that vendor again, or name a source of your own with `--oauth-token-file`, \
+             which this build reads and never rewrites.",
+            path.display()
+        )
+    })?;
+    Ok(renewed.map(|renewed| harness_loop::CredentialRenewal {
+        source: path.display().to_string(),
+        provider: provider_name.clone(),
+        expires_unix: renewed.expires_unix,
+        refresh_token_rotated: renewed.refresh_token_rotated,
+        byte_preserving: renewed.byte_preserving,
+    }))
 }
 
 fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
@@ -1543,6 +1637,10 @@ fn prepare(
     options: &RunOptions,
     answer: Option<harness_loop::OutputSchema>,
 ) -> Result<Prepared, String> {
+    // **Before the credential is resolved, and before anything else in this function**, because a
+    // renewal rewrites a file the source below reads. Doing it after would leave the run holding a
+    // token it had already replaced on disk.
+    let renewed = renew_credential(options)?;
     let credential = resolve_credential(options)?;
     let cancel = LoopCancel::new();
     let client = model_client(
@@ -1608,6 +1706,7 @@ fn prepare(
     // Reported in the record and acted on nowhere: what the machine would not admit was already
     // decided when the catalogue was built, and this is the sentence saying so.
     .with_credential_source(credential_source(options))
+    .with_credential_renewal(renewed)
     .with_profiles(applied_profiles(options))
     .with_withheld(withheld_events(&withheld));
     // A hook is unconfined — it is the operator's own program — but it is not handed this run's
@@ -2650,6 +2749,22 @@ fn providers_command(verb: &ProvidersCommand) -> Result<(), String> {
                     println!("oauth-token-pointer  {pointer}");
                 }
                 provider::Credential::ApiKeyEnv { name } => println!("api-key-env  {name}"),
+            }
+            // Printed for the same reason the credential path is, and it is the larger claim: this
+            // says the run may **write** to that file, name the other field it will read out of it,
+            // and name the server it will present that field to — all before anything is spent.
+            match &provider.renewal {
+                Some(renewal) => {
+                    println!(
+                        "renews               yes, when the token is within 15 minutes of expiring"
+                    );
+                    println!("token-endpoint       {}", renewal.token_endpoint);
+                    println!("client-id            {}", renewal.client_id);
+                    println!("refresh-pointer      {}", renewal.refresh_pointer);
+                }
+                None => println!(
+                    "renews               no; this build reads that file and never writes it"
+                ),
             }
         }
     }

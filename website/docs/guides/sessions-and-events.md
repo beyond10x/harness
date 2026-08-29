@@ -83,7 +83,7 @@ Each line is one object with a kebab-case `kind`. The main event groups are:
 
 | Group | Event kinds |
 |---|---|
-| Lifecycle | `started`, `turn-started`, `finished` |
+| Lifecycle | `credential-renewed`, `started`, `turn-started`, `finished` |
 | Streaming | `text-delta`, `reasoning-delta`, `tool-arguments-delta` |
 | Tools | `tool-requested`, `approval-required`, `approval-resolved`, `tool-completed` |
 | Accounting | `usage`, `rates`, `cost` |
@@ -93,6 +93,21 @@ Each line is one object with a kebab-case `kind`. The main event groups are:
 The `started` event names the model, tools published to it, neutral operations, any requested tool
 withheld by the machine, and the `skills` and `agents` offered — the last three written even when
 empty, so *this run had none* and *this build does not say* are different records. The `finished` event carries the typed stop and total model turns.
+
+`credential-renewed` arrives **before** `started`, and only on a run that renewed something: the
+token had gone stale, it was renewed, and the file its owner keeps it in was rewritten — all before
+the first request. It names the file, the provider whose renewal was used, when the new credential
+runs out, whether the refresh token on disk was retired, and whether every byte the rewrite did not
+have to change survived. It carries **no part of the credential** — not a prefix, not a length, not
+a digest — so this stream stays a thing you can forward to explain a run.
+
+```json
+{"kind":"credential-renewed","source":"/home/you/.codex/auth.json","provider":"codex",
+ "expires_unix":1788871151,"refresh_token_rotated":true,"byte_preserving":true}
+```
+
+Unlike the always-written lists on `started`, this has no empty form: it is an **act**, and a run
+that renewed nothing emits nothing here.
 
 ### Warning codes
 

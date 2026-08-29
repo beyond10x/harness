@@ -142,6 +142,20 @@ pub fn utc_date(now: SystemTime) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+/// A UTC instant as RFC 3339, `YYYY-MM-DDThh:mm:ssZ`.
+///
+/// Beside [`utc_date`] and through the same `civil_from_days`, so this repository keeps its one
+/// answer to what day it is. It exists because a credential store's own "last renewed" stamp is a
+/// timestamp and not a date, and writing a date where its owner expects an instant would leave
+/// that file saying something slightly untrue about itself.
+pub fn utc_rfc3339(unix: u64) -> String {
+    let seconds = i64::try_from(unix).unwrap_or(i64::MAX);
+    let (year, month, day) = civil_from_days(seconds.div_euclid(SECONDS_PER_DAY));
+    let time = seconds.rem_euclid(SECONDS_PER_DAY);
+    let (hour, minute, second) = (time / 3600, (time % 3600) / 60, time % 60);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
 /// The civil date for a count of days since 1970-01-01, by Howard Hinnant's algorithm.
 ///
 /// Written out rather than taken from a date crate: this is the only date arithmetic in the

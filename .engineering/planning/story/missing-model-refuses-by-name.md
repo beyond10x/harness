@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:missing-model-refuses-by-name
 kind: story
-status: draft
+status: implemented
 title: A run with no model refuses by name on every machine, never panics
 relations:
 - derived_from: epic:pinned-interfaces-honest
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 5
 ---
 ## Evidence
 

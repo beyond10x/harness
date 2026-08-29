@@ -2,11 +2,11 @@
 format: aep.planning-md/1
 id: task:refusal-message-spacing
 kind: task
-status: draft
+status: implemented
 title: The no-endpoint-or-model refusal prints without runs of spaces
 relations:
 - decomposes: story:missing-model-refuses-by-name
-revision: 2
+revision: 5
 ---
 ## Evidence
 

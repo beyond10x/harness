@@ -274,7 +274,7 @@ fn the_probe_asks_the_one_route_the_contract_names() {
 
 // --- what a confined workspace admits, and what the catalogue makes of it ----------------------
 
-use harness_tools::{Catalogue, Operations};
+use harness_tools::{Catalogue, Operations, ReadWindow, SearchOptions};
 use std::sync::Arc;
 
 /// One thing the scripted transport was asked: method, path, and the body if there was one.
@@ -360,12 +360,22 @@ fn no_backend_at_all_contributes_nothing_that_outlives_a_call() {
         Scripted::new(vec![]),
         &["cargo"],
     )));
-    assert_eq!(entries, vec!["file_read", "dir_list", "search"]);
+    assert_eq!(entries, vec!["file_read", "dir_list", "search", "find"]);
 }
 
-/// A backend answering one file of `bytes` bytes.
+/// A backend answering one file of `bytes` bytes, all on one line.
 fn a_file_of(bytes: usize) -> Scripted {
-    let data = base64_of(&"x".repeat(bytes));
+    a_file_holding(&"x".repeat(bytes))
+}
+
+/// A backend answering `count` lines of `width` characters each.
+fn a_file_of_lines(count: usize, width: usize) -> Scripted {
+    a_file_holding(&format!("{}\n", "x".repeat(width)).repeat(count))
+}
+
+/// A backend answering exactly this text.
+fn a_file_holding(text: &str) -> Scripted {
+    let data = base64_of(text);
     Scripted::new(vec![(
         200,
         Box::leak(format!(r#"{{"content":{{"data":"{data}"}}}}"#).into_boxed_str()),
@@ -399,40 +409,123 @@ fn base64_of(text: &str) -> String {
 fn a_confined_read_is_bounded_and_says_so_rather_than_replaying_a_whole_large_file() {
     // A result is replayed on every later turn. A live run read three files in one turn and the
     // next turn's replay grew by 24,630 tokens, which pushed the conversation past its bound.
-    let answer = provider(&confined(), a_file_of(200_000), &["cargo"])
-        .file_read("big.txt", None)
+    let answer = provider(&confined(), a_file_of_lines(5_000, 40), &["cargo"])
+        .file_read("big.txt", ReadWindow::whole())
         .expect("read");
 
-    assert_eq!(answer["bytes"], 200_000, "the whole size is still reported");
+    assert_eq!(answer["bytes"], 205_000, "the whole size is still reported");
     assert_eq!(
         answer["truncated"], true,
         "a partial read never looks whole"
     );
     assert_eq!(
-        answer["text"].as_str().expect("text").len(),
-        64 * 1024,
-        "bounded at the same figure the unconfined provider uses"
+        answer["lines"],
+        json!({"from": 1, "to": 65_536 / 41, "total": 5_000}),
+        "as many whole lines as the same byte ceiling the unconfined provider uses holds"
     );
 }
 
 #[test]
 fn a_confined_read_the_caller_bounded_more_tightly_is_answered_at_that_bound() {
-    let answer = provider(&confined(), a_file_of(10_000), &["cargo"])
-        .file_read("big.txt", Some(100))
+    let answer = provider(&confined(), a_file_of_lines(200, 40), &["cargo"])
+        .file_read(
+            "big.txt",
+            ReadWindow {
+                max_bytes: Some(100),
+                ..ReadWindow::whole()
+            },
+        )
         .expect("read");
 
-    assert_eq!(answer["text"].as_str().expect("text").len(), 100);
+    assert_eq!(answer["lines"], json!({"from": 1, "to": 2, "total": 200}));
     assert_eq!(answer["truncated"], true);
 }
 
 #[test]
 fn a_confined_read_inside_the_bound_is_answered_whole_and_says_it_is_whole() {
     let answer = provider(&confined(), a_file_of(120), &["cargo"])
-        .file_read("small.txt", None)
+        .file_read("small.txt", ReadWindow::whole())
         .expect("read");
 
     assert_eq!(answer["truncated"], false);
-    assert_eq!(answer["text"].as_str().expect("text").len(), 120);
+    assert_eq!(answer["lines"], json!({"from": 1, "to": 1, "total": 1}));
+    assert_eq!(answer["truncated_lines"], json!([]));
+    assert_eq!(
+        answer["text"].as_str().expect("text").len(),
+        120 + "     1\t\n".len()
+    );
+}
+
+#[test]
+fn a_confined_read_answers_the_same_numbered_window_the_unconfined_one_does() {
+    // A run's replies must not change shape when it is confined: the same numbered lines, the same
+    // `lines` block, so a model that learnt to quote a read back to `file_edit` here does it there.
+    let answer = provider(&confined(), a_file_holding("a\nb\nc\nd\ne\n"), &["cargo"])
+        .file_read("five.txt", ReadWindow::lines(2, 2))
+        .expect("read");
+
+    assert_eq!(answer["text"], json!("     2\tb\n     3\tc\n"));
+    assert_eq!(answer["lines"], json!({"from": 2, "to": 3, "total": 5}));
+    assert_eq!(answer["truncated"], true, "line 5 is not in it");
+}
+
+#[test]
+fn a_read_the_route_ceiling_cut_is_never_answered_as_though_it_were_the_whole_file() {
+    // 4,096 lines of 64 bytes is exactly the 262,144 this machine says it reads and no more, so
+    // what came back is a prefix of something larger. It used to be answered as the file: a window
+    // ending on the prefix's last line said `truncated: false`, and `lines.total` was the prefix's
+    // count under the name of the file's.
+    let answer = provider(&confined(), a_file_of_lines(4_096, 63), &["cargo"])
+        .file_read("big.txt", ReadWindow::lines(4_090, 10))
+        .expect("read");
+
+    assert_eq!(
+        answer["truncated"], true,
+        "a window ending at the prefix's last line has not reached the file's"
+    );
+    assert_eq!(
+        answer["lines"]["total"],
+        Value::Null,
+        "how many lines the file has is not knowable from a prefix"
+    );
+    assert_eq!(answer["bytes"], Value::Null, "nor how large it is");
+    assert_eq!(answer["bytes_read"], 262_144);
+    assert_eq!(answer["route_ceiling_bytes"], 262_144);
+    assert!(
+        answer["note"]
+            .as_str()
+            .expect("a note")
+            .contains("cannot be reached on this path"),
+        "{}",
+        answer["note"]
+    );
+}
+
+#[test]
+fn an_edit_of_a_file_the_read_route_could_not_answer_whole_is_refused_rather_than_truncating_it() {
+    // An edit writes back what it read. On a file the ceiling cut, that is a write of the prefix
+    // over the whole file - everything past the ceiling deleted, by a tool the model asked to
+    // change one line.
+    let refusal = provider(&confined(), a_file_of_lines(4_096, 63), &["cargo"])
+        .file_edit("big.txt", "xxx", "yyy")
+        .expect_err("refused");
+
+    assert!(refusal.contains("read ceiling"), "{refusal}");
+    assert!(refusal.contains("Nothing was changed"), "{refusal}");
+}
+
+#[test]
+fn a_confined_window_past_what_the_read_route_reached_is_refused_by_the_line_it_stopped_at() {
+    // The route answers from byte 0 up to a ceiling and hands back a `String`, so there is no
+    // offset to seek with. A window past the last line those bytes hold cannot be answered - and
+    // answering nothing would look exactly like a file that has no such lines.
+    let refusal = provider(&confined(), a_file_holding("a\nb\nc\n"), &["cargo"])
+        .file_read("three.txt", ReadWindow::lines(40, 10))
+        .expect_err("refused");
+
+    assert!(refusal.contains("reaches line 3"), "{refusal}");
+    assert!(refusal.contains("line 40"), "{refusal}");
+    assert!(refusal.contains("byte ceiling"), "and why: {refusal}");
 }
 
 #[test]
@@ -911,14 +1004,15 @@ fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change(
 }
 
 #[test]
-fn a_confined_workspace_lists_and_searches_through_nothing_and_says_so() {
+fn a_confined_workspace_lists_searches_and_finds_through_nothing_and_says_so() {
     // `Backend` carries no listing route, and reading the host filesystem to fake one would step
     // around the containment this provider exists for. A run that needs a listing gets it from the
     // reading provider beside this one, which is what `harness_tools::Split` composes.
     let confined_provider = provider(&confined(), Scripted::new(vec![]), &[]);
     for refused in [
         confined_provider.dir_list("."),
-        confined_provider.search("fn", ".", None),
+        confined_provider.search("fn", ".", &SearchOptions::default()),
+        confined_provider.find("*.rs", ".", None),
     ] {
         assert!(
             refused

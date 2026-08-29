@@ -205,9 +205,18 @@ impl Envelope {
     /// tool that can opt out of the envelope, which is the one thing a safety boundary must not
     /// offer. A caller that wants everything approved passes [`Risk::Low`] as the ceiling; one that
     /// wants nothing approved passes [`Risk::Destructive`] and has said so out loud.
+    ///
+    /// # Risk alone decides
+    ///
+    /// Until 2026-08-29 a second clause asked about every non-idempotent mutation whatever the
+    /// ceiling. It was written for a workflow that re-runs a whole scope and would apply an edit
+    /// twice — a retry question, not an approval one — and its consequence at the command line was
+    /// backwards: `--approve-up-to high` let a `run` and a whole-file `file_write` through unasked
+    /// and refused every `file_edit`, so an unattended run was pushed toward rewriting files whole
+    /// when the narrower edit was the safer act. Retry safety is what [`Idempotency`] still
+    /// declares, and it is a scheduler's business to read it.
     pub fn needs_approval(&self, unattended_ceiling: Risk) -> bool {
         self.risk > unattended_ceiling
-            || (self.idempotency == Idempotency::NonIdempotent && self.mutates())
     }
 }
 
@@ -244,14 +253,20 @@ mod tests {
         );
         assert!(writes.needs_approval(Risk::Low));
 
-        // The second clause: doing it twice is doing it twice, so somebody has to want it once.
+        // Idempotency is a retry question and not an approval one: an edit that cannot be applied
+        // twice is not more dangerous than a write that can, and asking about it whatever the
+        // ceiling pushed an unattended run toward whole-file writes.
         let appends = Envelope {
             idempotency: Idempotency::NonIdempotent,
             ..writes.clone()
         };
         assert!(
-            appends.needs_approval(Risk::Destructive),
-            "a non-idempotent mutation is asked about however high the ceiling is"
+            !appends.needs_approval(Risk::Medium),
+            "a non-idempotent mutation at the ceiling is not asked about"
+        );
+        assert!(
+            appends.needs_approval(Risk::Low),
+            "and above the ceiling it is, for its risk"
         );
 
         // ...and only when it actually mutates. A non-idempotent *read* is a strange thing to

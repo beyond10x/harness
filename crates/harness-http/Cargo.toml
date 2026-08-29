@@ -1,0 +1,20 @@
+[package]
+name = "b10x-harness-http"
+description = "The transport half of a b10x provider wire: streaming HTTP, SSE framing, retry and status mapping"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Deliberately three. `harness-wire` for the neutral error, sink and cancellation types; `reqwest`
+# for the one blocking POST; `serde_json` for the frame payloads. A fourth dependency here would be
+# a fourth thing every wire below carries.
+[dependencies]
+harness-wire = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }

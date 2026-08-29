@@ -11,25 +11,27 @@
 //! The projection is in [`project`] and is entirely this wire's own: role-alternating messages
 //! instead of a flat input array, content blocks instead of output items, an argument object
 //! instead of encoded argument text, disjoint token counts instead of nested ones, and a required
-//! output bound where the first wire had an optional one.
+//! output bound where the first wire had an optional one. The credential's *presentation* is this
+//! wire's too — two header names for one secret, depending on which route issued it.
 //!
-//! What is **not** this wire's own, and is a near-copy of `harness-responses`, is everything
-//! between the HTTP client and the projection: bounded server-sent-event framing, the retry rule,
-//! the back-off, the witnessed sink that makes the retry rule safe, and the status-code mapping.
-//! None of that is vendor-shaped — it is *transport*-shaped — and the second wire proved it by
-//! needing all of it unchanged. It was copied rather than extracted because extracting it means a
-//! third crate and a change to the wire that is already released, and this change is the one that
-//! produces the evidence rather than the one that should act on it. That is the finding; a
-//! `harness-http` beneath both wires is what it argues for.
+//! What is **not** this wire's own is everything between the HTTP client and that projection:
+//! bounded server-sent-event framing, the retry rule, the back-off, the witnessed sink that makes
+//! the retry rule safe, and the status-code mapping. None of it is vendor-shaped — it is
+//! *transport*-shaped — and this wire proved it by needing all of it unchanged. It was a near-copy
+//! of `harness-responses` for exactly one release, which is the evidence that argued for
+//! [`harness_http`]; it now lives there, and this crate configures it with [`TRANSPORT`].
+//!
+//! One thing in that shared half is genuinely per-wire and is named rather than unified: this
+//! route has **no `[DONE]` sentinel**. Its terminal marker is a `message_stop` *payload*, so
+//! end-of-stream is the decoder's decision and not the framer's, and a `[DONE]` line here is a
+//! payload that is not JSON — a protocol refusal, which is what it must stay.
 
 mod project;
-mod sse;
 
 use std::collections::BTreeMap;
-use std::io::{BufReader, Read};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
+use harness_http::{Framing, Headers, HttpTransport, Settings, SseReader, StreamingPost};
 use harness_wire::{
     Bearer, BearerSource, Cancel, CredentialKind, Item, MAX_TOOL_ARGUMENT_BYTES, ModelPort,
     StreamEvent, StreamSink, TurnOutcome, TurnRequest, WireError, WireErrorCode, WireId,
@@ -39,7 +41,6 @@ use serde_json::{Value, json};
 pub use project::{
     MAX_TEMPERATURE, MAX_TOOL_NAME_BYTES, TOOL_NAME_PATTERN, request_body, usage_from_message,
 };
-pub use sse::{MAX_EVENT_BYTES, MAX_STREAM_BYTES, SseReader};
 
 /// Identifies this projection. Opaque items carry it and may not be replayed into another wire.
 pub const WIRE: &str = "anthropic-messages";
@@ -80,56 +81,14 @@ pub const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// [`Endpoint`], so a caller who cares names it rather than discovering it here.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 8192;
 
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// Applies to each individual read, not to the turn.
+/// What this wire asks of [`harness_http`].
 ///
-/// A streamed turn may legitimately run for minutes; what must not happen is a peer that accepts
-/// the connection and then says nothing, which would hold the loop open with no way out.
-const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(180);
-const MAX_ERROR_BODY_BYTES: usize = 2048;
-
-/// How many extra attempts a turn gets when the far side failed in a way that may not repeat.
-const MAX_ATTEMPTS: u32 = 4;
-
-/// How long to wait before attempt `n`, doubling and capped.
-fn backoff(attempt: u32) -> Duration {
-    Duration::from_millis(500u64 << attempt.min(4))
-}
-
-/// Sleeps for `duration` unless the caller cancels first.
-fn pause(duration: Duration, cancel: &Cancel) {
-    let end = Instant::now() + duration;
-    let slice = Duration::from_millis(50);
-    loop {
-        if cancel.is_cancelled() {
-            return;
-        }
-        let now = Instant::now();
-        if now >= end {
-            return;
-        }
-        std::thread::sleep(slice.min(end - now));
-    }
-}
-
-/// A sink that remembers whether anything reached the caller.
-///
-/// **The whole of the retry rule.** Resending a request is safe on this wire — nothing is retained
-/// on the far side and a second identical POST is a fresh turn. What is *not* safe is resending
-/// after the caller has already seen part of the first attempt: the text deltas are out, a person
-/// has read them, and a second attempt would append a second copy of the same sentence to the
-/// record. So an attempt that has emitted **anything** is final, whatever went wrong.
-struct WitnessedSink<'a> {
-    inner: &'a mut dyn StreamSink,
-    emitted: bool,
-}
-
-impl StreamSink for WitnessedSink<'_> {
-    fn emit(&mut self, event: StreamEvent) {
-        self.emitted = true;
-        self.inner.emit(event);
-    }
-}
+/// [`Framing::PayloadsOnly`] is the one thing the two wires do not agree on: this route ends its
+/// stream with a `message_stop` payload and has no `data: [DONE]` sentinel, so a `[DONE]` line
+/// here is a payload that is not JSON. Everything else — four attempts, the 1 s/2 s/4 s back-off,
+/// the two timeouts and the bounded error body — is the shared default, and
+/// `tests/transport.rs` fails if the two wires ever stop agreeing about it without saying so.
+pub const TRANSPORT: Settings = Settings::streaming(Framing::PayloadsOnly);
 
 /// One endpoint serving one model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,7 +167,7 @@ impl Endpoint {
 ///
 /// The returned values include the credential. It is built, written into a request, and dropped;
 /// this is a place a secret can escape and every call site is expected to treat it as one.
-fn request_headers(credential: Option<(&Bearer, CredentialKind)>) -> Vec<(&'static str, String)> {
+fn request_headers(credential: Option<(&Bearer, CredentialKind)>) -> Headers {
     let mut headers = vec![
         ("accept", "text/event-stream".to_owned()),
         ("content-type", "application/json".to_owned()),
@@ -250,8 +209,8 @@ pub struct MessagesClient {
     /// authenticates nobody — and for a run declared with no credential, whose first request is
     /// expected to be refused by the far end rather than by this client.
     bearer: Option<Arc<dyn BearerSource>>,
-    http: reqwest::blocking::Client,
-    cancel: Cancel,
+    /// The transport half, configured by [`TRANSPORT`] and shared with the other wire.
+    http: HttpTransport,
 }
 
 impl std::fmt::Debug for MessagesClient {
@@ -288,17 +247,11 @@ impl MessagesClient {
     }
 
     fn build(endpoint: Endpoint, bearer: Option<Arc<dyn BearerSource>>) -> Result<Self, WireError> {
-        let http = reqwest::blocking::Client::builder()
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .timeout(DEFAULT_OPERATION_TIMEOUT)
-            .build()
-            .map_err(|error| WireError::transport(format!("building the HTTP client: {error}")))?;
         Ok(Self {
             wire: WireId::new(WIRE).expect("the wire id constant is valid"),
             endpoint,
             bearer,
-            http,
-            cancel: Cancel::new(),
+            http: HttpTransport::new(TRANSPORT)?,
         })
     }
 
@@ -308,66 +261,51 @@ impl MessagesClient {
 
     /// Shares this client's cancellation token.
     pub fn cancel_handle(&self) -> Cancel {
-        self.cancel.clone()
+        self.http.cancel_handle()
     }
 
     /// Adopts a token shared with the rest of a turn, rather than owning a private one.
     #[must_use]
     pub fn with_cancel(mut self, cancel: Cancel) -> Self {
-        self.cancel = cancel;
+        self.http.adopt_cancel(cancel);
         self
     }
 
-    /// One turn, retried while the far side has not actually answered.
+    /// One turn, over the shared transport.
+    ///
+    /// What this wire contributes is the URL, the headers and the decoder; the attempt loop, the
+    /// retry rule and the back-off are [`harness_http`]'s
+    /// ([`HttpTransport::stream_turn`]).
     fn attempt_turn(
         &self,
         body: &Value,
         model: &str,
         sink: &mut dyn StreamSink,
     ) -> Result<TurnOutcome, WireError> {
-        let mut attempt = 0;
-        loop {
-            let mut witnessed = WitnessedSink {
-                inner: sink,
-                emitted: false,
-            };
-            let outcome = self.send(body).and_then(|response| {
-                let reader =
-                    SseReader::new(BufReader::new(response)).with_cancel(self.cancel.clone());
-                drain(reader, &self.wire, model, &mut witnessed)
-            });
-            let error = match outcome {
-                Ok(outcome) => return Ok(outcome),
-                Err(error) => error,
-            };
-            attempt += 1;
-            let again = error.retriable
-                && attempt < MAX_ATTEMPTS
-                && !witnessed.emitted
-                && !self.cancel.is_cancelled();
-            if !again {
-                return Err(error);
-            }
-            // Said out loud. A run that quietly took four times as long as it looks would be a run
-            // whose latency numbers mean nothing.
-            sink.emit(StreamEvent::Warning {
-                code: "turn-retried".to_owned(),
-                message: format!(
-                    "attempt {attempt} of {MAX_ATTEMPTS} failed before answering and is being \
-                     retried: {}",
-                    error.message
-                ),
-            });
-            pause(backoff(attempt), &self.cancel);
-        }
+        let url = self.endpoint.messages_url();
+        let headers = || self.headers();
+        let post = StreamingPost {
+            wire: WIRE,
+            url: &url,
+            body,
+            headers: &headers,
+        };
+        self.http.stream_turn(&post, sink, |reader, sink| {
+            drain(reader, &self.wire, model, sink)
+        })
     }
 
-    fn send(&self, body: &Value) -> Result<reqwest::blocking::Response, WireError> {
-        if self.cancel.is_cancelled() {
-            return Err(WireError::cancelled());
-        }
-        // Held only for as long as it takes to become a header, and dropped before the send that
-        // can block.
+    /// The headers one attempt carries, credential included.
+    ///
+    /// Built per attempt, which is what keeps the credential's custody: it is fetched at call
+    /// time, written into the list, and the [`Bearer`] itself is dropped here — the request the
+    /// transport then builds is the only thing that carries the value onward.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the bearer source refuses with, or [`WireErrorCode::Unauthorized`] when it
+    /// answered with nothing.
+    fn headers(&self) -> Result<Headers, WireError> {
         let fetched = match &self.bearer {
             None => None,
             Some(source) => {
@@ -380,45 +318,29 @@ impl MessagesClient {
                 Some((bearer, source.kind()))
             }
         };
-        let mut request = self.http.post(self.endpoint.messages_url());
-        for (name, value) in request_headers(fetched.as_ref().map(|(bearer, kind)| (bearer, *kind)))
-        {
-            request = request.header(name, value);
-        }
+        let headers = request_headers(fetched.as_ref().map(|(bearer, kind)| (bearer, *kind)));
         drop(fetched);
-        let response = request.json(body).send().map_err(|error| {
-            WireError::transport(format!(
-                "posting to {}: {error}",
-                self.endpoint.messages_url()
-            ))
-        })?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
-        }
-        Err(status_error(status, &read_bounded_body(response)))
+        Ok(headers)
     }
 }
 
-fn read_bounded_body(response: reqwest::blocking::Response) -> String {
-    let mut body = String::new();
-    let _ = response
-        .take(MAX_ERROR_BODY_BYTES as u64)
-        .read_to_string(&mut body);
-    body.trim().to_owned()
-}
-
-fn status_error(status: reqwest::StatusCode, body: &str) -> WireError {
-    let (code, retriable) = match status.as_u16() {
-        401 | 403 => (WireErrorCode::Unauthorized, false),
-        429 => (WireErrorCode::RateLimited, true),
-        // 529 is this route's *overloaded* status and lands here with the rest of the 5xx range: a
-        // gateway that is still starting a backend and a route that is momentarily full are both
-        // worth another attempt.
-        500..=599 => (WireErrorCode::Transport, true),
-        _ => (WireErrorCode::Refused, false),
-    };
-    WireError::new(code, format!("{WIRE} answered {status}: {body}"), retriable)
+/// A stream that stopped before the message reached a terminal state.
+///
+/// **Framing by its code, transport by its cause, and retriable because of the cause.** Nothing
+/// malformed arrived: the far side simply stopped sending and closed, which is what a dropped
+/// connection looks like from in here and not what a peer speaking a different protocol looks
+/// like. The identical request very likely answers, so the flag says so. The code stays
+/// [`WireErrorCode::Protocol`] because that is what was *observed* — a response that did not match
+/// the pinned subset — and the two fields answer different questions: one names what happened, the
+/// other says what to do about it.
+///
+/// The wire still will not resend once anything has been emitted; see [`WitnessedSink`].
+fn ended_before_a_terminal_message() -> WireError {
+    WireError::new(
+        WireErrorCode::Protocol,
+        "the stream ended before the message reached a terminal state",
+        true,
+    )
 }
 
 /// One content block being assembled from its deltas.
@@ -562,16 +484,31 @@ impl<'a> TurnDecoder<'a> {
                     });
                 }
             }
-            // Reasoning text and its signature. Accumulated into the block and **never** emitted
-            // to the sink: the block is opaque, and a reader shown its contents would be reading
-            // something this crate has undertaken not to interpret.
+            // **Two things at once, and they are not in conflict.** The fragment is accumulated
+            // into the block, which stays opaque and is replayed byte for byte with its signature
+            // — that is what carries the reasoning across a tool round trip. It is *also* shown to
+            // a reader as it arrives, because a turn that is silent for a minute is one a person
+            // interrupts, and this is the text the provider chose to stream. Opaque means never
+            // **reinterpreted**: nothing here parses it, edits it or decides anything on it.
+            //
+            // Unlike the first wire, what this route streams is the thinking itself rather than a
+            // summary of it. Same neutral event either way — the loop is told a think is in
+            // progress, not what kind of visibility the provider grants — and the difference is
+            // the provider's to make.
             Some("thinking_delta") => {
                 let text = delta
                     .get("thinking")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 append(&mut block.value, "thinking", text);
+                if !text.is_empty() {
+                    sink.emit(StreamEvent::ReasoningDelta {
+                        text: text.to_owned(),
+                    });
+                }
             }
+            // Folded into the block exactly as before and never shown: a signature is not
+            // reasoning, it is what the provider verifies the block against.
             Some("signature_delta") => {
                 let signature = delta
                     .get("signature")
@@ -641,9 +578,7 @@ impl<'a> TurnDecoder<'a> {
 
     fn finish(self) -> Result<TurnOutcome, WireError> {
         if !self.complete {
-            return Err(WireError::protocol(
-                "the stream ended before the message reached a terminal state",
-            ));
+            return Err(ended_before_a_terminal_message());
         }
         let has_tool_calls = self.items.iter().any(|item| item.as_tool_call().is_some());
         // Rebuilt into the shape a non-streamed message has, so one function reads usage on both
@@ -732,9 +667,19 @@ pub fn decode_stream<R: std::io::BufRead>(
     sink: &mut dyn StreamSink,
 ) -> Result<TurnOutcome, WireError> {
     let wire = WireId::new(WIRE).expect("the wire id constant is valid");
-    drain(SseReader::new(reader), &wire, model, sink)
+    drain(
+        SseReader::new(reader, TRANSPORT.framing),
+        &wire,
+        model,
+        sink,
+    )
 }
 
+/// Reads one stream to its end and hands the decoder every payload.
+///
+/// Generic over the reader so a live turn and a pinned fixture go through the same code. Running
+/// out of bytes is **not** how a turn ends here — [`TurnDecoder::finish`] refuses unless a
+/// `message_stop` payload arrived — which is the whole of what [`Framing::PayloadsOnly`] means.
 fn drain<R: std::io::BufRead>(
     mut reader: SseReader<R>,
     wire: &WireId,
@@ -742,8 +687,8 @@ fn drain<R: std::io::BufRead>(
     sink: &mut dyn StreamSink,
 ) -> Result<TurnOutcome, WireError> {
     let mut decoder = TurnDecoder::new(wire, model);
-    while let Some(event) = reader.next_event()? {
-        decoder.apply(&event, sink)?;
+    while let Some(payload) = reader.next_payload()? {
+        decoder.apply(&payload, sink)?;
     }
     decoder.finish()
 }
@@ -966,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thinking_block_is_assembled_and_kept_opaque_without_being_streamed_to_a_reader() {
+    fn a_thinking_block_is_shown_as_it_arrives_and_still_carried_whole() {
         let (outcome, sink) = drive(&[
             message_start(&json!({"input_tokens": 1, "output_tokens": 1})),
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
@@ -978,6 +923,7 @@ mod tests {
             json!({"type": "message_stop"}),
         ]);
         let outcome = outcome.expect("the turn completes");
+        // Carried whole, signature and all, and never reinterpreted. This is what is replayed.
         assert_eq!(
             outcome.items,
             vec![Item::Opaque {
@@ -985,18 +931,61 @@ mod tests {
                 payload: json!({"type": "thinking", "thinking": "step one", "signature": "SIG"}),
             }]
         );
-        // Opaque means opaque: the reasoning text is carried, not shown.
+        // And shown while it arrived, so a person watching a long think sees something.
+        let reasoning: Vec<&str> = sink
+            .events()
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::ReasoningDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reasoning, vec!["step ", "one"]);
+        // The signature is not reasoning and is never shown; nor is any of this the turn's answer.
         assert_eq!(sink.text(), "");
+        assert_eq!(sink.events().len(), 2, "{:?}", sink.events());
     }
 
     #[test]
-    fn a_stream_without_a_terminal_event_refuses() {
+    fn a_stream_without_a_terminal_event_refuses_and_is_worth_another_attempt() {
         let (outcome, _) = drive(&[message_start(
             &json!({"input_tokens": 1, "output_tokens": 1}),
         )]);
         let error = outcome.expect_err("an unterminated stream refuses");
         assert_eq!(error.code, WireErrorCode::Protocol);
         assert!(error.message.contains("terminal"), "{}", error.message);
+        assert!(
+            error.retriable,
+            "a far side that closed cleanly mid-turn is a dropped connection"
+        );
+    }
+
+    #[test]
+    fn a_stream_that_dies_mid_way_is_reported_as_worth_another_attempt() {
+        // Through `decode_stream`, the same entry point a live turn uses, on bytes that stop in
+        // the middle of a frame. This is the failure a network blip on turn twenty produces, and
+        // the flag is the only thing that tells the loop the run is not lost.
+        let mut sink = VecSink::new();
+        let error = decode_stream(
+            "test-model",
+            &b"data: {\"type\":\"message_start\",\"mess"[..],
+            &mut sink,
+        )
+        .expect_err("a stream that stops mid-frame refuses");
+        assert_eq!(error.code, WireErrorCode::Protocol);
+        assert!(error.retriable, "{error}");
+    }
+
+    #[test]
+    fn a_malformed_event_is_refused_for_good() {
+        let mut sink = VecSink::new();
+        let error = decode_stream("test-model", &b"data: {not json}\n\n"[..], &mut sink)
+            .expect_err("a malformed event refuses");
+        assert_eq!(error.code, WireErrorCode::Protocol);
+        assert!(
+            !error.retriable,
+            "the same bytes would be malformed a second time"
+        );
     }
 
     #[test]
@@ -1056,24 +1045,32 @@ mod tests {
     }
 
     #[test]
-    fn http_statuses_map_to_actionable_codes() {
+    fn the_headers_a_client_hands_the_transport_are_the_ones_the_contract_pins() {
+        // The wiring, one layer up from `request_headers`: the transport is handed a list, and a
+        // client that stopped building it from the same function would send something the contract
+        // never saw. A source that says nothing holds an API key, so this is the `x-api-key` route.
+        let endpoint = Endpoint::new("https://api.example/v1", "m", 8192).expect("valid");
+        let client = MessagesClient::new(endpoint, Arc::new(StaticBearer::new("synthetic-secret")))
+            .expect("the client builds");
+        let headers = client.headers().expect("the headers build");
         assert_eq!(
-            status_error(reqwest::StatusCode::UNAUTHORIZED, "").code,
-            WireErrorCode::Unauthorized
+            headers.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            header_names(Some(CredentialKind::ApiKey))
         );
+        assert!(headers.contains(&(API_KEY_HEADER, "synthetic-secret".to_owned())));
+
+        let unauthenticated = MessagesClient::unauthenticated(
+            Endpoint::new("https://api.example/v1", "m", 8192).expect("valid"),
+        )
+        .expect("the client builds");
         assert_eq!(
-            status_error(reqwest::StatusCode::TOO_MANY_REQUESTS, "").code,
-            WireErrorCode::RateLimited
-        );
-        let overloaded = status_error(
-            reqwest::StatusCode::from_u16(529).expect("a valid status"),
-            "",
-        );
-        assert_eq!(overloaded.code, WireErrorCode::Transport);
-        assert!(overloaded.retriable, "an overloaded route answers later");
-        assert_eq!(
-            status_error(reqwest::StatusCode::BAD_REQUEST, "").code,
-            WireErrorCode::Refused
+            unauthenticated
+                .headers()
+                .expect("the headers build")
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            header_names(None)
         );
     }
 

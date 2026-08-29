@@ -23,14 +23,17 @@ impl Everything {
 }
 
 impl Operations for Everything {
-    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String> {
-        self.local.file_read(path, max_bytes)
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        self.local.file_read(path, window)
     }
     fn dir_list(&self, path: &str) -> Result<Value, String> {
         self.local.dir_list(path)
     }
-    fn search(&self, p: &str, path: &str, max: Option<usize>) -> Result<Value, String> {
-        self.local.search(p, path, max)
+    fn search(&self, p: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
+        self.local.search(p, path, options)
+    }
+    fn find(&self, glob: &str, path: &str, max: Option<usize>) -> Result<Value, String> {
+        self.local.find(glob, path, max)
     }
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
         self.written
@@ -99,7 +102,7 @@ fn a_provider_that_cannot_write_contributes_no_writing_entry() {
     let read_only = Catalogue::of(LocalOperations::new(dir.path()).expect("opens"));
     assert_eq!(
         names(&read_only.search(None, None)),
-        vec!["file_read", "dir_list", "search"]
+        vec!["file_read", "dir_list", "search", "find"]
     );
 
     let everything = Catalogue::of(Everything::at(dir.path(), &["cargo"]));
@@ -109,6 +112,7 @@ fn a_provider_that_cannot_write_contributes_no_writing_entry() {
             "file_read",
             "dir_list",
             "search",
+            "find",
             "file_write",
             "file_edit",
             "run"
@@ -143,7 +147,7 @@ fn search_with_no_argument_answers_the_whole_catalogue_because_it_is_short() {
     let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
     let answer = verbs.call(&call(SEARCH_VERB, json!({})));
     assert!(!answer.failed);
-    assert_eq!(names(&answer.output).len(), 6);
+    assert_eq!(names(&answer.output).len(), 7);
 }
 
 #[test]
@@ -205,7 +209,7 @@ fn invoking_reaches_the_provider_and_carries_its_own_words_back() {
         json!({"name": "file_read", "arguments": {"path": "src/main.rs"}}),
     ));
     assert!(!answer.failed, "{}", output(&answer));
-    assert_eq!(answer.output["text"], "fn marker() {}\n");
+    assert_eq!(answer.output["text"], "     1\tfn marker() {}\n");
 
     // A program outside the declared set is the provider's refusal, verbatim.
     let answer = verbs.call(&call(
@@ -274,7 +278,7 @@ fn a_path_that_leaves_the_tree_is_refused_by_where_it_lands() {
     let dir = tree();
     let local = LocalOperations::new(dir.path()).expect("opens");
     let refused = local
-        .file_read("../../etc/passwd", None)
+        .file_read("../../etc/passwd", ReadWindow::whole())
         .expect_err("refused");
     assert!(
         refused.contains("resolves outside the workspace") || refused.contains("No such"),
@@ -321,6 +325,7 @@ fn a_read_only_provider_and_an_unconfined_one_differ_only_in_what_they_admit() {
             "file_read",
             "dir_list",
             "search",
+            "find",
             "file_write",
             "file_edit",
             "run"
@@ -462,7 +467,7 @@ fn every_entry_a_catalogue_can_hold_answers_to_exactly_one_operation() {
     assert_eq!(
         catalogue.entries().len(),
         entry_names().len(),
-        "and all six"
+        "and all seven"
     );
     assert_eq!(
         operation_of("Bash"),
@@ -481,8 +486,11 @@ fn a_filtered_search_says_what_it_withheld_so_a_filter_is_not_a_ceiling() {
     let catalogue = Catalogue::of(Everything::at(dir.path(), &["cargo"]));
 
     let filtered = catalogue.search(None, Some("read"));
-    assert_eq!(names(&filtered), vec!["file_read", "dir_list", "search"]);
-    assert_eq!(filtered["total"], 6);
+    assert_eq!(
+        names(&filtered),
+        vec!["file_read", "dir_list", "search", "find"]
+    );
+    assert_eq!(filtered["total"], 7);
     assert_eq!(filtered["withheld_by_filter"], 3);
     let note = filtered["note"].as_str().expect("a note");
     assert!(note.contains("no arguments"), "and how to see them: {note}");
@@ -490,7 +498,7 @@ fn a_filtered_search_says_what_it_withheld_so_a_filter_is_not_a_ceiling() {
     // The unfiltered answer hid nothing, so it says nothing — the call the description asks for
     // stays exactly as short as it was.
     let all = catalogue.search(None, None);
-    assert_eq!(names(&all).len(), 6);
+    assert_eq!(names(&all).len(), 7);
     assert!(all.get("withheld_by_filter").is_none(), "{all}");
     assert!(all.get("note").is_none());
 }
@@ -650,5 +658,340 @@ fn reading_a_denied_path_is_still_reading_because_a_write_scope_bounds_writes() 
     ));
 
     assert!(!answer.failed, "{}", output(&answer));
-    assert_eq!(answer.output["text"], "fn marker() {}\n");
+    assert_eq!(answer.output["text"], "     1\tfn marker() {}\n");
+}
+
+// --- the flat surface, over the same catalogue ---------------------------------------------------
+
+#[test]
+fn the_flat_surface_publishes_one_tool_per_entry_and_none_of_the_verbs() {
+    // What the verbs cost and this does not: a per-tool schema the provider can validate against,
+    // and no turn spent on `tool_search` before the first useful call.
+    let dir = tree();
+    let flat = Flat::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let published: Vec<&str> = flat.specs().iter().map(|spec| spec.name.as_str()).collect();
+    assert_eq!(
+        published,
+        vec![
+            "file_read",
+            "dir_list",
+            "search",
+            "find",
+            "file_write",
+            "file_edit",
+            "run"
+        ]
+    );
+    for verb in [SEARCH_VERB, DESCRIBE_VERB, INVOKE_VERB] {
+        assert!(!published.contains(&verb), "`{verb}` is not published here");
+    }
+    assert!(
+        flat.specs()[0].input_schema["properties"]["offset"].is_object(),
+        "each tool carries its own arguments, which is the thing the verbs could not give a provider"
+    );
+    assert_eq!(
+        flat.operations(),
+        flat.catalogue().operations(),
+        "what a run could do is still the catalogue's answer, not the surface's"
+    );
+    assert_eq!(
+        flat.subjects(&call("file_write", json!({"path": "a.txt", "text": ""}))),
+        vec![Subject::file("a.txt")],
+        "the arguments are the entry's own, so nothing has to be unwrapped"
+    );
+}
+
+#[test]
+fn a_call_through_the_flat_surface_answers_what_the_verb_answers() {
+    let dir = tree();
+    let mut flat = Flat::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let flatly = flat.call(&call("file_read", json!({"path": "src/main.rs"})));
+    let through = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_read", "arguments": {"path": "src/main.rs"}}),
+    ));
+    assert!(!flatly.failed, "{}", output(&flatly));
+    assert_eq!(flatly.output, through.output);
+}
+
+#[test]
+fn an_unknown_tool_on_the_flat_surface_is_refused_by_name_listing_what_this_run_has() {
+    let dir = tree();
+    let mut flat = Flat::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+    let answer = flat.call(&call("Bash", json!({"command": "rm -rf /"})));
+
+    assert!(answer.failed);
+    let said = output(&answer);
+    assert!(said.contains("`Bash` is not a tool this run has"), "{said}");
+    assert!(
+        said.contains("file_read") && said.contains("run"),
+        "and it lists what is: {said}"
+    );
+}
+
+// --- a bare entry name through the verbs ---------------------------------------------------------
+
+#[test]
+fn an_entry_called_by_its_own_name_is_performed_rather_than_burning_a_turn() {
+    // Measured on a live run under this surface: 10 of 82 tool calls were a bare entry name, each
+    // refused as unpublished. The published list is still the three verbs — this is a route.
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let bare = verbs.call(&call("file_read", json!({"path": "src/main.rs"})));
+    let wrapped = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_read", "arguments": {"path": "src/main.rs"}}),
+    ));
+    assert!(!bare.failed, "{}", output(&bare));
+    assert_eq!(bare.output, wrapped.output);
+
+    let offered: Vec<&str> = verbs.specs().iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        offered,
+        vec![SEARCH_VERB, DESCRIBE_VERB, INVOKE_VERB],
+        "a route is not a publication"
+    );
+}
+
+#[test]
+fn a_bare_entry_name_is_gated_on_that_entrys_own_spec_and_subjects() {
+    let dir = tree();
+    let verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let spec = verbs
+        .invoked(&call("file_write", json!({"path": "a.txt", "text": "x"})))
+        .expect("an entry this run has");
+    assert_eq!(spec.name.as_str(), "file_write");
+    assert_eq!(spec.envelope.risk, harness_wire::Risk::Medium);
+    assert_eq!(
+        verbs.subjects(&call("file_write", json!({"path": "a.txt", "text": "x"}))),
+        vec![Subject::file("a.txt")],
+        "the arguments are the entry's own here, not wrapped in a verb"
+    );
+
+    assert!(
+        verbs.invoked(&call("Bash", json!({}))).is_none(),
+        "a name that is neither a verb nor an entry reaches nothing"
+    );
+}
+
+#[test]
+fn a_bare_name_this_run_does_not_have_is_still_refused_and_lists_the_entries() {
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+    let answer = verbs.call(&call("Bash", json!({"command": "id"})));
+
+    assert!(answer.failed);
+    let said = output(&answer);
+    assert!(said.contains("`Bash` is not a tool this run has"), "{said}");
+    assert!(said.contains("dir_list"), "listing what is: {said}");
+}
+
+// --- a batch of pure calls -----------------------------------------------------------------------
+
+#[test]
+fn a_batch_answers_one_result_per_call_in_the_position_it_was_asked_in() {
+    let dir = tree();
+    std::fs::write(dir.path().join("src/other.rs"), "fn other() {}\n").expect("a file");
+    let mut flat = Flat::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let calls = vec![
+        call("file_read", json!({"path": "src/main.rs"})),
+        call("file_read", json!({"path": "src/other.rs"})),
+        call(
+            "file_read",
+            json!({"path": "src/main.rs", "offset": 1, "limit": 1}),
+        ),
+    ];
+    let answers = flat.call_batch(&calls, None);
+
+    assert_eq!(answers.len(), 3);
+    assert!(answers.iter().all(|answer| !answer.failed));
+    assert_eq!(answers[0].output["text"], "     1\tfn marker() {}\n");
+    assert_eq!(answers[1].output["text"], "     1\tfn other() {}\n");
+    assert_eq!(
+        answers[2].output["lines"],
+        json!({"from": 1, "to": 1, "total": 1})
+    );
+}
+
+#[test]
+fn a_batch_carrying_a_name_this_run_does_not_have_refuses_in_that_position_alone() {
+    let dir = tree();
+    let mut flat = Flat::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let calls = vec![
+        call("file_read", json!({"path": "src/main.rs"})),
+        call("Bash", json!({"command": "id"})),
+        call("dir_list", json!({"path": "src"})),
+    ];
+    let answers = flat.call_batch(&calls, None);
+
+    assert!(!answers[0].failed);
+    assert!(answers[1].failed);
+    assert!(
+        output(&answers[1]).contains("is not a tool this run has"),
+        "{}",
+        output(&answers[1])
+    );
+    assert!(!answers[2].failed, "the others still did their work");
+}
+
+/// A provider that reads like any other and panics on one named path.
+///
+/// The thing a batch had no answer for: `std::thread::scope` re-panics on its own thread when any
+/// scoped thread panicked, joined or not, so one panicking call took every sibling's answer and the
+/// caller with it.
+struct Brittle {
+    local: LocalOperations,
+    explodes: &'static str,
+}
+
+impl Operations for Brittle {
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        assert!(path != self.explodes, "this read was told to come apart");
+        self.local.file_read(path, window)
+    }
+    fn dir_list(&self, path: &str) -> Result<Value, String> {
+        self.local.dir_list(path)
+    }
+    fn search(&self, p: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
+        self.local.search(p, path, options)
+    }
+    fn find(&self, glob: &str, path: &str, max: Option<usize>) -> Result<Value, String> {
+        self.local.find(glob, path, max)
+    }
+    fn file_write(&self, path: &str, _text: &str) -> Result<Value, String> {
+        Err(format!("`{path}`: this provider only reads"))
+    }
+    fn file_edit(&self, path: &str, _old: &str, _new: &str) -> Result<Value, String> {
+        Err(format!("`{path}`: this provider only reads"))
+    }
+    fn run(&self, _argv: &[String]) -> Result<Value, String> {
+        Err("this provider starts nothing".to_owned())
+    }
+}
+
+#[test]
+fn a_call_that_panics_is_a_refusal_in_its_own_position_and_its_siblings_still_answer() {
+    let dir = tree();
+    std::fs::write(dir.path().join("src/other.rs"), "fn other() {}\n").expect("a file");
+    let catalogue = Catalogue::of(Brittle {
+        local: LocalOperations::new(dir.path()).expect("opens"),
+        explodes: "src/boom.rs",
+    });
+    let arguments = [
+        json!({"path": "src/main.rs"}),
+        json!({"path": "src/boom.rs"}),
+        json!({"path": "src/other.rs"}),
+    ];
+    let calls: Vec<(&str, &Value)> = arguments.iter().map(|a| ("file_read", a)).collect();
+
+    let answers = catalogue.invoke_batch(&calls, None);
+
+    assert_eq!(answers.len(), 3);
+    assert!(answers[0].is_ok(), "{:?}", answers[0]);
+    assert!(answers[2].is_ok(), "the sibling after it did its work too");
+    let refusal = answers[1].as_ref().expect_err("refused");
+    assert!(refusal.contains("`file_read`"), "{refusal}");
+    assert!(refusal.contains("panicked while running"), "{refusal}");
+    assert!(
+        refusal.contains("this read was told to come apart"),
+        "with the panic's own words: {refusal}"
+    );
+}
+
+#[test]
+fn a_batch_larger_than_the_thread_bound_answers_every_call_in_its_own_position() {
+    // One OS thread per call is right for the six reads batching was built for and wrong for the
+    // two hundred a turn can hold, so the batch runs in chunks — and a chunked batch has to come
+    // back in the order it was asked in.
+    let dir = tempfile::tempdir().expect("a temporary tree");
+    for index in 0..20 {
+        std::fs::write(
+            dir.path().join(format!("f{index}.txt")),
+            format!("line {index}\n"),
+        )
+        .expect("a file");
+    }
+    let catalogue = Catalogue::of(LocalOperations::new(dir.path()).expect("opens"));
+    let arguments: Vec<Value> = (0..20)
+        .map(|index| json!({"path": format!("f{index}.txt")}))
+        .collect();
+    let calls: Vec<(&str, &Value)> = arguments.iter().map(|a| ("file_read", a)).collect();
+
+    let answers = catalogue.invoke_batch(&calls, None);
+
+    assert_eq!(answers.len(), 20);
+    for (index, answer) in answers.iter().enumerate() {
+        let value = answer.as_ref().expect("the read answers");
+        assert_eq!(value["text"], json!(format!("     1\tline {index}\n")));
+    }
+}
+
+#[test]
+fn a_batch_of_one_is_the_same_answer_as_invoking_it_alone() {
+    let dir = tree();
+    let catalogue = Catalogue::of(Everything::at(dir.path(), &["cargo"]));
+    let arguments = json!({"path": "src/main.rs"});
+
+    let alone = catalogue.invoke_within("file_read", &arguments, None);
+    let batched = catalogue.invoke_batch(&[("file_read", &arguments)], None);
+
+    assert_eq!(batched.len(), 1);
+    assert_eq!(batched[0], alone);
+}
+
+#[test]
+fn the_verbs_batch_runs_invocations_together_and_answers_the_catalogue_questions_in_place() {
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    let calls = vec![
+        call(SEARCH_VERB, json!({})),
+        call(
+            INVOKE_VERB,
+            json!({"name": "file_read", "arguments": {"path": "src/main.rs"}}),
+        ),
+        call("file_read", json!({"path": "src/main.rs"})),
+        call(DESCRIBE_VERB, json!({"name": "run"})),
+    ];
+    let answers = verbs.call_batch(&calls, None);
+
+    assert_eq!(answers.len(), 4);
+    assert_eq!(names(&answers[0].output).len(), 7);
+    assert_eq!(answers[1].output["text"], "     1\tfn marker() {}\n");
+    assert_eq!(
+        answers[2].output, answers[1].output,
+        "a bare name and a wrapped one are one call"
+    );
+    assert_eq!(answers[3].output["operation"], "shell");
+}
+
+// --- what asks a person --------------------------------------------------------------------------
+
+#[test]
+fn an_edit_is_asked_about_at_exactly_the_ceiling_a_whole_file_write_is() {
+    // `--approve-up-to high` used to let `run` and a whole-file `file_write` through unasked and
+    // stop at every `file_edit`, because `needs_approval` had a second clause about idempotency.
+    // That pushed an unattended run toward rewriting whole files, which is the more dangerous act.
+    // The declaration itself stays: it is what a workflow that re-runs a scope reads.
+    let dir = tree();
+    let catalogue = Catalogue::of(Everything::at(dir.path(), &["cargo"]));
+    let edit = catalogue.get("file_edit").expect("an entry").spec();
+    let write = catalogue.get("file_write").expect("an entry").spec();
+
+    assert_eq!(
+        edit.envelope.idempotency,
+        harness_wire::Idempotency::NonIdempotent
+    );
+    assert_eq!(edit.envelope.risk, harness_wire::Risk::Medium);
+    for envelope in [&edit.envelope, &write.envelope] {
+        assert!(!envelope.needs_approval(harness_wire::Risk::Medium));
+        assert!(envelope.needs_approval(harness_wire::Risk::Low));
+    }
 }

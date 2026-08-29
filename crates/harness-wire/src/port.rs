@@ -22,6 +22,17 @@ pub enum StreamEvent {
         call_id: CallId,
         delta: String,
     },
+    /// A fragment of the model's own reasoning, as the provider chose to show it.
+    ///
+    /// What a provider streams here is what it is willing to have read — a summary on one wire,
+    /// the visible thinking on another; this crate does not know which and does not need to. It
+    /// exists so a person watching a long think sees that something is happening — a turn that
+    /// is silent for a minute is one they will interrupt. It is never replayed into the
+    /// conversation; the opaque item the turn ends with is what carries the reasoning across a
+    /// tool round trip.
+    ReasoningDelta {
+        text: String,
+    },
     /// Something the wire saw and did not understand, preserved instead of dropped.
     Warning {
         code: String,
@@ -183,6 +194,34 @@ pub trait ToolPort {
     fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
         let _ = remaining;
         self.call(call)
+    }
+
+    /// Runs several calls the loop already checked, answering one outcome per call, in order.
+    ///
+    /// # Why a batch exists
+    ///
+    /// A turn that asks for six reads pays six round trips of tool latency when they run one after
+    /// another, and nothing about a read requires that. The loop hands over **only calls whose
+    /// invoked envelope does not mutate** — pure reads, already published, already inside every
+    /// bound, and never ones that ask a person — so a port that can run them side by side may. A
+    /// port that cannot runs them in order, which is what this default does, and the loop cannot
+    /// tell the difference except by the clock.
+    ///
+    /// The outcomes are positional: `outcomes[i]` answers `calls[i]`. A port that answers fewer or
+    /// more is a port the loop refuses to trust, and it falls back to calling each one itself —
+    /// **after** this has already run whatever it ran, so a call in a miscounted group happens
+    /// twice. That is survivable only because a group is pure reads.
+    ///
+    /// `remaining` is one figure for the whole group, not a share of one. The calls are meant to
+    /// run side by side, so they all start at the same moment and the time left at that moment is
+    /// what each of them has. The loop reads its deadline again the moment this returns; it does
+    /// not read it, or the cancellation token, between the calls of one group, because there is no
+    /// point between them at which it is in control.
+    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        calls
+            .iter()
+            .map(|call| self.call_within(call, remaining))
+            .collect()
     }
 }
 

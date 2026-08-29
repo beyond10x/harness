@@ -247,19 +247,40 @@ pub fn stop_reason(response: &Value, has_tool_calls: bool) -> StopReason {
 
 /// Reads the provider's own error object into a typed refusal.
 pub fn response_error(response: &Value) -> WireError {
-    let error = response.get("error");
+    // Two shapes reach here. `response.failed` carries a `response` object whose `error` field is
+    // the reason; a top-level `error` event **is** the reason and carries `code` and `message`
+    // itself. Reading only the nested one turned every `error` event into `unknown` with no
+    // message, which is the provider's own explanation being dropped on the floor.
+    let error = match response.get("error") {
+        Some(nested) if nested.is_object() => nested,
+        _ => response,
+    };
     let message = error
-        .and_then(|value| value.get("message"))
+        .get("message")
         .and_then(Value::as_str)
         .unwrap_or("the provider failed the response without a message");
     let code = error
-        .and_then(|value| value.get("code"))
+        .get("code")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    let (code_class, retriable) = match code {
+        // The far side failed on its own account, not on this request's: the same bytes sent
+        // again may well be answered. A run has already paid for every turn before this one, and
+        // ending it on somebody else's fault is the most expensive way to fail.
+        "server_error" => (harness_wire::WireErrorCode::Transport, true),
+        // Not a refusal of the request but a request for less traffic, which is what the back-off
+        // above is for.
+        "rate_limit_exceeded" => (harness_wire::WireErrorCode::RateLimited, true),
+        // Everything else is this request being refused on its own terms — an unusable prompt, an
+        // image this model cannot read, a bad parameter. Only these two are widened because only
+        // these two are unambiguously the far side's own state; a code guessed into the retriable
+        // set would spend a run's budget four times over to be refused identically.
+        _ => (harness_wire::WireErrorCode::Refused, false),
+    };
     WireError::new(
-        harness_wire::WireErrorCode::Refused,
+        code_class,
         format!("{WIRE} failed the response (`{code}`): {message}"),
-        false,
+        retriable,
     )
 }
 
@@ -637,9 +658,52 @@ mod tests {
         let error = response_error(
             &json!({"status":"failed","error":{"code":"server_error","message":"boom"}}),
         );
-        assert_eq!(error.code, harness_wire::WireErrorCode::Refused);
+        assert_eq!(error.code, harness_wire::WireErrorCode::Transport);
         assert!(error.message.contains("server_error"), "{}", error.message);
         assert!(error.message.contains("boom"), "{}", error.message);
+    }
+
+    #[test]
+    fn only_the_providers_own_failures_are_worth_another_attempt() {
+        let failed = |code: &str| {
+            response_error(&json!({"status": "failed", "error": {"code": code, "message": "m"}}))
+        };
+        assert!(failed("server_error").retriable);
+        assert!(failed("rate_limit_exceeded").retriable);
+        assert_eq!(
+            failed("rate_limit_exceeded").code,
+            harness_wire::WireErrorCode::RateLimited
+        );
+        // A request refused on its own terms is refused identically a second later.
+        for code in [
+            "invalid_prompt",
+            "invalid_image",
+            "invalid_image_format",
+            "unknown",
+        ] {
+            let error = failed(code);
+            assert_eq!(error.code, harness_wire::WireErrorCode::Refused, "{code}");
+            assert!(!error.retriable, "{code}");
+        }
+    }
+
+    #[test]
+    fn a_top_level_error_event_carries_its_own_code_and_message() {
+        // The `error` event puts them at the top level rather than under `error`. Read from the
+        // wrong place they became `unknown` with no message, and a retriable class could never
+        // fire because the code was never seen.
+        let error = response_error(&json!({
+            "type": "error",
+            "code": "server_error",
+            "message": "the gateway gave up",
+        }));
+        assert_eq!(error.code, harness_wire::WireErrorCode::Transport);
+        assert!(error.retriable);
+        assert!(
+            error.message.contains("the gateway gave up"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

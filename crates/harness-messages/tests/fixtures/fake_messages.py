@@ -25,16 +25,24 @@ MODEL = "b10x-emulated"
 # The scenarios both emulators serve. Kept in one obvious place on each side so the equality test
 # reads as a comparison of two declarations rather than of two implementations.
 SCENARIOS = [
+    "answer-call",
+    "answer-prose",
+    "answer-stop-hook",
     "bad-arguments",
     "cold",
     "cold-once",
+    "delegate",
     "dynamic-tool",
     "failed",
+    "flat-tool",
+    "flat-write",
+    "hooks-block",
     "incomplete",
     "malformed",
     "no-usage",
     "reasoning",
     "slow",
+    "stop-hook",
     "text",
     "tool",
     "truncated",
@@ -42,6 +50,11 @@ SCENARIOS = [
     "unknown-events",
     "unpublished-tool",
 ]
+
+# What a delegating parent puts in the sub-task, so this emulator can tell the child's requests
+# from the parent's: the child's conversation starts empty and its first user message **is** the
+# task. The same sentinel as the Responses emulator, for the same reason the scenarios are shared.
+DELEGATED = "DELEGATE-TASK"
 
 RECORD_LOCK = threading.Lock()
 
@@ -168,6 +181,42 @@ def called(name, arguments, leading=()):
         *tool_use_events(name, arguments, index=index),
         *message_end("tool_use", 8),
     ]
+
+
+def first_user_text(body):
+    """The first thing a person (or a delegating parent) said in this conversation."""
+    for message in body.get("messages", []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block.get("text") or ""
+        return ""
+    return ""
+
+
+def user_texts(body):
+    """How many user messages carry text, one per turn somebody asked for.
+
+    Tool results travel as user messages on this wire, so they are not counted: what is wanted is
+    how many times this conversation was addressed, not how many blocks it holds.
+    """
+    count = 0
+    for message in body.get("messages", []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            count += 1
+        elif isinstance(content, list) and any(
+            isinstance(block, dict) and block.get("type") == "text" for block in content
+        ):
+            count += 1
+    return count
 
 
 def has_tool_result(body):
@@ -389,6 +438,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(answered("I see, I cannot use that."))
             else:
                 self._send_sse(called("shell_exec", {"cmd": "id"}))
+        elif scenario == "flat-tool":
+            # The flat surface: the model calls the catalogue entry by its own name, with the
+            # entry's own arguments. No verb, and nothing nested a level down.
+            if has_tool_result(body):
+                self._send_sse(answered("The file says: hello harness"))
+            else:
+                self._send_sse(called("file_read", {"path": "README.md"}))
+        elif scenario == "flat-write":
+            # The same surface, asking for an effect: what a run does depends on the approver and
+            # on the ceiling, and the second turn reports whichever answer came back.
+            if has_tool_result(body):
+                self._send_sse(answered("that is what the tool said"))
+            else:
+                self._send_sse(
+                    called("file_write", {"path": "note.md", "text": "written by the harness\n"})
+                )
         elif scenario == "tool":
             # The three-verb surface: the model calls `tool_invoke` and names an entry inside it.
             if has_tool_result(body):
@@ -407,6 +472,60 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(answered("The file says: hello harness"))
             else:
                 self._send_sse(called("workspace_read", {"path": "README.md"}))
+        elif scenario == "answer-call":
+            # Structured output: the model finishes by calling the answer tool, and its arguments
+            # are the answer. Nothing is said in prose, because prose is not what was asked for.
+            if has_tool_result(body):
+                self._send_sse(answered("I have already answered."))
+            else:
+                self._send_sse(
+                    called("answer", {"verdict": "ok", "file": "README.md", "bytes": 14})
+                )
+        elif scenario == "answer-prose":
+            # The same run, from a model that will not call it: one nudge, one more turn in prose,
+            # and a stop that is not `completed`.
+            self._send_sse(answered("The readme says hello harness."))
+        elif scenario == "answer-stop-hook":
+            # Two structured answers. The first is withdrawn by a stop hook, whose reason arrives
+            # as one more user message; the second is what the run actually answers, and the only
+            # one a consumer reading stdout may ever see.
+            if user_texts(body) > 1:
+                self._send_sse(called("answer", {"verdict": "second, after the hook"}))
+            else:
+                self._send_sse(called("answer", {"verdict": "first"}))
+        elif scenario == "hooks-block":
+            # A write the ceiling allows and a hook refuses. The second turn reports whichever
+            # answer came back, exactly as it would for a denial.
+            if has_tool_result(body):
+                self._send_sse(answered("the hook stopped the write"))
+            else:
+                self._send_sse(
+                    called("file_write", {"path": "note.md", "text": "written by the harness\n"})
+                )
+        elif scenario == "stop-hook":
+            # Two answers in prose. The second turn exists only because a stop hook refused the
+            # first ending and its reason arrived as one more user message.
+            if user_texts(body) > 1:
+                self._send_sse(answered("second answer, after the hook"))
+            else:
+                self._send_sse(answered("first answer"))
+        elif scenario == "delegate":
+            # One emulator serves both loops. The child's conversation starts empty, so its first
+            # user message is the task itself -- that is what tells the two apart.
+            if DELEGATED in first_user_text(body):
+                if has_tool_result(body):
+                    self._send_sse(answered("README.md says: hello harness"))
+                else:
+                    self._send_sse(called("file_read", {"path": "README.md"}))
+            elif has_tool_result(body):
+                self._send_sse(answered("the delegate read it: hello harness"))
+            else:
+                self._send_sse(
+                    called(
+                        "delegate",
+                        {"task": f"{DELEGATED} read README.md and say what it says"},
+                    )
+                )
         elif scenario == "reasoning":
             leading = thinking_events(index=0)
             if has_tool_result(body):

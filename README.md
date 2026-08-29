@@ -32,7 +32,8 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `openai-responses` wire | implemented, streaming, pinned by contract |
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
-| command line (`run`, `tools`, `app-server`, `events`) | implemented |
+| sub-agents (`delegate`), structured output (`answer`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
+| command line (`run`, `chat`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
 | substrate confinement, embedded | working, including execution — but `run` has been *published*, not yet *exercised* against a confined process |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
@@ -53,6 +54,7 @@ The gate is **`bash scripts/gate.sh`**. Green here is the bar for main.
 | lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | provider-wire pins | `python3 scripts/check-provider-wires.py` |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
+| command-line argv pin | `python3 scripts/check-cli-contract.py` |
 | brand | org-wide, from the atlas checkout: `bash ../atlas/scripts/check-org-brand.sh harness` |
 
 Rust 1.97, edition 2024. The binary is `b10x-harness`.
@@ -75,11 +77,58 @@ credential it was not pointed at, so a run can always be explained afterwards.
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
 | `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — a directory not called `ws_…`, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
-| `--yes` | approve what asks. Every write and every `run` asks — the loop judges each call's declared risk against a ceiling that defaults to low — and without `--yes` the default approver denies them and the model is told |
-| `--approve-up-to <risk>` | raise that ceiling instead: `medium` lets `file_write` through unasked, `high` lets `run` through too. A `file_edit` asks whatever the ceiling (non-idempotent), so it still needs `--yes`; the two flags do not combine |
+| `--approve <mode>` | who decides a call above the ceiling. `auto` (the default) asks a person over `/dev/tty` when there is a terminal and stdin and stderr are one, and otherwise says so in one line and refuses; `prompt` asks or refuses the run by name; `deny` refuses and tells the model; `all` approves |
+| `--yes` | the same as `--approve all`, and what every unattended invocation already says. It wins when both are given; it does not combine with `--approve-up-to` |
+| `--approve-up-to <risk>` | raise the ceiling instead of changing who decides: `medium` lets `file_write` and `file_edit` through unasked, `high` lets `run` through too. Only calls **above** the ceiling reach the approver |
+| `--surface <flat\|verbs>` | how the catalogue reaches the model. `flat` (the default) publishes every entry as its own tool with its own schema; `verbs` publishes `tool_search`/`tool_describe`/`tool_invoke` over it |
+| `--session-dir <path>` / `--resume <id\|latest>` / `--no-session` | where the conversation is filed, which one to continue, or none at all |
+| `--context-window <tokens>` | what the endpoint serves for this model. It bounds the request **and** drives compaction: the run compacts at 80% of it and frees to 50% |
+| `--no-project-instructions` | leave the workspace's own `AGENTS.md`/`CLAUDE.md` out of the standing instruction. The environment block stays |
 
 Exit status distinguishes the three outcomes a caller acts on differently: `0` the model answered,
-`2` the run stopped for a named reason, `1` the harness could not run.
+`2` the run stopped for a named reason, `1` the harness could not run. A run refused **before** the
+loop starts — a command line clap would not parse, a credential, a confinement, a session on the
+other wire — exits `1` and, under `--json`, writes one line saying so:
+`{"kind":"refused","reason":…}`. clap's own `2` is deliberately not used, because on this command
+line `2` already means a run that happened and stopped.
+
+### Sessions, resume and `chat`
+
+Every `run` files its conversation under `$XDG_STATE_HOME/b10x-harness/sessions/<id>.json` —
+outside the workspace, `0700`, written atomically — and says the identifier on stderr. It is
+written whether the run answered or died, because a run that dies on turn 20 is exactly the one
+whose nineteen turns must survive.
+
+**It files what the run spent, too.** The usage, the cost and the turns of a run that broke on the
+wire go into the session with its conversation: those turns were billed, their figures went past on
+stderr while the run was alive, and once the process is gone the session file is the only place
+still holding them. A failed run that showed nineteen turns of items and no tokens would read as a
+failure that cost nothing.
+
+```console
+b10x-harness sessions                       # id, updated, model, turns — newest first
+b10x-harness run --resume latest --input "and now the tests?"
+b10x-harness chat --model <alias> --base-url …   # one line at a time, same session
+```
+
+Items are stored verbatim, opaque reasoning items included, so a resumed run replays what the
+model already thought instead of paying for it again. **No credential and no instruction text is
+written**: the instruction is derived from this run's catalogue, scope and project files, and
+replaying under a stale one would give a run nobody could reproduce from its flags. A session
+recorded on the other wire is refused by name before anything is sent — an opaque item may not
+cross wires.
+
+`--no-session` writes nothing at all, for an evaluation arm that must leave nothing on the machine
+it ran on.
+
+Under `--json` the identifier is the **last line of the record** —
+`{"kind":"session","id":…,"path":…}` — so a driver reading the stream ends up holding what it needs
+to continue the conversation, rather than having to parse it out of stderr.
+
+**What is streamed is not what is stored.** On `anthropic-messages` a `thinking_delta` is the
+model's visible thinking and it is rendered to stderr as it arrives; it is **not** persisted in a
+session. What carries reasoning across a tool round trip is the opaque item the turn ends with,
+exactly as it always was, and that is what a session holds.
 
 ### Running with confinement
 
@@ -92,8 +141,8 @@ kernel refuses a write across delegation domains — so it has to be *started* t
 systemd-run --user --scope --property="Delegate=cpu memory pids" -- ./run.sh
 ```
 
-and inside, pass the scope's containing slice as `--cgroup-root`. Without it the run has five tools
-and no `run`; with it, six. That is the toolset following the machine rather than a flag.
+and inside, pass the scope's containing slice as `--cgroup-root`. Without it the run has six tools
+and no `run`; with it, seven. That is the toolset following the machine rather than a flag.
 
 The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes substrate's
 root, and reads and writes land in the same place. The directory must therefore be named
@@ -112,29 +161,51 @@ before the run, or the first `cargo build` fails inside cargo looking for a crat
 
 ## What the model sees
 
-Exactly **three verbs** — `tool_search`, `tool_describe`, `tool_invoke` — over a
-[catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral operations.
+One [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral
+operations, published under one of two surfaces.
 
-This was originally the opposite: each admitted operation published directly as its own model tool.
-The reason that gave still holds — the catalogue has six entries and would fit under any vendor
-ceiling, so the indirection is not a dodge — but it was outweighed. The evaluation compares arms
-across three harnesses that each name their tools differently (`Bash` here, `run` there, `Write`
-and `workspace_write` for one act), so everything that read a run had to learn one vendor's
-vocabulary. Three verbs over one catalogue makes the names **ours everywhere**. The cost is a turn
-spent on `tool_describe` before a first call; whether that shows up in practice is an experiment,
-not a claim.
+| entry | operation | what it does | needs |
+|---|---|---|---|
+| `file_read` | `file.read` | one file, or a window of it: `offset`/`limit` in lines, answered `cat -n`-numbered with `lines: {from, to, total}` | — |
+| `dir_list` | `dir.list` | one directory, not recursive, 500 entries | — |
+| `search` | `search` | text across the tree: literal or `regex`, filtered by `glob`, with `context` lines either side | — |
+| `find` | `find` | every path matching a glob, in one call instead of one `dir_list` per level | — |
+| `file_write` | `file.write` | one file, whole | a confined workspace |
+| `file_edit` | `file.edit` | one exact piece of text, which must appear exactly once | a confined workspace |
+| `run` | `shell` | an argv over a **declared** program set — never a shell | a delegated cgroup |
 
-The catalogue is what the machine can perform: three entries with no backend, five with a confined
-workspace, six inside a delegated cgroup. Reads are bounded to the workspace root, and every path
-is re-checked after canonicalization — including each entry `grep` walks into — so a symlink inside
-the workspace cannot be used to read outside it.
+Four entries with no backend, six with a confined workspace, seven inside a delegated cgroup. The
+catalogue is what the machine can perform, and a tool the machine cannot confine is one no surface
+ever lists. Reads are bounded to the workspace root and every path is re-checked after
+canonicalization — including each entry a search walks into — so a symlink inside the workspace
+cannot be used to read outside it.
+
+**`--surface flat` is the default**: each entry is published as its own tool, with its own schema,
+so the provider validates arguments and nothing has to be discovered first. The surface was three
+verbs — `tool_search`, `tool_describe`, `tool_invoke` — and the reason for them was neutral names
+across harnesses, since an evaluation compares arms that each spell one act differently (`Bash`
+here, `run` there, `Write` and `workspace_write`). That reason survives without the indirection:
+the **entry names are the vocabulary**, and `harness_tools::operation_of` maps them for a reader of
+a finished run. What did not survive is the cost — across three live runs **33–44% of every tool
+call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` was an untyped object no
+provider could check.
+
+`--surface verbs` publishes the three verbs over the same catalogue and is fully supported:
+metaharness serves that surface over MCP, and an arm comparing the two asks for it by name. Under
+it, a model that calls an entry by its bare name is routed to it and the waste is warned about
+(`unpublished-tool-routed`) rather than costing a dead turn.
 
 With no `--substrate` or `--substrate-embedded`, nothing the run can call changes a file or starts
 a process. **That is a fact about the machine, not a promise this README makes to the model**: the
-standing instruction states no effects at all and tells the run to ask `tool_search`. It used to
-name three tools that no longer exist and assert that none of them could write — and a measured run
-given a write-and-execute catalogue believed it, read two files, changed nothing, and reported the
-task done.
+standing instruction states no effects of its own and names only what this run actually has. It
+used to name three tools that no longer existed and assert that none of them could write — and a
+measured run given a write-and-execute catalogue believed it, read two files, changed nothing, and
+reported the task done.
+
+The instruction also carries an **environment block** — the absolute workspace path, the OS and
+architecture, today's UTC date, and the git branch, read from `.git/HEAD` rather than by spawning
+`git` — and the workspace's own `AGENTS.md` (else `CLAUDE.md`), bounded at 32 KiB and said so in
+words. `--no-project-instructions` leaves the project's words out; the environment block stays.
 
 ## Budgets and cost
 
@@ -151,16 +222,43 @@ not list is **warned about by name** rather than reported as free.
 
 Approval is a **blocking call**, not a protocol round trip that can land after the effect. What
 asks is derived from the call, never declared by the tool: the loop reads the envelope of the
-catalogue entry a `tool_invoke` names and asks when its risk is above the run's unattended ceiling
-(default low, `--approve-up-to` raises it), or when it is a non-idempotent write. The default
-approver denies; `--yes` approves.
+catalogue entry the call resolves to — the entry's, not the surface's — and asks when its risk is
+above the run's unattended ceiling (default low, `--approve-up-to` raises it). Risk alone decides:
+an idempotency clause used to ask about every `file_edit` whatever the ceiling, which pushed an
+unattended run toward rewriting whole files when the narrower edit was the safer act.
 
-## Two shells, one loop
+**The library's default approver is `DenyAll`.** The command line's is `--approve auto`: a person
+over `/dev/tty` when there is one to ask, and a refusal — stated in one line before the run — when
+there is not. `--yes` (`--approve all`) is the declared unattended run.
+
+## Sub-agents, structured output, hooks
+
+Three things every comparable harness has, added on 2026-08-29 under one rule: **nothing reaches a
+tool without the gate, nothing widens what a turn admits, and nothing refuses silently.** The
+argument is [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md); each is off
+unless a run asks for it.
+
+| what | how it is spelled | what it is |
+|---|---|---|
+| structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it; if it still does not, the run stops `unstructured` and exits 2 — never a success status over prose |
+| sub-agents | `--delegate` (`--delegate-turns N`, default 20) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and the remainder of the parent's budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate |
+| hooks | `--hooks <FILE>` | the operator's own programs, run as an argv (never a shell) at three moments: `before-call` (after approval; exit 2 refuses the call, a hook that fails refuses it too), `after-call` (a note the model reads beside the result), `stop` (exit 2 keeps the run working with the reason, at most three times). Named on the command line, **never discovered in the workspace** |
+
+None of the three is a catalogue entry or touches `harness-wire`: `answer` and `delegate` are tools
+the **loop** owns, resolved before the tool port ever sees a call, and a hook is a port like the
+approver, with the process-running half in the shell. A delegate's tool calls meet exactly the gate
+the parent's do; a hook can refuse what the gate allowed and can allow nothing the gate refused.
+
+Provider-native structured output (constrained decoding on the wire), schema validation in the loop,
+delegate trees and parallel delegates are labelled later milestones in the design, each waiting on
+a live run that shows the shipped path is not enough.
+
+## Three shells, one loop
 
 | shell | what it is |
 |---|---|
 | embedded | `harness-loop` as a library; tools bound in-process, no IPC |
-| command line | `b10x-harness run`, over a read-only workspace |
+| command line | `b10x-harness run` and `b10x-harness chat`, over a workspace |
 | bridge | `b10x-harness app-server`, a process speaking the Codex app-server JSON-RPC format |
 
 The seam that makes this possible is [`ToolPort`](crates/harness-wire/src/port.rs): in-process it
@@ -184,6 +282,15 @@ are refused by name rather than answered with a silent success.
 one function; below it the loop holds a `ModelPort` and cannot tell which projection it got, which
 is the whole reason a second wire cost a second projection instead of a second loop.
 
+A wire crate is now **only** the projection — the request body, the stream decoder, the endpoint's
+path and its header names. Everything under that is
+[`crates/harness-http`](crates/harness-http/src/lib.rs): bounded SSE framing, the retry rule, the
+back-off, the witnessed sink that stops a turn being resent once a person has read part of it, and
+the HTTP status mapping. That half was written for the first wire and copied unchanged by the
+second, which is what proved it was transport-shaped rather than vendor-shaped. The two wires
+configure it identically but for one thing, and that one thing is checked: the first route ends its
+stream with `data: [DONE]` and the second has no sentinel at all.
+
 Turns are **stateless**: nothing is retained on the far side and the whole conversation is replayed
 each time. Reasoning — `reasoning` items on one wire, `thinking` and `redacted_thinking` blocks on
 the other — is carried verbatim as [`Item::Opaque`](crates/harness-wire/src/item.rs) tagged with the
@@ -191,8 +298,18 @@ wire that produced it, so the model keeps its own chain of thought across a tool
 cannot have one provider's blob replayed into another's. Replaying one into a wire that did not
 produce it is a typed refusal naming both wires, not a silent drop.
 
+While a turn is streaming, the reasoning the provider chooses to send — `reasoning_summary_text`
+deltas on one wire, `thinking_delta` blocks on the other — reaches a reader on **stderr** as it
+arrives, so a long think is not a silent minute. It is shown and let go: what crosses a tool round
+trip, and what a session stores, is the opaque item, never the streamed text.
+
 Both wires are exercised by the **same** loop suite over a real socket: the same case names against
-the same scenario names, with a test that fails if either side grows a case the other lacks.
+the same scenario names, with a test that fails if either side grows a case the other lacks. A
+second comparison covers the half beneath them —
+[`crates/harness-messages/tests/transport.rs`](crates/harness-messages/tests/transport.rs) reads
+what each wire asks of `harness-http` and fails on any difference but the framing, so a wire that
+quietly doubled its attempts or halved a timeout is caught by a test rather than by a person
+reading two files side by side.
 
 ## Layout
 
@@ -200,19 +317,21 @@ the same scenario names, with a test that fails if either side grows a case the 
 |---|---|
 | `crates/harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`. No I/O, no clock, no vendor field name. It defines the credential types; it reads and sends none |
 | `crates/harness-credential` | credential sources that read exactly what a caller pointed them at. Nothing vendor-shaped: how a fetched credential is *presented* belongs to the wire |
-| `crates/harness-responses` | the Responses projection and its HTTP/SSE client |
-| `crates/harness-messages` | the Messages projection and its HTTP/SSE client |
-| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation |
+| `crates/harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST`. No vendor name, field name or header name |
+| `crates/harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers |
+| `crates/harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under |
+| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the two tools it owns itself (`answer`, `delegate`) and the hook port |
 | `crates/harness-flow` | a workflow notation the loop runs natively: a DAG of sub-trees, validated before anything runs |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
-| `crates/harness-tools` | one catalogue, published to every harness under three verbs |
+| `crates/harness-tools` | one catalogue, published flat or under three verbs |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
-| `crates/harness-cli` | the `b10x-harness` binary and the read-only workspace tools |
+| `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block |
 
 | path | holds |
 |---|---|
 | `contracts/provider-wires/` | the exact request sent and the exact stream accepted, per dated pin |
 | `contracts/app-server-profile/` | the JSON-RPC subset served, per dated pin |
+| `contracts/cli/` | the argv surface accepted, per dated pin — generated from clap, never written by hand |
 | `docs/design/` | component design documents |
 | `scripts/` | `gate.sh` and the checks it runs |
 
@@ -228,7 +347,7 @@ Three suites drive real processes over real sockets and pipes:
 |---|---|
 | `crates/harness-responses/tests/provider_emulated.rs` | the first wire's client and the loop against a local HTTP endpoint |
 | `crates/harness-messages/tests/provider_emulated.rs` | the same suite, pointed at the second wire |
-| `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace |
+| `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace: both surfaces, both wires, sessions, resume, `chat`, the approver and a refused command line |
 | `crates/harness-cli/tests/bridge_mode.rs` | the shipped binary driven as a bridge would drive it |
 
 ## Not owned here
@@ -236,7 +355,15 @@ Three suites drive real processes over real sockets and pipes:
 - **No substrate confinement claim.** This harness's effects are exactly what its published toolset
   admits, and nothing constrains it further.
 - **No live-provider conformance.** One live run has happened; the pins are still emulator-derived.
-- No delegation, structured output, realtime media, provider-side sessions, or durable resume.
+- **No MCP client and no multimodal input.** Of the five gaps the comparison against other
+  harnesses ranked (`docs/reviews/2026-08-29-sota-comparison.md`), sub-agents, structured output
+  and hooks landed the same day (design 0002); these two stay decisions about what this component
+  owns. An MCP client would make the loop a client of a protocol whose tools nothing here confines
+  — metaharness is the MCP side of this family — and an image item is a new neutral value on both
+  wires that nothing measuring this harness has asked for.
+- No realtime media or provider-side sessions. Sessions here are **this harness's own file on this
+  machine**: nothing is retained on the far side and the whole conversation is replayed every turn
+  (invariant 4).
 - No hosted service, no admission transport, no durable store.
 
 ## Read more
@@ -246,4 +373,5 @@ Three suites drive real processes over real sockets and pipes:
   exists.
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed and what each change cost to learn.
 - [`docs/design/0001-tool-envelope-and-substrate-confinement.md`](docs/design/0001-tool-envelope-and-substrate-confinement.md)
+- [`docs/design/0002-sub-agents-structured-output-hooks.md`](docs/design/0002-sub-agents-structured-output-hooks.md)
 - [`AGENTS.md`](AGENTS.md) — working agreements and invariants for anyone changing this repo.

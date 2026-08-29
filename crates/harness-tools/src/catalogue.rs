@@ -2,7 +2,7 @@
 //!
 //! # Entries are named by neutral operations
 //!
-//! `file.read`, `file.write`, `file.edit`, `dir.list`, `search`, `shell` — metaharness's own
+//! `file.read`, `file.write`, `file.edit`, `dir.list`, `search`, `find`, `shell` — metaharness's own
 //! vocabulary (`metaharness_protocol::Operation`), not spelled out as a dependency but matched name
 //! for name. That is the point of this crate: a consumer asks *did this run write a file* without
 //! knowing whether the harness spells a write `Write`, `workspace_write` or `apply_patch`.
@@ -11,7 +11,7 @@
 //!
 //! An entry is here because something can perform it. A provider that cannot write contributes no
 //! writing entry; a machine with no delegated cgroup contributes no `run`. So
-//! [`Catalogue::search`] answering four entries rather than six is the publication gate speaking,
+//! [`Catalogue::search`] answering four entries rather than seven is the publication gate speaking,
 //! not a filter — the model is never told about a tool it cannot have.
 
 use std::collections::BTreeMap;
@@ -91,13 +91,23 @@ impl std::fmt::Debug for Catalogue {
 impl Catalogue {
     /// The catalogue this provider admits.
     ///
-    /// Reading entries are always there. Writing entries appear when the provider
-    /// [`writes`](Operations::writes); `run` appears when it names at least one program. A provider
-    /// that can confine execution but was given no declared set publishes no `run`: a workflow that
-    /// named no commands wants none, and a tool that admitted everything because nobody listed
-    /// anything is the failure this whole design exists to prevent.
+    /// Writing entries appear when the provider [`writes`](Operations::writes); `run` appears when
+    /// it names at least one program. A provider that can confine execution but was given no
+    /// declared set publishes no `run`: a workflow that named no commands wants none, and a tool
+    /// that admitted everything because nobody listed anything is the failure this whole design
+    /// exists to prevent.
+    ///
+    /// **The four reading entries are published whatever the provider answers**, and that is a
+    /// decision rather than an oversight. `dir_list`, `search` and `find` have no route through a
+    /// confined workspace — `Backend` carries no way to walk one — so the confined provider refuses
+    /// all three by name, and a run that reads a tree holds [`Split`](crate::Split) with the local
+    /// reader on that side, which is what the CLI composes. Gating publication on the provider
+    /// would take the three entries away from every `Split` whose *effects* half cannot walk, which
+    /// is all of them. A catalogue built on a bare confined provider therefore does publish three
+    /// entries whose calls come back as a refusal naming them — an outcome the model reads, not a
+    /// silence.
     pub fn of(operations: impl Operations + 'static) -> Self {
-        let mut entries = vec![file_read(), dir_list(), search()];
+        let mut entries = vec![file_read(), dir_list(), search(), find()];
         if operations.writes() {
             entries.push(file_write());
             entries.push(file_edit());
@@ -320,10 +330,21 @@ impl Catalogue {
                 .ok_or_else(|| format!("`{field}` is required by `{name}`"))
         };
         let path = || string("path");
+        let under = |field: &str| {
+            arguments
+                .get(field)
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+        };
         match entry.operation {
-            "file.read" => self
-                .operations
-                .file_read(path()?, arguments.get("max_bytes").and_then(Value::as_u64)),
+            "file.read" => self.operations.file_read(
+                path()?,
+                crate::ReadWindow {
+                    offset: arguments.get("offset").and_then(Value::as_u64),
+                    limit: arguments.get("limit").and_then(Value::as_u64),
+                    max_bytes: arguments.get("max_bytes").and_then(Value::as_u64),
+                },
+            ),
             "file.write" => self.operations.file_write(path()?, string("text")?),
             "file.edit" => self
                 .operations
@@ -334,10 +355,23 @@ impl Catalogue {
             "search" => self.operations.search(
                 string("pattern")?,
                 arguments.get("path").and_then(Value::as_str).unwrap_or("."),
-                arguments
-                    .get("max_results")
-                    .and_then(Value::as_u64)
-                    .and_then(|value| usize::try_from(value).ok()),
+                &crate::SearchOptions {
+                    regex: arguments
+                        .get("regex")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    glob: arguments
+                        .get("glob")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                    context: arguments.get("context").and_then(Value::as_u64),
+                    max_results: under("max_results"),
+                },
+            ),
+            "find" => self.operations.find(
+                string("glob")?,
+                arguments.get("path").and_then(Value::as_str).unwrap_or("."),
+                under("max_results"),
             ),
             "shell" => {
                 let items = arguments
@@ -364,6 +398,79 @@ impl Catalogue {
         }
     }
 
+    /// Perform several entries at once, one answer per call, in the order they were given.
+    ///
+    /// # What this buys, and who is allowed to ask for it
+    ///
+    /// A turn that asks for six reads paid six round trips of tool latency when they ran one after
+    /// another, and nothing about a read requires that. Each call gets a thread —
+    /// `std::thread::scope`, so nothing outlives this function and nothing is spawned that the
+    /// caller has to join — and a turn asks for a handful, not a thousand.
+    ///
+    /// **This does not check that the calls are safe to run side by side, and it never will.** The
+    /// loop decides: it hands over only calls whose invoked envelope does not mutate, which is a
+    /// question about `Envelope` that the loop already has to answer for approval and that this
+    /// catalogue would have to answer a second, drifting way. Handed a `file_write` and a
+    /// `file_edit` of one file, this runs both and the file gets whichever landed last — exactly
+    /// as it would if a caller called `invoke_within` twice from two threads of its own.
+    ///
+    /// A call whose thread panics answers a refusal naming the entry rather than taking the
+    /// process with it: the other five have already done their work, and the model needs to hear
+    /// which one did not.
+    ///
+    /// **The panic is caught inside the thread, not at the join**, and that is not a detail.
+    /// `std::thread::scope` re-panics on its own thread if *any* scoped thread panicked, whether or
+    /// not it was joined first — so a caught-at-the-join refusal was unreachable and one bad call
+    /// took the other five answers, and this function's caller, with it. `catch_unwind` around each
+    /// body means the scope never sees a panicked thread. It is safe code; `unsafe_code` stays
+    /// forbidden.
+    ///
+    /// # Threads are chunked, because a turn is not always a handful
+    ///
+    /// The loop hands over the whole batchable prefix of a turn, and a model that opens with two
+    /// hundred reads used to get two hundred OS threads and two hundred concurrent tree scans. The
+    /// batch is run [`MAX_BATCH_THREADS`] at a time, each chunk under its own scope, and the
+    /// answers concatenated in the order the calls came in.
+    #[must_use]
+    pub fn invoke_batch(
+        &self,
+        calls: &[(&str, &Value)],
+        remaining: Option<std::time::Duration>,
+    ) -> Vec<Result<Value, String>> {
+        let mut answers = Vec::with_capacity(calls.len());
+        for chunk in calls.chunks(MAX_BATCH_THREADS) {
+            std::thread::scope(|scope| {
+                let running: Vec<_> = chunk
+                    .iter()
+                    .map(|(name, arguments)| {
+                        scope.spawn(move || {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                self.invoke_within(name, arguments, remaining)
+                            }))
+                            .unwrap_or_else(|payload| {
+                                Err(format!(
+                                    "`{name}` panicked while running: {}. Nothing else in this \
+                                     batch was affected, and whether it did anything before it \
+                                     stopped is unknown.",
+                                    panic_words(payload.as_ref())
+                                ))
+                            })
+                        })
+                    })
+                    .collect();
+                for (handle, (name, _)) in running.into_iter().zip(chunk) {
+                    answers.push(handle.join().unwrap_or_else(|_| {
+                        Err(format!(
+                            "`{name}` did not finish: the thread running it stopped without an \
+                             answer, so whether it did anything is unknown"
+                        ))
+                    }));
+                }
+            });
+        }
+        answers
+    }
+
     fn no_such(&self, name: &str) -> String {
         format!(
             "`{name}` is not a tool this run has. Available: {}.",
@@ -373,6 +480,30 @@ impl Catalogue {
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+}
+
+/// How many of a batch's calls run side by side.
+///
+/// The loop hands over every batchable call of a turn at once, and one OS thread each is fine for
+/// the six reads that motivated batching and wrong for the two hundred a model can ask for: two
+/// hundred threads, each walking a tree, is a way to spend a machine rather than a turn. Eight is
+/// more than the parallelism a handful of reads needs and small enough that the largest batch costs
+/// the same eight threads as the smallest one that fills them.
+const MAX_BATCH_THREADS: usize = 8;
+
+/// What a caught panic said, where it said anything a reader can act on.
+///
+/// A payload is `Box<dyn Any>` and only the two ordinary shapes carry words: `panic!("…")` leaves a
+/// `&str`, a formatted one leaves a `String`. Anything else is named as what it is rather than
+/// dressed up — a message invented for it would read as the panic's own.
+fn panic_words(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "it carried no message this build can read".to_owned()
     }
 }
 
@@ -398,14 +529,21 @@ fn file_read() -> Entry {
     Entry {
         operation: "file.read",
         name: "file_read",
-        summary:
-            "Read one text file. The reply says whether it was truncated, so a partial read is \
-                  never mistaken for a whole file."
-                .to_owned(),
+        summary: "Read a window of one text file, as numbered lines. Each line comes back as its \
+                  number, right-aligned in six columns, then a tab, then the line — the number is \
+                  this reply's, not the file's, so strip it before quoting text to `file_edit`. \
+                  `lines` says which window you got and how many lines the file has, and \
+                  `truncated` says the window stops before the file's last line or that a line in \
+                  it was cut. Any part of any file is reachable by moving `offset` — except where \
+                  `lines.total` comes back `null`, which means the reply could not establish how \
+                  many lines there are and says in `note` why. Read that before assuming."
+            .to_owned(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "File relative to the workspace root."},
+                "offset": {"type": "integer", "minimum": 1, "description": "First line to read, counting from 1. Default 1."},
+                "limit": {"type": "integer", "minimum": 1, "description": "How many lines to read. Default: as many as fit under the byte ceiling."},
                 "max_bytes": {"type": "integer", "description": "Byte ceiling for this read."},
             },
             "required": ["path"],
@@ -436,18 +574,56 @@ fn search() -> Entry {
     Entry {
         operation: "search",
         name: "search",
-        summary:
-            "Find a literal substring in the workspace's text files. Not a regular expression. \
-                  Build output and version-control directories are skipped."
-                .to_owned(),
+        summary: format!(
+            "Find text in the workspace's files. A literal substring by default; set `regex` for a \
+             regular expression. `glob` narrows which files are read and `context` answers the \
+             lines either side of each match. Two things are never searched and the reply cannot \
+             tell you afterwards: these directories and everything under them — {} — and anything \
+             more than {} directories below where the search started, which the reply reports as \
+             `depth_bound_reached`. Start the search lower down to reach past either.",
+            crate::local::SKIPPED.join(", "),
+            crate::local::MAX_GREP_DEPTH,
+        ),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Literal substring to find."},
+                "pattern": {"type": "string", "description": "What to find: a literal substring, or a regular expression when `regex` is true."},
                 "path": {"type": "string", "description": "Directory or file to search."},
+                "regex": {"type": "boolean", "description": "Read `pattern` as a regular expression. Default false. One that does not compile is refused, never silently matched against nothing."},
+                "glob": {"type": "string", "description": "Only files matching this glob — `*.rs` is that name anywhere in the tree, `crates/**/*.rs` is the whole path."},
+                "context": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Lines either side of each match, under `before` and `after` with their own numbers. Default 0, capped at 5."},
                 "max_results": {"type": "integer", "description": "Ceiling on returned matches."},
             },
             "required": ["pattern"],
+            "additionalProperties": false,
+        }),
+        envelope: reading(),
+    }
+}
+
+fn find() -> Entry {
+    Entry {
+        operation: "find",
+        name: "find",
+        summary: format!(
+            "List the files whose path matches a glob under the workspace. `*.rs` is that name at \
+             any depth; `crates/**/*.rs` matches the whole workspace-relative path. Use this \
+             instead of walking the tree one `dir_list` at a time. Two places it does not look, \
+             and an empty list will not tell you which: these directories and everything under \
+             them — {} — and anything more than {} directories below where the walk started, which \
+             the reply reports as `depth_bound_reached`. Set `path` lower down to reach past \
+             either.",
+            crate::local::SKIPPED.join(", "),
+            crate::local::MAX_GREP_DEPTH,
+        ),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "glob": {"type": "string", "description": "The glob to match. Without a `/` it matches the file's own name at any depth; with one it matches the workspace-relative path and `*` does not cross a `/`."},
+                "path": {"type": "string", "description": "Directory to search under. Default the workspace root."},
+                "max_results": {"type": "integer", "description": "Ceiling on returned paths."},
+            },
+            "required": ["glob"],
             "additionalProperties": false,
         }),
         envelope: reading(),
@@ -495,8 +671,17 @@ fn file_edit() -> Entry {
             "required": ["path", "old", "new"],
             "additionalProperties": false,
         }),
-        // Running it twice is not running it once: the second attempt finds nothing to replace, and
-        // under a workflow that retreats and re-runs a whole scope that is exactly what happens.
+        // **A retry declaration, and no longer an approval one.** Running it twice is not running
+        // it once: the second attempt finds nothing to replace, and under a workflow that retreats
+        // and re-runs a whole scope that is exactly what happens — which is what a scheduler reads
+        // this field for.
+        //
+        // Until 2026-08-29 `Envelope::needs_approval` also asked about every non-idempotent
+        // mutation whatever the ceiling, and the consequence at the command line was backwards:
+        // `--approve-up-to high` let `run` and a whole-file `file_write` through unasked and
+        // stopped to ask about every `file_edit`, pushing an unattended run toward rewriting files
+        // whole when the narrower edit was the safer act. The clause is gone; risk alone decides,
+        // and `file_edit` is asked about at exactly the ceiling `file_write` is.
         envelope: writing(Idempotency::NonIdempotent),
     }
 }
@@ -543,6 +728,7 @@ pub fn entry_names() -> BTreeMap<&'static str, &'static str> {
         ("file.edit", "file_edit"),
         ("dir.list", "dir_list"),
         ("search", "search"),
+        ("find", "find"),
         ("shell", "run"),
     ])
 }

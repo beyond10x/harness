@@ -197,6 +197,13 @@ impl LoopSink for BridgeSink {
             LoopEvent::ToolRequested(_)
             | LoopEvent::ToolCompleted { .. }
             | LoopEvent::ToolArgumentsDelta { .. }
+            // The pinned notification set has no reasoning-summary item, and this server may not
+            // invent one onto the wire.
+            | LoopEvent::ReasoningDelta { .. }
+            // Nor a retry or a compaction: the client sees the turn's deltas and its terminal
+            // frame, and a retried turn's discarded text is this side's bookkeeping.
+            | LoopEvent::TurnRetried { .. }
+            | LoopEvent::Compacted { .. }
             // Bridged tools carry no approval posture, so these never fire here.
             | LoopEvent::ApprovalRequired { .. }
             | LoopEvent::ApprovalResolved { .. }
@@ -207,7 +214,14 @@ impl LoopSink for BridgeSink {
             // The pinned notification set has no field for a price, and this server may not invent
             // one. A bridged run is priced by whoever started it, from the token counts above.
             | LoopEvent::Rates { .. }
-            | LoopEvent::Cost { .. } => {}
+            | LoopEvent::Cost { .. }
+            // A bridged thread publishes no answer tool, no delegate and no hooks — the client
+            // mediates its own tools (AGENTS.md § Safety envelope) — so none of these fire here.
+            | LoopEvent::Answered { .. }
+            | LoopEvent::DelegateStarted { .. }
+            | LoopEvent::DelegateFinished { .. }
+            | LoopEvent::Delegated { .. }
+            | LoopEvent::HookRan { .. } => {}
         }
     }
 }

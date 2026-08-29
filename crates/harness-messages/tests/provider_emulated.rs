@@ -229,6 +229,54 @@ fn the_request_is_stateless_versioned_and_carries_a_cache_breakpoint() {
 }
 
 #[test]
+fn the_rolling_cache_breakpoint_moves_with_the_conversation() {
+    // The head being cached was never the expensive part. A stateless loop resends the whole
+    // transcript every turn, so with the head marked and the tail not, everything the conversation
+    // grew by is re-charged at full rate on every remaining turn — a measured 81-turn run went from
+    // a 66% hit rate to 12.5% and spent 1.33M input tokens for 10.5k of output.
+    //
+    // Two turns over a real socket is the smallest thing that can show the marker **moving**, which
+    // is the property that makes the growth cost once instead of once per remaining turn.
+    let mut tools = TestTools::with_read();
+    let (fixture, outcome, _) = run("dynamic-tool", &mut tools);
+    outcome.expect("the round trip completes");
+
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 2);
+    let ephemeral = json!({"type": "ephemeral"});
+
+    let marked_tail = |request: &Value| -> Value {
+        let messages = request["messages"].as_array().expect("an array");
+        let last = messages.last().expect("a last message");
+        let blocks = last["content"].as_array().expect("an array");
+        blocks.last().expect("a last block")["cache_control"].clone()
+    };
+    assert_eq!(marked_tail(&requests[0]), ephemeral);
+    assert_eq!(marked_tail(&requests[1]), ephemeral);
+
+    // And it moved: the block that carried it on turn one carries nothing on turn two, or the
+    // marker would be stuck at the head of the conversation and the cache would stop chaining.
+    let second = requests[1]["messages"].as_array().expect("an array");
+    assert_eq!(second.len(), 3, "{second:?}");
+    assert!(
+        second[0]["content"][0].get("cache_control").is_none(),
+        "the marker must not be left behind: {:?}",
+        second[0]
+    );
+    // The tail of turn two is the tool result the loop just appended, which is the growth being
+    // written to cache for turn three to read.
+    assert_eq!(second[2]["content"][0]["type"], json!("tool_result"));
+
+    // Two breakpoints on the wire, against a documented cap of four.
+    assert_eq!(
+        requests[1].to_string().matches("cache_control").count(),
+        2,
+        "{:?}",
+        requests[1]
+    );
+}
+
+#[test]
 fn a_tool_round_trip_completes_over_the_wire() {
     let mut tools = TestTools::with_read();
     // `dynamic-tool`: the emulator calls this test's own tool by name. The provider is the wire, and
@@ -354,9 +402,17 @@ fn a_cold_gateway_is_retriable_transport_rather_than_a_refusal() {
         panic!("an HTTP status maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Transport);
+    // Worth another attempt — and the wire took every one it had before the first byte arrived, so
+    // what goes up is final: the loop above retries on this flag, and a gateway that stayed down
+    // through four requests must not be tried through twelve more.
     assert!(
-        error.retriable,
-        "a starting backend is worth another attempt"
+        !error.retriable,
+        "the wire's own attempts are exhausted; the loop must not multiply them"
+    );
+    assert!(
+        error.message.contains("after 4 attempts"),
+        "{}",
+        error.message
     );
 }
 
@@ -368,6 +424,10 @@ fn a_malformed_event_refuses_as_protocol() {
         panic!("a framing failure maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Protocol);
+    assert!(
+        !error.retriable,
+        "the same bytes would be malformed a second time"
+    );
 }
 
 #[test]
@@ -378,6 +438,10 @@ fn a_truncated_stream_is_never_read_as_a_completion() {
         panic!("a truncated stream maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Protocol);
+    assert!(
+        error.retriable,
+        "a stream that stopped mid-frame dropped; the loop decides whether to ask again"
+    );
 }
 
 #[test]
@@ -388,6 +452,18 @@ fn a_provider_failure_carries_its_own_reason() {
     else {
         panic!("a provider failure maps to a wire error");
     };
+    // The emulator fails with `api_error`, which is the far side's own state rather than a refusal
+    // of this request, so it is transport-class and worth another attempt. Same classification as
+    // the first wire's `server_error`.
+    assert_eq!(error.code, WireErrorCode::Transport);
+    // ...and gives up as final, for the reason the cold-gateway test gives: the loop retries on
+    // this flag, and these attempts were already the wire's.
+    assert!(!error.retriable);
+    assert!(
+        error.message.contains("after 4 attempts"),
+        "{}",
+        error.message
+    );
     assert!(
         error.message.contains("upstream exploded"),
         "{}",

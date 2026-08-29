@@ -2,6 +2,7 @@ use harness_wire::{CallId, ToolCall, ToolName, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::LoopStop;
+use crate::hook::{HookDecision, HookPoint};
 
 /// Everything a person or a shell can observe while the loop runs.
 ///
@@ -26,12 +27,55 @@ pub enum LoopEvent {
     TurnStarted {
         turn: u64,
     },
+    /// A turn whose stream broke after it had already emitted something, being attempted again.
+    ///
+    /// **Whatever streamed for this turn is to be discarded.** A wire never retries once it has
+    /// witnessed output — a second attempt would append a second copy of text a person already
+    /// read — so the decision moves up here, where the conversation is known to be unchanged by
+    /// the failed attempt. A renderer that shows deltas has to act on this: without it a person
+    /// sees the first half of an answer, then a whole answer, and no reason for either.
+    ///
+    /// `attempt` counts the retries, so the first one is 1 and the last is
+    /// [`crate::MAX_TURN_RETRIES`].
+    TurnRetried {
+        turn: u64,
+        attempt: u32,
+        /// What the wire said went wrong, verbatim.
+        reason: String,
+    },
+    /// The conversation was made smaller before a turn, and by what means.
+    ///
+    /// Emitted once per compaction, whether it elided, summarised or both. A reader of a finished
+    /// run needs it to explain a jump in the record: an assistant that suddenly cannot quote a file
+    /// it read, or a turn whose input tokens fall by half.
+    ///
+    /// Counted rather than described, because the prose lives in the `conversation-compacted`
+    /// warning beside it and a machine reading the record needs figures.
+    Compacted {
+        /// Tool results whose payload was replaced by a note saying how much went.
+        elided_results: usize,
+        elided_bytes: usize,
+        /// Items folded into one summary item. Zero when no summary was made.
+        summarised_items: usize,
+        bytes_before: usize,
+        bytes_after: usize,
+        /// Whether a model turn was spent on a summary. True even when that turn failed, because
+        /// it was still paid for.
+        summary_turn: bool,
+    },
     TextDelta {
         text: String,
     },
     ToolArgumentsDelta {
         call_id: CallId,
         delta: String,
+    },
+    /// A fragment of the model's reasoning summary, as the provider streamed it.
+    ///
+    /// Forwarded so a person watching a long think sees something happening. Never part of the
+    /// answer and never replayed: the conversation carries the reasoning as an opaque item.
+    ReasoningDelta {
+        text: String,
     },
     ToolRequested(ToolCall),
     ApprovalRequired {
@@ -75,6 +119,40 @@ pub enum LoopEvent {
     Warning {
         code: String,
         message: String,
+    },
+    /// The model called the answer tool: `value` is the run's structured answer.
+    ///
+    /// Carried in the event, not only in the outcome, so the JSONL record of a run has it.
+    Answered {
+        call_id: CallId,
+        value: serde_json::Value,
+    },
+    /// A delegate started on `task`, inside the tool call `call_id`.
+    DelegateStarted {
+        call_id: CallId,
+        task: String,
+    },
+    /// The delegate inside `call_id` ended, however it ended.
+    DelegateFinished {
+        call_id: CallId,
+        stop: LoopStop,
+        turns: u64,
+    },
+    /// One event of the delegate running inside `call_id`, wrapped.
+    ///
+    /// Everything a child emits arrives this way and nothing of it arrives bare: its text is not
+    /// the parent's answer, and its `Usage` and `Cost` are not the parent's turns. The parent's
+    /// [`crate::LoopOutcome::usage`] still includes them, so totals are right.
+    Delegated {
+        call_id: CallId,
+        event: Box<LoopEvent>,
+    },
+    /// A hook was consulted and this is what it said (design 0002 § 3).
+    HookRan {
+        point: HookPoint,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<CallId>,
+        decision: HookDecision,
     },
     Finished {
         stop: LoopStop,
@@ -179,6 +257,55 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<LoopEvent>(encoded).expect("deserializes"),
             event
+        );
+    }
+
+    #[test]
+    fn the_events_of_a_run_with_delegates_and_hooks_round_trip_with_the_nested_kind_intact() {
+        // The JSONL record is a published interface — the metaharness reads it — so every shape a
+        // run with sub-agents, an answer and hooks can write has to survive being read back. The
+        // wrapped one is the shape that can quietly stop doing so: a `Box` inside a tagged enum
+        // needs the inner event to keep its own `kind`, and a reader that lost it would see a
+        // delegate's events as untagged noise.
+        let call_id = CallId::new("call-1").expect("valid");
+        let delegated = LoopEvent::Delegated {
+            call_id: call_id.clone(),
+            event: Box::new(LoopEvent::DelegateFinished {
+                call_id: call_id.clone(),
+                stop: LoopStop::MaxTurns { limit: 20 },
+                turns: 20,
+            }),
+        };
+        let events = vec![
+            delegated.clone(),
+            LoopEvent::HookRan {
+                point: HookPoint::Stop,
+                call_id: None,
+                decision: HookDecision::block("the tests do not pass yet"),
+            },
+            LoopEvent::Answered {
+                call_id: call_id.clone(),
+                value: serde_json::json!({"verdict": "green"}),
+            },
+            LoopEvent::DelegateStarted {
+                call_id,
+                task: "survey every file under src/".to_owned(),
+            },
+        ];
+        for event in events {
+            let encoded = serde_json::to_value(&event).expect("serializes");
+            assert_eq!(
+                serde_json::from_value::<LoopEvent>(encoded).expect("deserializes"),
+                event
+            );
+        }
+
+        let encoded = serde_json::to_value(&delegated).expect("serializes");
+        assert_eq!(encoded["kind"], serde_json::json!("delegated"));
+        assert_eq!(
+            encoded["event"]["kind"],
+            serde_json::json!("delegate-finished"),
+            "the wrapped event carries its own tag, or nothing can read it back: {encoded}"
         );
     }
 }

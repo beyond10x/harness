@@ -11,15 +11,23 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# No `reqwest`. This crate speaks no HTTP of its own: the transport is `harness-http`, and a wire
+# that could reach for a client directly is a wire that can grow a second retry rule.
 [dependencies]
+harness-http = { workspace = true }
 harness-wire = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 # The loop does not depend on this crate, so driving the loop from these tests introduces no cycle.
 # It is what lets the wire be proven against the code that actually consumes it.
+#
+# `harness-responses` is here for `tests/transport.rs` and nothing else: the claim that both wires
+# ask the shared transport for the same thing can only be checked where both are visible. Nothing
+# in `src/` may import it — the two projections stay independent, and neither re-exports the
+# other's anything.
 [dev-dependencies]
 harness-credential = { workspace = true }
 harness-loop = { workspace = true }
+harness-responses = { workspace = true }
 tempfile = { workspace = true }

@@ -11,25 +11,82 @@
 //! [`harness_wire::ToolPort`]. In-process those tools are direct calls; under a bridge they are a
 //! callback over the wire. The loop cannot tell the difference, which is what keeps the embedded
 //! and the bridged harness the same code.
+//!
+//! # Hooks narrow a run; they never widen it
+//!
+//! An operator may attach their own programs at three moments — before a call, after one, and at
+//! the stop ([`HookPort`], design 0002 § 3). Every one of them can only **narrow**. `before-call`
+//! is consulted after the approver has already said yes, so a call a person refused never reaches
+//! a hook and a hook cannot un-refuse it; its only answers are *proceed* and *no*, and a hook that
+//! could not decide is a *no* (fail closed — a hook that could not run did not say yes).
+//! `after-call` may leave the model a note beside a result and cannot mark the result failed.
+//! `stop` may take away the model's right to stop, at most [`MAX_STOP_HOOK_CONTINUES`] times, and
+//! cannot add a right to act. A hook that widened would be a second gate nobody reviews.
+//!
+//! All three fire for the loop's own tools as well ([`OutputSchema`], [`Delegation`]), with each
+//! tool's own spec as the entry — a `before-call` declaration with no tool filter means *every*
+//! call. The one place a point does **not** fire is the end of a delegate: `stop` is about the
+//! run's ending, and a child's ending is not one (see [`AgentLoop::stop_hook`]).
+//!
+//! **The loop spawns nothing.** [`HookPort`] is a seam exactly as [`ApprovalPort`] is; the
+//! implementation that runs a process — the argv, the timeout, the stdout bound, the file naming
+//! the hooks — lives in the shell, which read that file from a path the operator gave it. Nothing
+//! here discovers a hook from a workspace. A run with hooks attached also batches nothing, so a
+//! hook fires exactly once per call.
 
+//! # The two tools the loop owns
+//!
+//! [`OutputSchema`] publishes `answer` and [`Delegation`] publishes `delegate`, and neither is a
+//! catalogue entry: `answer` performs no operation on any machine, and `delegate` performs
+//! whatever this run's own tools perform, through this run's own gate. So they belong here rather
+//! than to a [`harness_wire::ToolPort`], which never sees them — their specs are appended after
+//! the port's on every turn, a call naming one is resolved before anything else and is never
+//! batched, never routed by bare name and never handed to the port, and a port that already
+//! publishes a name they need refuses the run ([`LoopError::Config`]) before the first byte goes
+//! out. Each still produces exactly one [`Item::ToolResult`], because a call replayed without its
+//! result is a hard error on the next turn.
+//!
+//! Both are opt-in per run ([`LoopConfig::output_schema`], [`LoopConfig::delegation`], both
+//! [`None`] by default), so every invocation written before they existed means what it did.
+//! Design: `docs/design/0002-sub-agents-structured-output-hooks.md` § 0.
+
+mod answer;
 mod approval;
 mod budget;
+mod delegate;
 mod event;
+mod hook;
 mod price;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use harness_wire::{
-    Approval, Item, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_RESULT_BYTES, ModelPort, Risk, Sampling,
-    StopReason, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort, ToolSpec, TurnRequest,
-    Usage, WireError, WireErrorCode, exceeds,
+    Approval, CallId, Item, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_RESULT_BYTES, ModelPort, Risk,
+    Sampling, StopReason, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort, ToolSpec,
+    TurnOutcome, TurnRequest, Usage, WireError, WireErrorCode, exceeds,
 };
 use serde::{Deserialize, Serialize};
 
+pub use answer::{
+    DEFAULT_ANSWER_DESCRIPTION, DEFAULT_ANSWER_NAME, MAX_ANSWER_NUDGES, OutputSchema,
+    OutputSchemaError,
+};
 pub use approval::{ApprovalDecision, ApprovalPort, ApproveAll, DenyAll};
 pub use budget::{Budget, BudgetError};
+pub use delegate::{
+    DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_TURNS, DELEGATE_PREAMBLE, Delegation,
+    MAX_DELEGATION_DEPTH,
+};
 pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink};
+pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
+
+/// How many times a `stop` hook may keep one run working after the model tried to end it.
+///
+/// Three. A hook that blocks every stop is a run with no end, and the model told the same thing
+/// a fourth time has already shown it cannot act on it. After this the loop warns
+/// `stop-hook-exhausted` and the run ends as the model asked.
+pub const MAX_STOP_HOOK_CONTINUES: u32 = 3;
 
 /// Why the loop stopped. Every variant is a real terminal state, not a failure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +121,14 @@ pub enum LoopStop {
     ProviderIncomplete {
         reason: String,
     },
+    /// The run was asked for a structured answer and the model ended in prose instead.
+    ///
+    /// Not `Completed`: a consumer reading stdout as JSON must not get prose with a success
+    /// status. `asked_again` is how many nudges were spent first — see
+    /// [`MAX_ANSWER_NUDGES`].
+    Unstructured {
+        asked_again: u32,
+    },
 }
 
 impl LoopStop {
@@ -90,21 +155,80 @@ pub struct LoopOutcome {
     /// zero, for the reason [`LoopEvent::Cost`] gives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_micro_usd: Option<u64>,
+    /// The answer in the shape [`LoopConfig::output_schema`] asked for, when the model gave one.
+    ///
+    /// The arguments of the `answer` call, exactly as the provider accepted them — parsed by
+    /// nobody here and validated against the schema by nobody here (design 0002 § 1, M3).
+    /// [`None`] on a run that asked for no schema, and on one that stopped
+    /// [`LoopStop::Unstructured`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured: Option<serde_json::Value>,
 }
 
 impl LoopOutcome {
     /// Returns the summed reported token counts, or `None` when no turn reported any.
     pub fn total_tokens(&self) -> Option<(u64, u64)> {
-        if self.usage.is_empty() {
-            return None;
-        }
-        Some(self.usage.iter().fold((0, 0), |(input, output), usage| {
-            (
-                input.saturating_add(usage.input_tokens),
-                output.saturating_add(usage.output_tokens),
-            )
-        }))
+        total_tokens(&self.usage)
     }
+}
+
+/// What a run spent, readable however the run ended.
+///
+/// [`AgentLoop::run_in`] writes one on **every** exit path, exactly as it writes the conversation
+/// back, and for the same reason: a run that broke on the wire on turn twenty still bought
+/// nineteen turns. Their [`LoopEvent::Usage`] and [`LoopEvent::Cost`] events have already gone out
+/// on the sink by then, so a shell that filed the conversation of a failed run but none of its
+/// spend under-reports what the failure cost — and the session file is the only record a person
+/// still has after the process is gone.
+///
+/// # Why a second out-parameter rather than a payload on [`LoopError`]
+///
+/// The smallest shape that changes nothing else. `LoopError` stays three variants a caller matches
+/// on and formats, rather than three that each have to be unpacked before the reason can be read;
+/// [`AgentLoop::run`] keeps its signature and its behaviour for callers that do not care what a
+/// run spent; and the rule a caller learns is the one [`AgentLoop::run_in`] already has for items —
+/// *lend the loop somewhere to write, read it whatever comes back* — rather than a second, different
+/// rule for the same question.
+///
+/// **Replaced, never accumulated.** One ledger holds one run: the figures are this run's, not the
+/// session's, so a caller reusing a ledger across runs reads the last run and does its own folding
+/// — which is what `usage` being one entry per billed turn is for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunLedger {
+    /// One entry per turn the provider reported for, this run's delegates included.
+    ///
+    /// An empty list means usage is unknown, not that nothing was spent (`AGENTS.md` invariant 7).
+    pub usage: Vec<Usage>,
+    /// What the run spent in millionths of a US dollar, at the rates the caller declared.
+    ///
+    /// [`None`] when nothing priced this model, and absent stays absent: a failed run nobody could
+    /// price must not fold a zero into a session's total.
+    pub cost_micro_usd: Option<u64>,
+    /// The turns this run started — the same count [`LoopOutcome::turns`] carries.
+    pub turns: u64,
+}
+
+impl RunLedger {
+    /// Returns the summed reported token counts, or `None` when no turn reported any.
+    pub fn total_tokens(&self) -> Option<(u64, u64)> {
+        total_tokens(&self.usage)
+    }
+}
+
+/// The reported token counts of `usage`, summed, or `None` when no turn reported any.
+///
+/// One function behind both [`LoopOutcome::total_tokens`] and [`RunLedger::total_tokens`], so the
+/// two records of one run cannot answer the same question differently.
+fn total_tokens(usage: &[Usage]) -> Option<(u64, u64)> {
+    if usage.is_empty() {
+        return None;
+    }
+    Some(usage.iter().fold((0, 0), |(input, output), reported| {
+        (
+            input.saturating_add(reported.input_tokens),
+            output.saturating_add(reported.output_tokens),
+        )
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -113,6 +237,14 @@ pub enum LoopError {
     Budget(#[from] BudgetError),
     #[error("model wire refused: {0}")]
     Wire(#[from] WireError),
+    /// The run as configured could not be described to a provider at all.
+    ///
+    /// Raised before the first request, so nothing is spent finding out. Today the only cause is a
+    /// clash over a tool name — a [`ToolPort`] publishing one of the loop's own, or an
+    /// [`OutputSchema`] and a [`Delegation`] published under the same name — which would put that
+    /// name in `tools` twice and leave the model able to address neither.
+    #[error("the run cannot start: {0}")]
+    Config(String),
 }
 
 /// Ends the run between turns and between tool calls.
@@ -150,6 +282,31 @@ pub struct LoopConfig {
     /// an approver that says yes: [`ApproveAll`] with [`Risk::Destructive`] is an unattended run
     /// declared, rather than one arrived at because no tool happened to ask.
     pub unattended_ceiling: Risk,
+    /// How many tokens the model's context window holds, when the caller knows.
+    ///
+    /// [`None`] leaves compaction on the fixed byte rule it has always had
+    /// ([`MAX_CONVERSATION_BYTES`]), which is 192 KiB — roughly 50k tokens, so about 60 % of a
+    /// 128k window was never reachable and a longer run met the provider's wall as a hard error
+    /// instead of a compaction. With a window declared, the trigger becomes token-aware: see
+    /// [`COMPACTION_TRIGGER_PERCENT`].
+    ///
+    /// A count of tokens, not of bytes, because that is the unit the provider refuses in.
+    pub context_window: Option<u64>,
+    /// The first pause before a turn whose stream broke is attempted again.
+    ///
+    /// Doubles per attempt up to [`MAX_TURN_RETRY_BACKOFF`]. A field rather than a constant so a
+    /// test can exercise the exhaustion path without spending the 3.5 seconds the shipped default
+    /// would take, and so an embedder driving many short runs can choose its own patience.
+    pub retry_backoff: Duration,
+    /// The shape the run's answer must take, when the caller wants one.
+    ///
+    /// Published as a tool the model calls to finish (design 0002 § 1). [`None`] is a run that
+    /// answers in prose, which is what every run did before this existed.
+    pub output_schema: Option<OutputSchema>,
+    /// Whether the model may hand a sub-task to a fresh context (design 0002 § 2).
+    ///
+    /// [`None`] publishes no `delegate`, which is what every run did before this existed.
+    pub delegation: Option<Delegation>,
 }
 
 impl LoopConfig {
@@ -161,7 +318,25 @@ impl LoopConfig {
             sampling: Sampling::default(),
             prices: None,
             unattended_ceiling: Risk::Low,
+            context_window: None,
+            retry_backoff: TURN_RETRY_BACKOFF,
+            output_schema: None,
+            delegation: None,
         }
+    }
+
+    /// Asks for the run's answer in one shape, by publishing it as a tool the model calls.
+    #[must_use]
+    pub fn with_output_schema(mut self, schema: Option<OutputSchema>) -> Self {
+        self.output_schema = schema;
+        self
+    }
+
+    /// Lets the model delegate a sub-task to a fresh context on the same gate.
+    #[must_use]
+    pub fn with_delegation(mut self, delegation: Option<Delegation>) -> Self {
+        self.delegation = delegation;
+        self
     }
 
     #[must_use]
@@ -187,7 +362,52 @@ impl LoopConfig {
         self.unattended_ceiling = ceiling;
         self
     }
+
+    /// Declares the model's context window, in tokens, and makes compaction token-aware.
+    ///
+    /// [`None`] is not a window of zero: it is a run whose window nobody stated, and it keeps the
+    /// byte rule.
+    #[must_use]
+    pub fn with_context_window(mut self, tokens: Option<u64>) -> Self {
+        self.context_window = tokens;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_backoff(mut self, backoff: Duration) -> Self {
+        self.retry_backoff = backoff;
+        self
+    }
 }
+
+/// How many further attempts a turn gets after a **retriable** wire failure.
+///
+/// Three, and then the run ends with the failure it already had. The cost of one more attempt is a
+/// whole replay of the conversation — quadratic in run length — so this is not a number to raise
+/// without measuring what a fourth attempt actually recovers.
+pub const MAX_TURN_RETRIES: u32 = 3;
+
+/// The first pause between attempts at a turn, doubling per attempt.
+pub const TURN_RETRY_BACKOFF: Duration = Duration::from_millis(500);
+
+/// The longest pause between attempts, however many have been made.
+///
+/// A ceiling rather than unbounded doubling: past a few seconds the person watching has already
+/// decided whether to wait, and a run that pauses for a minute reads as one that has hung.
+///
+/// **On a shipped run it never binds, and that is deliberate.** The default
+/// [`LoopConfig::retry_backoff`] is 500 ms and [`MAX_TURN_RETRIES`] is three, so the pauses are
+/// 0.5 s, 1 s and 2 s and the largest is a quarter of this. It is a guard for an embedder that
+/// raises `retry_backoff` — at 5 s the third pause would otherwise be 20 s — not a number the
+/// defaults reach.
+pub const MAX_TURN_RETRY_BACKOFF: Duration = Duration::from_secs(8);
+
+/// How often a pause looks at the cancellation token.
+///
+/// The pause is slept in slices of this, so a Ctrl-C during an eight-second back-off is honoured
+/// within a frame rather than after it. Sleeping the whole pause in one call would make the loop
+/// deaf for exactly as long as it is least useful to be.
+const CANCEL_POLL: Duration = Duration::from_millis(25);
 
 fn cancelled() -> LoopStop {
     LoopStop::Cancelled {
@@ -214,42 +434,87 @@ struct RunState {
     output_total: u64,
     /// Absent until a turn is priced, so a run nobody could price never reports a figure.
     cost_total: Option<u64>,
+    /// What the last **conversation** turn reported as its input, for the compaction trigger.
+    ///
+    /// Not `usage.last()`: a summary turn is charged to the same run but its input count measures
+    /// the prefix it was handed, not the conversation. Reading it would tell the next compaction
+    /// the window had emptied and stop it firing again.
+    reported_input: Option<u64>,
     text: String,
+    /// The `answer` call's arguments, once the model has made it.
+    structured: Option<serde_json::Value>,
+    /// How many times the model was told to call the answer tool ([`MAX_ANSWER_NUDGES`]).
+    nudged: u32,
+    /// How many times a stop hook kept the run going ([`MAX_STOP_HOOK_CONTINUES`]).
+    stop_continues: u32,
 }
 
 impl RunState {
-    fn new(input: impl Into<String>) -> Self {
+    /// A run that continues a conversation somebody else was holding.
+    ///
+    /// An empty `items` is a first run, and is how [`AgentLoop::run`] starts one.
+    ///
+    /// The prior items come first and the new input is one more user item after them — the same
+    /// shape a first run has, which is why nothing below this line can tell a resumed run from a
+    /// fresh one.
+    fn resuming(mut items: Vec<Item>, input: impl Into<String>) -> Self {
+        items.push(Item::user(input));
         Self {
-            items: vec![Item::user(input)],
+            items,
             usage: Vec::new(),
             turns: 0,
             input_total: 0,
             output_total: 0,
             cost_total: None,
+            reported_input: None,
             text: String::new(),
+            structured: None,
+            nudged: 0,
+            stop_continues: 0,
         }
+    }
+
+    /// Counts what one turn reported against the run's totals, its budget and its bill.
+    ///
+    /// Separate from [`RunState::absorb`] because a summary turn spends tokens without adding
+    /// anything to the conversation: what it produced replaces items rather than joining them. It
+    /// is still a turn the provider charged for, so it is counted here exactly like any other —
+    /// a compaction that priced itself at nothing would understate every long run.
+    ///
+    /// Absent usage produces no event and no zero, for the reason [`LoopEvent::Cost`] gives.
+    fn absorb_usage(
+        &mut self,
+        usage: Option<Usage>,
+        prices: Option<&RateCard>,
+        sink: &mut dyn LoopSink,
+    ) {
+        let Some(reported) = usage else {
+            return;
+        };
+        self.input_total = self.input_total.saturating_add(reported.input_tokens);
+        self.output_total = self.output_total.saturating_add(reported.output_tokens);
+        sink.emit(LoopEvent::Usage(reported.clone()));
+        if let Some(micro_usd) = prices.and_then(|card| card.price(&reported)) {
+            self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(micro_usd));
+            sink.emit(LoopEvent::Cost {
+                model: reported.model.clone(),
+                micro_usd,
+            });
+        }
+        self.usage.push(reported);
     }
 
     /// Folds one turn into the run and returns the calls it asked for.
     fn absorb(
         &mut self,
-        outcome: harness_wire::TurnOutcome,
+        outcome: TurnOutcome,
         prices: Option<&RateCard>,
         sink: &mut dyn LoopSink,
     ) -> (Vec<ToolCall>, StopReason) {
-        if let Some(reported) = outcome.usage {
-            self.input_total = self.input_total.saturating_add(reported.input_tokens);
-            self.output_total = self.output_total.saturating_add(reported.output_tokens);
-            sink.emit(LoopEvent::Usage(reported.clone()));
-            if let Some(micro_usd) = prices.and_then(|card| card.price(&reported)) {
-                self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(micro_usd));
-                sink.emit(LoopEvent::Cost {
-                    model: reported.model.clone(),
-                    micro_usd,
-                });
-            }
-            self.usage.push(reported);
+        if let Some(reported) = outcome.usage.as_ref() {
+            self.reported_input = Some(reported.input_tokens);
         }
+        self.absorb_usage(outcome.usage, prices, sink);
 
         let turn_text: String = outcome
             .items
@@ -273,6 +538,39 @@ impl RunState {
         (calls, outcome.stop_reason)
     }
 
+    /// Takes a child run's spend into this one.
+    ///
+    /// A delegate spends the run's budget rather than one of its own, so what it spent is the
+    /// parent's — on **every** exit path the child has, an answer and a wire failure alike. A
+    /// child that broke on turn four still bought three turns, and its [`LoopEvent::Usage`] and
+    /// [`LoopEvent::Cost`] events have already gone out (wrapped) by the time it breaks: a parent
+    /// that absorbed nothing from a failed child would report totals smaller than the record it
+    /// emitted, carve the next delegate a remainder that is already gone, and never let
+    /// [`AgentLoop::stop_after_tokens`] see the spend at all.
+    ///
+    /// Absent cost stays absent — a child nobody could price does not turn an unpriced parent into
+    /// a run that cost zero.
+    fn absorb_child(&mut self, child: &mut Self) {
+        self.input_total = self.input_total.saturating_add(child.input_total);
+        self.output_total = self.output_total.saturating_add(child.output_total);
+        if let Some(spent) = child.cost_total {
+            self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(spent));
+        }
+        self.usage.append(&mut child.usage);
+    }
+
+    /// What this run has spent so far, in the shape the caller reads it in.
+    ///
+    /// Borrowing rather than consuming: a run that answered still owes its caller a
+    /// [`LoopOutcome`] built from the same state, and the two records of one run must agree.
+    fn ledger(&self) -> RunLedger {
+        RunLedger {
+            usage: self.usage.clone(),
+            cost_micro_usd: self.cost_total,
+            turns: self.turns,
+        }
+    }
+
     fn into_outcome(self, stop: LoopStop) -> LoopOutcome {
         LoopOutcome {
             stop,
@@ -281,6 +579,7 @@ impl RunState {
             turns: self.turns,
             usage: self.usage,
             cost_micro_usd: self.cost_total,
+            structured: self.structured,
         }
     }
 }
@@ -325,6 +624,201 @@ pub const COMPACTED_TARGET_BYTES: usize = 96 * 1024;
 /// above the target it is meant to leave room under.
 pub const KEPT_RESULT_BYTES: usize = 48 * 1024;
 
+/// How many bytes of conversation one token is taken to be, where nothing has counted them.
+///
+/// An **estimate**, and named as one. Four bytes per token is the ratio usually quoted for English
+/// prose; a conversation here is JSON — escaped paths, braces, quoted source — which tokenizes
+/// denser, so this under-counts and fires later than the truth. Two things keep that safe: the
+/// trigger reads the **larger** of this estimate and the provider's own reported input count, so
+/// neither a provider that reports nothing nor an estimate that under-counts can delay a
+/// compaction — whichever figure is nearer the wall is the one that fires; and the trigger sits at
+/// 80 % of the window rather than at it, so the margin absorbs the error. It is never used to
+/// state what a turn cost.
+pub const ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
+
+/// How full the window has to be before a token-aware compaction fires.
+///
+/// Below the wall, not at it: a compaction that fires at 100 % has already lost, because the turn
+/// that would have carried it is the one the provider refuses.
+pub const COMPACTION_TRIGGER_PERCENT: u64 = 80;
+
+/// How full the window a token-aware compaction aims to leave it.
+///
+/// The same argument as [`COMPACTED_TARGET_BYTES`]: stopping at the trigger leaves the next result
+/// to cross it again, and every crossing rewrites the prefix a prompt cache is keyed on.
+pub const COMPACTION_TARGET_PERCENT: u64 = 50;
+
+/// The fewest bytes worth spending a whole model turn to fold into a summary.
+///
+/// A summary turn costs a replay of what it folds plus the tokens it writes, so folding a few
+/// hundred bytes spends more than it recovers. Below this the loop keeps the elided conversation
+/// and says nothing, which is also what stops a run whose weight is all in the protected tail from
+/// buying a summary turn every turn.
+pub const SUMMARY_MIN_FOLD_BYTES: usize = 8 * 1024;
+
+/// The first line of the item a summary is folded into.
+///
+/// Fixed text, so a reader of a transcript — and the model on the next turn — can tell a summary
+/// the harness wrote from something a person said. Never removed and never translated.
+pub const SUMMARY_MARKER: &str =
+    "[Earlier turns were summarised by the harness; the summary follows.]";
+
+/// What the model is asked for when the harness folds the earlier part of a run into one item.
+///
+/// It is deliberately not the run's own standing instruction: this turn has no tools, no task and
+/// no person to answer — it is being asked to compress a record. Naming what must survive (paths,
+/// commands, outcomes, what is still open) is what keeps the summary usable as *working memory*
+/// rather than as a readable paragraph: a summary that says "the tests were fixed" and drops the
+/// file it happened in costs the next turn a search.
+const SUMMARY_INSTRUCTION: &str = "\
+You are compressing the earlier part of an agent's own working record so it can be dropped from \
+its context. Write a dense summary of what was asked, what was decided, what was done and what is \
+still open. Preserve exact file paths, identifiers, commands and their outcomes; a detail you drop \
+is one the agent will have to spend a tool call to recover. Do not add anything that is not in the \
+record you were given, do not address anybody, and write no preamble.";
+
+/// The first item is the task, and a summary never folds it.
+///
+/// Everything after it is a record of working on the task and can be compressed. The task itself
+/// is what the run is *for*: folded into a summary of its own execution, a long run would end up
+/// answering a paraphrase of the question it was asked.
+const FIRST_KEPT_ITEM: usize = 1;
+
+/// How many bytes of rendered transcript one summary turn may carry.
+///
+/// The request that asks for a summary is itself a request, and it is built from the part of the
+/// conversation that grew too large — so without a bound the turn meant to fit the run back inside
+/// the window is the one the provider refuses. 128 KiB is roughly 32k tokens by
+/// [`ESTIMATED_BYTES_PER_TOKEN`], which fits inside every window this loop has been pointed at
+/// while still holding most of a long run.
+///
+/// What goes when it binds is the **oldest** items, because the newest are what the next turn is
+/// about — and a line saying how many and how many bytes goes in their place. Never silently.
+///
+/// The bound is on the rendered items. The two lines that report what was cut and what is not
+/// shown, and the instruction after them, sit outside it: a few hundred bytes on a figure with
+/// three orders of magnitude of headroom.
+pub const SUMMARY_TRANSCRIPT_BYTES: usize = 128 * 1024;
+
+/// How many bytes of one call's arguments, or one result's output, the transcript shows.
+///
+/// A single 64 KiB file read would otherwise be half the transcript on its own and crowd out the
+/// twenty turns around it, which are what a summary is actually for. What is cut is stated in the
+/// line itself, with the figure, so the model reads a shortened result as shortened.
+pub const SUMMARY_ITEM_BYTES: usize = 4 * 1024;
+
+/// The items a summary turn sends, rendered from the part of the conversation being folded.
+///
+/// # Why the fold is rendered rather than replayed
+///
+/// Replaying `folded` as items was a request neither wire could accept. The fold begins after the
+/// task, so its first item is assistant-side — and the Messages route requires the first message
+/// to be `user`. It carries `tool_use` and `tool_result` blocks, and that route rejects those when
+/// the request publishes no tools, which a summary turn deliberately does not. And it carries
+/// [`Item::Opaque`] reasoning items, which are a provider's own encrypted state: replayable
+/// verbatim in the conversation they came from, and meaningless in a request that is not that
+/// conversation.
+///
+/// So the fold is rendered to text and sent as **one** [`Item::user`]: one message, `user`-first,
+/// no tool blocks, no opaque items. That is wire-neutral by construction rather than by each wire
+/// happening to tolerate it, which is why both wire crates project this function's output in their
+/// own tests.
+///
+/// # What the rendering says out loud
+///
+/// Opaque items are dropped — there is nothing to render, and the model is told once how many.
+/// Arguments and outputs over [`SUMMARY_ITEM_BYTES`] carry the count of what was cut, and a
+/// transcript over [`SUMMARY_TRANSCRIPT_BYTES`] loses its oldest lines behind a line that says how
+/// many. A shortened record the model reads as complete is exactly what invariant 8 forbids.
+///
+/// The ask itself comes **after** the record, where the model reads last, which is why it is here
+/// and in the turn's standing instruction both: this item has to be a complete prompt on its own,
+/// since a wire places a standing instruction wherever its route wants it.
+#[must_use]
+pub fn summary_request_items(folded: &[Item]) -> Vec<Item> {
+    let mut lines: Vec<String> = Vec::with_capacity(folded.len());
+    let mut opaque = 0_usize;
+    for item in folded {
+        match transcript_line(item) {
+            Some(line) => lines.push(line),
+            None => opaque += 1,
+        }
+    }
+    // One for the newline each line is joined with, so the bound covers what is actually sent.
+    let mut rendered: usize = lines.iter().map(|line| line.len() + 1).sum();
+    let mut cut_lines = 0_usize;
+    let mut cut_bytes = 0_usize;
+    while rendered > SUMMARY_TRANSCRIPT_BYTES && cut_lines < lines.len() {
+        let size = lines[cut_lines].len() + 1;
+        rendered -= size;
+        cut_bytes += size;
+        cut_lines += 1;
+    }
+
+    let mut transcript: Vec<String> = Vec::new();
+    if cut_lines > 0 {
+        transcript.push(format!(
+            "[The {cut_lines} oldest item(s) of this record, {cut_bytes} bytes, were cut to keep \
+             it inside the {SUMMARY_TRANSCRIPT_BYTES} byte bound on one summary request. What \
+             follows is the rest of it.]"
+        ));
+    }
+    if opaque > 0 {
+        transcript.push(format!(
+            "[{opaque} provider reasoning item(s) are not shown: they are opaque to this harness, \
+             which replays them verbatim and never reads them.]"
+        ));
+    }
+    transcript.extend(lines.drain(cut_lines..));
+    vec![Item::user(format!(
+        "{}\n\n{SUMMARY_INSTRUCTION}",
+        transcript.join("\n")
+    ))]
+}
+
+/// One conversation item as one line of the transcript, or [`None`] for one there is nothing to
+/// render.
+fn transcript_line(item: &Item) -> Option<String> {
+    Some(match item {
+        Item::UserText { text } => format!("[user] {text}"),
+        Item::AssistantText { text } => format!("[assistant] {text}"),
+        Item::ToolCall(call) => format!(
+            "[tool call {} {}]",
+            call.name,
+            bounded_json(&call.arguments)
+        ),
+        Item::ToolResult {
+            call_id,
+            output,
+            failed,
+        } => format!(
+            "[tool result {call_id}{} {}]",
+            if *failed { " failed" } else { "" },
+            bounded_json(output)
+        ),
+        Item::Opaque { .. } => return None,
+    })
+}
+
+/// One payload as compact JSON, cut to [`SUMMARY_ITEM_BYTES`] and saying so when it was.
+fn bounded_json(value: &serde_json::Value) -> String {
+    let json = serde_json::to_string(value)
+        .unwrap_or_else(|_| "\"this payload could not be rendered\"".to_owned());
+    if json.len() <= SUMMARY_ITEM_BYTES {
+        return json;
+    }
+    let mut at = SUMMARY_ITEM_BYTES;
+    while at > 0 && !json.is_char_boundary(at) {
+        at -= 1;
+    }
+    format!(
+        "{} …({cut} of {total} bytes were cut)",
+        &json[..at],
+        cut = json.len() - at,
+        total = json.len()
+    )
+}
+
 /// Elides the oldest tool results until the conversation fits, and says how much went.
 ///
 /// # What is dropped, and what never is
@@ -345,30 +839,100 @@ pub const KEPT_RESULT_BYTES: usize = 48 * 1024;
 ///
 /// Trading one uncached turn for a permanently shorter conversation is worth it at these sizes;
 /// trading one every turn would not be, which is why the threshold is a bound rather than a target.
+///
+/// This is the **byte** rule, which is what a run with no declared context window still gets. With
+/// one, [`AgentLoop::compact_run`] decides in tokens and may summarise what elision cannot reach.
 fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
-    fn measure(items: &[Item]) -> usize {
-        items
-            .iter()
-            .map(|item| serde_json::to_string(item).map_or(0, |json| json.len()))
-            .sum()
-    }
-    if measure(items) <= MAX_CONVERSATION_BYTES {
+    let before = measure(items);
+    if before <= MAX_CONVERSATION_BYTES {
         return;
     }
+    let elided = elide(
+        items,
+        COMPACTED_TARGET_BYTES,
+        protected_bytes(COMPACTED_TARGET_BYTES),
+    );
+    if elided.count == 0 {
+        return;
+    }
+    let after = measure(items);
+    // Said out loud: a model that suddenly cannot see a file it read has a right to a reason,
+    // and so does anyone reading the record afterwards.
+    sink.emit(LoopEvent::Warning {
+        code: "conversation-compacted".to_owned(),
+        message: format!(
+            "the conversation passed {MAX_CONVERSATION_BYTES} bytes, so {count} old tool \
+             result(s) were elided, freeing {freed} bytes and leaving {after}. The most recent \
+             {protected} result(s), {kept} bytes, are untouched.",
+            count = elided.count,
+            freed = elided.freed,
+            protected = elided.protected,
+            kept = elided.kept,
+        ),
+    });
+    sink.emit(LoopEvent::Compacted {
+        elided_results: elided.count,
+        elided_bytes: elided.freed,
+        summarised_items: 0,
+        bytes_before: before,
+        bytes_after: after,
+        summary_turn: false,
+    });
+}
 
+/// The conversation's size, the way every threshold here measures it.
+fn measure(items: &[Item]) -> usize {
+    items.iter().map(measure_one).sum()
+}
+
+fn measure_one(item: &Item) -> usize {
+    serde_json::to_string(item).map_or(0, |json| json.len())
+}
+
+/// What that many bytes of conversation are estimated to be in tokens.
+fn estimated_tokens(bytes: usize) -> u64 {
+    u64::try_from(bytes).unwrap_or(u64::MAX) / ESTIMATED_BYTES_PER_TOKEN
+}
+
+/// The newest bytes of conversation that neither elision nor a summary may touch.
+///
+/// [`KEPT_RESULT_BYTES`] wherever the run can afford it, and half the target where it cannot: a
+/// floor above the target it is meant to leave room under can never be met, so a small window
+/// would protect the whole conversation and compaction would do nothing at all. At the byte rule's
+/// own target the two are the same figure, so this changes nothing for a run with no window.
+fn protected_bytes(target: usize) -> usize {
+    KEPT_RESULT_BYTES.min(target / 2)
+}
+
+/// What one elision pass dropped, and what it left standing.
+struct Elided {
+    /// Tool results whose payload was replaced.
+    count: usize,
+    freed: usize,
+    /// The newest results left whole, and their size.
+    protected: usize,
+    kept: usize,
+}
+
+/// Elides the oldest tool-result payloads until the conversation is under `target`.
+///
+/// `protect` bytes of the newest results are never touched — see [`protected_bytes`] — and at
+/// least one result always survives, because a model that cannot see the result of the call it
+/// just made is stuck.
+fn elide(items: &mut [Item], target: usize, protect: usize) -> Elided {
     let results: Vec<usize> = items
         .iter()
         .enumerate()
         .filter(|(_, item)| matches!(item, Item::ToolResult { output, .. } if !is_elided(output)))
         .map(|(index, _)| index)
         .collect();
-    // The newest results, whole, until they come to [`KEPT_RESULT_BYTES`] — and always at least
-    // one, because a model that cannot see the result of the call it just made is stuck.
+    // The newest results, whole, until they come to `protect` bytes — and always at least one,
+    // because a model that cannot see the result of the call it just made is stuck.
     let mut kept = 0_usize;
     let mut protected = 0_usize;
     for &index in results.iter().rev() {
-        let size = serde_json::to_string(&items[index]).map_or(0, |json| json.len());
-        if protected > 0 && kept + size > KEPT_RESULT_BYTES {
+        let size = measure_one(&items[index]);
+        if protected > 0 && kept + size > protect {
             break;
         }
         kept += size;
@@ -380,7 +944,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
     for index in results.into_iter().take(elidable) {
         // Down to the low-water mark, not to the bound: stopping at the bound leaves the next
         // result to cross it again, and the second rewrite costs a whole uncached replay.
-        if measure(items) <= COMPACTED_TARGET_BYTES {
+        if measure(items) <= target {
             break;
         }
         let Item::ToolResult { output, .. } = &mut items[index] else {
@@ -397,24 +961,259 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         count += 1;
     }
 
-    if count > 0 {
-        // Said out loud: a model that suddenly cannot see a file it read has a right to a reason,
-        // and so does anyone reading the record afterwards.
-        sink.emit(LoopEvent::Warning {
-            code: "conversation-compacted".to_owned(),
-            message: format!(
-                "the conversation passed {MAX_CONVERSATION_BYTES} bytes, so {count} old tool \
-                 result(s) were elided, freeing {freed} bytes and leaving {now}. The most recent \
-                 {protected} result(s), {kept} bytes, are untouched.",
-                now = measure(items)
-            ),
-        });
+    Elided {
+        count,
+        freed,
+        protected,
+        kept,
     }
+}
+
+/// Where the **turn group** starting at `start` ends, exclusive.
+///
+/// A turn group is the smallest run of items that is still replayable on its own: the
+/// [`Item::Opaque`] reasoning item(s) a turn emitted before it called anything, the run of
+/// [`Item::ToolCall`]s it then made, and the [`Item::ToolResult`]s that answer exactly those
+/// calls. A [`Item::UserText`] or [`Item::AssistantText`] is a group of one, and so is an opaque
+/// item no call follows.
+///
+/// Results are matched by `call_id` rather than by position, because the two shapes a provider
+/// produces — all the calls then all the results, or each call followed by its own result — are
+/// both in use and the group has to close at the right place for either.
+fn group_end(items: &[Item], start: usize) -> usize {
+    let mut index = start;
+    while index < items.len() && matches!(items[index], Item::Opaque { .. }) {
+        index += 1;
+    }
+    if index >= items.len() || !matches!(items[index], Item::ToolCall(_)) {
+        // Reasoning that no call follows stands alone, and so does a text item.
+        return if index > start { index } else { start + 1 };
+    }
+    let mut awaiting: Vec<harness_wire::CallId> = Vec::new();
+    while let Some(Item::ToolCall(call)) = items.get(index) {
+        awaiting.push(call.call_id.clone());
+        index += 1;
+    }
+    while !awaiting.is_empty() {
+        let Some(Item::ToolResult { call_id, .. }) = items.get(index) else {
+            break;
+        };
+        let Some(answered) = awaiting.iter().position(|id| id == call_id) else {
+            break;
+        };
+        awaiting.remove(answered);
+        index += 1;
+    }
+    index
+}
+
+/// Which indices a fold may stop at: `legal[i]` is true when nothing straddles the gap before `i`.
+///
+/// One pass over the conversation, so the boundaries are the group boundaries by construction
+/// rather than by a walk-back that has to guess what it is standing in the middle of.
+fn group_boundaries(items: &[Item]) -> Vec<bool> {
+    let mut legal = vec![false; items.len() + 1];
+    let mut index = 0_usize;
+    while index < items.len() {
+        legal[index] = true;
+        index = group_end(items, index).max(index + 1);
+    }
+    legal[items.len()] = true;
+    legal
+}
+
+/// Where a summary's fold stops, or [`None`] when there is nothing worth folding.
+///
+/// Three things are never folded: the task ([`FIRST_KEPT_ITEM`]), the newest `protect` bytes of the
+/// conversation, and — whatever `protect` works out to — the **newest item**, because a model that
+/// cannot see the result of the call it just made is stuck.
+///
+/// # The boundary may only fall between turn groups
+///
+/// Both halves of a tool round trip are provider errors on their own: a `function_call` replayed
+/// without its output is one, an output replayed without its call is worse because nothing says
+/// what it answers, and on the Responses wire a reasoning item that its call does not follow is a
+/// third. Walking back over `ToolCall`s alone was not enough to avoid any of them —
+/// `[…, call A, call B, result A, result B, …]` has a byte boundary between the two results that
+/// stands over no `ToolCall` at all, and folding there orphans B's call from B's result **and**
+/// puts a result at the head of the tail. So the boundary is snapped back to the nearest
+/// [`group_boundaries`] index instead, which cannot fall inside a group of any of those shapes.
+///
+/// Snapping only ever makes the fold smaller, so it can end at [`FIRST_KEPT_ITEM`] and leave
+/// nothing to fold. That is [`None`] and a skipped summary, which is the right answer: a
+/// conversation whose whole tail is one unbreakable group has nothing a summary could take.
+fn fold_end(items: &[Item], protect: usize) -> Option<usize> {
+    let mut kept = 0_usize;
+    let mut end = items.len().saturating_sub(1);
+    while end > FIRST_KEPT_ITEM {
+        let size = measure_one(&items[end - 1]);
+        if kept + size > protect {
+            break;
+        }
+        kept += size;
+        end -= 1;
+    }
+    let legal = group_boundaries(items);
+    while end > FIRST_KEPT_ITEM && !legal[end] {
+        end -= 1;
+    }
+    // What is worth folding is decided in bytes, by `SUMMARY_MIN_FOLD_BYTES`: one 40kB assistant
+    // argument is worth a turn and six short items are not.
+    (end > FIRST_KEPT_ITEM).then_some(end)
+}
+
+/// What a summary attempt did.
+enum Summarised {
+    /// Nothing was folded: too little to be worth a turn, or all of it protected.
+    Skipped,
+    /// The prefix is now one summary item, in place of this many.
+    Folded(usize),
+    /// A turn was spent and produced nothing usable. The elided conversation stands.
+    Failed,
+    /// The caller cancelled. The run is over.
+    Cancelled,
 }
 
 /// Whether this output has already been elided, so nothing is counted or elided twice.
 fn is_elided(output: &serde_json::Value) -> bool {
     output.get("elided").is_some()
+}
+
+/// Refuses an oversized result by name rather than cutting it down.
+///
+/// A truncated result reads to the model exactly like a complete one, so it would answer from a
+/// file it believes it saw the whole of. The same check for a call run on its own and for one run
+/// in a batch: a bound that a faster path could get around is not a bound.
+fn within_result_bound(call: &ToolCall, result: ToolOutcome) -> ToolOutcome {
+    if exceeds(&result.output, MAX_TOOL_RESULT_BYTES) {
+        return ToolOutcome::failed(format!(
+            "the result of `{}` is over the {MAX_TOOL_RESULT_BYTES} byte bound; narrow the request",
+            call.name
+        ));
+    }
+    result
+}
+
+/// How a refusal names the call it is about.
+///
+/// The **invoked** entry, because that is what would have run and what a person — or a hook —
+/// decided on, and the verb it came through when the two differ. A refusal that named only the
+/// verb told the model `tool_invoke` was refused and never said which entry, so it either stopped
+/// using the verb at all or retried the same entry against the same answer.
+fn refused_name(call: &ToolCall, invoked: &ToolSpec) -> String {
+    if invoked.name == call.name {
+        format!("`{}`", call.name)
+    } else {
+        format!("`{}` (called through `{}`)", invoked.name, call.name)
+    }
+}
+
+/// Puts an after-call hook's note where the model reads it: beside the result, never instead of it.
+///
+/// An object result grows a `hook_notes` array. Anything else — a string, a list, a number — is
+/// wrapped as `{"output": <what the tool said>, "hook_notes": [<note>]}`, because a note appended
+/// to a string would read to the model exactly like something the tool itself said.
+///
+/// An object that already carries a `hook_notes` which is **not** an array is wrapped too, rather
+/// than having it overwritten: the tool said that, and replacing it would destroy an answer to
+/// make room for a comment on it.
+fn with_hook_note(result: ToolOutcome, note: String) -> ToolOutcome {
+    let ToolOutcome { mut output, failed } = result;
+    let note = serde_json::Value::String(note);
+    let joins = output.as_object().is_some_and(|fields| {
+        fields
+            .get("hook_notes")
+            .is_none_or(serde_json::Value::is_array)
+    });
+    if joins {
+        let fields = output.as_object_mut().expect("checked immediately above");
+        match fields.get_mut("hook_notes") {
+            Some(serde_json::Value::Array(notes)) => notes.push(note),
+            _ => {
+                fields.insert(
+                    "hook_notes".to_owned(),
+                    serde_json::Value::Array(vec![note]),
+                );
+            }
+        }
+    } else {
+        let said = std::mem::take(&mut output);
+        output = serde_json::json!({"output": said, "hook_notes": [note]});
+    }
+    // `failed` is the tool's own, untouched: a note is not a verdict, and a hook cannot make a
+    // call that happened read as one that did not.
+    ToolOutcome { output, failed }
+}
+
+/// What is left of one ceiling once what has been spent against it is taken off, or the ceiling's
+/// name when nothing is left.
+///
+/// [`None`] in is [`None`] out: a ceiling the parent never set is one the child does not get
+/// either, rather than one carved down to zero.
+fn remainder(
+    limit: Option<u64>,
+    spent: u64,
+    name: &'static str,
+) -> Result<Option<u64>, &'static str> {
+    let Some(limit) = limit else {
+        return Ok(None);
+    };
+    match limit.saturating_sub(spent) {
+        0 => Err(name),
+        left => Ok(Some(left)),
+    }
+}
+
+/// Puts one call's answer in the record and in the conversation.
+fn complete(call: &ToolCall, result: ToolOutcome, state: &mut RunState, sink: &mut dyn LoopSink) {
+    sink.emit(LoopEvent::ToolCompleted {
+        call_id: call.call_id.clone(),
+        failed: result.failed,
+    });
+    state.items.push(Item::result(call.call_id.clone(), result));
+}
+
+/// What every other call of a turn that carried the run's answer is told.
+///
+/// The same sentence whether the call sat before the answer or after it: the answer tool's own
+/// description is what the model read before it made the call — *call it alone, as the last thing:
+/// any other call in the same turn is refused* — so it is what it is told after.
+///
+/// It says the calls were made beside the answer and **not** that the run ended, because the
+/// siblings are refused before the answer's own outcome is known and an `answer` can still fail:
+/// arguments that are not an object, arguments over [`MAX_TOOL_ARGUMENT_BYTES`], a `before-call`
+/// hook that blocked it. Each of those leaves the run turning, and a model told *the run ended*
+/// for its `file_write` and *call it again* for its `answer` in the same turn reads two things
+/// that cannot both be true — and may redo the write, or stop.
+fn refused_beside_the_answer(name: &harness_wire::ToolName) -> String {
+    format!("refused: made in the same turn as `{name}`, which must be called alone")
+}
+
+/// Answers every call that will not run, so the conversation stays replayable.
+///
+/// Each one enters the **record** as well as the conversation: a refused call is still a call the
+/// model made, and a reader counting [`LoopEvent::ToolRequested`] against the [`Item::ToolCall`]s
+/// of a finished run would otherwise find calls in the conversation the record never mentions, with
+/// no way to tell which of them went unreported.
+fn refuse_rest(calls: &[ToolCall], why: &str, state: &mut RunState, sink: &mut dyn LoopSink) {
+    for skipped in calls {
+        sink.emit(LoopEvent::ToolRequested(skipped.clone()));
+        complete(skipped, ToolOutcome::failed(why), state, sink);
+    }
+}
+
+/// The call a run asks its tool port about to find out whether it would answer to `name`.
+///
+/// A question, never an invocation: [`ToolPort::invoked`] only reads a call to say which entry
+/// *would* run, so nothing happens on the machine and no argument is needed. The id says as much
+/// to any port that logs what it was asked, and empty arguments are what a call that will not be
+/// made carries.
+fn owned_name_probe(name: &harness_wire::ToolName) -> ToolCall {
+    ToolCall {
+        call_id: CallId::new("loop-owned-name-probe").expect("a constant probe id is legal"),
+        name: name.clone(),
+        arguments: serde_json::json!({}),
+    }
 }
 
 /// Keeps an oversized call out of the conversation that gets replayed.
@@ -443,8 +1242,17 @@ pub struct AgentLoop<'a> {
     model: &'a mut dyn ModelPort,
     tools: &'a mut dyn ToolPort,
     approvals: &'a mut dyn ApprovalPort,
+    /// The operator's hooks, when a shell attached any. [`None`] behaves as [`NoHooks`].
+    hooks: Option<&'a mut dyn HookPort>,
     config: LoopConfig,
     cancel: LoopCancel,
+    /// Whether this loop is a delegate's, running inside another loop's tool call.
+    ///
+    /// Set by [`AgentLoop::delegate`] and by nothing else — it is not a caller's choice, because
+    /// *being somebody's sub-task* is not something a caller can declare about a run it starts
+    /// itself. What it changes is [`AgentLoop::stop_hook`]; the other two hook points fire in a
+    /// child exactly as in a parent.
+    nested: bool,
 }
 
 /// Projects the wire's live stream into the loop's own event stream.
@@ -457,9 +1265,113 @@ impl StreamSink for Forward<'_> {
             StreamEvent::ToolArgumentsDelta { call_id, delta } => {
                 LoopEvent::ToolArgumentsDelta { call_id, delta }
             }
+            StreamEvent::ReasoningDelta { text } => LoopEvent::ReasoningDelta { text },
             StreamEvent::Warning { code, message } => LoopEvent::Warning { code, message },
         });
     }
+}
+
+/// Swallows the live stream of a turn nobody asked for.
+///
+/// A summary turn is the harness talking to the model about its own record, and its text is not an
+/// answer to anybody: forwarded as [`LoopEvent::TextDelta`] it would appear in a terminal exactly
+/// like the assistant replying, and in a bridge as an agent message the client would show a person.
+/// Nothing is lost by dropping it — the text is read from the turn's items and put in the
+/// conversation. A warning still comes through, because a wire that saw something it did not
+/// understand has to say so wherever it happened.
+struct Quiet<'s>(&'s mut dyn LoopSink);
+
+impl StreamSink for Quiet<'_> {
+    fn emit(&mut self, event: StreamEvent) {
+        if let StreamEvent::Warning { code, message } = event {
+            self.0.emit(LoopEvent::Warning { code, message });
+        }
+    }
+}
+
+/// Everything a delegate emits, wrapped, so that nothing of the child's arrives bare.
+///
+/// A child's [`LoopEvent::TextDelta`] is not the parent's answer and its [`LoopEvent::Usage`] is
+/// not one of the parent's turns; forwarded unwrapped, a renderer would show the sub-task's
+/// working as the run's reply and a reader summing top-level `Usage` events would count the
+/// child's turns twice — once here and once inside [`LoopOutcome::usage`], which does include
+/// them. Wrapping is what lets a renderer indent, a JSONL record nest, and a bridge ignore.
+struct Wrapped<'s> {
+    call_id: CallId,
+    sink: &'s mut dyn LoopSink,
+}
+
+impl LoopSink for Wrapped<'_> {
+    fn emit(&mut self, event: LoopEvent) {
+        self.sink.emit(LoopEvent::Delegated {
+            call_id: self.call_id.clone(),
+            event: Box::new(event),
+        });
+    }
+}
+
+/// One turn attempt's result: the turn, or a reason the run is over.
+enum Attempt {
+    Turn(TurnOutcome),
+    Stopped(LoopStop),
+}
+
+/// Which of the loop's own tools a call named.
+///
+/// Resolved before the port is consulted at all, because neither is a port call: `answer` ends the
+/// run and `delegate` holds the model port for the length of a whole second run.
+enum Owned {
+    /// The schema this run publishes, carried for the same reason [`Owned::Delegate`] carries its
+    /// delegation: what the call needs is read once, here, rather than out of `self.config` at
+    /// every step of running it.
+    Answer(OutputSchema),
+    /// The delegation this run is configured with, carried so the call does not have to read it
+    /// back out of `self.config` while the child holds every one of the loop's ports.
+    Delegate(Delegation),
+}
+
+impl Owned {
+    /// The spec the loop published for this tool.
+    ///
+    /// What a hook is shown and what a refusal names, exactly as [`ToolPort::invoked`]'s answer is
+    /// for a port call: an operator whose hook file says `"tools": ["delegate"]` has to be shown
+    /// `delegate`, and a refusal has to name what did not run.
+    fn spec(&self) -> ToolSpec {
+        match self {
+            Self::Answer(schema) => schema.spec(),
+            Self::Delegate(delegation) => delegation.spec(),
+        }
+    }
+}
+
+/// Answers the run's own `answer` call: the arguments **are** the answer.
+///
+/// Nothing here parses or validates them against the schema — what the provider accepted as tool
+/// arguments is what the caller gets (design 0002 § 1, M3).
+///
+/// Returns the outcome the model reads and, with it, whether the run ends here. Recording is the
+/// caller's, because an owned call meets the `after-call` hook between the outcome and the record
+/// exactly as a port call does.
+fn accept_answer(call: &ToolCall, state: &mut RunState) -> (ToolOutcome, Option<LoopStop>) {
+    if !call.arguments.is_object() {
+        // A failed outcome rather than a stop: the run has not answered, and the model is the one
+        // that can fix it on the next turn.
+        return (
+            ToolOutcome::failed(format!(
+                "the arguments of `{}` must be a JSON object in the shape its schema gives, and \
+                 these are not an object; call it again with one",
+                call.name
+            )),
+            None,
+        );
+    }
+    state.structured = Some(call.arguments.clone());
+    // Answered like any other call, because a `function_call` replayed without its output is a
+    // provider error on the next turn — and a run that answered can still be resumed.
+    (
+        ToolOutcome::ok(serde_json::json!({"accepted": true})),
+        Some(LoopStop::Completed),
+    )
 }
 
 impl<'a> AgentLoop<'a> {
@@ -473,8 +1385,10 @@ impl<'a> AgentLoop<'a> {
             model,
             tools,
             approvals,
+            hooks: None,
             config,
             cancel: LoopCancel::new(),
+            nested: false,
         }
     }
 
@@ -488,11 +1402,19 @@ impl<'a> AgentLoop<'a> {
         self
     }
 
+    /// Attaches the operator's hooks (design 0002 § 3). Without this the loop consults none.
+    #[must_use]
+    pub fn with_hooks(mut self, hooks: &'a mut dyn HookPort) -> Self {
+        self.hooks = Some(hooks);
+        self
+    }
+
     /// Runs until the model answers, a budget binds, or the caller cancels.
     ///
     /// # Errors
     ///
-    /// Returns [`LoopError::Budget`] before the first request when a bound is unusable, and
+    /// Returns [`LoopError::Config`] and [`LoopError::Budget`] before the first request, for a
+    /// run that could not be described and for one whose bound is unusable, and
     /// [`LoopError::Wire`] when a turn could not be obtained at all. A budget that *binds* is an
     /// outcome, not an error.
     pub fn run(
@@ -500,6 +1422,102 @@ impl<'a> AgentLoop<'a> {
         input: impl Into<String>,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopOutcome, LoopError> {
+        // A caller who did not lend a conversation did not ask for a spend either: when this run
+        // answers, both are in the outcome, and when it fails there is nobody holding either.
+        self.run_in(&mut Vec::new(), &mut RunLedger::default(), input, sink)
+    }
+
+    /// [`run`](Self::run), continuing a conversation the caller is holding and reporting what the
+    /// run spent.
+    ///
+    /// `items` is the conversation so far — empty for a first run, a resumed session's items for a
+    /// following one. The new input is appended to it and the run proceeds exactly as
+    /// [`run`](Self::run) does. `spend` is where this run's usage, cost and turns are written.
+    ///
+    /// # Why the caller's vector and the caller's ledger, rather than the outcome
+    ///
+    /// **This is what lets a shell persist what a failed run had, and what it cost.**
+    /// [`LoopError`] carries neither items nor usage: a turn that broke on the wire returns an
+    /// error, the [`LoopOutcome`] is never built, and every turn before it is gone. That is the
+    /// twenty-turn run a network blip threw away. So both are taken out of the caller's hands into
+    /// the run's state and written back on **every** exit path — an unusable budget before the
+    /// first request, a wire failure on turn twenty, or an answer — and the caller can save
+    /// whatever there is.
+    ///
+    /// The spend is handed back for the same reason the conversation is, and this is the same
+    /// defect [`RunState::absorb_child`] fixes one level down for a delegate: those nineteen turns
+    /// were billed, their [`LoopEvent::Usage`] and [`LoopEvent::Cost`] events are already in the
+    /// record the caller streamed, and a session file holding the conversation but not the figures
+    /// would report a failed run as free.
+    ///
+    /// Items replace rather than append: the loop replays the whole conversation each turn and its
+    /// state holds all of it, so appending would store every earlier turn twice. [`RunLedger`] is
+    /// replaced too and holds **this** run only — a resumed run is not billed again for the turns
+    /// it replays, so folding one run's figures into a session's is the caller's own arithmetic.
+    ///
+    /// # Errors
+    ///
+    /// As [`run`](Self::run).
+    pub fn run_in(
+        &mut self,
+        items: &mut Vec<Item>,
+        spend: &mut RunLedger,
+        input: impl Into<String>,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
+        let mut state = RunState::resuming(std::mem::take(items), input);
+        let ended = self.run_over(&mut state, sink);
+        // Written before the two arms part, so that neither can be the one that forgets. The
+        // conversation still has to be handed back inside them — one arm owns the state and the
+        // other the outcome — but the spend is the same figure whichever way the run ended.
+        *spend = state.ledger();
+        match ended {
+            Ok(stop) => {
+                let outcome = state.into_outcome(stop);
+                items.clone_from(&outcome.items);
+                Ok(outcome)
+            }
+            Err(error) => {
+                *items = state.items;
+                Err(error)
+            }
+        }
+    }
+
+    /// One whole run over a [`RunState`] the caller keeps hold of, ending in `Finished`.
+    ///
+    /// The seam a delegate runs its child over. [`run_in`](Self::run_in) exists to hand the
+    /// **conversation** back on every exit path; this exists to hand the *whole* state back, which
+    /// is what a parent needs from a child that failed: the child's [`LoopEvent::Usage`] and
+    /// [`LoopEvent::Cost`] events have already been emitted, so the spend behind them has to be
+    /// readable however the child ended (see [`RunState::absorb_child`]). Nothing outside this
+    /// crate can reach it — [`run`](Self::run) and [`run_in`](Self::run_in) are unchanged.
+    fn run_over(
+        &mut self,
+        state: &mut RunState,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopStop, LoopError> {
+        let stop = self.drive_run(state, sink)?;
+        sink.emit(LoopEvent::Finished {
+            stop: stop.clone(),
+            turns: state.turns,
+        });
+        Ok(stop)
+    }
+
+    /// One run, from the budget check to the stop, over a state the caller owns.
+    ///
+    /// Separate from [`run_in`](Self::run_in) so that every way out of a run — including the two
+    /// that are errors — passes through one place that hands the conversation back.
+    fn drive_run(
+        &mut self,
+        state: &mut RunState,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopStop, LoopError> {
+        // First of all, because it decides whether the run can be *described* at all: a duplicate
+        // tool name is a request no wire can accept, and finding that out on turn one costs a
+        // turn to learn something knowable before the first.
+        self.check_owned_names()?;
         // The run's own model is what the ceiling is judged against, because it is the only model
         // known before the first turn. An endpoint that answers as something else is caught by
         // `RateCard::price` and reported as an unpriced turn.
@@ -514,15 +1532,18 @@ impl<'a> AgentLoop<'a> {
             .budget
             .max_duration()
             .map(|span| Instant::now() + span);
-        let mut state = RunState::new(input);
 
         sink.emit(LoopEvent::Started {
             model: self.config.model.clone(),
+            // The loop's own tools among them: the event answers *what was the model offered*,
+            // and a reader who saw `delegate` in the record but not here would have to guess
+            // where it came from.
             published_tools: self
                 .tools
                 .specs()
                 .iter()
                 .map(|spec| spec.name.clone())
+                .chain(self.owned_specs().into_iter().map(|spec| spec.name))
                 .collect(),
             operations: self
                 .tools
@@ -533,12 +1554,7 @@ impl<'a> AgentLoop<'a> {
         });
         self.announce_prices(priced, sink);
 
-        let stop = self.drive(&mut state, deadline, sink)?;
-        sink.emit(LoopEvent::Finished {
-            stop: stop.clone(),
-            turns: state.turns,
-        });
-        Ok(state.into_outcome(stop))
+        self.drive(state, deadline, sink)
     }
 
     /// Puts the rates in the record, and says so by name when they miss this model.
@@ -587,27 +1603,36 @@ impl<'a> AgentLoop<'a> {
 
             // Before the request is built, so the turn that pays for a compaction is the one
             // that benefits from it.
-            compact(&mut state.items, sink);
+            if let Some(stop) = self.compact_run(state, sink) {
+                return Ok(stop);
+            }
+            // A summary turn is charged to the run like any other, so a ceiling it crosses binds
+            // here rather than after the next turn's tool calls. Checked only after the ceilings
+            // are counted, this was the one turn whose spend nothing looked at: a run could
+            // overshoot `max_cost` or `max_input_tokens` by a summary turn *and* a full
+            // conversation turn before anything stopped it.
+            if let Some(stop) = self.stop_after_tokens(state) {
+                return Ok(stop);
+            }
             state.turns += 1;
             sink.emit(LoopEvent::TurnStarted { turn: state.turns });
-            let outcome = {
-                let request = self.request(state);
-                let mut forward = Forward(sink);
-                match self.model.turn(&request, &mut forward) {
-                    Ok(outcome) => outcome,
-                    // A read that stopped because the caller cancelled is them getting what they
-                    // asked for. Reporting it as a failure would tell a person who pressed Ctrl-C
-                    // that something went wrong.
-                    Err(error) if error.code == WireErrorCode::Cancelled => return Ok(cancelled()),
-                    Err(error) => return Err(error.into()),
-                }
+            let outcome = match self.attempt_turn(state, deadline, sink)? {
+                Attempt::Turn(outcome) => outcome,
+                Attempt::Stopped(stop) => return Ok(stop),
             };
 
             let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
-            if calls.is_empty() {
-                return Ok(terminal_stop(stop_reason));
-            }
-            if let Some(stop) = self.run_calls(calls, state, deadline, sink) {
+            let stop = if calls.is_empty() {
+                Some(terminal_stop(stop_reason))
+            } else {
+                self.run_calls(&calls, state, deadline, sink)
+            };
+            // A run ending `Completed` is the one ending something may still have a say in: the
+            // answer nudge (design 0002 § 1), then the stop hook (§ 3). Both are bounded, and
+            // either turns the run again.
+            if let Some(stop) = stop
+                && let Some(stop) = self.ending(stop, state, sink)
+            {
                 return Ok(stop);
             }
             if let Some(stop) = self.stop_after_tokens(state) {
@@ -616,15 +1641,184 @@ impl<'a> AgentLoop<'a> {
         }
     }
 
+    /// Runs one turn, attempting it again when the wire says the failure was retriable.
+    ///
+    /// # Why the retry lives here and not in the wire
+    ///
+    /// A wire deliberately stops retrying the moment it has emitted anything: a second attempt
+    /// would append a second copy of text a person has already read, and its `WitnessedSink` makes
+    /// that impossible to get wrong. The consequence was that a network blip on turn 20 of a long
+    /// run ended the run — the loop mapped any `Err` to [`LoopError::Wire`] and exited, and nothing
+    /// persisted the conversation to resume from.
+    ///
+    /// The decision belongs one level up, because up here the thing a retry would duplicate is
+    /// known to be discardable: `state.items` is **unchanged** by a failed turn, so the second
+    /// attempt is not a resumption but the same request again. What a person already saw is the
+    /// one thing that cannot be taken back, so [`LoopEvent::TurnRetried`] says out loud that the
+    /// turn's stream is to be discarded, and a renderer acts on it.
+    ///
+    /// [`MAX_TURN_RETRIES`] extra attempts, then the failure the run already had stands. A
+    /// non-retriable failure — a rejected key, a protocol error — is not attempted again at all;
+    /// nothing about waiting would change it.
+    fn attempt_turn(
+        &mut self,
+        state: &RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> Result<Attempt, LoopError> {
+        let request = self.request(state);
+        let mut retries = 0_u32;
+        loop {
+            let error = {
+                let mut forward = Forward(sink);
+                match self.model.turn(&request, &mut forward) {
+                    Ok(outcome) => return Ok(Attempt::Turn(outcome)),
+                    // A read that stopped because the caller cancelled is them getting what they
+                    // asked for. Reporting it as a failure would tell a person who pressed Ctrl-C
+                    // that something went wrong.
+                    Err(error) if error.code == WireErrorCode::Cancelled => {
+                        return Ok(Attempt::Stopped(cancelled()));
+                    }
+                    Err(error) => error,
+                }
+            };
+            if !error.retriable || retries >= MAX_TURN_RETRIES {
+                return Err(error.into());
+            }
+            if self.cancel.is_cancelled() {
+                return Ok(Attempt::Stopped(cancelled()));
+            }
+            retries += 1;
+            sink.emit(LoopEvent::TurnRetried {
+                turn: state.turns,
+                attempt: retries,
+                reason: error.message.clone(),
+            });
+            if let Some(stop) = self.back_off(retries, deadline) {
+                return Ok(Attempt::Stopped(stop));
+            }
+        }
+    }
+
+    /// Waits before the next attempt, and says when the run ended inside the wait instead.
+    ///
+    /// Doubling from [`LoopConfig::retry_backoff`] and capped at [`MAX_TURN_RETRY_BACKOFF`],
+    /// because a wire that just failed on transport is usually one whose other side is briefly
+    /// unwell and an immediate second request is the least likely to be answered.
+    ///
+    /// Slept in [`CANCEL_POLL`] slices so a Ctrl-C is honoured inside the pause, and the deadline
+    /// is read each slice: an attempt is never *started* past the wall clock the caller bought,
+    /// because a request begun at the deadline runs to the wire's timeout, not to the budget's.
+    fn back_off(&self, attempt: u32, deadline: Option<Instant>) -> Option<LoopStop> {
+        let pause = self
+            .config
+            .retry_backoff
+            .saturating_mul(2_u32.saturating_pow(attempt.saturating_sub(1)))
+            .min(MAX_TURN_RETRY_BACKOFF);
+        let until = Instant::now() + pause;
+        loop {
+            if self.cancel.is_cancelled() {
+                return Some(cancelled());
+            }
+            if let Some(stop) = self.deadline_passed(deadline) {
+                return Some(stop);
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            std::thread::sleep(left.min(CANCEL_POLL));
+        }
+    }
+
     fn request(&self, state: &RunState) -> TurnRequest {
+        let mut tools = self.tools.specs().to_vec();
+        tools.extend(self.owned_specs());
         TurnRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
             items: state.items.clone(),
-            tools: self.tools.specs().to_vec(),
+            tools,
             max_output_tokens: self.config.budget.max_output_tokens_per_turn,
             sampling: self.config.sampling.clone(),
         }
+    }
+
+    /// The tools the loop owns, in the order they are appended after the port's.
+    ///
+    /// After, not before, so that the catalogue the run is actually for reads first and a
+    /// published set stays byte-identical to what it was on a run that asked for neither. Both are
+    /// inside [`harness_wire::MAX_TOOLS`] and the duplicate-name check for free, because
+    /// [`TurnRequest::validate`] sees exactly this list.
+    ///
+    /// A delegation at depth 0 publishes nothing: that is the child of a one-level delegation, and
+    /// what makes the tree one level deep rather than unbounded.
+    fn owned_specs(&self) -> Vec<ToolSpec> {
+        let mut specs = Vec::new();
+        if let Some(schema) = self.config.output_schema.as_ref() {
+            specs.push(schema.spec());
+        }
+        if let Some(delegation) = self.config.delegation.as_ref()
+            && delegation.depth > 0
+        {
+            specs.push(delegation.spec());
+        }
+        specs
+    }
+
+    /// Refuses, by name, a run whose port already answers to a name the loop's own tools need.
+    ///
+    /// Before any byte goes out, because the alternative is a request carrying the same tool name
+    /// twice: the wire refuses it as a protocol error on the first turn, having already been
+    /// paid for nothing, and the message names the duplicate rather than the mistake.
+    ///
+    /// # `specs()` is not the whole of what a port answers to
+    ///
+    /// Under the three-verb surface `specs()` is three verbs, and the port still resolves a bare
+    /// **entry** name — the routed path [`AgentLoop::invoke`] warns about, 12 % of calls in a
+    /// measured run. A catalogue entry called `answer` or `delegate` would put nothing in the
+    /// request twice, so nothing would refuse it; it would simply be unreachable for ever, because
+    /// the loop resolves its own tools first and the call would never reach the port. That is the
+    /// silent shadowing this second probe is for, and it is why the probe asks
+    /// [`ToolPort::invoked`] rather than reading a published list.
+    ///
+    /// # Errors
+    ///
+    /// [`LoopError::Config`], naming the tool two things want.
+    fn check_owned_names(&self) -> Result<(), LoopError> {
+        let owned = self.owned_specs();
+        for (index, spec) in owned.iter().enumerate() {
+            if self
+                .tools
+                .specs()
+                .iter()
+                .any(|published| published.name == spec.name)
+            {
+                return Err(LoopError::Config(format!(
+                    "this run's tool port publishes `{name}`, which is the name the loop's own \
+                     `{name}` needs; the model could address neither, so rename one of them",
+                    name = spec.name
+                )));
+            }
+            if self.tools.invoked(&owned_name_probe(&spec.name)).is_some() {
+                return Err(LoopError::Config(format!(
+                    "this run's tool port resolves `{name}` to an entry of its own, which is the \
+                     name the loop's own `{name}` needs; the loop resolves its own tools first, so \
+                     that entry could never be reached — rename one of them",
+                    name = spec.name
+                )));
+            }
+            // And the owned ones against each other, because a caller may name both: two tools of
+            // one name is the same unaddressable request, with nobody else to blame for it.
+            if owned[..index].iter().any(|other| other.name == spec.name) {
+                return Err(LoopError::Config(format!(
+                    "this run's answer schema and its delegation are both published as `{}`; the \
+                     model could address neither, so rename one of them",
+                    spec.name
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn stop_before_turn(&self, state: &RunState, deadline: Option<Instant>) -> Option<LoopStop> {
@@ -679,30 +1873,288 @@ impl<'a> AgentLoop<'a> {
         None
     }
 
+    /// Makes the conversation smaller before the next request is built.
+    ///
+    /// # Two rules, and which one a run gets
+    ///
+    /// With no [`LoopConfig::context_window`] declared, the byte rule stands unchanged: past
+    /// [`MAX_CONVERSATION_BYTES`], elide the oldest tool-result payloads down to
+    /// [`COMPACTED_TARGET_BYTES`]. That rule was fixed at 192 KiB — about 50k tokens — so about
+    /// 60 % of a 128k window was never reachable and a run whose weight was not in tool results
+    /// had no strategy at all: it met the provider's wall as a hard error.
+    ///
+    /// With a window declared, the trigger is tokens. It fires at
+    /// [`COMPACTION_TRIGGER_PERCENT`] of the window, measured by the provider's own last reported
+    /// input count where there is one and by [`ESTIMATED_BYTES_PER_TOKEN`] where there is not.
+    /// Elision goes first, because it costs nothing; a summary turn is spent only where the weight
+    /// is in things elision may not touch — user and assistant text, and the opaque reasoning items
+    /// this loop carries verbatim across every tool round trip.
+    ///
+    /// Returns a stop only when the caller cancelled inside the summary turn. A summary that fails
+    /// on the wire is a warning: the conversation is merely larger than wanted, and ending the run
+    /// over that would reintroduce the defect this exists to remove.
+    fn compact_run(&mut self, state: &mut RunState, sink: &mut dyn LoopSink) -> Option<LoopStop> {
+        let Some(window) = self.config.context_window else {
+            compact(&mut state.items, sink);
+            return None;
+        };
+        let before = measure(&state.items);
+        // The provider's own count wherever there is one: it includes the instruction and the tool
+        // schemas, which are not in `items` at all, so it is the larger figure and the one nearer
+        // the wall. The estimate is the fallback for a provider that reports nothing.
+        let occupied = estimated_tokens(before).max(state.reported_input.unwrap_or(0));
+        if occupied < window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100 {
+            return None;
+        }
+        // Expressed as *how many bytes to free* rather than as a size to reach, because what this
+        // loop can shrink is `items` and the count that triggered may have measured more than
+        // that. Freeing the overshoot is the same arithmetic in both cases, and with no reported
+        // count it is exactly "leave the conversation at half the window".
+        let free = occupied
+            .saturating_sub(window.saturating_mul(COMPACTION_TARGET_PERCENT) / 100)
+            .saturating_mul(ESTIMATED_BYTES_PER_TOKEN);
+        let target = before.saturating_sub(usize::try_from(free).unwrap_or(usize::MAX));
+        let elided = elide(&mut state.items, target, protected_bytes(target));
+
+        let mut summarised = 0_usize;
+        let mut summary_turn = false;
+        if measure(&state.items) > target {
+            match self.summarise(state, target, sink) {
+                Summarised::Cancelled => return Some(cancelled()),
+                Summarised::Folded(count) => {
+                    summarised = count;
+                    summary_turn = true;
+                }
+                Summarised::Failed => summary_turn = true,
+                Summarised::Skipped => {}
+            }
+        }
+        if elided.count == 0 && summarised == 0 && !summary_turn {
+            return None;
+        }
+
+        let after = measure(&state.items);
+        // Said out loud, for the same reason the byte rule says it: a model that suddenly cannot
+        // see a file it read has a right to a reason, and so does anyone reading the record.
+        sink.emit(LoopEvent::Warning {
+            code: "conversation-compacted".to_owned(),
+            message: format!(
+                "the conversation reached {occupied} tokens of the {window} declared, so {count} \
+                 old tool result(s) were elided and {summarised} item(s) folded into a summary; \
+                 {before} bytes became {after}.",
+                count = elided.count,
+            ),
+        });
+        sink.emit(LoopEvent::Compacted {
+            elided_results: elided.count,
+            elided_bytes: elided.freed,
+            summarised_items: summarised,
+            bytes_before: before,
+            bytes_after: after,
+            summary_turn,
+        });
+        None
+    }
+
+    /// Spends one turn folding the earlier part of the conversation into a single item.
+    ///
+    /// # Why this is a turn and not a truncation
+    ///
+    /// Elision drops tool-result payloads, which is where the weight usually is. Where it is not —
+    /// a long argument in user and assistant text, or the opaque reasoning items carried verbatim
+    /// so the model keeps its own chain of thought across a round trip — elision reaches its floor
+    /// with the conversation still over the target, and the only alternatives are to drop that
+    /// text unread or to compress it. Dropping it silently is what invariant 8 forbids; asking the
+    /// model to compress it costs one turn and keeps the facts.
+    ///
+    /// What survives, always: the task ([`FIRST_KEPT_ITEM`]), the newest [`protected_bytes`] of
+    /// conversation, and every [`Item::ToolCall`] beside its result. What replaces the rest is one
+    /// [`Item::user`] beginning with [`SUMMARY_MARKER`], so nothing downstream mistakes the
+    /// harness's own words for a person's.
+    ///
+    /// The turn is counted against the run's tokens, budget and bill like any other, because the
+    /// provider charged for it like any other. It does **not** advance `turns`: that number bounds
+    /// the model's progress on the task, and compaction is overhead the loop chose.
+    fn summarise(
+        &mut self,
+        state: &mut RunState,
+        target: usize,
+        sink: &mut dyn LoopSink,
+    ) -> Summarised {
+        let Some(end) = fold_end(&state.items, protected_bytes(target)) else {
+            return Summarised::Skipped;
+        };
+        let folded: Vec<Item> = state.items[FIRST_KEPT_ITEM..end].to_vec();
+        if measure(&folded) < SUMMARY_MIN_FOLD_BYTES {
+            return Summarised::Skipped;
+        }
+        if self.cancel.is_cancelled() {
+            return Summarised::Cancelled;
+        }
+
+        let request = TurnRequest {
+            model: self.config.model.clone(),
+            instructions: SUMMARY_INSTRUCTION.to_owned(),
+            // The fold **rendered**, not replayed: one user item, no tool blocks, no opaque
+            // items. Sent as items it was a request neither wire could accept, and every
+            // compaction paid for a turn that was going to be a 400 — see
+            // [`summary_request_items`].
+            items: summary_request_items(&folded),
+            // No tools. This turn has nothing to do but read what it was handed, and a tool call
+            // from a turn a person cannot see would be an effect nobody asked for.
+            tools: Vec::new(),
+            max_output_tokens: self.config.budget.max_output_tokens_per_turn,
+            sampling: self.config.sampling.clone(),
+        };
+        let outcome = {
+            let mut quiet = Quiet(sink);
+            match self.model.turn(&request, &mut quiet) {
+                Ok(outcome) => outcome,
+                Err(error) if error.code == WireErrorCode::Cancelled => {
+                    return Summarised::Cancelled;
+                }
+                Err(error) => {
+                    sink.emit(LoopEvent::Warning {
+                        code: "summary-failed".to_owned(),
+                        message: format!(
+                            "the summary turn failed ({error}), so the conversation keeps its \
+                             elided form and the run goes on"
+                        ),
+                    });
+                    return Summarised::Failed;
+                }
+            }
+        };
+        state.absorb_usage(outcome.usage, self.config.prices.as_ref(), sink);
+        if self.cancel.is_cancelled() {
+            return Summarised::Cancelled;
+        }
+
+        let summary: String = outcome
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::AssistantText { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        if summary.trim().is_empty() {
+            sink.emit(LoopEvent::Warning {
+                code: "summary-failed".to_owned(),
+                message: "the summary turn answered with no text, so nothing could replace the \
+                          conversation it was asked to fold"
+                    .to_owned(),
+            });
+            return Summarised::Failed;
+        }
+
+        let tail = state.items.split_off(end);
+        state.items.truncate(FIRST_KEPT_ITEM);
+        state
+            .items
+            .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
+        state.items.extend(tail);
+        Summarised::Folded(end - FIRST_KEPT_ITEM)
+    }
+
+    /// What a run that would stop with `stop` actually does: ends with it, or turns again.
+    ///
+    /// Only a `Completed` stop is open to question — a bound that bound, a cancellation, a
+    /// provider that gave up are final. The answer nudge speaks first, because a run asked for a
+    /// structured answer has not answered yet; the stop hook speaks last, on whatever the run's
+    /// answer turned out to be. [`None`] means the conversation has one more user item and the
+    /// loop turns again.
+    fn ending(
+        &mut self,
+        stop: LoopStop,
+        state: &mut RunState,
+        sink: &mut dyn LoopSink,
+    ) -> Option<LoopStop> {
+        if !stop.is_completed() {
+            return Some(stop);
+        }
+        let stop = self.answer_or_nudge(stop, state, sink)?;
+        if !stop.is_completed() {
+            return Some(stop);
+        }
+        self.stop_hook(stop, state, sink)
+    }
+
+    /// The answer nudge (design 0002 § 1): a run asked for a structured answer that ended in
+    /// prose is told once to call the answer tool, and after that stops
+    /// [`LoopStop::Unstructured`]. Returns `None` to turn again.
+    fn answer_or_nudge(
+        &mut self,
+        stop: LoopStop,
+        state: &mut RunState,
+        sink: &mut dyn LoopSink,
+    ) -> Option<LoopStop> {
+        let Some(schema) = self.config.output_schema.as_ref() else {
+            return Some(stop);
+        };
+        if state.structured.is_some() {
+            return Some(stop);
+        }
+        if state.nudged >= MAX_ANSWER_NUDGES {
+            return Some(LoopStop::Unstructured {
+                asked_again: state.nudged,
+            });
+        }
+        state.nudged += 1;
+        sink.emit(LoopEvent::Warning {
+            code: "answer-nudged".to_owned(),
+            message: format!(
+                "the model ended in prose where `{}` was required; told once more to call it \
+                 ({} of {MAX_ANSWER_NUDGES})",
+                schema.name, state.nudged
+            ),
+        });
+        state.items.push(Item::user(format!(
+            "Finish by calling `{}` with the result; nothing else is read.",
+            schema.name
+        )));
+        None
+    }
+
     /// Runs the turn's calls in order, stopping the moment the caller cancels or time runs out.
+    ///
+    /// # A turn that answers is the answer and nothing else
+    ///
+    /// The answer tool's published description promises it: *call it alone, as the last thing: any
+    /// other call in the same turn is refused*. So where the turn carries an `answer` call, every
+    /// other call in that turn is refused by [`refused_beside_the_answer`] and **none of them runs**
+    /// — the
+    /// ones before it as much as the ones after. Refusing only the tail kept the promise for half
+    /// the turn: a `[file_write, answer]` ran the write, which is exactly the effect-after-the-end
+    /// the sentence says did not happen. They are still answered in the order the model asked, so
+    /// the conversation reads back in it.
     fn run_calls(
         &mut self,
-        calls: Vec<ToolCall>,
+        calls: &[ToolCall],
         state: &mut RunState,
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> Option<LoopStop> {
-        let mut calls = calls.into_iter();
-        for call in calls.by_ref() {
+        // Found before anything runs, because *running the write and refusing it afterwards* is
+        // the failure this answers. The sentence its siblings are refused with is built here, once
+        // per turn rather than once per call: it names the run's answer tool, which is fixed for
+        // the run.
+        let answering = self.config.output_schema.as_ref().and_then(|schema| {
+            let at = calls.iter().position(|call| call.name == schema.name)?;
+            Some((at, refused_beside_the_answer(&schema.name)))
+        });
+        let mut next = 0_usize;
+        while next < calls.len() {
             if self.cancel.is_cancelled() {
                 // Every call the model made needs an answer in the conversation, even one that
                 // never ran: a `function_call` replayed without its output is a provider error on
                 // the next turn, so a cancelled run could not be resumed at all.
-                state.items.push(Item::result(
-                    call.call_id,
-                    ToolOutcome::failed("the run was cancelled before this call ran"),
-                ));
-                for skipped in calls {
-                    state.items.push(Item::result(
-                        skipped.call_id,
-                        ToolOutcome::failed("the run was cancelled before this call ran"),
-                    ));
-                }
+                refuse_rest(
+                    &calls[next..],
+                    "the run was cancelled before this call ran",
+                    state,
+                    sink,
+                );
                 return Some(cancelled());
             }
             // Between calls as well as between turns: one call can block for minutes, so a
@@ -711,23 +2163,490 @@ impl<'a> AgentLoop<'a> {
             // own timeout; nothing here reaches into it. Every skipped call still gets an
             // outcome, for the reason the cancellation branch above gives.
             if let Some(stop) = self.deadline_passed(deadline) {
-                for skipped in std::iter::once(call).chain(calls) {
-                    state.items.push(Item::result(
-                        skipped.call_id,
-                        ToolOutcome::failed("the run's deadline passed before this call ran"),
-                    ));
-                }
+                refuse_rest(
+                    &calls[next..],
+                    "the run's deadline passed before this call ran",
+                    state,
+                    sink,
+                );
                 return Some(stop);
             }
+
+            let call = &calls[next];
+            // Everything a turn that answered asked for beside the answer, in the order it asked.
+            if let Some((at, refusal)) = answering.as_ref()
+                && *at != next
+            {
+                refuse_rest(std::slice::from_ref(call), refusal, state, sink);
+                next += 1;
+                continue;
+            }
+
+            // The loop's own tools resolve first, before batching, before the published set is
+            // consulted and before anything reaches the port. Neither is a port call: `answer`
+            // ends the run and `delegate` runs a whole second loop over these same ports.
+            if let Some(owned) = self.owned(call) {
+                sink.emit(LoopEvent::ToolRequested(call.clone()));
+                if let Some(stop) = self.run_owned(&owned, call, state, deadline, sink) {
+                    // Only the answer ends a turn from in here, and nothing after it is read. The
+                    // same sentence the calls before it got: they were refused for the same
+                    // reason, and `answering` is `Some` here because only an answer stops a turn.
+                    if let Some((_, refusal)) = answering.as_ref() {
+                        refuse_rest(&calls[next + 1..], refusal, state, sink);
+                    }
+                    return Some(stop);
+                }
+                next += 1;
+                continue;
+            }
+
+            // A maximal run of neighbours that are all pure, so the port may run them side by
+            // side. Consecutive rather than gathered from the whole turn: a write between two
+            // reads is a barrier, because the second read may be reading what the write wrote.
+            let group = calls[next..]
+                .iter()
+                .take_while(|neighbour| self.batchable(neighbour))
+                .count();
+            if group > 1 {
+                self.run_batch(&calls[next..next + group], state, deadline, sink);
+                next += group;
+                continue;
+            }
+
             sink.emit(LoopEvent::ToolRequested(call.clone()));
-            let result = self.invoke(&call, deadline, sink);
-            sink.emit(LoopEvent::ToolCompleted {
-                call_id: call.call_id.clone(),
-                failed: result.failed,
-            });
-            state.items.push(Item::result(call.call_id, result));
+            let result = self.invoke(call, deadline, sink);
+            complete(call, result, state, sink);
+            next += 1;
         }
         None
+    }
+
+    /// Runs one call on a tool the loop owns, under the bounds and the hooks a port call meets.
+    ///
+    /// # The same gate, minus the one stage that has nothing to decide
+    ///
+    /// The argument bound first, for the reason [`recordable`] gives from the other side: it
+    /// replaces oversized arguments with `{"omitted": …}` in the conversation, so an `answer`
+    /// accepted past the bound would put a value in [`LoopOutcome::structured`] that the record of
+    /// the run does not carry, and a `delegate` past it would hand a child a task nobody can read
+    /// back. Then the operator's `before-call` hook, whose block is the same failed outcome
+    /// [`AgentLoop::invoke`] produces, naming this tool. Then the tool. Then `after-call`, whose
+    /// note lands beside the result exactly as it does for a port call. An owned call went through
+    /// neither hook before this: a `before-call` declaration with no `tools` filter — which design
+    /// 0002 § 3 says means *every* call — was never consulted about the two calls an operator is
+    /// most likely to want a word on, and left nothing in the record to say so.
+    ///
+    /// The approver is the stage that is missing, and it is missing because it would decide
+    /// nothing: both specs declare no effect at `Risk::Low`, so `needs_approval` is false at every
+    /// ceiling a run can have. What a delegate then does is asked about call by call, inside the
+    /// child, on each entry's own envelope.
+    ///
+    /// [`Some`] is the run ending here, which only the answer can ask for.
+    fn run_owned(
+        &mut self,
+        owned: &Owned,
+        call: &ToolCall,
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> Option<LoopStop> {
+        let invoked = owned.spec();
+        if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
+            complete(
+                call,
+                ToolOutcome::failed(format!(
+                    "the arguments for `{}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound",
+                    call.name
+                )),
+                state,
+                sink,
+            );
+            return None;
+        }
+        if let Some(refusal) = self.before_call_hook(call, &invoked, sink) {
+            complete(call, refusal, state, sink);
+            return None;
+        }
+
+        let (result, stop) = match owned {
+            Owned::Answer(_) => accept_answer(call, state),
+            Owned::Delegate(delegation) => {
+                (self.delegate(delegation, call, state, deadline, sink), None)
+            }
+        };
+        let result = self.after_call_hook(call, &invoked, result, sink);
+        complete(call, result, state, sink);
+        if stop.is_some() {
+            // After the result is in the conversation, so a reader of the record sees the answer
+            // announced by a run that had already recorded it.
+            sink.emit(LoopEvent::Answered {
+                call_id: call.call_id.clone(),
+                value: call.arguments.clone(),
+            });
+        }
+        stop
+    }
+
+    /// Whether this call is the run's own answer tool, without cloning a schema to find out.
+    fn answers(&self, call: &ToolCall) -> bool {
+        self.config
+            .output_schema
+            .as_ref()
+            .is_some_and(|schema| schema.name == call.name)
+    }
+
+    /// Which of the loop's own tools this call names, if any.
+    ///
+    /// Read from the run's own configuration and never from the port, and unambiguous because
+    /// [`AgentLoop::check_owned_names`] refused the run if the port wanted either name. A
+    /// delegation at depth 0 owns nothing: it published no `delegate`, so a call naming one is an
+    /// unpublished tool and is refused as one.
+    fn owned(&self, call: &ToolCall) -> Option<Owned> {
+        if let Some(schema) = self.config.output_schema.as_ref()
+            && self.answers(call)
+        {
+            return Some(Owned::Answer(schema.clone()));
+        }
+        if let Some(delegation) = self.config.delegation.as_ref()
+            && delegation.depth > 0
+            && delegation.name == call.name
+        {
+            return Some(Owned::Delegate(delegation.clone()));
+        }
+        None
+    }
+
+    /// Runs a second loop to completion inside this tool call, and returns what it reported.
+    ///
+    /// The child starts from an empty conversation: it sees the parent's standing instruction and
+    /// [`DELEGATE_PREAMBLE`], and the `task` string, and nothing of the conversation the call came
+    /// from. That is the point — a sub-tree that reads forty files to answer one question costs
+    /// the parent one tool result rather than forty reads of context.
+    ///
+    /// # What is shared, and what the parent gets back
+    ///
+    /// The model port (the parent is blocked in here, so it is idle), the tool port (delegation
+    /// widens nothing: the child can do exactly what the parent's catalogue admits), the approver
+    /// (a person is asked about the child's write exactly as about the parent's), the hooks — for
+    /// `before-call` and `after-call`, an operator's hook on `run` firing in a delegate too or it
+    /// was not a hook on `run`, while `stop` belongs to the run and is not consulted at a child's
+    /// end ([`AgentLoop::stop_hook`]) — and the cancellation token (Ctrl-C reaches the innermost
+    /// blocked read). What comes back is the child's usage and cost, added to the parent's totals
+    /// **however the child ended**, and one result carrying its stop, its turn count and its final
+    /// text.
+    ///
+    /// Every event the child emits reaches the sink inside [`LoopEvent::Delegated`] — see
+    /// [`Wrapped`] — so the `Usage` and `Cost` events for the turns absorbed here have already
+    /// been seen, and none is emitted a second time.
+    ///
+    /// # A cancelled child ends the parent, and nothing here does that
+    ///
+    /// The token is shared, so a child that stopped [`LoopStop::Cancelled`] leaves it cancelled
+    /// and the parent's own check — the one at the top of [`AgentLoop::run_calls`], before the
+    /// next call of this same turn — refuses the rest and ends the run. Special-casing it here
+    /// would be a second implementation of that.
+    fn delegate(
+        &mut self,
+        delegation: &Delegation,
+        call: &ToolCall,
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> ToolOutcome {
+        let task = call
+            .arguments
+            .get("task")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if task.trim().is_empty() {
+            return ToolOutcome::failed(format!(
+                "`{}` needs a `task`: one non-empty string saying everything the delegate needs, \
+                 because it cannot see this conversation",
+                call.name
+            ));
+        }
+        // Before the child exists, so a run with nothing left never spends a turn learning it.
+        let budget = match self.carve(delegation, state, deadline) {
+            Ok(budget) => budget,
+            Err(ceiling) => {
+                return ToolOutcome::failed(format!(
+                    "the run's budget has no room for a delegate: {ceiling}"
+                ));
+            }
+        };
+        sink.emit(LoopEvent::DelegateStarted {
+            call_id: call.call_id.clone(),
+            task: task.to_owned(),
+        });
+
+        let child = LoopConfig {
+            // The parent's standing instruction whole, so the delegate knows where it is and what
+            // its tools are for, and the preamble after it — which is everything that is true only
+            // of a child.
+            instructions: format!("{}\n\n{DELEGATE_PREAMBLE}", self.config.instructions),
+            budget,
+            // Its report is its text; a schema for a child is milestone M2 of design 0002.
+            output_schema: None,
+            delegation: self
+                .config
+                .delegation
+                .as_ref()
+                .and_then(Delegation::for_child),
+            ..self.config.clone()
+        };
+        let mut wrapped = Wrapped {
+            call_id: call.call_id.clone(),
+            sink,
+        };
+        // The child's own state, held here rather than inside the run, because the parent has to
+        // read what it spent however it ended — see the absorption below.
+        let mut child_state = RunState::resuming(Vec::new(), task);
+        let ran = {
+            let mut child_loop = AgentLoop::new(
+                &mut *self.model,
+                &mut *self.tools,
+                &mut *self.approvals,
+                child,
+            )
+            .with_cancel(self.cancel.clone());
+            if let Some(hooks) = self.hooks.as_deref_mut() {
+                child_loop = child_loop.with_hooks(hooks);
+            }
+            // The one thing a child is that a run started by a caller never is.
+            child_loop.nested = true;
+            child_loop.run_over(&mut child_state, &mut wrapped)
+        };
+        // Before anything branches on how the child ended, because *how it ended* is exactly what
+        // used to decide whether the parent paid for it. A delegate spends the run's budget, never
+        // one of its own: the parent's ceilings bind on the sum and `stop_after_tokens` fires
+        // before the parent's next turn.
+        state.absorb_child(&mut child_state);
+
+        let (stop, result) = match ran {
+            Ok(stop) => {
+                let result = ToolOutcome {
+                    output: serde_json::json!({
+                        "stop": stop,
+                        "turns": child_state.turns,
+                        "text": child_state.text,
+                    }),
+                    // A bound the child hit, a wire error, a cancellation: the parent has to learn
+                    // the sub-task did not finish, or it reads a half-answer as a whole one.
+                    failed: !stop.is_completed(),
+                };
+                // The same bound every result meets. The preamble is what tells the child to
+                // report well inside it; this is what happens when it did not.
+                (stop, within_result_bound(call, result))
+            }
+            // A run that could not proceed at all never reached a stop of its own, and
+            // `DelegateFinished` has to carry one. `ProviderIncomplete` is the variant that
+            // already means *this run ended early, and here is the reason in words* — the reason
+            // is what a reader of the record needs, and inventing a variant would put a state in
+            // `LoopStop` that no run can actually stop in.
+            Err(error) => (
+                LoopStop::ProviderIncomplete {
+                    reason: error.to_string(),
+                },
+                ToolOutcome::failed(format!("the delegate could not run: {error}")),
+            ),
+        };
+        sink.emit(LoopEvent::DelegateFinished {
+            call_id: call.call_id.clone(),
+            stop,
+            // The turns the child actually started, on the failed path as on the answered one —
+            // the same count `turns` carries everywhere else in this loop, which is why a child
+            // that broke on its fourth reports four and not nothing.
+            turns: child_state.turns,
+        });
+        result
+    }
+
+    /// The remainder of this run's budget, as the budget of one delegate.
+    ///
+    /// Every ceiling the parent set — turns excepted — is carved to `limit − spent so far`,
+    /// because a delegate spends the run's budget rather than one of its own and the parent
+    /// absorbs what it spent when the call returns. Turns are the exception: the child gets
+    /// [`Delegation::max_turns`] of its own, so a child that loops does not spend the parent's
+    /// remaining fifty turns finding out. The per-turn output offer is passed through rather than
+    /// carved, because it bounds one turn and is not a total to divide.
+    ///
+    /// # Errors
+    ///
+    /// The name of the first ceiling with nothing left. Starting a child on a remainder of zero
+    /// would spend a turn to be told what is knowable here — and [`Budget::validate`] refuses a
+    /// zero bound by name anyway, so it would come back as an error rather than as the refusal
+    /// the model can act on.
+    fn carve(
+        &self,
+        delegation: &Delegation,
+        state: &RunState,
+        deadline: Option<Instant>,
+    ) -> Result<Budget, &'static str> {
+        // Already a remainder rather than a ceiling, so nothing is taken off it. `deadline` is
+        // `Some` exactly when `max_duration_ms` is, both being built from the same field.
+        let left_ms = deadline.map(|deadline| {
+            u64::try_from(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis(),
+            )
+            .unwrap_or(u64::MAX)
+        });
+        Ok(Budget {
+            max_turns: Some(delegation.max_turns),
+            max_input_tokens: remainder(
+                self.config.budget.max_input_tokens,
+                state.input_total,
+                "max_input_tokens",
+            )?,
+            max_output_tokens: remainder(
+                self.config.budget.max_output_tokens,
+                state.output_total,
+                "max_output_tokens",
+            )?,
+            max_output_tokens_per_turn: self.config.budget.max_output_tokens_per_turn,
+            max_duration_ms: remainder(left_ms, 0, "max_duration_ms")?,
+            max_cost_microunits: remainder(
+                self.config.budget.max_cost_microunits,
+                state.cost_total.unwrap_or(0),
+                "max_cost_microunits",
+            )?,
+        })
+    }
+
+    /// Whether this call may run beside its neighbours.
+    ///
+    /// # What makes a call safe to run side by side
+    ///
+    /// It has to be one the loop would have run anyway — published, inside
+    /// [`MAX_TOOL_ARGUMENT_BYTES`] — and one whose **invoked** envelope neither mutates nor asks
+    /// anybody at this run's ceiling. Mutation is the barrier: two reads of the same file in
+    /// either order read the same bytes, and a write between them does not. Approval is the other:
+    /// a batch cannot ask a person about its third call halfway through, and a gate that ran the
+    /// call first and asked afterwards would not be a gate.
+    ///
+    /// A call routed to an entry it did not name (see [`AgentLoop::invoke`]) is deliberately not
+    /// batchable: the routing is warned about once per call in `invoke`, and keeping it on that
+    /// one path is worth more than the latency of the 12 % of calls that take it.
+    ///
+    /// # A run with hooks attached batches nothing
+    ///
+    /// [`AgentLoop::invoke`] is the one path a hook fires on, so a run whose operator attached
+    /// hooks sends every call down it: the hook then fires exactly once per call, and never twice
+    /// on a group the port answered a different number of outcomes for. The alternative — firing
+    /// per group, or per call inside a group the loop cannot see into — would make *how many times
+    /// my guard ran* depend on how the model happened to order its reads.
+    ///
+    /// What it costs is the round trips batching saves, and only a run that asked for hooks pays
+    /// it: hooks are opt-in per run (design 0002 § 3).
+    ///
+    /// Neither is a call naming one of the loop's own tools. `answer` ends the run, so what
+    /// follows it is refused rather than run; `delegate` takes the model port for a whole second
+    /// run, and a port asked to run two of those side by side would be running two loops through
+    /// one model client. [`AgentLoop::run_calls`] resolves those before this is ever reached, and
+    /// the check here is what stops one being swept into the group of a *neighbour* that started
+    /// it.
+    fn batchable(&self, call: &ToolCall) -> bool {
+        if self.hooks.is_some() {
+            return false;
+        }
+        if self.owned(call).is_some() {
+            return false;
+        }
+        let Some(published) = self.published(&call.name) else {
+            return false;
+        };
+        if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
+            return false;
+        }
+        let invoked = self
+            .tools
+            .invoked(call)
+            .unwrap_or_else(|| published.clone());
+        !invoked.envelope.mutates() && !self.asks(Some(&published), &invoked)
+    }
+
+    /// Hands a group of pure calls to the port at once, and checks every answer it gets back.
+    ///
+    /// A turn asking for six reads paid six round trips of tool latency for no reason: nothing
+    /// about a read requires the one before it to have finished. The port decides whether it
+    /// actually runs them side by side — the default [`ToolPort::call_batch`] runs them in order —
+    /// and the loop cannot tell except by the clock.
+    ///
+    /// Every outcome is checked against [`MAX_TOOL_RESULT_BYTES`] exactly as a single call is, so
+    /// batching cannot become the way an oversized result gets in. A port that answers a different
+    /// number of outcomes than it was given calls is one whose answers cannot be matched to
+    /// anything, so nothing it said is used: the loop says so by name and runs every call itself.
+    ///
+    /// # Every call in the group is told the same time is left, and that is the right figure
+    ///
+    /// [`AgentLoop::invoke`] reads the clock per call because its calls run one after another, so
+    /// the fourth genuinely has less time than the first. A group does not run that way: the port
+    /// is free to run all of it side by side, and the shipped one does — a thread per call — so
+    /// every call in it starts at the same moment and the time left at that moment is what each
+    /// of them has. Dividing it, or re-reading the clock per call before handing the whole group
+    /// over at once, would tell later calls they had less time than they do. The deadline is read
+    /// again the moment the group returns, in [`AgentLoop::run_calls`], which is where the
+    /// overshoot a group can cause is actually bounded.
+    ///
+    /// # Cancel and the deadline are not checked *inside* a group
+    ///
+    /// They are checked before it and after it, never between its calls, because there is no
+    /// "between": the group is handed over in one call. What that costs is bounded by what a group
+    /// is allowed to contain — pure reads, published, inside every bound, none of which asks a
+    /// person — so the worst a cancel raised mid-group can do is let some reads finish. No effect
+    /// happens that the run had not already admitted. The next group, and every call after it,
+    /// sees the cancel.
+    fn run_batch(
+        &mut self,
+        group: &[ToolCall],
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) {
+        for call in group {
+            sink.emit(LoopEvent::ToolRequested(call.clone()));
+        }
+        // With the time left on the clock, for the reason `invoke` gives: the deadline check
+        // between groups cannot reach into a group already running.
+        let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        let outcomes = self.tools.call_batch(group, remaining);
+        if outcomes.len() == group.len() {
+            for (call, outcome) in group.iter().zip(outcomes) {
+                complete(call, within_result_bound(call, outcome), state, sink);
+            }
+            return;
+        }
+
+        sink.emit(LoopEvent::Warning {
+            code: "batch-miscounted".to_owned(),
+            message: format!(
+                "the tool port answered {answered} outcome(s) for {asked} call(s); outcomes are \
+                 positional, so none of them could be matched to a call and every call was run \
+                 again on its own. Whatever of the {asked} the port already ran, it ran — so a \
+                 call here happens a second time. A group is only ever pure reads, which is the \
+                 only reason running one again is safe",
+                answered = outcomes.len(),
+                asked = group.len(),
+            ),
+        });
+        for call in group {
+            let result = self.invoke(call, deadline, sink);
+            complete(call, result, state, sink);
+        }
+    }
+
+    /// Whether a person has to say yes before this call runs.
+    ///
+    /// `approval` stays in the disjunction while the ports that set it are migrated — it can only
+    /// add asking. `published` is [`None`] for a call routed to an entry the run did not publish,
+    /// which has no verb spec of its own to consult.
+    fn asks(&self, published: Option<&ToolSpec>, invoked: &ToolSpec) -> bool {
+        published.is_some_and(|spec| spec.approval == Approval::Required)
+            || invoked.approval == Approval::Required
+            || invoked
+                .envelope
+                .needs_approval(self.config.unattended_ceiling)
     }
 
     /// Runs one call, or explains to the model why it did not run.
@@ -735,25 +2654,75 @@ impl<'a> AgentLoop<'a> {
     /// Every refusal here comes back as a failed outcome rather than an error, because the model
     /// has to learn that the effect did not happen. Ending the run instead would leave it
     /// believing the call succeeded.
+    ///
+    /// # The order the checks run in is the safety argument
+    ///
+    /// Published or routed, then the argument bound, then the approver, then the operator's
+    /// `before-call` hook, then the tool, then the result bound, then the `after-call` hook. Each
+    /// stage can only remove calls the stage before it admitted, so the gate is the narrowest of
+    /// them and never the widest: a call a person refused never reaches a hook — a hook that said
+    /// yes to it would be approving what a person said no to — and a hook's block is one more
+    /// refusal on top of theirs. A hook that could not decide blocks too (design 0002 § 3): a hook
+    /// that could not run did not say yes.
     fn invoke(
         &mut self,
         call: &ToolCall,
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> ToolOutcome {
-        let Some(spec) = self.published(&call.name) else {
+        let published = self.published(&call.name);
+        // The spec that decides is the **invoked** one, not the published verb's: a verb over a
+        // catalogue has one spec that must honestly declare every effect any entry can have, so
+        // gating on that would ask a person about every read. The same spec is what the approver
+        // is handed, what the event names and what the refusal says — a gate that decided on the
+        // entry and then reported the verb told the model `tool_invoke` was refused and never
+        // said which entry, and told an approver nothing it could decide on.
+        let invoked = match (&published, self.tools.invoked(call)) {
+            (_, Some(invoked)) => invoked,
+            (Some(spec), None) => spec.clone(),
+            (None, None) => {
+                sink.emit(LoopEvent::Warning {
+                    code: "unpublished-tool".to_owned(),
+                    message: format!(
+                        "the model called `{}`, which this run never published",
+                        call.name
+                    ),
+                });
+                return ToolOutcome::failed(format!(
+                    "`{}` is not one of this run's tools; call only what was published",
+                    call.name
+                ));
+            }
+        };
+        if published.is_none() {
+            // A measured run under the three-verb surface spent 10 of 82 tool calls (12.2 %)
+            // calling a catalogue entry by its bare name — `file_read`, `dir_list`, `run` — and
+            // got `unpublished-tool` back each time, one dead turn apiece, re-learnt per state.
+            //
+            // Routing does not widen what the turn admits, which is what `ToolSpec`'s doc means by
+            // the published set being the authority. The entry was already reachable, through the
+            // verb, and it arrives here under exactly the same gate: the port's own `invoked` is
+            // what names it, the approval decision below is the same decision, and the argument
+            // and result bounds are the same bounds. What changes is only the spelling the model
+            // used. The warning stays so the waste stays measurable.
+            //
+            // `published` is `None` on this path, so `asks` below sees no verb spec and reads only
+            // the entry's own — its `ToolSpec::approval` and its envelope. That is deliberate and
+            // it is not a hole: `ToolSpec::approval` is retired-in-progress (AGENTS.md § *Safety
+            // envelope*), no shipped tool sets it, and it can only ever *add* asking, so a verb
+            // that set it could not make the entry behind it any more dangerous than the entry's
+            // own envelope already says it is. The envelope is what gates, and the entry's is the
+            // one that describes what will actually happen. Do not reach for the verb's spec here
+            // to close a gap: the gap is the field, and the field is going.
             sink.emit(LoopEvent::Warning {
-                code: "unpublished-tool".to_owned(),
+                code: "unpublished-tool-routed".to_owned(),
                 message: format!(
-                    "the model called `{}`, which this run never published",
+                    "the model called `{}` directly; this run publishes it behind a verb, so the \
+                     call was routed to that entry under the same gate",
                     call.name
                 ),
             });
-            return ToolOutcome::failed(format!(
-                "`{}` is not one of this run's tools; call only what was published",
-                call.name
-            ));
-        };
+        }
 
         if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
             return ToolOutcome::failed(format!(
@@ -762,21 +2731,7 @@ impl<'a> AgentLoop<'a> {
             ));
         }
 
-        // The spec that decides is the **invoked** one, not the published verb's: a verb over a
-        // catalogue has one spec that must honestly declare every effect any entry can have, so
-        // gating on that would ask a person about every read. The same spec is what the approver
-        // is handed, what the event names and what the refusal says — a gate that decided on the
-        // entry and then reported the verb told the model `tool_invoke` was refused and never
-        // said which entry, and told an approver nothing it could decide on. `approval` stays in
-        // the disjunction while the ports that set it are migrated — it can only add asking.
-        let invoked = self.tools.invoked(call).unwrap_or_else(|| spec.clone());
-        let asks = spec.approval == Approval::Required
-            || invoked.approval == Approval::Required
-            || invoked
-                .envelope
-                .needs_approval(self.config.unattended_ceiling);
-
-        if asks {
+        if self.asks(published.as_ref(), &invoked) {
             sink.emit(LoopEvent::ApprovalRequired {
                 call_id: call.call_id.clone(),
                 name: invoked.name.clone(),
@@ -787,15 +2742,13 @@ impl<'a> AgentLoop<'a> {
                 approved: decision.is_approved(),
             });
             if let ApprovalDecision::Denied { reason } = decision {
-                return ToolOutcome::failed(if invoked.name == call.name {
-                    format!("`{}` was not approved: {reason}", call.name)
-                } else {
-                    format!(
-                        "`{}` (called through `{}`) was not approved: {reason}",
-                        invoked.name, call.name
-                    )
-                });
+                let name = refused_name(call, &invoked);
+                return ToolOutcome::failed(format!("{name} was not approved: {reason}"));
             }
+        }
+
+        if let Some(refusal) = self.before_call_hook(call, &invoked, sink) {
+            return refusal;
         }
 
         // With the time left on the clock, so a call that starts something bounds it by that: the
@@ -803,15 +2756,86 @@ impl<'a> AgentLoop<'a> {
         // a suite is longer than most budgets.
         let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
         let result = self.tools.call_within(call, remaining);
-        if exceeds(&result.output, MAX_TOOL_RESULT_BYTES) {
-            // Not truncated: a truncated result reads to the model exactly like a complete one.
+        let result = within_result_bound(call, result);
+        self.after_call_hook(call, &invoked, result, sink)
+    }
+
+    /// The `before-call` hook (design 0002 § 3): the operator's last word before an effect.
+    ///
+    /// Consulted after the approver, and only ever narrowing — [`Some`] is the failed outcome the
+    /// model reads instead of a result, and the tool port is not reached at all. A hook that could
+    /// not decide is treated as a block, because the point of the hook is that nothing happens it
+    /// has not seen; the model is told which of the two it was, so *the guard is broken* and *the
+    /// guard said no* are not the same message.
+    fn before_call_hook(
+        &mut self,
+        call: &ToolCall,
+        invoked: &ToolSpec,
+        sink: &mut dyn LoopSink,
+    ) -> Option<ToolOutcome> {
+        let hooks = self.hooks.as_deref_mut()?;
+        let decision = hooks.before_call(call, invoked);
+        sink.emit(LoopEvent::HookRan {
+            point: HookPoint::BeforeCall,
+            call_id: Some(call.call_id.clone()),
+            decision: decision.clone(),
+        });
+        let name = refused_name(call, invoked);
+        match decision {
+            HookDecision::Proceed => None,
+            HookDecision::Block { reason } => Some(ToolOutcome::failed(format!(
+                "{name} was blocked by a hook: {reason}"
+            ))),
+            HookDecision::Failed { reason } => Some(ToolOutcome::failed(format!(
+                "{name} did not run because a hook could not check it: {reason}"
+            ))),
+        }
+    }
+
+    /// The `after-call` hook (design 0002 § 3): the operator's programs read the outcome and may
+    /// leave the model a note beside it — that a formatter ran, that a check failed.
+    ///
+    /// A note is not a verdict: `failed` stays exactly as the tool set it. Marking an outcome
+    /// failed after the effect has already happened would tell the model nothing happened when
+    /// something did; `before-call` is the point that speaks in time to prevent it.
+    ///
+    /// [`MAX_TOOL_RESULT_BYTES`] is checked a **second** time here, over the noted result, so a
+    /// note cannot become the one way an oversized payload reaches the model. When the note is
+    /// what crosses the bound the refusal says so by name: the tool's result was inside it, and a
+    /// model told to *narrow the request* would narrow one that was never too large.
+    fn after_call_hook(
+        &mut self,
+        call: &ToolCall,
+        invoked: &ToolSpec,
+        result: ToolOutcome,
+        sink: &mut dyn LoopSink,
+    ) -> ToolOutcome {
+        let Some(hooks) = self.hooks.as_deref_mut() else {
+            return result;
+        };
+        let AfterCall { note, decision } = hooks.after_call(call, invoked, &result);
+        // Emitted whether or not there was a note: the record says the hook was consulted, and a
+        // point that fired silently reads exactly like one that never ran. The decision is the
+        // hook's own — a hook that crashed here says so — and never the outcome's: `failed` below
+        // stays the tool's, because an after-call hook may not fail a result.
+        sink.emit(LoopEvent::HookRan {
+            point: HookPoint::AfterCall,
+            call_id: Some(call.call_id.clone()),
+            decision,
+        });
+        let Some(note) = note else {
+            return result;
+        };
+        let noted = with_hook_note(result, note);
+        if exceeds(&noted.output, MAX_TOOL_RESULT_BYTES) {
             return ToolOutcome::failed(format!(
-                "the result of `{}` is over the {MAX_TOOL_RESULT_BYTES} byte bound; narrow the \
-                 request",
+                "the result of `{}` was inside the {MAX_TOOL_RESULT_BYTES} byte bound until an \
+                 after-call hook's note was added to it; neither the result nor the note is \
+                 forwarded, because a cut-down result reads exactly like a whole one",
                 call.name
             ));
         }
-        result
+        noted
     }
 
     fn published(&self, name: &harness_wire::ToolName) -> Option<ToolSpec> {
@@ -820,6 +2844,81 @@ impl<'a> AgentLoop<'a> {
             .iter()
             .find(|spec| &spec.name == name)
             .cloned()
+    }
+
+    /// The stop hook (design 0002 § 3): the operator's last word on a run that would end here.
+    /// A block's reason becomes one more user item and the loop turns again, at most
+    /// [`MAX_STOP_HOOK_CONTINUES`] times. Returns `None` to turn again.
+    ///
+    /// # It does not fire at the end of a delegate
+    ///
+    /// The point is *when the run would end*, and a child's ending is not the run's: the parent is
+    /// still inside the tool call and will go on turning afterwards. A hook consulted there would
+    /// be asked *has this run finished?* about a run nobody started, and a block would turn the
+    /// child again — up to [`MAX_STOP_HOOK_CONTINUES`] times **per delegate**, each time on budget
+    /// the parent carved, for an end the operator was never trying to hold. So a nested loop
+    /// returns the stop unchanged. `before-call` and `after-call` still fire inside a child: they
+    /// are about calls, and a delegate's calls are the run's calls.
+    fn stop_hook(
+        &mut self,
+        stop: LoopStop,
+        state: &mut RunState,
+        sink: &mut dyn LoopSink,
+    ) -> Option<LoopStop> {
+        if self.nested {
+            return Some(stop);
+        }
+        let Some(hooks) = self.hooks.as_deref_mut() else {
+            return Some(stop);
+        };
+        // What the run is about to answer with: the structured answer where there is one, else
+        // the prose. A hook reads the thing a consumer would have read.
+        let text = state
+            .structured
+            .as_ref()
+            .map_or_else(|| state.text.clone(), serde_json::Value::to_string);
+        let decision = hooks.on_stop(&text);
+        sink.emit(LoopEvent::HookRan {
+            point: HookPoint::Stop,
+            call_id: None,
+            decision: decision.clone(),
+        });
+        match decision {
+            HookDecision::Proceed => Some(stop),
+            // Fail open, and say so: a hook that crashed must not keep a run alive for ever.
+            HookDecision::Failed { reason } => {
+                sink.emit(LoopEvent::Warning {
+                    code: "hook-failed".to_owned(),
+                    message: format!("the stop hook could not decide, so the run ends: {reason}"),
+                });
+                Some(stop)
+            }
+            HookDecision::Block { reason } => {
+                if state.stop_continues >= MAX_STOP_HOOK_CONTINUES {
+                    sink.emit(LoopEvent::Warning {
+                        code: "stop-hook-exhausted".to_owned(),
+                        message: format!(
+                            "the stop hook blocked the end of this run {MAX_STOP_HOOK_CONTINUES} \
+                             times and it ends anyway; its last reason: {reason}"
+                        ),
+                    });
+                    return Some(stop);
+                }
+                state.stop_continues += 1;
+                // A continuation is a **new** ending, so the answer nudge is owed again: this run
+                // answered, the operator's hook sent it back to work, and what it does next is a
+                // fresh chance to end in prose. Counting nudges per run instead spent the only one
+                // on the first ending and stopped the second `Unstructured` without ever asking —
+                // an empty stdout and exit 2 where one more sentence would almost certainly have
+                // produced the answer.
+                state.nudged = 0;
+                // An answer already given is withdrawn: the model is being asked to go on, and a
+                // later answer replaces this one.
+                state.structured = None;
+                state.items.push(Item::user(reason));
+                None
+            }
+        }
     }
 }
 

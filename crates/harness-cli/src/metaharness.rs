@@ -151,6 +151,12 @@ pub fn convert(
                 ended = true;
                 finished(&value, spent_micro_usd)
             }
+            // A run that never started. It is terminal in exactly the way a finished run is —
+            // there will be no more events — so it takes the class the stream already has.
+            "refused" => {
+                ended = true;
+                refused(&value, spent_micro_usd)
+            }
             // **Control plane, not opaque.** `opaque` means *this build could not read it*, and a
             // consumer reads it that way: an unread event could have been the tool call an
             // expectation was looking for, so every count over the run goes `unk`. Sending this
@@ -199,10 +205,11 @@ fn started(value: &Value, version: &str) -> Value {
         "output_style": Value::Null,
         "cwd": Value::Null,
         "offered_tools": value["published_tools"],
-        // **What the run could do**, beside what the model was offered. Behind three verbs the
-        // second is the same on every run, so a control asking *was there a writer to refuse*
-        // read a list of three verbs and answered that there was none - which reads as a defect
-        // and is a vocabulary mismatch.
+        // **What the run could do**, beside what the model was offered. Under the flat surface the
+        // two lists name the same entries; behind three verbs the first is the same on every run,
+        // so a control asking *was there a writer to refuse* read a list of three verbs and
+        // answered that there was none - which reads as a defect and is a vocabulary mismatch.
+        // Stated either way, so a reader needs no rule about which surface produced the record.
         "available_operations": value.get("operations").cloned().unwrap_or(Value::Null),
         "slash_commands": Value::Null,
         "skills": Value::Null,
@@ -263,6 +270,42 @@ fn finished(value: &Value, spent_micro_usd: Option<u64>) -> Value {
     })
 }
 
+/// The terminal record for a run that never started.
+///
+/// # Why `session.ended` and not a class of its own
+///
+/// A consumer reads one terminal record per stream and answers `unk` when there is none. A run
+/// refused at the command line — a flag that changed shape, a credential that is not there, a
+/// session recorded on the other wire — produced no turns, so under the old shape it produced no
+/// terminal record either, and every expectation over it went undecidable. The failure that costs
+/// most is a checker that cannot tell *the run did not happen* from *the run happened and I could
+/// not read it*, so this says the first, in the vocabulary the stream already has.
+///
+/// The reason travels in `stop_reason`. It is the only free-text field on this record, and the
+/// loop never fills it — a finished run states its stop under `terminal_reason` — so a reader that
+/// finds one here is reading a refusal and nothing else.
+fn refused(value: &Value, spent_micro_usd: Option<u64>) -> Value {
+    json!({
+        "event": "session.ended",
+        "is_error": true,
+        "subtype": "refused",
+        "stop_reason": value.get("reason").cloned().unwrap_or(Value::Null),
+        "terminal_reason": "refused",
+        "api_error_status": Value::Null,
+        // A fact and not an absence: nothing was sent, so nothing was charged for.
+        "num_turns": 0,
+        "duration_ms": Value::Null,
+        "duration_api_ms": Value::Null,
+        "ttft_ms": Value::Null,
+        "time_to_request_ms": Value::Null,
+        "total_cost_usd": spent_micro_usd.map_or(Value::Null, dollars),
+        "permission_denials": [],
+        "subagents_spawned": 0,
+        "usage": Value::Null,
+        "model_usage": Value::Null,
+    })
+}
+
 /// Millionths of a dollar as the JSON number this field is declared to hold.
 ///
 /// Built from the decimal rather than by dividing into a float, so the number in this stream and
@@ -274,19 +317,20 @@ fn dollars(micro_usd: u64) -> Value {
 
 /// The neutral operations one `tool-requested` resolves to.
 ///
-/// This loop publishes three verbs and nothing else, so the tool name is never the answer:
-/// `tool_invoke` is every act in the run, and which one is inside its arguments. Resolved here
-/// rather than by the consumer, because the mapping is a fact about the catalogue and a consumer
-/// that kept its own copy is a copy that drifts.
+/// Two surfaces reach this, and the answer is the same for both. Under `flat` the tool the model
+/// called **is** the entry — `file_read`, `run` — and the name maps straight through. Under
+/// `verbs` every act travels as `tool_invoke` and which one is inside its arguments, so the name
+/// is never the answer and has to be unwrapped. A bare entry name under the verbs surface — the
+/// call the loop routes and warns about as `unpublished-tool-routed` — has the flat shape, and is
+/// read as one.
+///
+/// Resolved here rather than by the consumer, because the mapping is a fact about the catalogue
+/// and a consumer that kept its own copy is a copy that drifts.
 ///
 /// Empty for `tool_search` and `tool_describe` — they are questions about the catalogue, not acts —
 /// and for an entry outside the vocabulary, which reached no tool.
 fn operations(value: &Value) -> Vec<&'static str> {
-    if value["name"].as_str() != Some(harness_tools::INVOKE_VERB) {
-        return Vec::new();
-    }
-    value["arguments"]["name"]
-        .as_str()
+    entry_of(value)
         .and_then(harness_tools::operation_of)
         .into_iter()
         .collect()
@@ -295,18 +339,33 @@ fn operations(value: &Value) -> Vec<&'static str> {
 /// The concrete things one `tool-requested` would touch, as `file:…` / `proc:…`.
 ///
 /// Read from the catalogue's own rule rather than from the arguments directly, so this stream and
-/// a live gate answer the same question the same way.
+/// a live gate answer the same question the same way. The arguments are the entry's own under
+/// either surface: the call's, flat; the ones nested under `arguments.arguments`, behind a verb.
 fn subjects(value: &Value) -> Vec<String> {
-    if value["name"].as_str() != Some(harness_tools::INVOKE_VERB) {
-        return Vec::new();
-    }
-    let Some(entry) = value["arguments"]["name"].as_str() else {
+    let Some(entry) = entry_of(value) else {
         return Vec::new();
     };
-    harness_tools::subjects_of(entry, &value["arguments"]["arguments"])
+    let arguments = if value["name"].as_str() == Some(harness_tools::INVOKE_VERB) {
+        &value["arguments"]["arguments"]
+    } else {
+        &value["arguments"]
+    };
+    harness_tools::subjects_of(entry, arguments)
         .into_iter()
         .map(|subject| subject.as_str().to_owned())
         .collect()
+}
+
+/// Which catalogue entry one `tool-requested` names, whichever surface carried it.
+///
+/// [`None`] for a catalogue question and for a name this vocabulary does not hold — both of which
+/// performed nothing, which is why the two callers treat them the same.
+fn entry_of(value: &Value) -> Option<&str> {
+    let name = value["name"].as_str()?;
+    if name == harness_tools::INVOKE_VERB {
+        return value["arguments"]["name"].as_str();
+    }
+    Some(name)
 }
 
 fn opaque(line: &str) -> Value {
@@ -559,6 +618,49 @@ mod tests {
     }
 
     #[test]
+    fn a_run_that_never_started_still_reaches_a_terminal_record() {
+        // The two hours this exists to save: a driver launched the binary with a flag that had
+        // changed shape, clap exited before any harness code ran, and the stream held nothing at
+        // all. A reader of this stream now sees that the run did not happen, and why.
+        let events = convert_all(
+            r#"{"kind":"refused","reason":"error: unexpected argument '--substrate-embedded=1'"}"#,
+        );
+        let ended = events.last().expect("a terminal event");
+        assert_eq!(ended["event"], "session.ended");
+        assert_eq!(ended["is_error"], json!(true));
+        assert_eq!(ended["subtype"], "refused");
+        assert_eq!(ended["terminal_reason"], "refused");
+        assert_eq!(ended["num_turns"], json!(0), "nothing was sent");
+        assert!(
+            ended["stop_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("--substrate-embedded")),
+            "the harness's own words travel with it: {ended}"
+        );
+        assert_ne!(
+            ended["event"], "opaque",
+            "`opaque` claims this build could not read the line, and it read it"
+        );
+    }
+
+    #[test]
+    fn a_flat_run_offers_the_entries_themselves_and_the_record_says_so() {
+        let events = convert_all(
+            r#"{"kind":"started","model":"m","published_tools":["file_read","dir_list","search","find"],"operations":["file.read","dir.list","search","find"]}
+{"kind":"tool-requested","call_id":"c-1","name":"file_read","arguments":{"path":"README.md"}}
+{"kind":"finished","stop":{"kind":"completed"}}"#,
+        );
+        assert_eq!(
+            events[0]["offered_tools"],
+            json!(["file_read", "dir_list", "search", "find"]),
+            "what the model was offered, which under this surface is the catalogue itself"
+        );
+        assert_eq!(events[1]["name"], "file_read", "the vendor's name stays");
+        assert_eq!(events[1]["operations"], json!(["file.read"]));
+        assert_eq!(events[1]["subjects"], json!(["file:README.md"]));
+    }
+
+    #[test]
     fn a_cost_this_loop_never_had_is_null_and_never_zero() {
         // The gateway relays bytes and reports no price. A zero would be a lie about a run that
         // cost money, and the matrix reports every resource total over the runs that stated one.
@@ -614,6 +716,64 @@ mod operation_tests {
             .is_empty(),
             "a name outside the vocabulary reached no tool, so it is no operation"
         );
+    }
+
+    /// The flat surface: the tool the model called **is** the entry, and reads the same.
+    ///
+    /// Under `flat` there is no verb to unwrap — the record carries `file_write` with its own
+    /// arguments. A consumer must get the same `operations` and `subjects` for a run whichever
+    /// surface produced it, or a comparison of the two surfaces would be a comparison of two
+    /// readers.
+    #[test]
+    fn a_call_under_the_flat_surface_carries_the_same_operation_and_subject_as_one_behind_a_verb() {
+        for (entry, arguments, operation, subject) in [
+            (
+                "file_read",
+                json!({"path": "README.md"}),
+                "file.read",
+                "file:README.md",
+            ),
+            (
+                "file_write",
+                json!({"path": "notes.md", "text": "x"}),
+                "file.write",
+                "file:notes.md",
+            ),
+            ("find", json!({"glob": "**/*.rs"}), "find", "file:."),
+            (
+                "run",
+                json!({"argv": ["/usr/bin/python3", "test.py"]}),
+                "shell",
+                "proc:/usr/bin/python3",
+            ),
+        ] {
+            let flat = json!({"name": entry, "arguments": arguments.clone()});
+            let behind_a_verb = json!({
+                "name": harness_tools::INVOKE_VERB,
+                "arguments": {"name": entry, "arguments": arguments},
+            });
+            assert_eq!(operations(&flat), vec![operation], "{entry}");
+            assert_eq!(operations(&behind_a_verb), vec![operation], "{entry}");
+            assert_eq!(subjects(&flat), vec![subject.to_owned()], "{entry}");
+            assert_eq!(
+                subjects(&behind_a_verb),
+                vec![subject.to_owned()],
+                "{entry}"
+            );
+        }
+    }
+
+    /// A bare entry name the loop routed has the flat shape, and is read as one.
+    ///
+    /// The `verbs` surface publishes three tools and routes a model that calls `file_read`
+    /// directly, warning `unpublished-tool-routed`. The call really happened, so a record that
+    /// showed no operation for it would under-count exactly the calls this warning exists to make
+    /// measurable.
+    #[test]
+    fn a_routed_bare_name_is_the_act_it_performed_and_not_an_unknown_tool() {
+        let routed = json!({"name": "file_read", "arguments": {"path": "README.md"}});
+        assert_eq!(operations(&routed), vec!["file.read"]);
+        assert_eq!(subjects(&routed), vec!["file:README.md".to_owned()]);
     }
 
     /// The field reaches the converted stream, which is the thing a judge actually reads.

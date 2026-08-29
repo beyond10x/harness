@@ -90,6 +90,11 @@ fn run(arguments: &[&str], workspace: &Path) -> Output {
     }
 }
 
+/// A run against the fixture that leaves nothing on the machine.
+///
+/// `--no-session` by default: every one of these would otherwise write a transcript into the
+/// operator's own `$XDG_STATE_HOME`, and a test suite that files real sessions on the machine it
+/// runs on is one nobody can run twice. The session tests below name a directory instead.
 fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
     let mut arguments = vec![
         "run",
@@ -99,6 +104,7 @@ fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
         "b10x-emulated",
         "--api-key-env",
         "B10X_HARNESS_TEST_KEY",
+        "--no-session",
         "--input",
         "read the readme and tell me what it says",
     ];
@@ -126,19 +132,37 @@ fn the_binary_answers_and_puts_only_the_answer_on_stdout() {
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert_eq!(output.stdout.trim(), "provider emulation passed");
     assert!(
-        output
-            .stderr
-            .contains("tool_search, tool_describe, tool_invoke"),
-        "progress names the three verbs, whatever the catalogue holds: {}",
+        output.stderr.contains("file_read, dir_list, search, find"),
+        "progress names what the model was offered, which by default is the catalogue itself: {}",
         output.stderr
     );
 }
 
 #[test]
-fn the_binary_reads_a_real_file_through_a_real_tool_call() {
-    let fixture = Fixture::start("tool");
+fn the_binary_reads_a_real_file_by_calling_the_tool_directly() {
+    // The default surface. The model names `file_read` and passes the entry's own arguments;
+    // nothing is discovered first and no verb carries it.
+    let fixture = Fixture::start("flat-tool");
     let workspace = workspace();
     let output = run_against(&fixture, &[], workspace.path());
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert!(
+        output.stderr.contains("→ file_read"),
+        "the call is reported under the entry's own name: {}",
+        output.stderr
+    );
+    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert_eq!(output.stdout.trim(), "The file says: hello harness");
+}
+
+#[test]
+fn the_binary_reads_a_real_file_through_a_real_tool_call() {
+    // The verbs surface, which metaharness serves over MCP and an evaluation arm asks for by
+    // name. Same catalogue, same file, one flag different.
+    let fixture = Fixture::start("tool");
+    let workspace = workspace();
+    let output = run_against(&fixture, &["--surface", "verbs"], workspace.path());
 
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
     assert!(
@@ -160,7 +184,7 @@ fn the_binary_reads_a_real_file_through_a_real_tool_call() {
 
 #[test]
 fn json_mode_emits_one_event_per_line() {
-    let fixture = Fixture::start("tool");
+    let fixture = Fixture::start("flat-tool");
     let workspace = workspace();
     let output = run_against(&fixture, &["--json"], workspace.path());
 
@@ -232,6 +256,7 @@ fn naming_no_credential_source_reaches_the_endpoint_unauthenticated() {
             "http://127.0.0.1:1/v1",
             "--model",
             "m",
+            "--no-session",
             "--input",
             "hi",
         ],
@@ -261,17 +286,16 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
         .collect();
     assert_eq!(
         names,
-        vec!["tool_search", "tool_describe", "tool_invoke"],
-        "the model is offered three verbs, whatever the machine admits"
+        vec!["file_read", "dir_list", "search", "find"],
+        "by default the model is offered the catalogue entries themselves"
     );
-    // ...and what stands behind them is the question a reader is actually asking.
     let entries: Vec<&str> = described["catalogue"]["tools"]
         .as_array()
         .expect("a catalogue")
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
-    assert_eq!(entries, vec!["file_read", "dir_list", "search"]);
+    assert_eq!(entries, vec!["file_read", "dir_list", "search", "find"]);
     assert!(
         described["tools"]
             .as_array()
@@ -284,6 +308,31 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
 }
 
 #[test]
+fn the_verbs_surface_publishes_three_tools_over_the_same_catalogue() {
+    // The other surface, unchanged and still fully served. What differs is the publication, not
+    // what the run may do: the catalogue behind the three verbs is the same four entries.
+    let workspace = workspace();
+    let output = run(&["tools", "--surface", "verbs"], workspace.path());
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let described: Value = serde_json::from_str(&output.stdout).expect("valid JSON");
+    let names: Vec<&str> = described["tools"]
+        .as_array()
+        .expect("a tool array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["tool_search", "tool_describe", "tool_invoke"]);
+    let entries: Vec<&str> = described["catalogue"]["tools"]
+        .as_array()
+        .expect("a catalogue")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(entries, vec!["file_read", "dir_list", "search", "find"]);
+}
+
+#[test]
 fn the_binary_drives_the_second_wire_and_calls_a_real_tool_through_it() {
     // Phase 3's exit criterion at the outermost layer: the shipped binary, one flag different,
     // against the other endpoint. Everything between the flag and the answer — the loop, the
@@ -293,7 +342,13 @@ fn the_binary_drives_the_second_wire_and_calls_a_real_tool_through_it() {
     let workspace = workspace();
     let output = run_against(
         &fixture,
-        &["--wire", "anthropic-messages", "--yes"],
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--surface",
+            "verbs",
+            "--yes",
+        ],
         workspace.path(),
     );
 
@@ -311,7 +366,14 @@ fn a_thinking_round_trip_completes_through_the_shipped_binary() {
     let workspace = workspace();
     let output = run_against(
         &fixture,
-        &["--wire", "anthropic-messages", "--yes", "--json"],
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--surface",
+            "verbs",
+            "--yes",
+            "--json",
+        ],
         workspace.path(),
     );
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
@@ -375,10 +437,11 @@ fn tools_over_an_adopted_embedded_workspace_publishes_the_writing_entries() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect();
+    assert!(names.contains(&"file_write"), "{names:?}");
     assert_eq!(
-        names,
-        vec!["tool_search", "tool_describe", "tool_invoke"],
-        "the three verbs are what the model sees, confined or not"
+        names.len(),
+        entries.len(),
+        "under the default surface the published list and the catalogue are one list: {names:?}"
     );
 }
 
@@ -410,4 +473,1132 @@ fn a_named_socket_with_no_daemon_refuses_rather_than_going_read_only() {
 
     assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
     assert!(output.stderr.contains("nothing.sock"), "{}", output.stderr);
+}
+
+/// The binary with exactly the arguments given — no `--workspace` appended.
+///
+/// `run` and `tools` take one and `sessions` does not, and a helper that always appended it could
+/// only ever test half the command line.
+fn raw(arguments: &[&str]) -> Output {
+    let output = Command::new(BINARY)
+        .args(arguments)
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .output()
+        .expect("the binary runs");
+    Output {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// One `run` against the fixture, writing its session into a directory the test owns.
+fn run_with_session(
+    fixture: &Fixture,
+    extra: &[&str],
+    workspace: &Path,
+    sessions: &Path,
+) -> Output {
+    let mut arguments = vec![
+        "run".to_owned(),
+        "--base-url".to_owned(),
+        fixture.base_url.clone(),
+        "--model".to_owned(),
+        "b10x-emulated".to_owned(),
+        "--api-key-env".to_owned(),
+        "B10X_HARNESS_TEST_KEY".to_owned(),
+        "--workspace".to_owned(),
+        workspace.display().to_string(),
+        "--session-dir".to_owned(),
+        sessions.display().to_string(),
+        "--input".to_owned(),
+        "read the readme and tell me what it says".to_owned(),
+    ];
+    arguments.extend(extra.iter().map(|argument| (*argument).to_owned()));
+    raw(&arguments.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// The one session in a directory, parsed.
+fn only_session(sessions: &Path) -> Value {
+    let mut files: Vec<PathBuf> = fs::read_dir(sessions)
+        .expect("the session directory exists")
+        .map(|entry| entry.expect("an entry").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect();
+    assert_eq!(files.len(), 1, "one session was written: {files:?}");
+    let path = files.pop().expect("one file");
+    serde_json::from_str(&fs::read_to_string(path).expect("readable")).expect("a session file")
+}
+
+#[test]
+fn a_run_files_its_conversation_and_a_later_one_resumes_it() {
+    // The twenty-turn run a blip threw away, and the follow-up question that used to cost the
+    // whole conversation again. The second run replays the first one's items before its own input,
+    // so the model keeps what it already worked out.
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+
+    let first = run_with_session(&fixture, &[], workspace.path(), sessions.path());
+    assert_eq!(first.status, Some(0), "stderr: {}", first.stderr);
+    assert!(
+        first.stderr.contains("session ") && first.stderr.contains("saved to"),
+        "the identifier is printed, or nobody can resume it: {}",
+        first.stderr
+    );
+    let session = only_session(sessions.path());
+    assert_eq!(session["turns"], 1);
+    assert_eq!(session["version"], 1);
+    assert_eq!(session["wire"], "openai-responses");
+    let after_one = session["items"].as_array().expect("items").len();
+    assert!(after_one >= 2, "the question and the answer: {session}");
+
+    let second = run_with_session(
+        &fixture,
+        &["--resume", "latest"],
+        workspace.path(),
+        sessions.path(),
+    );
+    assert_eq!(second.status, Some(0), "stderr: {}", second.stderr);
+    let session = only_session(sessions.path());
+    assert_eq!(session["turns"], 2, "folded into the same session");
+    assert!(
+        session["items"].as_array().expect("items").len() > after_one,
+        "the second run's turn joined the first one's: {session}"
+    );
+    assert_eq!(
+        session["items"][0]["text"], "read the readme and tell me what it says",
+        "and the first question is still the first item: {session}"
+    );
+
+    let listed = raw(&[
+        "sessions",
+        "--session-dir",
+        sessions.path().to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(listed.status, Some(0), "stderr: {}", listed.stderr);
+    assert!(
+        listed
+            .stdout
+            .contains(session["id"].as_str().expect("an identifier")),
+        "the listing names it: {}",
+        listed.stdout
+    );
+    assert!(listed.stdout.contains("b10x-emulated"), "{}", listed.stdout);
+}
+
+#[test]
+fn a_run_that_never_got_an_answer_still_files_what_it_had() {
+    // `LoopError` carries no items, so a shell reading only the outcome had nothing to save. The
+    // conversation the loop hands back is saved exactly as a finished one is.
+    let fixture = Fixture::start("unauthorized");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+
+    let output = run_with_session(&fixture, &[], workspace.path(), sessions.path());
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let session = only_session(sessions.path());
+    assert_eq!(
+        session["items"][0]["text"], "read the readme and tell me what it says",
+        "what the run had when it failed: {session}"
+    );
+}
+
+#[test]
+fn a_session_from_the_other_wire_is_refused_before_anything_is_sent() {
+    // An opaque provider item may not cross wires. The loop would refuse it; saying so here says
+    // it in this harness's own words, naming the flag that fixes it, before a turn is paid for.
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    run_with_session(&fixture, &[], workspace.path(), sessions.path());
+
+    let output = run_with_session(
+        &fixture,
+        &[
+            "--resume",
+            "latest",
+            "--wire",
+            "anthropic-messages",
+            "--json",
+        ],
+        workspace.path(),
+        sessions.path(),
+    );
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(
+        output.stderr.contains("openai-responses"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("anthropic-messages"),
+        "{}",
+        output.stderr
+    );
+    // And a driver reading the record is told the run never started, rather than being left with
+    // an exit status and an empty stream.
+    let refused: Value = serde_json::from_str(output.stdout.trim()).expect("one JSON line");
+    assert_eq!(refused["kind"], "refused");
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("anthropic-messages")),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_command_line_the_parser_refuses_states_that_the_run_never_started() {
+    // Two hours went into this once: a driver launched the binary with a flag that had changed
+    // shape, clap exited before any harness code ran, and the driver saw a status it already had
+    // a meaning for and no record at all.
+    let output = raw(&["run", "--json", "--not-a-flag-this-build-has"]);
+
+    assert_eq!(
+        output.status,
+        Some(1),
+        "1 and not clap's 2: on this command line 2 means a run that happened and stopped"
+    );
+    let refused: Value = serde_json::from_str(output.stdout.trim()).expect("one JSON line");
+    assert_eq!(refused["kind"], "refused");
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("--not-a-flag-this-build-has")),
+        "clap's own words, on one line: {refused}"
+    );
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.contains('\n')),
+        "one line, so a line-delimited record stays line-delimited: {refused}"
+    );
+    assert!(
+        output.stderr.contains("--not-a-flag-this-build-has"),
+        "and a person still gets clap's message: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_write_is_refused_when_the_run_may_not_ask_anybody() {
+    // `--approve deny` is the library's own default approver, chosen explicitly. The call comes
+    // back to the model as a failed outcome — it has to know the effect did not happen — and the
+    // run finishes rather than ending.
+    let fixture = Fixture::start("flat-write");
+    let (_root, workspace) = adoptable_workspace("ws_deny");
+    let output = run_against(
+        &fixture,
+        &["--substrate-embedded", "--approve", "deny"],
+        &workspace,
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert!(output.stderr.contains("→ file_write"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("← failed"),
+        "the model is told the write did not happen: {}",
+        output.stderr
+    );
+    assert!(
+        !workspace.join("note.md").exists(),
+        "and nothing was written"
+    );
+}
+
+#[test]
+fn asking_for_a_person_when_there_is_no_terminal_refuses_the_run_by_name() {
+    // `--approve prompt` names a person. Falling back to refusing every call would look like a
+    // harness whose tools do not work, so the run refuses instead and says which flag to use.
+    let fixture = Fixture::start("flat-write");
+    let (_root, workspace) = adoptable_workspace("ws_prompt");
+    let output = run_against(
+        &fixture,
+        &["--substrate-embedded", "--approve", "prompt"],
+        &workspace,
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(output.stderr.contains("/dev/tty"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("--approve deny"),
+        "{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn raising_the_ceiling_lets_a_write_through_on_the_second_wire_too() {
+    // The ceiling is the loop's, and the loop cannot tell which wire it got. One flag different
+    // from the run above, and the write lands.
+    let fixture = Fixture::messages("flat-write");
+    let (_root, workspace) = adoptable_workspace("ws_ceiling");
+    let output = run_against(
+        &fixture,
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--substrate-embedded",
+            "--approve-up-to",
+            "medium",
+        ],
+        &workspace,
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert_eq!(
+        fs::read_to_string(workspace.join("note.md")).expect("the file was written"),
+        "written by the harness\n"
+    );
+}
+
+#[test]
+fn chat_carries_one_turn_into_the_next_over_one_session() {
+    // Two questions down a pipe, one conversation. The session is what proves it: the second
+    // turn's items sit on top of the first turn's rather than beside them.
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let mut child = Command::new(BINARY)
+        .args([
+            "chat",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--api-key-env",
+            "B10X_HARNESS_TEST_KEY",
+            "--workspace",
+            workspace.path().to_str().expect("utf-8 path"),
+            "--session-dir",
+            sessions.path().to_str().expect("utf-8 path"),
+        ])
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(b"what does this workspace do?\nand what else?\nexit\n")
+        .expect("write");
+    let output = child.wait_with_output().expect("the chat ends");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.matches("provider emulation passed").count(),
+        2,
+        "one answer per line of input: {stdout}"
+    );
+    let session = only_session(sessions.path());
+    assert_eq!(session["turns"], 2, "{session}");
+    let questions: Vec<&str> = session["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|item| item["kind"] == "user-text")
+        .filter_map(|item| item["text"].as_str())
+        .collect();
+    assert_eq!(
+        questions,
+        vec!["what does this workspace do?", "and what else?"],
+        "the second turn is a follow-up on the first, not a run of its own: {session}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Structured output, delegation and hooks (design 0002).
+// ---------------------------------------------------------------------------------------------
+
+/// A hooks file naming one program, written where the test can reach it.
+fn hooks_file(dir: &Path, declaration: &Value) -> PathBuf {
+    let path = dir.join("hooks.json");
+    fs::write(
+        &path,
+        serde_json::json!({"version": 1, "hooks": [declaration]}).to_string(),
+    )
+    .expect("write the hooks file");
+    path
+}
+
+/// A hook that is a real program: a python3 script, spawned as an argv like any other.
+fn hook_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, body).expect("write the hook");
+    path
+}
+
+/// The schema `--output-schema` names, as a file.
+fn schema_file(dir: &Path, schema: &Value) -> PathBuf {
+    let path = dir.join("schema.json");
+    fs::write(&path, schema.to_string()).expect("write the schema");
+    path
+}
+
+/// Every event of a `--json` run, one per line.
+fn events(output: &Output) -> Vec<Value> {
+    output
+        .stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("{line}: {error}")))
+        .collect()
+}
+
+fn kinds(events: &[Value]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect()
+}
+
+#[test]
+fn a_stop_hook_blocks_one_ending_and_the_run_turns_again_before_it_finishes() {
+    // The operator's last word on a run that would end here. The first stop is refused with a
+    // reason, that reason becomes one more user item, the model answers again and the second stop
+    // is allowed — so the run completes, having taken a turn nobody's flags asked for.
+    let fixture = Fixture::start("stop-hook");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let marker = dir.path().join("ran-once");
+    let script = hook_script(
+        dir.path(),
+        "stop.py",
+        &format!(
+            r#"import json, os, sys
+document = json.load(sys.stdin)
+if document.get("hook") != "stop" or "text" not in document or "workspace" not in document:
+    sys.stderr.write("not a stop document: " + json.dumps(document))
+    sys.exit(3)
+if os.path.exists({marker:?}):
+    sys.exit(0)
+open({marker:?}, "w").close()
+sys.stdout.write(json.dumps({{"reason": "the tests were not run; run them and say what happened"}}))
+sys.exit(2)
+"#,
+            marker = marker.display().to_string(),
+        ),
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "stop",
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &["--json", "--hooks", hooks.to_str().expect("utf-8 path")],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let decisions: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "hook-ran")
+        .collect();
+    assert_eq!(
+        decisions.len(),
+        2,
+        "one refusal and one assent: {:?}",
+        kinds(&events)
+    );
+    assert_eq!(decisions[0]["point"], serde_json::json!("stop"));
+    assert_eq!(decisions[0]["decision"]["kind"], serde_json::json!("block"));
+    assert!(
+        decisions[0]["decision"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("the tests were not run")),
+        "the hook's own words reach the record: {:?}",
+        decisions[0]
+    );
+    assert_eq!(
+        decisions[1]["decision"]["kind"],
+        serde_json::json!("proceed")
+    );
+    let text: String = events
+        .iter()
+        .filter(|event| event["kind"] == "text-delta")
+        .filter_map(|event| event["text"].as_str())
+        .collect();
+    assert!(
+        text.contains("second answer, after the hook"),
+        "the model answered again, having read the reason: {text}"
+    );
+    assert_eq!(
+        events.last().expect("a terminal event")["stop"]["kind"],
+        serde_json::json!("completed")
+    );
+}
+
+#[test]
+fn a_hooks_file_this_build_cannot_read_refuses_the_run_before_anything_is_sent() {
+    // A run started with `--hooks` and no hooks is a run whose gate the operator thinks is there.
+    // So it is a refusal, of exactly the kind a bad credential is, and it says so in the record.
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join("hooks.json");
+    fs::write(
+        &path,
+        r#"{"version": 1, "hooks": [{"on": "whenever", "command": ["x"]}]}"#,
+    )
+    .expect("write");
+
+    let output = run_against(
+        &fixture,
+        &["--json", "--hooks", path.to_str().expect("utf-8 path")],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let refused: Value =
+        serde_json::from_str(output.stdout.trim()).expect("one line saying the run never started");
+    assert_eq!(refused["kind"], serde_json::json!("refused"));
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("not a hook point")),
+        "{refused}"
+    );
+    assert!(output.stderr.contains("hooks.json"), "{}", output.stderr);
+}
+
+#[test]
+fn an_output_schema_that_is_not_an_object_schema_refuses_the_run_before_anything_is_sent() {
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(dir.path(), &serde_json::json!({"type": "string"}));
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--json",
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let refused: Value =
+        serde_json::from_str(output.stdout.trim()).expect("one line saying the run never started");
+    assert_eq!(refused["kind"], serde_json::json!("refused"));
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("JSON Schema for an object")),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer() {
+    // The failure that must not be silent: a consumer that piped stdout to a JSON reader and got
+    // prose with exit 0 would read the prose as the answer. One nudge is spent, and then the run
+    // stops `unstructured` and exits 2 — the same status every other stop-without-an-answer has.
+    let fixture = Fixture::start("answer-prose");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {"verdict": {"type": "string"}},
+            "required": ["verdict"],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &["--output-schema", schema.to_str().expect("utf-8 path")],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(2), "stderr: {}", output.stderr);
+    assert_eq!(
+        output.stdout, "",
+        "nothing at all on stdout: a run with no structured answer has nothing to compose with"
+    );
+    assert!(output.stderr.contains("Unstructured"), "{}", output.stderr);
+    // The prose is still shown — as progress, on stderr, where it cannot be read as the answer.
+    assert!(
+        output.stderr.contains("The readme says hello harness."),
+        "{}",
+        output.stderr
+    );
+
+    let recorded = run_against(
+        &fixture,
+        &[
+            "--json",
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+    let events = events(&recorded);
+    assert_eq!(
+        events.last().expect("a terminal event")["stop"],
+        serde_json::json!({"kind": "unstructured", "asked_again": 1})
+    );
+}
+
+#[test]
+fn an_answer_call_is_the_only_thing_on_stdout() {
+    let fixture = Fixture::start("answer-call");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {
+                "verdict": {"type": "string"},
+                "file": {"type": "string"},
+                "bytes": {"type": "integer"},
+            },
+            "required": ["verdict"],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &["--output-schema", schema.to_str().expect("utf-8 path")],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert_eq!(
+        output.stdout.lines().count(),
+        1,
+        "one line, so the command composes: {:?}",
+        output.stdout
+    );
+    let answer: Value =
+        serde_json::from_str(output.stdout.trim()).expect("stdout is the answer, as JSON");
+    assert_eq!(
+        answer,
+        serde_json::json!({"verdict": "ok", "file": "README.md", "bytes": 14})
+    );
+}
+
+#[test]
+fn an_answer_call_is_the_only_thing_on_stdout_on_the_second_wire_too() {
+    // Structured output is not a feature of one wire: `answer` is a tool the loop owns, published
+    // beside the port's own specs, and both emulators serve the same scenario. One flag different.
+    let fixture = Fixture::messages("answer-call");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {
+                "verdict": {"type": "string"},
+                "file": {"type": "string"},
+                "bytes": {"type": "integer"},
+            },
+            "required": ["verdict"],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert_eq!(
+        output.stdout.lines().count(),
+        1,
+        "one line, so the command composes: {:?}",
+        output.stdout
+    );
+    let answer: Value =
+        serde_json::from_str(output.stdout.trim()).expect("stdout is the answer, as JSON");
+    assert_eq!(
+        answer,
+        serde_json::json!({"verdict": "ok", "file": "README.md", "bytes": 14})
+    );
+}
+
+#[test]
+fn a_withdrawn_answer_is_never_printed_and_the_second_one_is_printed_once() {
+    // The whole reason the renderer holds the value instead of writing it as it arrives. The stop
+    // hook refuses the first ending, the loop clears the answer and turns again, and the model
+    // answers differently. Printing on arrival put the withdrawn value on stdout and then printed
+    // the second beside it — two JSON lines, of which the first was the one the operator refused.
+    let fixture = Fixture::start("answer-stop-hook");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {"verdict": {"type": "string"}},
+            "required": ["verdict"],
+        }),
+    );
+    let marker = dir.path().join("ran-once");
+    let script = hook_script(
+        dir.path(),
+        "stop.py",
+        &format!(
+            r#"import json, os, sys
+json.load(sys.stdin)
+if os.path.exists({marker:?}):
+    sys.exit(0)
+open({marker:?}, "w").close()
+sys.stdout.write(json.dumps({{"reason": "that verdict is not the one the tests support"}}))
+sys.exit(2)
+"#,
+            marker = marker.display().to_string(),
+        ),
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "stop",
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+            "--hooks",
+            hooks.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert_eq!(
+        output.stdout.lines().count(),
+        1,
+        "exactly one answer, not the refused one and its replacement: {:?}",
+        output.stdout
+    );
+    let answer: Value =
+        serde_json::from_str(output.stdout.trim()).expect("stdout is the answer, as JSON");
+    assert_eq!(
+        answer,
+        serde_json::json!({"verdict": "second, after the hook"}),
+        "the value that survived is the one on stdout"
+    );
+}
+
+#[test]
+fn under_json_the_answer_is_the_last_answered_event_and_no_line_of_stdout_is_a_bare_answer() {
+    // What the README and `--output-schema` used to promise — *stdout is that JSON and nothing
+    // else* — is false the moment `--json` is also given, which is the metaharness's own shape.
+    // Stdout is then the record, every line an event, and a driver looking for a bare JSON line
+    // finds none. What it takes instead is the last `answered` before a `completed` `finished`.
+    let fixture = Fixture::start("answer-call");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {
+                "verdict": {"type": "string"},
+                "file": {"type": "string"},
+                "bytes": {"type": "integer"},
+            },
+            "required": ["verdict"],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--json",
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    // `events` panics on a line that is not JSON at all; this says the stronger thing — every
+    // line is an *event*, so nothing on the stream is the answer written beside the record.
+    let events = events(&output);
+    for event in &events {
+        assert!(
+            event["kind"].as_str().is_some(),
+            "every line of the record is an event, not a bare answer: {event}"
+        );
+    }
+    let expected = serde_json::json!({"verdict": "ok", "file": "README.md", "bytes": 14});
+    assert!(
+        !events.contains(&expected),
+        "the answer is not also printed on its own line: {:?}",
+        output.stdout
+    );
+
+    let answered: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == serde_json::json!("answered"))
+        .collect();
+    assert_eq!(
+        answered.last().expect("the run answered")["value"],
+        expected,
+        "the last `answered` is the run's answer"
+    );
+    let finished = events.last().expect("a terminal event");
+    assert_eq!(finished["kind"], serde_json::json!("finished"));
+    assert_eq!(
+        finished["stop"],
+        serde_json::json!({"kind": "completed"}),
+        "and it is the answer only because the run completed"
+    );
+}
+
+#[test]
+fn a_withdrawn_answer_stays_in_the_json_record_so_only_the_last_one_may_be_read() {
+    // Why the rule is *last* and not *first*. The stop hook refuses the first ending, the loop
+    // clears the structured answer and turns again, and both `answered` events are in the record
+    // — the withdrawn one first. A driver taking the first takes the value the operator refused.
+    let fixture = Fixture::start("answer-stop-hook");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let schema = schema_file(
+        dir.path(),
+        &serde_json::json!({
+            "type": "object",
+            "properties": {"verdict": {"type": "string"}},
+            "required": ["verdict"],
+        }),
+    );
+    let marker = dir.path().join("ran-once");
+    let script = hook_script(
+        dir.path(),
+        "stop.py",
+        &format!(
+            r#"import json, os, sys
+json.load(sys.stdin)
+if os.path.exists({marker:?}):
+    sys.exit(0)
+open({marker:?}, "w").close()
+sys.stdout.write(json.dumps({{"reason": "that verdict is not the one the tests support"}}))
+sys.exit(2)
+"#,
+            marker = marker.display().to_string(),
+        ),
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "stop",
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--json",
+            "--output-schema",
+            schema.to_str().expect("utf-8 path"),
+            "--hooks",
+            hooks.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let answers: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == serde_json::json!("answered"))
+        .map(|event| &event["value"])
+        .collect();
+    assert_eq!(
+        answers,
+        vec![
+            &serde_json::json!({"verdict": "first"}),
+            &serde_json::json!({"verdict": "second, after the hook"}),
+        ],
+        "the withdrawn answer is in the record too, before the one that survived: {:?}",
+        output.stdout
+    );
+    let finished = events.last().expect("a terminal event");
+    assert_eq!(finished["stop"], serde_json::json!({"kind": "completed"}));
+}
+
+#[test]
+fn an_after_call_note_reaches_the_model_beside_the_result_it_is_about() {
+    // A hook that cannot block still has to be able to tell the model something — that the
+    // formatter ran, that the tree is dirty. The note travels as `hook_notes` on the tool result
+    // itself, which is what the next turn reads, and the session records exactly that.
+    let fixture = Fixture::start("flat-tool");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let script = hook_script(
+        dir.path(),
+        "note.py",
+        r#"import json, sys
+document = json.load(sys.stdin)
+if document.get("hook") != "after-call" or "outcome" not in document:
+    sys.stderr.write("not an after-call document: " + json.dumps(document))
+    sys.exit(3)
+sys.stdout.write(json.dumps({"note": "read at revision deadbeef"}))
+sys.exit(0)
+"#,
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "after-call",
+            "tools": ["file_read"],
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_with_session(
+        &fixture,
+        &["--hooks", hooks.to_str().expect("utf-8 path")],
+        workspace.path(),
+        sessions.path(),
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+
+    let session = only_session(sessions.path());
+    let result = session["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["kind"] == "tool-result")
+        .expect("the conversation carries the result the model read");
+    assert_eq!(
+        result["output"]["hook_notes"],
+        serde_json::json!(["read at revision deadbeef"]),
+        "beside the result, not instead of it: {result}"
+    );
+    assert_eq!(
+        result["failed"],
+        serde_json::json!(false),
+        "an `after-call` hook narrows nothing: {result}"
+    );
+}
+
+#[test]
+fn a_hook_never_carries_the_variable_this_run_reads_its_credential_from() {
+    // A hook is unconfined — the operator's own program, in this run's environment — and that is
+    // exactly why it must not be handed the key. The child inherited the whole environment, so a
+    // hook that echoed `$B10X_HARNESS_TEST_KEY` put the credential into the note the model reads
+    // and into the session on disk. The name `--api-key-env` gave is removed before the spawn.
+    let fixture = Fixture::start("flat-tool");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let script = hook_script(
+        dir.path(),
+        "peek.py",
+        r#"import json, os, sys
+json.load(sys.stdin)
+sys.stdout.write(json.dumps({"note": "saw [" + os.environ.get("B10X_HARNESS_TEST_KEY", "") + "]"}))
+"#,
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "after-call",
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_with_session(
+        &fixture,
+        &["--hooks", hooks.to_str().expect("utf-8 path")],
+        workspace.path(),
+        sessions.path(),
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+
+    let session = only_session(sessions.path());
+    let result = session["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["kind"] == "tool-result")
+        .expect("the conversation carries the result the model read");
+    assert_eq!(
+        result["output"]["hook_notes"],
+        serde_json::json!(["saw []"]),
+        "the hook ran, and found nothing under that name: {result}"
+    );
+    assert!(
+        !session.to_string().contains("test-key"),
+        "and the credential is nowhere in what was written to disk"
+    );
+}
+
+#[test]
+fn a_delegate_reads_a_file_in_its_own_context_and_the_parent_reads_only_the_report() {
+    let fixture = Fixture::start("delegate");
+    let workspace = workspace();
+
+    let output = run_against(&fixture, &["--delegate", "--json"], workspace.path());
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert!(kinds.contains(&"delegate-started"), "{kinds:?}");
+    assert!(kinds.contains(&"delegated"), "{kinds:?}");
+    assert!(kinds.contains(&"delegate-finished"), "{kinds:?}");
+    // The child's own tool call arrives wrapped, and nothing of it arrives bare.
+    let wrapped: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "delegated")
+        .collect();
+    assert!(
+        wrapped
+            .iter()
+            .any(|event| event["event"]["kind"] == "tool-requested"),
+        "the child's own calls are in the record, nested: {wrapped:?}"
+    );
+    let parent: String = events
+        .iter()
+        .filter(|event| event["kind"] == "text-delta")
+        .filter_map(|event| event["text"].as_str())
+        .collect();
+    assert!(
+        parent.contains("the delegate read it"),
+        "the parent answers for itself: {parent}"
+    );
+}
+
+#[test]
+fn a_delegate_turn_ceiling_binds_the_child_and_the_parent_is_told_it_did_not_finish() {
+    // `--delegate-turns` is the child's own ceiling and not the parent's remainder, so a child
+    // that loops does not spend the run's remaining turns finding out. The same delegate that
+    // completes in two turns above comes back **failed**, carrying the bound it hit — a parent
+    // that read a half-answer as a whole one is the silent failure invariant 9 forbids.
+    let fixture = Fixture::start("delegate");
+    let workspace = workspace();
+
+    let output = run_against(
+        &fixture,
+        &["--delegate", "--delegate-turns", "1", "--json"],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let finished = events
+        .iter()
+        .find(|event| event["kind"] == "delegate-finished")
+        .expect("the delegate is bracketed in the record");
+    assert_eq!(
+        finished["stop"],
+        serde_json::json!({"kind": "max-turns", "limit": 1}),
+        "the child stopped at its own ceiling: {finished}"
+    );
+    assert_eq!(finished["turns"], serde_json::json!(1), "{finished}");
+    let completed: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "tool-completed")
+        .collect();
+    assert_eq!(
+        completed.len(),
+        1,
+        "the parent made one call, and the child's arrive wrapped: {completed:?}"
+    );
+    assert_eq!(
+        completed[0]["failed"],
+        serde_json::json!(true),
+        "the parent learns the sub-task did not finish: {completed:?}"
+    );
+}
+
+#[test]
+fn a_before_call_hook_blocks_a_write_the_ceiling_had_already_allowed() {
+    // A hook narrows and never widens: the approver said yes at `--approve-up-to medium`, and this
+    // is one more refusal after it. The model is told the effect did not happen (invariant 9).
+    let fixture = Fixture::start("hooks-block");
+    let (_root, workspace) = adoptable_workspace("ws_hooked");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let script = hook_script(
+        dir.path(),
+        "guard.py",
+        r#"import json, sys
+document = json.load(sys.stdin)
+if document.get("entry") != "file_write":
+    sys.stderr.write("this hook was declared for file_write: " + json.dumps(document))
+    sys.exit(3)
+sys.stdout.write(json.dumps({"reason": "note.md is not a file this run may create"}))
+sys.exit(2)
+"#,
+    );
+    let hooks = hooks_file(
+        dir.path(),
+        &serde_json::json!({
+            "on": "before-call",
+            "tools": ["file_write"],
+            "command": ["python3", script.display().to_string()],
+        }),
+    );
+
+    let output = run_against(
+        &fixture,
+        &[
+            "--json",
+            "--substrate-embedded",
+            "--approve-up-to",
+            "medium",
+            "--hooks",
+            hooks.to_str().expect("utf-8 path"),
+        ],
+        &workspace,
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert!(
+        !workspace.join("note.md").exists(),
+        "the write did not happen"
+    );
+    let events = events(&output);
+    let blocked = events
+        .iter()
+        .find(|event| event["kind"] == "hook-ran")
+        .expect("the hook is in the record");
+    assert_eq!(blocked["point"], serde_json::json!("before-call"));
+    assert_eq!(blocked["decision"]["kind"], serde_json::json!("block"));
+    let result = events
+        .iter()
+        .find(|event| event["kind"] == "tool-completed")
+        .expect("the call still produces an outcome the model reads");
+    assert_eq!(
+        result["failed"],
+        serde_json::json!(true),
+        "a refusal the model must learn about is an outcome, not a silence"
+    );
 }

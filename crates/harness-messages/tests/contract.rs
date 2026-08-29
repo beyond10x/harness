@@ -16,7 +16,9 @@ use harness_wire::{
 };
 use serde_json::{Value, json};
 
-const VERSION: &str = "2026-08-29";
+/// The cut that added the rolling prompt-cache breakpoint. `2026-08-29` is the same wire
+/// without it and stays pinned as it was released.
+const VERSION: &str = "2026-08-29b";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -115,6 +117,55 @@ fn the_request_the_harness_sends_matches_the_pinned_fixture() {
 }
 
 #[test]
+fn the_pinned_request_carries_both_cache_breakpoints_and_nothing_opaque_is_marked() {
+    // The whole of what `2026-08-29b` cut a version for. Asserted against the **fixture** rather
+    // than against the projection, because the projection is what the test above already compares:
+    // this one says what a reader of the contract is entitled to find in it.
+    let request: Value =
+        serde_json::from_str(&fixture("turn-request.json")).expect("the request fixture is JSON");
+
+    // The constant head: `tools` then `system` is everything before the conversation.
+    assert_eq!(
+        request["system"][0]["cache_control"],
+        json!({"type": "ephemeral"})
+    );
+
+    // The rolling one: the last content block of the last message, which is where the conversation
+    // grows. Without it the growth is re-charged in full on every remaining turn.
+    let messages = request["messages"].as_array().expect("an array");
+    let last = messages.last().expect("a last message");
+    assert_eq!(last["role"], json!("user"));
+    let blocks = last["content"].as_array().expect("an array");
+    assert_eq!(
+        blocks.last().expect("a last block")["cache_control"],
+        json!({"type": "ephemeral"})
+    );
+
+    // Two, against a cap of four. A third would have to be argued for.
+    assert_eq!(
+        request.to_string().matches("cache_control").count(),
+        2,
+        "{request}"
+    );
+
+    // And never on a replayed thinking block: its signature covers the block as the model produced
+    // it, so an added key is a rejected turn (AGENTS.md invariant 5).
+    let thinking = messages
+        .iter()
+        .flat_map(|message| message["content"].as_array().expect("an array"))
+        .find(|block| block["type"] == json!("thinking"))
+        .expect("the canonical turn replays one");
+    assert_eq!(
+        *thinking,
+        json!({
+            "type": "thinking",
+            "thinking": "OPAQUE-REASONING-BLOB",
+            "signature": "OPAQUE-SIGNATURE",
+        })
+    );
+}
+
+#[test]
 fn the_manifest_names_exactly_the_request_fields_the_harness_sends() {
     let sent: Vec<String> = canonical_request()
         .as_object()
@@ -195,6 +246,19 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
             }),
         }
     );
+
+    // And shown while it arrived. The pinned stream carries one `thinking_delta` and one
+    // `signature_delta`; only the first is reasoning a person should see, and the signature is
+    // never shown. An event count here is what catches the summary being emitted twice.
+    let reasoning: Vec<&str> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            harness_wire::StreamEvent::ReasoningDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasoning, vec!["OPAQUE-REASONING-BLOB"]);
 
     let call = outcome
         .tool_calls()

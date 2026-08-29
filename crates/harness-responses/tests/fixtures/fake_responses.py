@@ -22,16 +22,24 @@ MODEL = "b10x-emulated"
 # same loop suite, and a suite the two sides could name differently is one that could drift
 # apart while both stayed green.
 SCENARIOS = [
+    "answer-call",
+    "answer-prose",
+    "answer-stop-hook",
     "bad-arguments",
     "cold",
     "cold-once",
+    "delegate",
     "dynamic-tool",
     "failed",
+    "flat-tool",
+    "flat-write",
+    "hooks-block",
     "incomplete",
     "malformed",
     "no-usage",
     "reasoning",
     "slow",
+    "stop-hook",
     "text",
     "tool",
     "truncated",
@@ -39,6 +47,10 @@ SCENARIOS = [
     "unknown-events",
     "unpublished-tool"
 ]
+
+# What a delegating parent puts in the sub-task, so this emulator can tell the child's requests
+# from the parent's: the child's conversation starts empty and its first user item **is** the task.
+DELEGATED = "DELEGATE-TASK"
 
 RECORD_LOCK = threading.Lock()
 
@@ -146,6 +158,29 @@ def function_call_events(name, arguments):
             "response": response_object("completed", [item], usage_object(8)),
         },
     ]
+
+
+def first_user_text(body):
+    """The first thing a person (or a delegating parent) said in this conversation."""
+    for entry in body.get("input", []):
+        if not isinstance(entry, dict) or entry.get("role") != "user":
+            continue
+        content = entry.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list) and content and isinstance(content[0], dict):
+            return content[0].get("text") or ""
+        return ""
+    return ""
+
+
+def user_items(body):
+    """How many user items the conversation carries, one per turn somebody asked for."""
+    return sum(
+        1
+        for entry in body.get("input", [])
+        if isinstance(entry, dict) and entry.get("role") == "user"
+    )
 
 
 def has_function_output(body):
@@ -366,6 +401,24 @@ class Handler(BaseHTTPRequestHandler):
                         "tool_invoke", {"name": "file_read", "arguments": {"path": "README.md"}}
                     )
                 )
+        elif scenario == "flat-tool":
+            # The flat surface: the model calls the catalogue entry by its own name, with the
+            # entry's own arguments. No verb, and nothing nested a level down.
+            if has_function_output(body):
+                self._send_sse(text_events("The file says: hello harness"))
+            else:
+                self._send_sse(function_call_events("file_read", {"path": "README.md"}))
+        elif scenario == "flat-write":
+            # The same surface, asking for an effect: what a run does depends on the approver and
+            # on the ceiling, and the second turn reports whichever answer came back.
+            if has_function_output(body):
+                self._send_sse(text_events("that is what the tool said"))
+            else:
+                self._send_sse(
+                    function_call_events(
+                        "file_write", {"path": "note.md", "text": "written by the harness\n"}
+                    )
+                )
         elif scenario == "dynamic-tool":
             # Bridge mode is the other surface: the tools are the *client's*, registered by name at
             # `thread/start`, and the verbs are not among them. A scenario of its own rather than a
@@ -374,6 +427,66 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(text_events("The file says: hello harness"))
             else:
                 self._send_sse(function_call_events("workspace_read", {"path": "README.md"}))
+        elif scenario == "answer-call":
+            # Structured output: the model finishes by calling the answer tool, and its arguments
+            # are the answer. Nothing is said in prose, because prose is not what was asked for.
+            if has_function_output(body):
+                self._send_sse(text_events("I have already answered."))
+            else:
+                self._send_sse(
+                    function_call_events(
+                        "answer", {"verdict": "ok", "file": "README.md", "bytes": 14}
+                    )
+                )
+        elif scenario == "answer-prose":
+            # The same run, from a model that will not call it: one nudge, one more turn in prose,
+            # and a stop that is not `completed`.
+            self._send_sse(text_events("The readme says hello harness."))
+        elif scenario == "answer-stop-hook":
+            # Two structured answers. The first is withdrawn by a stop hook, whose reason arrives
+            # as one more user item; the second is what the run actually answers, and the only one
+            # a consumer reading stdout may ever see.
+            if user_items(body) > 1:
+                self._send_sse(
+                    function_call_events("answer", {"verdict": "second, after the hook"})
+                )
+            else:
+                self._send_sse(function_call_events("answer", {"verdict": "first"}))
+        elif scenario == "hooks-block":
+            # A write the ceiling allows and a hook refuses. The second turn reports whichever
+            # answer came back, exactly as it would for a denial.
+            if has_function_output(body):
+                self._send_sse(text_events("the hook stopped the write"))
+            else:
+                self._send_sse(
+                    function_call_events(
+                        "file_write", {"path": "note.md", "text": "written by the harness\n"}
+                    )
+                )
+        elif scenario == "stop-hook":
+            # Two answers in prose. The second turn exists only because a stop hook refused the
+            # first ending and its reason arrived as one more user item.
+            if user_items(body) > 1:
+                self._send_sse(text_events("second answer, after the hook"))
+            else:
+                self._send_sse(text_events("first answer"))
+        elif scenario == "delegate":
+            # One emulator serves both loops. The child's conversation starts empty, so its first
+            # user item is the task itself -- that is what tells the two apart.
+            if DELEGATED in first_user_text(body):
+                if has_function_output(body):
+                    self._send_sse(text_events("README.md says: hello harness"))
+                else:
+                    self._send_sse(function_call_events("file_read", {"path": "README.md"}))
+            elif has_function_output(body):
+                self._send_sse(text_events("the delegate read it: hello harness"))
+            else:
+                self._send_sse(
+                    function_call_events(
+                        "delegate",
+                        {"task": f"{DELEGATED} read README.md and say what it says"},
+                    )
+                )
         elif scenario == "reasoning":
             if has_function_output(body):
                 self._send_sse(text_events("done", extra_output=[reasoning_item()]))

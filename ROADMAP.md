@@ -52,7 +52,10 @@ the projection, plus `thinking` blocks becoming opaque items.
 names over the same scenario names, with `the_two_wires_serve_the_same_scenarios` failing if either
 side grows a case the other lacks. The shipped binary drives either one on a `--wire` flag and the
 loop below it cannot tell which it got. `contracts/provider-wires/anthropic-messages/2026-08-29`
-pins the request, the stream and the credential headers, checked from both directions. Reached.
+pins the request, the stream and the credential headers, checked from both directions — **and is
+superseded by `2026-08-29b`**, cut the same day for the rolling `cache_control` breakpoint that
+caches the conversation and not only its head. `2026-08-29` stays as released (invariant 13); the
+current pin is `2026-08-29b`. Reached.
 
 `harness-wire` needed widening twice, and each widening carries its reason where it lands:
 
@@ -70,9 +73,19 @@ pins the request, the stream and the credential headers, checked from both direc
 between the HTTP client and the projection — bounded SSE framing, the retry rule, the witnessed sink
 that makes the retry rule safe, the back-off, the status mapping — was copied unchanged, because
 none of it is vendor-shaped. It is *transport*-shaped, and the first wire could not tell the
-difference while it was the only one. A `harness-http` beneath both wires is the next structural
-move; it was deliberately not made here, so that this change is the evidence rather than a guess
-acting on itself.
+difference while it was the only one. The copy was left standing on purpose for one release, so
+that the second wire was the evidence rather than a guess acting on itself.
+
+**Acted on: `crates/harness-http`.** That half is one crate beneath both wires, and each wire is now
+its projection, its URL and its headers over `harness_http::HttpTransport` — neither depends on
+`reqwest`. No behaviour moved with it: the two pinned contract suites, `check-provider-wires.py` and
+both `provider_emulated` suites pass with no fixture, manifest or case edited. The extraction found
+exactly **one** real difference between the two copies, and it is now named instead of implied —
+the first route ends its stream with `data: [DONE]` and the second has no sentinel at all, so
+`Framing` is a per-wire setting. Everything else was identical, including the status table: 529 was
+already covered by the 5xx range on both sides and only the comments differed. What keeps them
+honest is `crates/harness-messages/tests/transport.rs`, which compares whole settings values and
+fails on any difference but the framing.
 
 ## Phase 4: subscription authentication
 
@@ -106,9 +119,11 @@ Not done, and stated so nobody reads the absence as working:
   all: it takes its access token as a plain bearer, which `StaticBearer` already does — what is
   missing is the run that says so;
 - **a live contract version for the Anthropic route.** The run below happened; its *bytes* were not
-  captured, so `contracts/provider-wires/anthropic-messages/2026-08-29` is still
-  `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
+  captured, so `contracts/provider-wires/anthropic-messages/2026-08-29b` — the current pin — is
+  still `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
   place: a live pin is a **new dated version** cut from captured bytes, not an edit to this one.
+  The cache-breakpoint placement `2026-08-29b` introduces is the part most worth capturing live:
+  the measurement that argued for it is a hit-rate series, and the pin itself is emulated.
 
 Done since, and it is the Anthropic half of this phase's exit:
 
@@ -176,3 +191,23 @@ answer for the same reason.
 **Exit:** `harness-cli` names a workspace implementation and publishes what it admits, with no
 `cfg` and no branch on which one it got; the three implementations share one conformance suite; and
 `ToolPort` has one implementation rather than two that must be kept agreeing.
+
+## Phase 7: what the loop owns beyond the catalogue
+
+**Status: the first three landed 2026-08-29, `provider_emulated`; two stay out of scope.**
+
+The comparison against other harnesses (`docs/reviews/2026-08-29-sota-comparison.md`, finding #13)
+named five things every one of them has: sub-agents, structured output, hooks, an MCP client and
+multimodal input. Design 0002 is the decision. `answer` and `delegate` are tools the **loop** owns
+— resolved before the tool port sees a call, meeting the same gate, batched never — and a hook is
+a port like the approver, with the process-running half in the shell. Each is opt-in per run.
+
+**Exit evidence:** the `answer` path (call, nudge, `unstructured`), a delegate that reads and
+reports, and each of the three hook points, all driven end to end over both emulators through the
+shipped binary. Reached the same day. **What is not reached**, and what the next evidence is: one
+live run per feature — how often a real model ends in prose under `answer` is the measurement that
+decides whether provider-native constrained decoding (M2) is cut as new contract versions.
+
+Out of scope, and why: an MCP client would make this loop a client of a protocol whose tools
+nothing here confines — metaharness is the MCP side of this family; multimodal input is a new
+neutral value on both wires that nothing measuring this harness has asked for.

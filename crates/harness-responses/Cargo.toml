@@ -11,9 +11,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# No `reqwest`. This crate speaks no HTTP of its own: the transport is `harness-http`, and a wire
+# that could reach for a client directly is a wire that can grow a second retry rule.
 [dependencies]
+harness-http = { workspace = true }
 harness-wire = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

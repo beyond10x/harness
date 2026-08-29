@@ -1,4 +1,4 @@
-//! The six things a tool can be, performed by somebody else.
+//! The seven things a tool can be, performed by somebody else.
 //!
 //! # Why the catalogue does not perform anything
 //!
@@ -23,18 +23,90 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+/// Which part of a file one read answers with.
+///
+/// # Why a window and not a byte ceiling
+///
+/// `file_read` used to take a byte ceiling and nothing else, so it read from byte 0 every time: a
+/// file over the ceiling could never be seen whole, and the middle of any file cost a read of
+/// everything before it. Lines are the addressing every editor, every stack trace and every diff
+/// already uses, and they are what `file_edit` is quoted against — so a window is stated in them.
+///
+/// Named fields rather than three `Option<u64>` in a row: `(None, Some(40), Some(200))` is a
+/// silent transposition away from `(Some(40), Some(200), None)`, and both compile.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReadWindow {
+    /// The first line to answer with, counting from 1. [`None`] is line 1.
+    pub offset: Option<u64>,
+    /// How many lines to answer with. [`None`] is every line that fits under `max_bytes`.
+    pub limit: Option<u64>,
+    /// How many bytes of the file this read may take. [`None`] is the provider's own default, and
+    /// every provider caps whatever is asked for at its own ceiling.
+    pub max_bytes: Option<u64>,
+}
+
+impl ReadWindow {
+    /// The window a caller who wants the file means: from its first line, as much as fits.
+    #[must_use]
+    pub fn whole() -> Self {
+        Self::default()
+    }
+
+    /// `limit` lines from `offset`, counting from 1.
+    #[must_use]
+    pub fn lines(offset: u64, limit: u64) -> Self {
+        Self {
+            offset: Some(offset),
+            limit: Some(limit),
+            max_bytes: None,
+        }
+    }
+}
+
+/// How a search is narrowed, beyond the pattern and where it starts.
+///
+/// Every field's default is the search this crate has always performed — a literal substring, every
+/// text file under the path, the matching line and nothing around it. So a caller that wants that
+/// passes [`SearchOptions::default()`] and reads exactly as it did before.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchOptions {
+    /// Read the pattern as a regular expression rather than as a literal substring.
+    ///
+    /// Off by default, because a model that meant `a.b` almost always meant `a.b`. A pattern that
+    /// does not compile is refused with the regex crate's own words: a search that quietly matched
+    /// nothing would read as *this string is not in the tree*, which is a different answer.
+    pub regex: bool,
+    /// Only files whose workspace-relative path matches this glob — `*.rs`, `crates/**/*.rs`.
+    pub glob: Option<String>,
+    /// How many lines either side of a match to answer with.
+    pub context: Option<u64>,
+    /// A ceiling on returned matches, itself capped by the provider's own.
+    pub max_results: Option<usize>,
+}
+
 /// What performs a catalogue entry.
 ///
 /// Every method answers `Result<Value, String>`: the `Err` is a sentence the model reads, because a
 /// tool that failed has to say so in words the next turn can act on. A typed error here would have
 /// to be rendered into one anyway, and the two would drift.
-pub trait Operations {
-    /// Read one text file.
+///
+/// # `Send + Sync`, and what it bought
+///
+/// A turn that asks for six reads used to pay six round trips of tool latency for no reason: the
+/// calls are pure, they were already published and already inside every bound, and nothing about a
+/// read requires the next one to wait for it. [`Catalogue::invoke_batch`](crate::Catalogue) runs
+/// them on one thread each under `std::thread::scope`, which needs the provider to be shareable
+/// across threads. Both implementations already were; a third that is not has to say so by holding
+/// its unshareable part behind a lock, which is a thing to write down rather than a thing to
+/// discover under a race.
+pub trait Operations: Send + Sync {
+    /// Read a window of one text file.
     ///
     /// # Errors
     ///
-    /// The path could not be read, is not a file, or is outside the workspace.
-    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String>;
+    /// The path could not be read, is not a file, is outside the workspace, or the window names
+    /// lines the file does not have.
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String>;
 
     /// Write one file, whole.
     ///
@@ -61,17 +133,41 @@ pub trait Operations {
     /// The path is not a directory, or is outside the workspace.
     fn dir_list(&self, path: &str) -> Result<Value, String>;
 
-    /// Find a literal substring in the tree's text files.
+    /// Find a pattern in the tree's text files.
+    ///
+    /// Literal by default; [`SearchOptions::regex`] makes it a regular expression, and the two
+    /// other fields narrow which files are read and how much of each match is answered.
     ///
     /// # Errors
     ///
-    /// The pattern is empty, or the path is outside the workspace.
-    fn search(
-        &self,
-        pattern: &str,
-        path: &str,
-        max_results: Option<usize>,
-    ) -> Result<Value, String>;
+    /// The pattern is empty, does not compile as a regular expression, the glob does not compile,
+    /// or the path is outside the workspace.
+    fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String>;
+
+    /// Every file under `path` whose workspace-relative name matches a glob.
+    ///
+    /// The tool that was missing: without it, finding a file cost one `dir_list` per directory
+    /// level, and a model that wanted `*.rs` had to guess where they were.
+    ///
+    /// Defaulted to a refusal naming it, so a provider written before this existed keeps compiling
+    /// and answers the model in words rather than by pretending the tree holds nothing.
+    ///
+    /// **This one is reachable from the model, unlike the defaults below.** `find`, `dir_list` and
+    /// `search` are the three reading entries [`Catalogue::of`](crate::Catalogue::of) publishes
+    /// whatever the provider says, because the provider a run holds for them is normally not the
+    /// one it holds for its effects: the confined provider refuses all three by name and the CLI
+    /// composes [`Split`] so the local reader answers them. A run that hands the catalogue a bare
+    /// confined provider gets three published entries whose calls come back as this refusal — in
+    /// words, on the call, which is the outcome invariant 9 asks for and not a silence.
+    ///
+    /// # Errors
+    ///
+    /// The glob does not compile, the path is outside the workspace, or this provider does not
+    /// offer it.
+    fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
+        let _ = (glob, path, max_results);
+        Err("`find` is not offered by this workspace".to_owned())
+    }
 
     /// Run one program and answer what it did.
     ///
@@ -183,21 +279,20 @@ impl Split {
 }
 
 impl Operations for Split {
-    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String> {
-        self.reads.file_read(path, max_bytes)
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        self.reads.file_read(path, window)
     }
 
     fn dir_list(&self, path: &str) -> Result<Value, String> {
         self.reads.dir_list(path)
     }
 
-    fn search(
-        &self,
-        pattern: &str,
-        path: &str,
-        max_results: Option<usize>,
-    ) -> Result<Value, String> {
-        self.reads.search(pattern, path, max_results)
+    fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
+        self.reads.search(pattern, path, options)
+    }
+
+    fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
+        self.reads.find(glob, path, max_results)
     }
 
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/harness-wire",
     "crates/harness-credential",
+    "crates/harness-http",
     "crates/harness-responses",
     "crates/harness-messages",
     "crates/harness-loop",
@@ -24,6 +25,7 @@ publish = false
 [workspace.dependencies]
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
 harness-credential = { package = "b10x-harness-credential", path = "crates/harness-credential" }
+harness-http = { package = "b10x-harness-http", path = "crates/harness-http" }
 harness-responses = { package = "b10x-harness-responses", path = "crates/harness-responses" }
 harness-messages = { package = "b10x-harness-messages", path = "crates/harness-messages" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
@@ -34,6 +36,14 @@ harness-app-server = { package = "b10x-harness-app-server", path = "crates/harne
 
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"
+# The two `harness-tools` takes to give `search` a regular expression and a file filter. Both are
+# BurntSushi's, both are what ripgrep itself matches with, and they share `regex-automata` and
+# `regex-syntax` — so the second costs `bstr` and `log` on top of the first rather than a tree of
+# its own. Hand-rolling either was the alternative: a glob matcher written here would be a second,
+# subtly different answer to *does this path match `crates/**/*.rs`* on every machine that reads a
+# run, and a hand-rolled regex engine is not a thing anyone should write twice.
+globset = "0.4.19"
+regex = "1.13"
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

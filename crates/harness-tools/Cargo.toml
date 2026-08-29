@@ -12,7 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+globset = { workspace = true }
 harness-wire = { workspace = true }
+regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

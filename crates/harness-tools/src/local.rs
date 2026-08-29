@@ -12,7 +12,7 @@
 //!
 //! **By default it writes nothing and runs nothing.** [`LocalOperations::new`] leaves
 //! [`Operations::writes`] `false` and [`Operations::programs`] empty, so a catalogue built on it
-//! holds three entries: read, list, search.
+//! holds four entries: read, list, search, find.
 //!
 //! # …and the door out of that, which has to be asked for by name
 //!
@@ -28,22 +28,63 @@
 //! site knows it. A run that wants the effects actually confined passes `harness-substrate`'s
 //! provider instead, and the catalogue cannot tell the difference.
 
+use std::fmt::Write as _;
 use std::fs;
-use std::io::Read;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::Operations;
+use crate::{Operations, ReadWindow, SearchOptions};
 
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_READ_BYTES: u64 = 64 * 1024;
 const MAX_READ_BYTES_CEILING: u64 = 256 * 1024;
 const MAX_GREP_RESULTS: usize = 200;
 const MAX_GREP_FILE_BYTES: u64 = 1024 * 1024;
-const MAX_GREP_DEPTH: usize = 12;
+/// How deep under its starting directory a walk descends before it stops.
+///
+/// A bound rather than none: a deep or cyclic tree would otherwise hold the run open. `pub(crate)`
+/// because `search` and `find` name the figure in their own descriptions — a bound the model cannot
+/// read is one it cannot work around, and both entries answer `depth_bound_reached` when it bit.
+pub(crate) const MAX_GREP_DEPTH: usize = 12;
 const MAX_RUN_OUTPUT_BYTES: usize = 64 * 1024;
+/// The most paths one `find` answers with.
+///
+/// Larger than a listing's 500-entry page would suggest, because a glob is already the filter: a
+/// `find` of `**/*.rs` in a real workspace is the answer, not a page of it. Above this the reply
+/// says it was cut and the caller narrows the glob.
+const MAX_FIND_RESULTS: usize = 500;
+/// The most lines of context a search may be asked for either side of a match.
+///
+/// Five is enough to see a function signature over a match and small enough that two hundred
+/// matches with context is still a reply and not a file dump.
+const MAX_SEARCH_CONTEXT: u64 = 5;
+/// How much of one line a read answers with.
+///
+/// A minified bundle is one line of two megabytes, and a window of ten lines that included it
+/// would be the whole read. The line is cut and its number is reported, so a model that quoted it
+/// back to `file_edit` is refused for not matching rather than left to wonder.
+const MAX_READ_LINE_CHARS: usize = 2_000;
+/// How many bytes of one line are held while it is being read.
+///
+/// Four bytes per character is the widest UTF-8 gets, so this holds at least
+/// [`MAX_READ_LINE_CHARS`] characters whatever the encoding — and a file with no newline in it at
+/// all cannot make a read allocate its whole length.
+const MAX_READ_LINE_BYTES: usize = MAX_READ_LINE_CHARS * 4;
+/// How far a read scans while counting the lines of a file.
+///
+/// `lines.total` is what stops a window being mistaken for a whole file, and counting lines means
+/// reading to the end. On a multi-gigabyte artefact that is a full sequential scan **on every
+/// read**, bounded by nothing — the loop's deadline check between calls cannot reach inside one
+/// call, and the window itself is over after 256 KiB at the most.
+///
+/// So the scan stops here and the reply says so rather than answering a number it did not finish:
+/// `lines.total` is `null` and `lines_counted_to` names the last line the scan reached. Sixteen
+/// mebibytes is far past any source file and far short of a build artefact, and a `null` there is
+/// absence kept as absence rather than a count that would be wrong.
+const MAX_LINE_COUNT_BYTES: u64 = 16 * 1024 * 1024;
 /// How long an unconfined `run` may hold the turn open before it is killed.
 ///
 /// A bound rather than none: `wait` on a child that never exits stops the run with no record of
@@ -81,7 +122,12 @@ const INHERITED_ENV: &[&str] = &[
 
 /// Directories skipped while walking. Each is either machine output or another tool's private
 /// state, and including them buries the answer the person asked for.
-const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv", "__pycache__"];
+///
+/// `pub(crate)` because `search` and `find` name them one by one in their own descriptions. "Build
+/// output and version-control directories are skipped" tells a model that something was left out
+/// and not *what*, so a model looking for a file under `target/` reads a complete-looking empty
+/// answer and concludes the file is not there.
+pub(crate) const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv", "__pycache__"];
 
 #[derive(Debug, Clone)]
 pub struct LocalOperations {
@@ -219,44 +265,160 @@ impl LocalOperations {
         }))
     }
 
-    fn read(&self, relative: &str, max_bytes: Option<u64>) -> Result<Value, String> {
-        let limit = max_bytes
+    /// One window of one file, as numbered lines.
+    ///
+    /// # Why the reply is `cat -n` and not the file's own bytes
+    ///
+    /// What a model does with a read is quote part of it back to `file_edit`, and an edit lands
+    /// where the quoted text is. Numbering every line gives it a way to say *which* occurrence it
+    /// means and gives a person reading the record a way to check. It is the shape Claude Code's
+    /// `Read` answers with, and it is the reason its edits land: the number is a prefix the model
+    /// strips, and the entry's own description says so.
+    ///
+    /// # Why the file is walked past the window, and how far
+    ///
+    /// `lines.total` is the thing that keeps a window from being mistaken for a file — without it
+    /// a model that read lines 1..64 of a 4,000-line file has no way to know there is more, which
+    /// is invariant 8 in a different costume. Counting them means reading past the window. It is
+    /// sequential I/O and **one line is in memory at a time**: the multi-gigabyte artefact the
+    /// earlier byte-ceiling read was careful not to pull into memory is still not pulled into
+    /// memory.
+    ///
+    /// It is still a scan, though, and on that artefact it is a scan of the whole thing on every
+    /// read with nothing to stop it. So it stops at [`MAX_LINE_COUNT_BYTES`]: past there
+    /// `lines.total` is `null` and `lines_counted_to` says which line the scan reached. `bytes` is
+    /// the file's own size from its metadata either way, so the size of the thing is never in
+    /// doubt — only how many lines it holds.
+    fn read(&self, relative: &str, window: ReadWindow) -> Result<Value, String> {
+        let ceiling = window
+            .max_bytes
             .unwrap_or(MAX_READ_BYTES)
             .min(MAX_READ_BYTES_CEILING);
+        let offset = window.offset.unwrap_or(1);
+        if offset == 0 {
+            return Err(format!(
+                "`offset` is the first line to read and lines are numbered from 1, so 0 names no \
+                 line. `{relative}` was not read."
+            ));
+        }
         let target = self.resolve(relative)?;
         if !target.is_file() {
             return Err(format!("`{relative}` is not a file"));
         }
-        // The size comes from the metadata and only `limit` bytes are ever read. Reading the file
-        // whole and then cutting the reply means a multi-gigabyte artefact in the workspace is
-        // pulled into this process's memory to answer with 64 KiB of it.
-        let total = fs::metadata(&target)
+        let bytes = fs::metadata(&target)
             .map_err(|error| format!("`{relative}`: {error}"))?
             .len();
-        let mut head = Vec::new();
-        fs::File::open(&target)
+        let mut reader = std::io::BufReader::new(
+            fs::File::open(&target).map_err(|error| format!("`{relative}`: {error}"))?,
+        );
+
+        let mut text = String::new();
+        let mut cut = Vec::new();
+        let mut total: u64 = 0;
+        let mut kept: u64 = 0;
+        let mut answered_bytes: u64 = 0;
+        let mut scanned: u64 = 0;
+        let mut last: u64 = 0;
+        let mut closed = false;
+        let mut counting_bounded = false;
+        while let Some(line) = next_line(&mut reader, MAX_READ_LINE_BYTES)
             .map_err(|error| format!("`{relative}`: {error}"))?
-            .take(limit)
-            .read_to_end(&mut head)
-            .map_err(|error| format!("`{relative}`: {error}"))?;
-        let truncated = total > limit;
-        // On a character boundary. A cut through a multi-byte character becomes U+FFFD, which reads
-        // as damage to the file rather than to the reply, so the last partial character is dropped
-        // instead. `error_len() == None` is exactly "the bytes ran out mid-character": anything
-        // else is the file's own encoding and is reported lossily, as before.
-        let text = match std::str::from_utf8(&head) {
-            Ok(text) => text.to_owned(),
-            Err(error) if truncated && error.error_len().is_none() => {
-                String::from_utf8_lossy(&head[..error.valid_up_to()]).into_owned()
+        {
+            total += 1;
+            scanned += line.length + 1;
+            if total < offset || closed {
+                // The scan is the whole cost of this call on a large file, so it is the thing that
+                // is bounded. Checked after the line is counted, so `total` names a line that was
+                // actually reached.
+                if scanned >= MAX_LINE_COUNT_BYTES {
+                    counting_bounded = true;
+                    break;
+                }
+                continue;
             }
-            Err(_) => String::from_utf8_lossy(&head).into_owned(),
-        };
-        Ok(json!({
+            // The window closes on whichever bound arrives first — the line count the caller asked
+            // for, or the byte ceiling. The first line is always answered even when it is over the
+            // ceiling on its own, because a read that answered nothing would look like an empty
+            // file. The separator counts towards the ceiling: it is a byte of the file, and
+            // ignoring it would answer more than the ceiling allowed for a file of short lines.
+            let weight = line.length + 1;
+            let within_limit = window.limit.is_none_or(|count| kept < count);
+            let within_ceiling = kept == 0 || answered_bytes + weight <= ceiling;
+            if !(within_limit && within_ceiling) {
+                closed = true;
+                continue;
+            }
+            let content = String::from_utf8_lossy(&line.kept);
+            let shown: String = content.chars().take(MAX_READ_LINE_CHARS).collect();
+            if !line.whole || content.chars().count() > MAX_READ_LINE_CHARS {
+                cut.push(total);
+            }
+            let _ = writeln!(text, "{total:>6}\t{shown}");
+            kept += 1;
+            answered_bytes += weight;
+            last = total;
+        }
+
+        // A window that starts past the end is a refusal and not an empty answer: the model asked
+        // for something that is not there, and *no lines* would read as *the file is empty*. Line 1
+        // of an empty file is not that case — it is the file, answered whole.
+        if offset > 1 && offset > total {
+            return Err(if counting_bounded {
+                format!(
+                    "`{relative}` was scanned to line {total} — this build stops counting lines \
+                     after {MAX_LINE_COUNT_BYTES} bytes — and `offset` names line {offset}, past \
+                     where the scan reached. Nothing was read."
+                )
+            } else {
+                format!(
+                    "`{relative}` has {total} lines and `offset` names line {offset}, which is \
+                     past the end. Nothing was read."
+                )
+            });
+        }
+        let mut answer = json!({
             "path": self.display(&target),
-            "bytes": total,
-            "truncated": truncated,
+            "bytes": bytes,
+            // **The window stops before the file's last line, or a line in it was cut.** Not "the
+            // model has seen all of this file": a window with an `offset` in the middle that ends
+            // on the last line answers `false` and the lines before `offset` were never in it. A
+            // one-line minified bundle whose only line was cut at [`MAX_READ_LINE_CHARS`] answers
+            // `true`, because reaching the last line is not reading it.
+            //
+            // `true` as well when the line count was bounded: the scan stopped before the end, so
+            // whether the window reached the last line is not known here.
+            "truncated": counting_bounded || last < total || !cut.is_empty(),
             "text": text,
-        }))
+            // So a window is never mistaken for the whole file. `to` is one below `from` when the
+            // window answered nothing at all, which is only an empty file read from line 1.
+            //
+            // `total` is `null` when the scan stopped at [`MAX_LINE_COUNT_BYTES`]: how many lines
+            // the file has is then unknown, and a number that counted part of it would be read as
+            // the whole count. Absence stays absence.
+            "lines": {
+                "from": offset,
+                "to": if kept == 0 { offset.saturating_sub(1) } else { last },
+                "total": if counting_bounded { Value::Null } else { json!(total) },
+            },
+            // Every line this reply cut at [`MAX_READ_LINE_CHARS`], by number. Always present, so
+            // an empty list means *nothing was cut* rather than *an older reply*. No marker is put
+            // in the text itself: the text is what gets quoted back to `file_edit`, and a marker
+            // inside it would be quoted too.
+            "truncated_lines": cut,
+        });
+        if counting_bounded {
+            // Only where counting stopped, for the reason `note` is only on a filtered
+            // `tool_search`: a field that says *nothing happened* on every ordinary read is bytes
+            // replayed on every later turn to say nothing.
+            answer["lines_counted_to"] = json!(total);
+            answer["note"] = json!(format!(
+                "line counting stopped after {MAX_LINE_COUNT_BYTES} bytes of `{}`, at line \
+                 {total}, so how many lines it has is not known. `bytes` is still the whole file's \
+                 size, and a window past line {total} is refused rather than guessed at.",
+                self.display(&target)
+            ));
+        }
+        Ok(answer)
     }
 
     /// Resolves a path the caller intends to *create*, which `resolve` cannot: `canonicalize` on a
@@ -426,14 +588,22 @@ impl LocalOperations {
             std::thread::sleep(Duration::from_millis(25));
         };
 
-        let (stdout, stdout_truncated) = out.join().unwrap_or_default();
-        let (stderr, stderr_truncated) = err.join().unwrap_or_default();
+        let empty = || Drained {
+            text: String::new(),
+            omitted: 0,
+        };
+        let stdout = out.join().unwrap_or_else(|_| empty());
+        let stderr = err.join().unwrap_or_else(|_| empty());
+        let omitted = stdout.omitted + stderr.omitted;
         Ok(json!({
             "argv": argv,
             "exit": status.code(),
-            "stdout": stdout,
-            "stderr": stderr,
-            "truncated": stdout_truncated || stderr_truncated,
+            "stdout": stdout.text,
+            "stderr": stderr.text,
+            "truncated": omitted > 0,
+            // Across both streams. Each stream's own marker names its share, in the place the
+            // bytes were dropped from, so a reader never has to work out which one was cut.
+            "omitted_bytes": omitted,
             // Named, because a killed process's exit code says nothing about the task.
             "timed_out": killed,
             // And how long it was given, so a kill at the run's deadline is not read as the
@@ -446,23 +616,60 @@ impl LocalOperations {
         &self,
         pattern: &str,
         relative: &str,
-        max_results: Option<usize>,
+        options: &SearchOptions,
     ) -> Result<Value, String> {
         if pattern.is_empty() {
             return Err("`pattern` is required and must not be empty".to_owned());
         }
-        let limit = max_results
+        let limit = options
+            .max_results
             .unwrap_or(MAX_GREP_RESULTS)
             .min(MAX_GREP_RESULTS);
+        // Capped rather than refused: a caller who asked for forty lines of context wanted to see
+        // around the match, and five is seeing around it. The cap is in the entry's own schema —
+        // and the reply echoes the figure that was actually used when it differs from the one that
+        // was asked for, because a cap the reader cannot see is a bound they will not work around.
+        let asked_context = options.context.unwrap_or(0);
+        let context = usize::try_from(asked_context.min(MAX_SEARCH_CONTEXT)).unwrap_or(usize::MAX);
+        // Compiled once, before anything is walked. A pattern that does not compile is refused
+        // **with the regex crate's own words**: "no matches" for a broken pattern would read as
+        // *this string is not in the tree*, which is a different and wrong answer.
+        //
+        // **Both size limits are set rather than left at the crate's defaults.** The pattern comes
+        // from the model, and the default 10 MiB compiled program plus a 2 MiB lazy-DFA cache is a
+        // quantity of this process's memory a single `(a{1000}){1000}` can ask for. A megabyte each
+        // compiles every pattern a search of a tree has ever needed, and one over it is refused by
+        // name with the crate's own words rather than allocating first and asking later.
+        let expression = if options.regex {
+            Some(
+                regex::RegexBuilder::new(pattern)
+                    .size_limit(1 << 20)
+                    .dfa_size_limit(1 << 20)
+                    .build()
+                    .map_err(|error| {
+                        format!(
+                            "`{pattern}` is not a regular expression this build can compile: \
+                             {error}"
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        let filter = options.glob.as_deref().map(PathGlob::compile).transpose()?;
         let root = self.resolve(relative)?;
 
         let mut matches = Vec::new();
         let mut truncated = false;
         let boundary = self.root.clone();
-        walk(&root, &boundary, 0, &mut |file| {
+        let depth_bound_reached = walk(&root, &boundary, 0, &mut |file| {
             if matches.len() >= limit {
                 truncated = true;
                 return false;
+            }
+            let shown = self.display(file);
+            if filter.as_ref().is_some_and(|glob| !glob.matches(&shown)) {
+                return true;
             }
             let Ok(metadata) = file.metadata() else {
                 return true;
@@ -474,30 +681,174 @@ impl LocalOperations {
                 // Binary or unreadable. Skipping is right; reporting each one is noise.
                 return true;
             };
-            for (index, line) in text.lines().enumerate() {
+            let lines: Vec<&str> = text.lines().collect();
+            for (index, line) in lines.iter().enumerate() {
                 if matches.len() >= limit {
                     truncated = true;
                     return false;
                 }
-                if line.contains(pattern) {
-                    matches.push(json!({
-                        "path": self.display(file),
-                        "line": index + 1,
-                        "text": line.chars().take(MAX_MATCH_CHARS).collect::<String>(),
-                        // Always present, so the shape is stable and a reader who checks the flag
-                        // never has to wonder whether its absence means "whole" or "old reply".
-                        "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
-                    }));
+                let hit = match &expression {
+                    Some(expression) => expression.is_match(line),
+                    None => line.contains(pattern),
+                };
+                if !hit {
+                    continue;
                 }
+                let mut hit = json!({
+                    "path": shown,
+                    "line": index + 1,
+                    "text": cut_to(line),
+                    // Always present, so the shape is stable and a reader who checks the flag
+                    // never has to wonder whether its absence means "whole" or "old reply".
+                    "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
+                });
+                // Only when context was asked for. Two empty arrays on every match of every
+                // search would be bytes replayed on every later turn to say *nothing here*.
+                if context > 0 {
+                    hit["before"] = around(&lines, index.saturating_sub(context)..index);
+                    hit["after"] =
+                        around(&lines, index + 1..(index + 1 + context).min(lines.len()));
+                }
+                matches.push(hit);
+            }
+            true
+        });
+
+        let mut answer = json!({
+            "pattern": pattern,
+            "matches": matches,
+            "truncated": truncated,
+            // Always present, like `truncated`, and for the same reason: a walk that stopped
+            // descending at [`MAX_GREP_DEPTH`] answered a subset of the tree, and a reply that said
+            // nothing about it reads exactly like one that searched everything.
+            "depth_bound_reached": depth_bound_reached,
+        });
+        // Echoed only when they were asked for, so a reader of the record can tell a literal
+        // search from a regular expression without holding the call beside the answer.
+        if options.regex {
+            answer["regex"] = json!(true);
+        }
+        if let Some(glob) = &options.glob {
+            answer["glob"] = json!(glob);
+        }
+        // Only when the cap bit. A caller who asked for forty lines got five, and a reply that did
+        // not say so leaves them reading five as though it were forty.
+        if asked_context > MAX_SEARCH_CONTEXT {
+            answer["context"] = json!(MAX_SEARCH_CONTEXT);
+            answer["note"] = json!(format!(
+                "`context` was {asked_context} and this build answers at most \
+                 {MAX_SEARCH_CONTEXT} lines either side of a match, so {MAX_SEARCH_CONTEXT} is \
+                 what these matches carry."
+            ));
+        }
+        Ok(answer)
+    }
+
+    fn find_paths(
+        &self,
+        glob: &str,
+        relative: &str,
+        max_results: Option<usize>,
+    ) -> Result<Value, String> {
+        // An empty glob matches no path, so a `find` with one answered an empty list — which reads
+        // as *there are no such files* rather than as *you named no pattern*. `search` refuses an
+        // empty pattern by name and this is the same refusal.
+        if glob.is_empty() {
+            return Err(
+                "`glob` is required and must not be empty: a find has to name what it is looking \
+                 for. `*.rs` is that name at any depth; `crates/**/*.rs` is the whole path."
+                    .to_owned(),
+            );
+        }
+        let limit = max_results
+            .unwrap_or(MAX_FIND_RESULTS)
+            .min(MAX_FIND_RESULTS);
+        let filter = PathGlob::compile(glob)?;
+        let root = self.resolve(relative)?;
+
+        let mut paths: Vec<Value> = Vec::new();
+        let mut truncated = false;
+        let boundary = self.root.clone();
+        let depth_bound_reached = walk(&root, &boundary, 0, &mut |file| {
+            if paths.len() >= limit {
+                truncated = true;
+                return false;
+            }
+            let shown = self.display(file);
+            if filter.matches(&shown) {
+                paths.push(Value::String(shown));
             }
             true
         });
 
         Ok(json!({
-            "pattern": pattern,
-            "matches": matches,
+            "paths": paths,
             "truncated": truncated,
+            // Always present, like `truncated`. `find` says it lists every match under the
+            // workspace; where the walk stopped descending, it listed the matches above a depth
+            // instead, and nothing else in the reply would say so.
+            "depth_bound_reached": depth_bound_reached,
         }))
+    }
+}
+
+/// A match's line, cut at [`MAX_MATCH_CHARS`] on a character boundary.
+fn cut_to(line: &str) -> String {
+    line.chars().take(MAX_MATCH_CHARS).collect()
+}
+
+/// The lines of `range`, each under its own number, for the context around a match.
+fn around(lines: &[&str], range: std::ops::Range<usize>) -> Value {
+    Value::Array(
+        lines[range.clone()]
+            .iter()
+            .zip(range)
+            .map(|(line, index)| {
+                json!({
+                    "line": index + 1,
+                    "text": cut_to(line),
+                    "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// One glob, matched the way a person means it.
+///
+/// **A glob with no `/` in it matches the file's name anywhere in the tree**; one with a `/`
+/// matches the whole workspace-relative path, and `*` does not cross a directory separator there.
+/// That is ripgrep's rule, taken rather than invented: a model that asks for `*.rs` means every
+/// Rust file, and answering it with the four in the workspace root would read as *there are four*.
+struct PathGlob {
+    matcher: globset::GlobMatcher,
+    by_name: bool,
+}
+
+impl PathGlob {
+    /// # Errors
+    ///
+    /// The glob does not compile, with globset's own words — a pattern nobody can match is refused
+    /// rather than quietly matching nothing.
+    fn compile(pattern: &str) -> Result<Self, String> {
+        let matcher = globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .map_err(|error| format!("`{pattern}` is not a glob this build can compile: {error}"))?
+            .compile_matcher();
+        Ok(Self {
+            matcher,
+            by_name: !pattern.contains('/'),
+        })
+    }
+
+    fn matches(&self, relative: &str) -> bool {
+        let candidate = if self.by_name {
+            relative.rsplit('/').next().unwrap_or(relative)
+        } else {
+            relative
+        };
+        self.matcher.is_match(candidate)
     }
 }
 
@@ -508,22 +859,37 @@ impl LocalOperations {
 /// anywhere else would be walked and its contents returned under a workspace-relative name.
 ///
 /// Depth is bounded so a deep or cyclic tree cannot hold the run open.
-fn walk(directory: &Path, boundary: &Path, depth: usize, visit: &mut dyn FnMut(&Path) -> bool) {
+///
+/// **Answers whether that bound stopped a descent**, which is the whole reason it returns anything.
+/// A walk that stopped at [`MAX_GREP_DEPTH`] visited a subset of the tree, and `find` and `search`
+/// answered `truncated: false` over it — a bound nothing reported, which is invariant 8. The caller
+/// puts it in the reply as `depth_bound_reached`.
+///
+/// [`SKIPPED`] directories are not reported the same way: they are named in both entries' own
+/// descriptions, so a model reads *which* directories are not searched before it calls rather than
+/// afterwards.
+fn walk(
+    directory: &Path,
+    boundary: &Path,
+    depth: usize,
+    visit: &mut dyn FnMut(&Path) -> bool,
+) -> bool {
     if depth > MAX_GREP_DEPTH {
-        return;
+        return true;
     }
     if !contained(directory, boundary) {
-        return;
+        return false;
     }
     if directory.is_file() {
         visit(directory);
-        return;
+        return false;
     }
     let Ok(entries) = fs::read_dir(directory) else {
-        return;
+        return false;
     };
     let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
     entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut bounded = false;
     for entry in entries {
         let path = entry.path();
         let name = entry.file_name();
@@ -535,30 +901,184 @@ fn walk(directory: &Path, boundary: &Path, depth: usize, visit: &mut dyn FnMut(&
             if SKIPPED.contains(&name.as_ref()) {
                 continue;
             }
-            walk(&path, boundary, depth + 1, visit);
+            bounded |= walk(&path, boundary, depth + 1, visit);
         } else if !visit(&path) {
-            return;
+            return bounded;
         }
     }
+    bounded
 }
 
-/// Reads a child's stream to the end, keeping the first [`MAX_RUN_OUTPUT_BYTES`].
+/// What one of a child's streams said, bounded at both ends.
+struct Drained {
+    text: String,
+    omitted: u64,
+}
+
+/// Reads a child's stream to the end, keeping the first and last half of
+/// [`MAX_RUN_OUTPUT_BYTES`].
+///
+/// # The head is not where the answer is
+///
+/// This kept the **first** 64 KiB and dropped the rest. For the one program a run cares most about
+/// — a test suite — the head is the compiler's progress and the answer is the last twenty lines:
+/// `test result: FAILED. 3 passed; 1 failed`, and which test. A model handed the head learns that
+/// something was compiled. So both ends are kept, and the middle says how many bytes went missing
+/// between them.
 ///
 /// It keeps reading after the cap rather than stopping: a reader that walked away would block the
 /// child on a full pipe, and the point of the cap is the size of the answer, not the child's fate.
-fn drain(mut stream: impl std::io::Read) -> (String, bool) {
-    let mut kept: Vec<u8> = Vec::new();
+/// Memory stays at the cap — the tail is a ring, not a buffer of everything seen so far.
+fn drain(stream: impl std::io::Read) -> Drained {
+    let half = MAX_RUN_OUTPUT_BYTES / 2;
+    let (head, tail, beyond_head) = read_ends(stream, half);
+    keep_both_ends(&head, &tail, head.len() as u64 + beyond_head)
+}
+
+/// Reads `stream` to the end, keeping its first `half` bytes and its last `half` bytes.
+///
+/// The third answer is how many bytes came **after** the head — enough, with the two ends, to say
+/// how many went missing between them.
+fn read_ends(mut stream: impl std::io::Read, half: usize) -> (Vec<u8>, Vec<u8>, u64) {
+    let mut head: Vec<u8> = Vec::new();
+    let mut tail: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
+    let mut beyond_head: u64 = 0;
     let mut buffer = [0_u8; 8192];
-    let mut truncated = false;
     while let Ok(read) = stream.read(&mut buffer) {
         if read == 0 {
             break;
         }
-        let room = MAX_RUN_OUTPUT_BYTES.saturating_sub(kept.len());
-        kept.extend_from_slice(&buffer[..read.min(room)]);
-        truncated |= read > room;
+        let mut bytes = &buffer[..read];
+        let room = half.saturating_sub(head.len());
+        if room > 0 {
+            let taken = room.min(bytes.len());
+            head.extend_from_slice(&bytes[..taken]);
+            bytes = &bytes[taken..];
+        }
+        beyond_head += bytes.len() as u64;
+        // A chunk at a time, then one drain: a program that prints a hundred megabytes would
+        // otherwise pay a push and a pop per byte to keep a 32 KiB window.
+        tail.extend(bytes.iter().copied());
+        if tail.len() > half {
+            tail.drain(..tail.len() - half);
+        }
     }
-    (String::from_utf8_lossy(&kept).into_owned(), truncated)
+    (head, tail.into_iter().collect(), beyond_head)
+}
+
+/// Joins the two ends of a stream of `total` bytes, with a marker naming what fell between them.
+///
+/// Its own function, and pure, because the arithmetic here is the part that can be wrong — the
+/// character boundaries, the count in the marker, whether the last line survives — and the only
+/// test of it drove a real child process, so it returned early on any machine without
+/// `/usr/bin/seq` and checked nothing there at all.
+///
+/// `head` and `tail` are the two ends as [`read_ends`] kept them; `total` is the whole stream's
+/// length. When the two ends are the whole stream, nothing is omitted and no marker is written.
+fn keep_both_ends(head: &[u8], tail: &[u8], total: u64) -> Drained {
+    if head.len() as u64 + tail.len() as u64 >= total {
+        let mut whole = head.to_vec();
+        whole.extend_from_slice(tail);
+        return Drained {
+            text: String::from_utf8_lossy(&whole).into_owned(),
+            omitted: 0,
+        };
+    }
+
+    // Both cuts land on character boundaries. A cut through a multi-byte character becomes U+FFFD,
+    // which reads as damage to the program's output rather than to this reply.
+    let head = &head[..whole_prefix(head)];
+    let tail = &tail[whole_suffix(tail)..];
+    // Counted from what is actually in the reply, so the bytes dropped for a character boundary
+    // are in the figure too. A marker that undercounted would be a smaller lie than a silent cut
+    // and still a lie.
+    let omitted = total - head.len() as u64 - tail.len() as u64;
+    let mut text = String::from_utf8_lossy(head).into_owned();
+    let _ = write!(text, "\n… {omitted} bytes omitted here …\n");
+    text.push_str(&String::from_utf8_lossy(tail));
+    Drained { text, omitted }
+}
+
+/// How much of `bytes` is whole UTF-8, so a cut lands between characters rather than inside one.
+fn whole_prefix(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        // "the bytes ran out mid-character" is the cut this made; anything else is the stream's
+        // own encoding and is reported lossily, as it always was.
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Ok(_) | Err(_) => bytes.len(),
+    }
+}
+
+/// Where the whole characters start in `bytes`, so a tail does not open mid-character.
+fn whole_suffix(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .position(|byte| byte & 0b1100_0000 != 0b1000_0000)
+        .unwrap_or(bytes.len())
+}
+
+/// One line of a file: what is kept of it, how long it really was, and whether the two agree.
+struct Line {
+    /// The line's bytes, up to what the reader was told to keep, with a `\r` before the newline
+    /// dropped.
+    kept: Vec<u8>,
+    /// Its true length in the file, before anything was dropped — separator excluded, `\r`
+    /// included. What the byte ceiling is charged.
+    length: u64,
+    /// Whether `kept` holds the whole line. Not `kept.len() == length`: a stripped `\r` makes the
+    /// two differ on a file the reader saw all of, and a reply that called that line *cut* would
+    /// name every line of a CRLF file.
+    whole: bool,
+}
+
+/// The next line from `reader`, keeping at most `keep` of its bytes.
+///
+/// Its own function rather than [`BufRead::read_until`] for one reason: `read_until` on a file with
+/// no newline in it allocates the whole file. A minified bundle is exactly that, and a *read* of it
+/// must not be a way to spend a gigabyte of this process's memory. The line's true length is
+/// counted whatever is kept, so the reply can say the line was cut.
+///
+/// **A `\r` before the newline is dropped**, which is what `str::lines` does and therefore what the
+/// confined provider has always answered. Until that was true here, one CRLF file read differently
+/// on the two providers and the `\r` a model quoted back to `file_edit` matched nothing — the edit
+/// was refused for text it had just been handed. A trailing `\r` at the very end of a file with no
+/// newline after it is kept, because that is a `\r` and not a line ending, and `str::lines` keeps
+/// it too.
+///
+/// `None` at the end of the file. A last line with no trailing newline is a line.
+fn next_line(reader: &mut impl BufRead, keep: usize) -> std::io::Result<Option<Line>> {
+    let mut line = Line {
+        kept: Vec::new(),
+        length: 0,
+        whole: true,
+    };
+    let mut any = false;
+    loop {
+        let (ends_at, available) = {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok(any.then_some(line));
+            }
+            any = true;
+            let ends_at = available.iter().position(|byte| *byte == b'\n');
+            let end = ends_at.unwrap_or(available.len());
+            let room = keep.saturating_sub(line.kept.len());
+            line.whole &= end <= room;
+            line.kept.extend_from_slice(&available[..end.min(room)]);
+            line.length += end as u64;
+            (ends_at, available.len())
+        };
+        match ends_at {
+            Some(at) => {
+                reader.consume(at + 1);
+                if line.whole && line.kept.last() == Some(&b'\r') {
+                    line.kept.pop();
+                }
+                return Ok(Some(line));
+            }
+            None => reader.consume(available),
+        }
+    }
 }
 
 /// Whether `path` really lives inside `boundary`, following every link on the way.
@@ -574,21 +1094,20 @@ fn contained(path: &Path, boundary: &Path) -> bool {
 /// [`unconfined`](LocalOperations::unconfined) they do the thing, and a reader of *that* call site
 /// has been told what is and is not underneath it.
 impl Operations for LocalOperations {
-    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String> {
-        self.read(path, max_bytes)
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        self.read(path, window)
     }
 
     fn dir_list(&self, path: &str) -> Result<Value, String> {
         self.list(path)
     }
 
-    fn search(
-        &self,
-        pattern: &str,
-        path: &str,
-        max_results: Option<usize>,
-    ) -> Result<Value, String> {
-        self.grep(pattern, path, max_results)
+    fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
+        self.grep(pattern, path, options)
+    }
+
+    fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
+        self.find_paths(glob, path, max_results)
     }
 
     // The three below refuse unless the caller asked for them by name. The catalogue never offers
@@ -760,27 +1279,112 @@ mod tests {
     #[test]
     fn a_large_file_is_bounded_before_it_is_read_rather_than_after() {
         let inside = workspace();
-        fs::write(inside.path().join("big.txt"), "x".repeat(200 * 1024))
-            .expect("the file is written");
+        fs::write(
+            inside.path().join("big.txt"),
+            "filler\n".repeat(30 * 1024) + "last\n",
+        )
+        .expect("the file is written");
 
         let value = reading(inside.path())
-            .file_read("big.txt", Some(1024))
+            .file_read(
+                "big.txt",
+                ReadWindow {
+                    max_bytes: Some(1024),
+                    ..ReadWindow::whole()
+                },
+            )
             .expect("the read answers");
-        assert_eq!(value["bytes"], json!(204_800));
+        assert_eq!(value["bytes"], json!(215_045), "the whole file's size");
         assert_eq!(value["truncated"], json!(true));
-        assert!(value["text"].as_str().expect("text").len() <= 1024);
+        assert_eq!(value["lines"]["total"], json!(30 * 1024 + 1));
+        assert_eq!(
+            value["lines"]["to"],
+            json!(1024 / 7),
+            "as many whole lines as the byte ceiling holds, and not one past it"
+        );
     }
 
     #[test]
-    fn truncation_lands_on_a_character_boundary_rather_than_through_one() {
+    fn a_line_too_long_to_answer_whole_is_cut_on_a_character_boundary_and_named() {
+        // The cut is at a character count, so a three-byte character cannot be halved by the byte
+        // cap that holds the line while it is read. U+FFFD in the reply would read as damage to
+        // the file rather than to this answer.
         let inside = workspace();
-        fs::write(inside.path().join("accents.txt"), "é".repeat(16)).expect("the file is written");
+        fs::write(inside.path().join("wide.txt"), "€".repeat(3_000)).expect("the file is written");
 
         let value = reading(inside.path())
-            .file_read("accents.txt", Some(3))
+            .file_read("wide.txt", ReadWindow::whole())
             .expect("the read answers");
+        assert_eq!(
+            value["truncated_lines"],
+            json!([1]),
+            "the cut is named by line number"
+        );
         assert_eq!(value["truncated"], json!(true));
-        assert_eq!(value["text"], json!("é"));
+        assert_eq!(
+            value["text"],
+            json!(format!("     1\t{}\n", "€".repeat(MAX_READ_LINE_CHARS))),
+            "cut at the character count, with no replacement character in it"
+        );
+    }
+
+    #[test]
+    fn a_read_answers_numbered_lines_and_says_which_window_of_the_file_they_are() {
+        // The shape a model can quote back to `file_edit`: the number is a prefix it strips, and a
+        // window is never mistaken for the file because `lines.total` is there.
+        let inside = workspace();
+        fs::write(inside.path().join("five.rs"), "a\nb\nc\nd\ne\n").expect("the file is written");
+        let local = reading(inside.path());
+
+        let value = local
+            .file_read("five.rs", ReadWindow::lines(2, 2))
+            .expect("the read answers");
+        assert_eq!(value["text"], json!("     2\tb\n     3\tc\n"));
+        assert_eq!(value["lines"], json!({"from": 2, "to": 3, "total": 5}));
+        assert_eq!(value["truncated"], json!(true), "line 5 is not in it");
+
+        let value = local
+            .file_read("five.rs", ReadWindow::lines(4, 99))
+            .expect("the read answers");
+        assert_eq!(value["text"], json!("     4\td\n     5\te\n"));
+        assert_eq!(value["lines"], json!({"from": 4, "to": 5, "total": 5}));
+        assert_eq!(
+            value["truncated"],
+            json!(false),
+            "a window that ends at the last line has reached the end"
+        );
+    }
+
+    #[test]
+    fn a_window_that_starts_past_the_end_is_refused_with_the_number_of_lines_there_are() {
+        let inside = workspace();
+        fs::write(inside.path().join("three.txt"), "a\nb\nc\n").expect("the file is written");
+        let local = reading(inside.path());
+
+        let refusal = local
+            .file_read("three.txt", ReadWindow::lines(9, 10))
+            .expect_err("refused");
+        assert!(refusal.contains("has 3 lines"), "{refusal}");
+        assert!(refusal.contains("line 9"), "{refusal}");
+
+        let refusal = local
+            .file_read(
+                "three.txt",
+                ReadWindow {
+                    offset: Some(0),
+                    ..ReadWindow::whole()
+                },
+            )
+            .expect_err("refused");
+        assert!(refusal.contains("numbered from 1"), "{refusal}");
+
+        // An empty file read from its first line is the file, not a window past its end.
+        fs::write(inside.path().join("empty.txt"), "").expect("the file is written");
+        let value = local
+            .file_read("empty.txt", ReadWindow::whole())
+            .expect("the read answers");
+        assert_eq!(value["text"], json!(""));
+        assert_eq!(value["lines"], json!({"from": 1, "to": 0, "total": 0}));
     }
 
     #[test]
@@ -793,7 +1397,7 @@ mod tests {
             .expect("the file is written");
 
         let value = reading(inside.path())
-            .search("needle", ".", None)
+            .search("needle", ".", &SearchOptions::default())
             .expect("the search answers");
         let matches = value["matches"].as_array().expect("matches");
         assert_eq!(matches.len(), 2);
@@ -875,6 +1479,454 @@ mod tests {
             .expect("the program runs");
         assert_eq!(value["timed_out"], json!(false));
         assert_eq!(value["timeout_ms"], json!(MAX_RUN_SECONDS * 1000));
+    }
+
+    #[test]
+    fn output_over_the_cap_keeps_both_ends_and_the_marker_names_what_went_missing() {
+        // The tail is where a test suite's verdict is. Keeping the head alone handed a model the
+        // compiler's progress and dropped `test result: FAILED`.
+        let seq = Path::new("/usr/bin/seq");
+        if !seq.exists() {
+            return;
+        }
+        let inside = workspace();
+        let operations =
+            LocalOperations::unconfined(inside.path(), vec!["/usr/bin/seq".to_owned()])
+                .expect("the workspace opens");
+
+        let value = operations
+            .run(&[
+                "/usr/bin/seq".to_owned(),
+                "1".to_owned(),
+                "100000".to_owned(),
+            ])
+            .expect("the program runs");
+        let stdout = value["stdout"].as_str().expect("stdout");
+        assert_eq!(value["truncated"], json!(true));
+        assert!(stdout.starts_with("1\n2\n3\n"), "the head survives");
+        assert!(
+            stdout.ends_with("\n99999\n100000\n"),
+            "and so does the tail"
+        );
+        let omitted = value["omitted_bytes"].as_u64().expect("a byte count");
+        assert!(omitted > 0);
+        assert!(
+            stdout.contains(&format!("… {omitted} bytes omitted here …")),
+            "and the marker names the count the result reports"
+        );
+        // 588,895 bytes in, 64 KiB out, and every byte accounted for in one of the three.
+        assert_eq!(
+            usize::try_from(omitted).expect("a byte count that fits") + stdout.len()
+                - format!("\n… {omitted} bytes omitted here …\n").len(),
+            588_895
+        );
+    }
+
+    #[test]
+    fn a_search_can_be_a_regular_expression_and_a_broken_one_is_refused_by_the_regexs_own_words() {
+        let inside = workspace();
+        fs::write(inside.path().join("a.rs"), "fn alpha() {}\nfn beta() {}\n")
+            .expect("the file is written");
+        let local = reading(inside.path());
+
+        let value = local
+            .search(
+                r"fn\s+(alpha|gamma)",
+                ".",
+                &SearchOptions {
+                    regex: true,
+                    ..SearchOptions::default()
+                },
+            )
+            .expect("the search answers");
+        let matches = value["matches"].as_array().expect("matches");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["line"], json!(1));
+        assert_eq!(value["regex"], json!(true));
+
+        // Literal is still the default, so a model that meant `a.b` gets `a.b`.
+        let value = local
+            .search("fn (alpha", ".", &SearchOptions::default())
+            .expect("the search answers");
+        assert!(value["matches"].as_array().expect("matches").is_empty());
+
+        let refusal = local
+            .search(
+                "fn (alpha",
+                ".",
+                &SearchOptions {
+                    regex: true,
+                    ..SearchOptions::default()
+                },
+            )
+            .expect_err("refused");
+        assert!(refusal.contains("not a regular expression"), "{refusal}");
+        assert!(
+            refusal.contains("unclosed group"),
+            "with the regex's own words: {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_glob_narrows_a_search_to_the_files_it_names_and_context_comes_back_numbered() {
+        let inside = workspace();
+        fs::create_dir(inside.path().join("src")).expect("the directory is made");
+        fs::write(inside.path().join("src/one.rs"), "a\nb\nneedle\nd\ne\n")
+            .expect("the file is written");
+        fs::write(inside.path().join("notes.md"), "needle\n").expect("the file is written");
+        let local = reading(inside.path());
+
+        let value = local
+            .search(
+                "needle",
+                ".",
+                &SearchOptions {
+                    glob: Some("*.rs".to_owned()),
+                    context: Some(1),
+                    ..SearchOptions::default()
+                },
+            )
+            .expect("the search answers");
+        let matches = value["matches"].as_array().expect("matches");
+        assert_eq!(matches.len(), 1, "the markdown file is not a `*.rs`");
+        assert_eq!(matches[0]["path"], json!("src/one.rs"));
+        assert_eq!(
+            matches[0]["before"],
+            json!([{"line": 2, "text": "b", "line_truncated": false}])
+        );
+        assert_eq!(
+            matches[0]["after"],
+            json!([{"line": 4, "text": "d", "line_truncated": false}])
+        );
+
+        // A glob with a separator in it is matched against the whole workspace-relative path.
+        let value = local
+            .search(
+                "needle",
+                ".",
+                &SearchOptions {
+                    glob: Some("src/**".to_owned()),
+                    ..SearchOptions::default()
+                },
+            )
+            .expect("the search answers");
+        assert_eq!(value["matches"].as_array().expect("matches").len(), 1);
+        assert!(
+            value["matches"][0].get("before").is_none(),
+            "context is answered only where it was asked for"
+        );
+    }
+
+    #[test]
+    fn find_answers_workspace_relative_paths_and_never_the_machines_own_output() {
+        let inside = workspace();
+        fs::create_dir_all(inside.path().join("crates/x/src")).expect("the directories are made");
+        fs::create_dir_all(inside.path().join("target/debug")).expect("the directories are made");
+        fs::write(inside.path().join("crates/x/src/lib.rs"), "x").expect("the file is written");
+        fs::write(inside.path().join("top.rs"), "x").expect("the file is written");
+        fs::write(inside.path().join("target/debug/built.rs"), "x").expect("the file is written");
+        let local = reading(inside.path());
+
+        // No separator in the glob, so it is the file's own name, anywhere in the tree — the rule
+        // a person means by `*.rs`.
+        let value = local.find("*.rs", ".", None).expect("the find answers");
+        assert_eq!(
+            value["paths"],
+            json!(["crates/x/src/lib.rs", "top.rs"]),
+            "and `target` is machine output, never an answer"
+        );
+        assert_eq!(value["truncated"], json!(false));
+
+        // A separator makes it the whole path, and `*` does not cross one.
+        let value = local
+            .find("crates/**/*.rs", ".", None)
+            .expect("the find answers");
+        assert_eq!(value["paths"], json!(["crates/x/src/lib.rs"]));
+
+        let value = local.find("*.rs", ".", Some(1)).expect("the find answers");
+        assert_eq!(value["paths"].as_array().expect("paths").len(), 1);
+        assert_eq!(
+            value["truncated"],
+            json!(true),
+            "a cut list says it was cut"
+        );
+
+        let refusal = local.find("crates/[", ".", None).expect_err("refused");
+        assert!(refusal.contains("not a glob"), "{refusal}");
+    }
+
+    #[test]
+    fn a_walk_stopped_by_the_depth_bound_says_so_and_one_that_reached_the_bottom_says_it_did_not() {
+        // `find` says it lists every match under the workspace and `search` that it reads every
+        // file. Both stop descending at `MAX_GREP_DEPTH`, and both used to answer
+        // `truncated: false` over the part of the tree they had seen.
+        let deep = workspace();
+        let mut path = deep.path().to_path_buf();
+        for level in 0..14 {
+            path = path.join(format!("d{level}"));
+        }
+        fs::create_dir_all(&path).expect("the directories are made");
+        fs::write(path.join("buried.txt"), "needle\n").expect("the file is written");
+        let local = reading(deep.path());
+
+        let value = local.find("*.txt", ".", None).expect("the find answers");
+        assert_eq!(value["depth_bound_reached"], json!(true));
+        assert_eq!(
+            value["paths"],
+            json!([]),
+            "the file is past the bound, and the flag is the only thing that says so"
+        );
+
+        let value = local
+            .search("needle", ".", &SearchOptions::default())
+            .expect("the search answers");
+        assert_eq!(value["depth_bound_reached"], json!(true));
+
+        let shallow = workspace();
+        fs::create_dir_all(shallow.path().join("a/b")).expect("the directories are made");
+        fs::write(shallow.path().join("a/b/near.txt"), "needle\n").expect("the file is written");
+        let local = reading(shallow.path());
+
+        let value = local.find("*.txt", ".", None).expect("the find answers");
+        assert_eq!(value["depth_bound_reached"], json!(false));
+        assert_eq!(value["paths"], json!(["a/b/near.txt"]));
+        assert_eq!(
+            local
+                .search("needle", ".", &SearchOptions::default())
+                .expect("the search answers")["depth_bound_reached"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn counting_lines_stops_at_a_bound_and_the_reply_says_where_rather_than_answering_a_part_count()
+    {
+        // Reading to the end to count lines is a full scan of a multi-gigabyte artefact on every
+        // read. Past the bound the count is not known, so it is `null` — never the part of it this
+        // read happened to reach, which would be read as the whole file's.
+        let inside = workspace();
+        let line = format!("{}\n", "x".repeat(1_023));
+        fs::write(inside.path().join("huge.txt"), line.repeat(17 * 1_024))
+            .expect("the file is written");
+        let local = reading(inside.path());
+
+        let value = local
+            .file_read("huge.txt", ReadWindow::lines(1, 2))
+            .expect("the read answers");
+        assert_eq!(value["lines"]["total"], Value::Null, "absence, not a count");
+        assert_eq!(
+            value["lines_counted_to"],
+            json!(MAX_LINE_COUNT_BYTES / 1_024),
+            "the last line the scan reached"
+        );
+        assert_eq!(value["truncated"], json!(true));
+        assert_eq!(
+            value["bytes"],
+            json!(17 * 1_024 * 1_024),
+            "the size is metadata's and is known whatever the scan did"
+        );
+        assert!(
+            value["note"]
+                .as_str()
+                .expect("a note")
+                .contains("not known"),
+            "{}",
+            value["note"]
+        );
+
+        // And a window past where the scan reached is refused by that, not by a line count nobody
+        // finished.
+        let refusal = local
+            .file_read("huge.txt", ReadWindow::lines(20_000, 5))
+            .expect_err("refused");
+        assert!(refusal.contains("stops counting lines"), "{refusal}");
+        assert!(refusal.contains("line 20000"), "{refusal}");
+    }
+
+    #[test]
+    fn a_link_out_of_the_workspace_is_not_a_way_for_find_or_search_to_read_what_is_outside() {
+        // The containment re-check inside `walk` is the boundary these two stand on: `is_dir` and
+        // `read_dir` both follow links, so a link to a directory outside would be walked and its
+        // files answered under workspace-relative names.
+        let outside = workspace();
+        fs::create_dir(outside.path().join("private")).expect("the directory is made");
+        fs::write(outside.path().join("private/secret.txt"), "needle\n")
+            .expect("the file is written");
+        fs::write(outside.path().join("loose.txt"), "needle\n").expect("the file is written");
+
+        let inside = workspace();
+        fs::write(inside.path().join("own.txt"), "needle\n").expect("the file is written");
+        symlink(outside.path(), inside.path().join("out")).expect("a link to a directory");
+        symlink(
+            outside.path().join("loose.txt"),
+            inside.path().join("out.txt"),
+        )
+        .expect("a link to a file");
+        let local = reading(inside.path());
+
+        let value = local.find("*.txt", ".", None).expect("the find answers");
+        assert_eq!(
+            value["paths"],
+            json!(["own.txt"]),
+            "neither the linked directory's files nor the linked file itself"
+        );
+
+        let value = local
+            .search("needle", ".", &SearchOptions::default())
+            .expect("the search answers");
+        let paths: Vec<&str> = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|hit| hit["path"].as_str().expect("a path"))
+            .collect();
+        assert_eq!(paths, vec!["own.txt"], "and nothing outside was read");
+    }
+
+    #[test]
+    fn the_two_ends_kept_of_an_oversized_stream_are_whole_characters_and_the_marker_counts_exactly()
+    {
+        // On generated bytes, so it checks the arithmetic on every machine. The one test that had
+        // this drove `/usr/bin/seq` and returned early where there is none, which is a check that
+        // is not a check.
+        let body = "€".repeat(50_000);
+        let bytes = body.as_bytes();
+        let half = 1_000;
+        let cut = keep_both_ends(
+            &bytes[..half],
+            &bytes[bytes.len() - half..],
+            bytes.len() as u64,
+        );
+
+        assert!(
+            !cut.text.contains('\u{fffd}'),
+            "a cut through a character would read as damage to the stream"
+        );
+        assert!(cut.text.starts_with(&"€".repeat(333)), "the head survives");
+        assert!(cut.text.ends_with(&"€".repeat(333)), "and so does the tail");
+        assert_eq!(
+            cut.omitted,
+            150_000 - 999 - 999,
+            "the bytes dropped for a character boundary are counted too"
+        );
+        let marker = format!("\n… {} bytes omitted here …\n", cut.omitted);
+        assert!(cut.text.contains(marker.trim()), "{}", cut.text);
+        assert_eq!(
+            cut.omitted + cut.text.len() as u64 - marker.len() as u64,
+            150_000,
+            "every byte is in the head, the tail or the marker's count"
+        );
+    }
+
+    #[test]
+    fn a_stream_whose_two_ends_are_the_whole_of_it_keeps_its_last_line_and_writes_no_marker() {
+        let body = format!("{}test result: FAILED\n", "filler\n".repeat(100));
+        let bytes = body.as_bytes();
+        let cut = keep_both_ends(&bytes[..300], &bytes[300..], bytes.len() as u64);
+
+        assert_eq!(cut.omitted, 0);
+        assert_eq!(cut.text, body, "nothing was dropped, so nothing is marked");
+        assert!(cut.text.ends_with("test result: FAILED\n"));
+    }
+
+    #[test]
+    fn a_regular_expression_too_large_for_this_builds_limit_is_refused_by_the_crates_own_words() {
+        // The pattern comes from the model, and the crate's default ceiling is ten megabytes of
+        // this process's memory for one `search`.
+        let inside = workspace();
+        fs::write(inside.path().join("a.txt"), "aaa\n").expect("the file is written");
+
+        let refusal = reading(inside.path())
+            .search(
+                "(a{1000}){1000}",
+                ".",
+                &SearchOptions {
+                    regex: true,
+                    ..SearchOptions::default()
+                },
+            )
+            .expect_err("refused");
+        assert!(refusal.contains("not a regular expression"), "{refusal}");
+        assert!(
+            refusal.contains("size limit"),
+            "with the crate's own words: {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_crlf_file_reads_here_exactly_as_it_reads_through_a_confined_workspace() {
+        // The confined provider splits with `str::lines`, which drops the `\r`. Keeping it here
+        // made one file read differently on the two providers, and a `\r` quoted back to
+        // `file_edit` matched nothing in a file the model had just been handed.
+        let inside = workspace();
+        fs::write(inside.path().join("dos.txt"), "alpha\r\nbeta\r\n").expect("the file is written");
+
+        let value = reading(inside.path())
+            .file_read("dos.txt", ReadWindow::whole())
+            .expect("the read answers");
+        assert_eq!(value["text"], json!("     1\talpha\n     2\tbeta\n"));
+        assert_eq!(
+            value["truncated_lines"],
+            json!([]),
+            "a dropped `\\r` is not a cut line"
+        );
+        assert_eq!(value["truncated"], json!(false));
+        assert_eq!(value["lines"], json!({"from": 1, "to": 2, "total": 2}));
+    }
+
+    #[test]
+    fn an_empty_glob_is_refused_by_name_and_a_capped_context_is_echoed_not_applied_silently() {
+        let inside = workspace();
+        fs::write(
+            inside.path().join("a.txt"),
+            "1\n2\n3\n4\n5\n6\n7\n8\nneedle\n",
+        )
+        .expect("the file is written");
+        let local = reading(inside.path());
+
+        // An empty glob matched nothing and answered an empty list, which reads as *there are no
+        // such files* rather than as *you named no pattern*.
+        let refusal = local.find("", ".", None).expect_err("refused");
+        assert!(refusal.contains("`glob` is required"), "{refusal}");
+
+        let value = local
+            .search(
+                "needle",
+                ".",
+                &SearchOptions {
+                    context: Some(40),
+                    ..SearchOptions::default()
+                },
+            )
+            .expect("the search answers");
+        assert_eq!(value["context"], json!(MAX_SEARCH_CONTEXT));
+        assert!(
+            value["note"].as_str().expect("a note").contains("40"),
+            "{}",
+            value["note"]
+        );
+        assert_eq!(
+            value["matches"][0]["before"]
+                .as_array()
+                .expect("before")
+                .len(),
+            usize::try_from(MAX_SEARCH_CONTEXT).expect("five fits"),
+            "and the matches carry the figure the reply echoed"
+        );
+
+        // Asking for what the cap allows is not a cap, so nothing is echoed.
+        let value = local
+            .search(
+                "needle",
+                ".",
+                &SearchOptions {
+                    context: Some(2),
+                    ..SearchOptions::default()
+                },
+            )
+            .expect("the search answers");
+        assert!(value.get("context").is_none(), "{value}");
+        assert!(value.get("note").is_none(), "{value}");
     }
 
     #[test]

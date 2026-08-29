@@ -26,11 +26,23 @@
 //! removes the guess entirely: `WorkspaceCreateInput` is a Rust type, substrate serialises it, and
 //! a disagreement becomes a compile error instead of a 422.
 //!
-//! # One runtime, current-thread
+//! # One runtime, current-thread, and what that costs a batch
 //!
 //! The driver is async and this workspace is blocking. A current-thread runtime is created once and
-//! every operation is `block_on`. No work is concurrent here — the loop calls one tool at a time by
-//! construction — so a multi-thread runtime would buy nothing and cost threads.
+//! every operation is `block_on`.
+//!
+//! **Work does reach it concurrently**, which it did not when this was written:
+//! `harness_tools::Catalogue::invoke_batch` gives each call of a batch its own thread, and all of
+//! them `block_on` this one runtime. A current-thread runtime serialises them, so a batch of reads
+//! costs the same wall clock here as the same reads one after another — the threads queue instead
+//! of the calls.
+//!
+//! That is a stated cost and not a bug. Nothing races: the runtime is `Send + Sync` and each
+//! `block_on` is a whole operation. What a batch buys on this backend is one model round trip
+//! instead of six, which is the larger half of what batching was for; what it does not buy is
+//! parallel I/O. A multi-thread runtime would buy that and cost a thread pool inside a process that
+//! already has one thread per call, so it is a change to make deliberately if a run is ever bounded
+//! by this rather than by the model.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -302,6 +314,22 @@ impl Backend for Embedded {
         })
     }
 
+    /// One file, from byte 0 to [`substrate_wire::MAX_IO_BYTES`], as text.
+    ///
+    /// # The ceiling is the whole answer's shape, and this signature drops what the driver says
+    /// about it
+    ///
+    /// `MAX_IO_BYTES` is asked for because it is exactly what `HostConfig::minimum` sets the
+    /// driver's own `read_limit_bytes` to — a larger `limit_bytes` is refused by the guarded
+    /// filesystem rather than clamped — and it is the figure the driver's probe reports as
+    /// `workspace.read-limit-bytes`. `ConfinedOperations` reads that fact and treats a read that
+    /// returned the whole ceiling as one the ceiling cut, which is what stops a 1 MiB prefix of a
+    /// 3 MiB file being answered as the file.
+    ///
+    /// The driver answers better than that: the document here is a `substrate_wire::FileSlice` and
+    /// it carries `eof`, which is exact where a length test is a guess in the safe direction.
+    /// [`Backend::file_read`] hands back a `String`, so carrying it is a change to that trait and
+    /// to both implementations of it, and it is worth making the next time this trait moves.
     fn file_read(&self, workspace: &str, path: &str) -> Result<String, SubstrateError> {
         let root_name = self
             .driver

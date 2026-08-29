@@ -43,6 +43,11 @@ pub struct ServerConfig {
     pub model: String,
     /// Bounds applied to every turn on this connection.
     pub budget: Budget,
+    /// How many tokens the model's context window holds, when the operator knows.
+    ///
+    /// Reaches `LoopConfig::context_window`, so a bridged thread compacts on the provider's own
+    /// reported count rather than on the fixed byte rule. `None` keeps the byte rule.
+    pub context_window: Option<u64>,
     /// Reported at `initialize`.
     pub version: String,
 }
@@ -401,7 +406,8 @@ impl Server<'_> {
     ) -> Result<TurnResult, String> {
         let thread = self.thread.as_ref().expect("a turn requires a thread");
         let config = LoopConfig::new(self.config.model.as_str(), thread.instructions.as_str())
-            .with_budget(self.config.budget.clone());
+            .with_budget(self.config.budget.clone())
+            .with_context_window(self.config.context_window);
         let mut model = new_model(control.cancel.clone())?;
         let mut tools = BridgeTools::new(
             self.wire.clone(),
@@ -466,7 +472,8 @@ fn terminal_status(stop: &LoopStop) -> &'static str {
         | LoopStop::MaxOutputTokens { .. }
         | LoopStop::MaxCost { .. }
         | LoopStop::Deadline { .. }
-        | LoopStop::ProviderIncomplete { .. } => "failed",
+        | LoopStop::ProviderIncomplete { .. }
+        | LoopStop::Unstructured { .. } => "failed",
     }
 }
 

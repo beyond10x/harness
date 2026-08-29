@@ -209,6 +209,63 @@ pub fn items_to_messages(items: &[Item]) -> Vec<Value> {
     messages
 }
 
+/// Content blocks this file builds itself, and may therefore annotate.
+///
+/// A `cache_control` marker **modifies** the block it lands on. On a block carried through from the
+/// model — a `thinking` block, whose signature the provider verifies against the block as it was
+/// produced — that is AGENTS.md invariant 5 broken and a turn the route rejects. An allowlist
+/// rather than a denylist, because the blocks that must not be touched are exactly the ones this
+/// crate has undertaken not to look inside, and a new opaque shape must not become markable by
+/// nobody noticing.
+const MARKABLE_BLOCKS: [&str; 2] = ["text", "tool_result"];
+
+/// Places the rolling cache breakpoint on the tail of the conversation.
+///
+/// # What it costs a person not to have one
+///
+/// The loop is stateless: turn *n* resends turn *n−1*'s transcript byte for byte and adds to it.
+/// With a breakpoint on the constant head alone, every byte the conversation grew by is paid for at
+/// the full input rate on every remaining turn, so a run's input cost is quadratic in its turns. A
+/// measured 81-turn run watched its cache hit rate fall from 66% to 12.5% and spent 1.33M input
+/// tokens to produce 10.5k of output.
+///
+/// A breakpoint on the **last** block of the **last** message makes each turn write the prefix it
+/// just read, so the next turn reads that back instead of paying for it again: the growth is
+/// charged once rather than once per remaining turn.
+///
+/// # Why one rolling marker is enough
+///
+/// The marker moves, so the previous turn's write sits a few blocks earlier in this turn's request
+/// than this turn's marker does. This route looks for a hit at the breakpoint **and** at the blocks
+/// shortly before it, which is what makes a single moving marker chain turn to turn. That is the
+/// provider's documented behaviour and **not** something measured here; if a run ever shows writes
+/// with no reads, a second marker held one turn behind is the fix.
+///
+/// Two breakpoints total, against a cap of four, which leaves room for that second one.
+///
+/// Nothing is placed at all when the last message ends in blocks this file did not build — see
+/// [`MARKABLE_BLOCKS`]. A missing breakpoint costs money; a modified `thinking` block costs the
+/// turn.
+fn mark_rolling_breakpoint(messages: &mut [Value]) {
+    let Some(last) = messages.last_mut() else {
+        return;
+    };
+    let Some(blocks) = last.get_mut("content").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let markable = blocks.iter_mut().rev().find(|block| {
+        block
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| MARKABLE_BLOCKS.contains(&kind))
+    });
+    if let Some(block) = markable
+        && let Some(object) = block.as_object_mut()
+    {
+        object.insert("cache_control".to_owned(), json!({"type": "ephemeral"}));
+    }
+}
+
 fn message(role: Role, content: Vec<Value>) -> Value {
     json!({
         "role": match role {
@@ -367,8 +424,16 @@ pub fn stream_error(event: &Value) -> WireError {
         .and_then(|value| value.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    // An overloaded route is the far side asking for less traffic, not a refusal of this request:
-    // sending it again later is exactly the right move, and `Refused` would end the run instead.
+    // **Which failures may not repeat.** An overloaded route is the far side asking for less
+    // traffic, not a refusal of this request: sending it again later is exactly the right move,
+    // and `Refused` would end the run instead. An `api_error` is the far side failing on its own
+    // account, which is the same argument.
+    //
+    // Everything else this route documents is about *this request* and is refused identically a
+    // second later — `invalid_request_error`, `authentication_error`, `permission_error`,
+    // `not_found_error`, `request_too_large` — so they fall through and are not retried. They are
+    // listed here rather than matched because the answer for each is the fall-through answer, and
+    // an arm that only restated it would be a second place to keep in step.
     let (code, retriable) = match kind {
         "overloaded_error" => (WireErrorCode::RateLimited, true),
         "api_error" => (WireErrorCode::Transport, true),
@@ -404,10 +469,6 @@ pub fn request_body(
     // turn of the run. That matters more here than a tidier string would: the loop is stateless
     // and replays its conversation, so the head is re-sent on every turn and is paid for at the
     // full input rate without one.
-    //
-    // The conversation itself is **not** cached, and that is the next thing to do rather than an
-    // oversight — a breakpoint on the growing tail is what turns the quadratic term into a linear
-    // one, and it needs a placement rule this wire has no measurement for yet.
     body.insert(
         "system".to_owned(),
         json!([{
@@ -416,10 +477,9 @@ pub fn request_body(
             "cache_control": {"type": "ephemeral"},
         }]),
     );
-    body.insert(
-        "messages".to_owned(),
-        Value::Array(items_to_messages(items)),
-    );
+    let mut messages = items_to_messages(items);
+    mark_rolling_breakpoint(&mut messages);
+    body.insert("messages".to_owned(), Value::Array(messages));
     body.insert(
         "tools".to_owned(),
         Value::Array(tools.iter().map(tool_to_wire).collect()),
@@ -713,6 +773,13 @@ mod tests {
         assert_eq!(overloaded.code, WireErrorCode::RateLimited);
         assert!(overloaded.retriable, "asking again later is the right move");
 
+        let api = stream_error(&json!({
+            "type": "error",
+            "error": {"type": "api_error", "message": "upstream exploded"},
+        }));
+        assert_eq!(api.code, WireErrorCode::Transport);
+        assert!(api.retriable, "the far side failed on its own account");
+
         let refused = stream_error(&json!({
             "type": "error",
             "error": {"type": "invalid_request_error", "message": "boom"},
@@ -720,6 +787,28 @@ mod tests {
         assert_eq!(refused.code, WireErrorCode::Refused);
         assert!(!refused.retriable);
         assert!(refused.message.contains("boom"), "{}", refused.message);
+    }
+
+    #[test]
+    fn every_error_type_this_route_documents_about_the_request_itself_is_final() {
+        // Named one by one because the cost of getting this wrong is asymmetric: a retriable
+        // classification here spends a run's budget four times over to be refused identically,
+        // and the failure looks like slowness rather than like a mistake.
+        for kind in [
+            "invalid_request_error",
+            "authentication_error",
+            "permission_error",
+            "not_found_error",
+            "request_too_large",
+        ] {
+            let error = stream_error(&json!({
+                "type": "error",
+                "error": {"type": kind, "message": "m"},
+            }));
+            assert_eq!(error.code, WireErrorCode::Refused, "{kind}");
+            assert!(!error.retriable, "{kind}");
+            assert!(error.message.contains(kind), "{}", error.message);
+        }
     }
 
     #[test]
@@ -745,6 +834,136 @@ mod tests {
         for field in ["conversation_id", "previous_message_id", "store"] {
             assert!(body.get(field).is_none(), "{field} leaked into {body}");
         }
+    }
+
+    #[test]
+    fn the_growing_tail_of_the_conversation_carries_the_rolling_breakpoint() {
+        // Where the marker lands is the whole of the change: on the **last** content block of the
+        // **last** message, which on this loop is the user message carrying either the person's
+        // input or the tool results just appended.
+        let body = request_body(
+            "m",
+            "be useful",
+            &[
+                Item::user("read the readme"),
+                Item::ToolCall(ToolCall {
+                    call_id: CallId::new("toolu_1").expect("valid"),
+                    name: ToolName::new("workspace_read").expect("valid"),
+                    arguments: json!({"path": "README.md"}),
+                }),
+                Item::result(
+                    CallId::new("toolu_1").expect("valid"),
+                    ToolOutcome::ok(json!({"text": "hello harness"})),
+                ),
+            ],
+            &[spec("workspace_read")],
+            4096,
+            &Sampling::default(),
+        );
+        let messages = body["messages"].as_array().expect("an array");
+        let last = messages.last().expect("a last message");
+        assert_eq!(last["role"], json!("user"), "the tail is the person's turn");
+        let blocks = last["content"].as_array().expect("an array");
+        assert_eq!(
+            blocks.last().expect("a last block")["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        // Only the tail, and only once: the earlier user message keeps none, or the marker would
+        // stop moving and the cache would stop chaining.
+        assert!(
+            messages[0]["content"][0].get("cache_control").is_none(),
+            "{body}"
+        );
+        // The constant head keeps its own, and the two are the only ones. The route admits four.
+        assert_eq!(
+            body["system"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            body.to_string().matches("cache_control").count(),
+            2,
+            "at most four breakpoints are admitted and two is what this sends: {body}"
+        );
+    }
+
+    #[test]
+    fn a_replayed_thinking_block_is_never_the_thing_that_gets_marked() {
+        // Invariant 5, from the direction that would be easy to break by accident: the signature
+        // covers the block as the model produced it, so a `cache_control` key added to one is a
+        // turn the route rejects. Here the model spoke last and its message ends in a thinking
+        // block, so the marker must fall on the text block before it — or nowhere.
+        let body = request_body(
+            "m",
+            "",
+            &[
+                Item::user("hi"),
+                Item::assistant("thinking about it"),
+                Item::Opaque {
+                    wire: wire(),
+                    payload: json!({
+                        "type": "thinking",
+                        "thinking": "OPAQUE",
+                        "signature": "SIG",
+                    }),
+                },
+            ],
+            &[],
+            1024,
+            &Sampling::default(),
+        );
+        let last = body["messages"]
+            .as_array()
+            .expect("an array")
+            .last()
+            .expect("a message");
+        let blocks = last["content"].as_array().expect("an array");
+        let thinking = blocks
+            .iter()
+            .find(|block| block["type"] == json!("thinking"))
+            .expect("the thinking block is replayed");
+        assert_eq!(
+            *thinking,
+            json!({"type": "thinking", "thinking": "OPAQUE", "signature": "SIG"}),
+            "a replayed block is sent byte for byte or not at all"
+        );
+        assert_eq!(
+            blocks[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "the marker falls back to the last block this projection built: {body}"
+        );
+    }
+
+    #[test]
+    fn a_conversation_with_nothing_markable_in_its_tail_simply_carries_no_rolling_marker() {
+        // A missing breakpoint costs money; a modified opaque block costs the turn. So this is the
+        // side to fail on, and it must not panic or mark something it does not understand.
+        let body = request_body(
+            "m",
+            "",
+            &[
+                Item::user("hi"),
+                Item::Opaque {
+                    wire: wire(),
+                    payload: json!({"type": "redacted_thinking", "data": "OPAQUE"}),
+                },
+            ],
+            &[],
+            1024,
+            &Sampling::default(),
+        );
+        let last = body["messages"]
+            .as_array()
+            .expect("an array")
+            .last()
+            .expect("a message");
+        assert!(
+            last["content"]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .all(|block| block.get("cache_control").is_none()),
+            "{body}"
+        );
     }
 
     #[test]

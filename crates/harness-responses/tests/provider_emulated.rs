@@ -294,9 +294,17 @@ fn a_cold_gateway_is_retriable_transport_rather_than_a_refusal() {
         panic!("an HTTP status maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Transport);
+    // Worth another attempt — and the wire took every one it had before the first byte arrived, so
+    // what goes up is final: the loop above retries on this flag, and a gateway that stayed down
+    // through four requests must not be tried through twelve more.
     assert!(
-        error.retriable,
-        "a starting backend is worth another attempt"
+        !error.retriable,
+        "the wire's own attempts are exhausted; the loop must not multiply them"
+    );
+    assert!(
+        error.message.contains("after 4 attempts"),
+        "{}",
+        error.message
     );
 }
 
@@ -308,6 +316,10 @@ fn a_malformed_event_refuses_as_protocol() {
         panic!("a framing failure maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Protocol);
+    assert!(
+        !error.retriable,
+        "the same bytes would be malformed a second time"
+    );
 }
 
 #[test]
@@ -318,6 +330,11 @@ fn a_truncated_stream_is_never_read_as_a_completion() {
         panic!("a truncated stream maps to a wire error");
     };
     assert_eq!(error.code, WireErrorCode::Protocol);
+    // Reported as worth another attempt even though this wire will not take one: the emulator cut
+    // the stream *after* two text deltas reached the caller, and resending would append a second
+    // copy of a sentence a person has already read. The flag is for the loop, which owns the
+    // transcript and can throw the partial turn away.
+    assert!(error.retriable, "a stream that stopped mid-frame dropped");
 }
 
 #[test]
@@ -328,7 +345,19 @@ fn a_provider_failure_carries_its_own_reason() {
     else {
         panic!("a provider failure maps to a wire error");
     };
-    assert_eq!(error.code, WireErrorCode::Refused);
+    // The emulator fails with `server_error`, which is the far side's own state rather than a
+    // refusal of this request, so it is transport-class and worth another attempt. The wire takes
+    // those attempts itself here — nothing reached the caller before the failure — and gives up
+    // with the provider's own words intact.
+    assert_eq!(error.code, WireErrorCode::Transport);
+    // ...and gives up as final, for the reason the cold-gateway test gives: the loop retries on
+    // this flag, and these attempts were already the wire's.
+    assert!(!error.retriable);
+    assert!(
+        error.message.contains("after 4 attempts"),
+        "{}",
+        error.message
+    );
     assert!(
         error.message.contains("upstream exploded"),
         "{}",

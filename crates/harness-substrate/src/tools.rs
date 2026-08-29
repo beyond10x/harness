@@ -22,19 +22,35 @@
 //! Substrate reaches the same place from the other side: `exec.start`'s first capability predicate
 //! is `exec.argv-only`. Neither component will run a shell, and neither had to be told by the other.
 
+use std::fmt::Write as _;
 use std::time::Duration;
 
-use harness_tools::Operations;
+use harness_tools::{Operations, ReadWindow, SearchOptions};
 use serde_json::{Value, json};
 
 use crate::{Backend, Facts};
 
 /// What a confined workspace can do on this machine.
 pub struct ConfinedOperations {
-    backend: Box<dyn Backend>,
+    /// **`Send + Sync`, because the catalogue runs a turn's pure reads side by side.**
+    /// `harness_tools::Catalogue::invoke_batch` gives each call a thread, so the provider behind it
+    /// is shared across them. Both backends already were — [`Client`](crate::Client) holds a
+    /// `Box<dyn Transport + Send + Sync>` and opens a connection per call, and
+    /// [`Embedded`](crate::Embedded) holds the driver in an `Arc` behind a runtime — so this is a
+    /// bound written down rather than a change to either.
+    backend: Box<dyn Backend + Send + Sync>,
     workspace: String,
     programs: Vec<String>,
     writes: bool,
+    /// How many bytes the read route answers with before it stops — the machine's own
+    /// `workspace.read-limit-bytes` where it states one, and [`substrate_wire::MAX_IO_BYTES`]
+    /// otherwise.
+    ///
+    /// Read off [`Facts`] rather than assumed, because both backends ask for exactly this figure:
+    /// [`Client`](crate::Client) puts the fact in its query and the embedded driver asks for
+    /// `MAX_IO_BYTES`, which is what `HostConfig::minimum` sets its own read limit to and therefore
+    /// what its probe reports.
+    read_ceiling_bytes: u64,
 }
 
 impl std::fmt::Debug for ConfinedOperations {
@@ -56,7 +72,7 @@ impl ConfinedOperations {
     /// admitted everything because nobody listed anything is the failure this design exists to
     /// prevent.
     pub fn new(
-        backend: impl Backend + 'static,
+        backend: impl Backend + Send + Sync + 'static,
         facts: &Facts,
         workspace: impl Into<String>,
         programs: Vec<String>,
@@ -72,6 +88,10 @@ impl ConfinedOperations {
                 Vec::new()
             },
             writes: facts.holds_workspaces(),
+            read_ceiling_bytes: facts
+                .get("workspace.read-limit-bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or(substrate_wire::MAX_IO_BYTES),
         }
     }
 }
@@ -85,41 +105,132 @@ const MAX_READ_BYTES: u64 = 64 * 1024;
 /// The most a caller may ask for in one read, however large a number it names.
 const MAX_READ_BYTES_CEILING: u64 = 256 * 1024;
 
+/// How much of one line a read answers with.
+///
+/// The same figure the unconfined provider uses, for the same reason the byte ceilings match: a
+/// run's replies must not change shape when it is confined.
+const MAX_READ_LINE_CHARS: usize = 2_000;
+
 impl Operations for ConfinedOperations {
-    fn file_read(&self, path: &str, max_bytes: Option<u64>) -> Result<Value, String> {
-        // Bounded here, and reported. The earlier note said a truncation this side "could not be
-        // reported as one" — that was wrong: the whole text is in hand, so the exact total and the
-        // fact of truncation are both known, which is all a reply needs to keep a partial read from
-        // looking whole.
-        //
-        // It is bounded because a result is replayed on **every** later turn. A live run on
-        // 2026-08-24 read three files in one turn and the next turn's replay grew by 24,630 tokens,
-        // which then pushed the conversation past its bound and bought a prefix rewrite.
-        let limit = max_bytes
+    /// The same window, the same numbered lines, over what the wire route can reach.
+    ///
+    /// # What the route offers, and what that costs here
+    ///
+    /// [`Backend::file_read`] answers **from byte 0 up to a ceiling** — `workspace.read-limit-bytes`
+    /// where the machine states one, `substrate_wire::MAX_IO_BYTES` otherwise — and answers a
+    /// `String`, so there is no offset to seek with. The line window is therefore applied to the
+    /// bytes the ceiling let through, and a window that starts past the last line those bytes hold
+    /// is **refused by name, saying which line the read reached**. Silently answering nothing would
+    /// look exactly like a file with no such lines, which is the failure invariant 8 exists to stop.
+    ///
+    /// # When the ceiling cut the file, this reply says so and stops counting
+    ///
+    /// It did not, and that was the same failure wearing the other hat. A 3 MiB file read at
+    /// `offset: 24500, limit: 500` answered `{"truncated": false, "lines": {"to": 25000, "total":
+    /// 25000}}` — the prefix's last line read as the file's last line, the prefix's line count read
+    /// as the file's, and a model that had seen a third of the file was told it had seen all of it.
+    ///
+    /// So when the route returned as many bytes as its ceiling allows, this reply answers
+    /// `truncated: true`, `lines.total: null` — the count is not knowable from a prefix, and a
+    /// number that counted only the prefix is worse than no number — and names the ceiling in
+    /// `route_ceiling_bytes` with a `note` saying that lines past it cannot be reached on this
+    /// path, whatever `offset` says. `bytes` is `null` for the same reason, with the bytes that
+    /// *were* read under `bytes_read`.
+    ///
+    /// **"As many bytes as the ceiling allows" is the test, so a file of exactly the ceiling reads
+    /// as cut.** The route's own answer carries `eof` (`substrate_wire::FileSlice`), which would be
+    /// exact; [`Backend::file_read`] hands back a `String` and nothing else, so carrying it is a
+    /// change to that trait and both its implementations. Erring towards *cut* is the safe half of
+    /// the mistake: it never claims a file was read whole when it was not.
+    ///
+    /// The bound is also why the reply is bounded at all: a result is replayed on **every** later
+    /// turn. A live run on 2026-08-24 read three files in one turn and the next turn's replay grew
+    /// by 24,630 tokens, which pushed the conversation past its bound and bought a prefix rewrite.
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        let ceiling = window
+            .max_bytes
             .unwrap_or(MAX_READ_BYTES)
             .min(MAX_READ_BYTES_CEILING);
-        let text = self
+        let offset = window.offset.unwrap_or(1);
+        if offset == 0 {
+            return Err(format!(
+                "`offset` is the first line to read and lines are numbered from 1, so 0 names no \
+                 line. `{path}` was not read."
+            ));
+        }
+        let whole = self
             .backend
             .file_read(&self.workspace, path)
             .map_err(|error| error.to_string())?;
-        let total = text.len() as u64;
-        let truncated = total > limit;
-        // On a character boundary, so the reply is still a string the model can read.
-        let head = if truncated {
-            let mut end = usize::try_from(limit).unwrap_or(text.len()).min(text.len());
-            while end > 0 && !text.is_char_boundary(end) {
-                end -= 1;
+        let bytes = whole.len() as u64;
+        // The route answered its whole ceiling, so what came back is the front of something larger
+        // — or a file of exactly that size, which is answered the same way for want of the route's
+        // own `eof`. Anything shorter is the file.
+        let ceiling_cut = bytes >= self.read_ceiling_bytes;
+        let lines: Vec<&str> = whole.lines().collect();
+        let total = lines.len() as u64;
+        if offset > 1 && offset > total {
+            return Err(format!(
+                "this confined read of `{path}` reaches line {total} — the route answers from the \
+                 start of the file up to a byte ceiling of {} bytes, and that is where it stopped. \
+                 `offset` names line {offset}, past it, so nothing was read.",
+                self.read_ceiling_bytes
+            ));
+        }
+
+        let mut text = String::new();
+        let mut cut = Vec::new();
+        let mut answered_bytes: u64 = 0;
+        let mut kept: u64 = 0;
+        let mut last: u64 = 0;
+        for (index, line) in lines.iter().enumerate().skip(
+            usize::try_from(offset - 1)
+                .unwrap_or(usize::MAX)
+                .min(lines.len()),
+        ) {
+            let number = index as u64 + 1;
+            let weight = line.len() as u64 + 1;
+            let within_limit = window.limit.is_none_or(|count| kept < count);
+            let within_ceiling = kept == 0 || answered_bytes + weight <= ceiling;
+            if !(within_limit && within_ceiling) {
+                break;
             }
-            &text[..end]
-        } else {
-            text.as_str()
-        };
-        Ok(json!({
+            let shown: String = line.chars().take(MAX_READ_LINE_CHARS).collect();
+            if line.chars().count() > MAX_READ_LINE_CHARS {
+                cut.push(number);
+            }
+            let _ = writeln!(text, "{number:>6}\t{shown}");
+            kept += 1;
+            answered_bytes += weight;
+            last = number;
+        }
+
+        let mut answer = json!({
             "path": path,
-            "bytes": total,
-            "truncated": truncated,
-            "text": head,
-        }))
+            // Absence as absence: past the ceiling this read cannot see the file's size, and the
+            // prefix's size under this name would be read as the file's.
+            "bytes": if ceiling_cut { Value::Null } else { json!(bytes) },
+            "truncated": ceiling_cut || last < total || !cut.is_empty(),
+            "text": text,
+            "lines": {
+                "from": offset,
+                "to": if kept == 0 { offset.saturating_sub(1) } else { last },
+                "total": if ceiling_cut { Value::Null } else { json!(total) },
+            },
+            "truncated_lines": cut,
+        });
+        if ceiling_cut {
+            answer["bytes_read"] = json!(bytes);
+            answer["route_ceiling_bytes"] = json!(self.read_ceiling_bytes);
+            answer["note"] = json!(format!(
+                "this workspace's read route answers the first {} bytes of a file and no more, and \
+                 `{path}` filled them, so how many lines it has is not knowable from here and the \
+                 lines past that ceiling cannot be reached on this path at any `offset`. A tool \
+                 that walks the tree — `search`, `find` — reads it through the other provider.",
+                self.read_ceiling_bytes
+            ));
+        }
+        Ok(answer)
     }
 
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
@@ -128,11 +239,24 @@ impl Operations for ConfinedOperations {
             .map_err(|error| error.to_string())
     }
 
+    /// Read the file, replace one place in it, write it back.
+    ///
+    /// **A file the read route could not answer whole is refused rather than edited.** This writes
+    /// what it read, so a file whose first ceiling of bytes is all that came back would have been
+    /// written back at that length — an edit that silently deleted everything past the ceiling.
+    /// The same ceiling test [`file_read`](Self::file_read) uses, and the same erring towards *cut*.
     fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
         let current = self
             .backend
             .file_read(&self.workspace, path)
             .map_err(|error| error.to_string())?;
+        if current.len() as u64 >= self.read_ceiling_bytes {
+            return Err(format!(
+                "`{path}` filled this workspace's {} byte read ceiling, so an edit here would \
+                 write back only what was read and drop whatever is past it. Nothing was changed.",
+                self.read_ceiling_bytes
+            ));
+        }
         // Neither *none* nor *several* is an edit. A replacement that hit nothing leaves the model
         // believing a change landed, and one that hit four places changed three things nobody asked
         // about — which is why this is checked here rather than left to a `replace` call.
@@ -162,8 +286,18 @@ impl Operations for ConfinedOperations {
         Err(Self::unavailable("dir_list through a confined workspace"))
     }
 
-    fn search(&self, _p: &str, _path: &str, _max: Option<usize>) -> Result<Value, String> {
+    fn search(&self, _p: &str, _path: &str, _options: &SearchOptions) -> Result<Value, String> {
         Err(Self::unavailable("search through a confined workspace"))
+    }
+
+    /// The same absence as `dir_list` and `search`, and for the same reason.
+    ///
+    /// `Backend` carries no way to walk a workspace, and walking the host filesystem to answer
+    /// would step around the containment this provider exists for. A run that needs to find a file
+    /// gets it from the reading provider beside this one, which is what `harness_tools::Split`
+    /// composes.
+    fn find(&self, _glob: &str, _path: &str, _max: Option<usize>) -> Result<Value, String> {
+        Err(Self::unavailable("find through a confined workspace"))
     }
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {

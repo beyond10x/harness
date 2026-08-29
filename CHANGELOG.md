@@ -9,6 +9,189 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Structured output, sub-agents and hooks** — the three of finding #13's five gaps that are this
+  component's to own (`docs/design/0002-sub-agents-structured-output-hooks.md`; the MCP client and
+  multimodal input stay out, with the reason in `README.md`). All three are opt-in per run, none
+  touches `harness-wire`, and every one of them meets the approval gate exactly as a catalogue entry
+  does: nothing reaches a tool without the gate, nothing widens what a turn admits, nothing refuses
+  silently.
+  - **`--output-schema <FILE>`.** The schema is published as a tool named `answer` that the model
+    calls to finish, and its arguments are the answer — wire-neutral, no contract change, and what a
+    delegate's structured report will be built on; provider-native constrained decoding behind the
+    same value is a labelled later milestone. **Stdout is that JSON and nothing else**, so the
+    command composes with `jq`; it is written once, when the run completes, so an answer a `stop`
+    hook withdrew never reaches it. Under `--json` stdout is the event record instead, with no
+    bare answer line: the answer is the **last** `answered` event before a `finished` whose
+    `stop.kind` is `completed` — a `stop` hook can withdraw an earlier one, so a driver taking the
+    first takes a refused value. A model that ends in prose is told once to call `answer`; if
+    it still does not, the run stops `unstructured` and exits 2 — never a success status over
+    prose. An `answer` beside any other call in one turn ends the run and refuses the others as
+    *made in the same turn as `answer`, which must be called alone* — which is what the tool's
+    description promised, and a sentence that stays true when the answer itself is refused and the
+    run goes on. A `stop` hook that sends an answered run back to work restores its nudge, so a
+    second prose ending is asked once more instead of exiting `unstructured`.
+    The nudge is warned as `answer-nudged`; a `{"accepted": true}` result goes into the
+    conversation so the run stays replayable; `LoopEvent::Answered` puts the value in the record;
+    the loop validates nothing against the schema. The session stores the answer beside the text.
+    `chat` does not take it — a conversation has no single end.
+  - **`--delegate`** (`--delegate-turns N`, default 20). A tool named `delegate`: a second
+    `AgentLoop` runs to completion inside the tool call over a **fresh** conversation, with the same
+    tools, the same approver, the same hooks, the same cancellation token and the **remainder of
+    the parent's budget** — a delegate spends the run's budget, never its own, and the parent's
+    ceilings bind on the sum — on every exit path, a child that failed on the wire included. The
+    parent reads one result, `{stop, turns, text}`, failed when the child did not complete; every event the child emits arrives wrapped in `delegated` so a reader
+    cannot mistake its text for the answer, and a terminal renders them indented. Depth one: a
+    delegate cannot delegate, and it publishes no `answer` either. `--delegate-turns 0` is a parse
+    error (exit 2), refused where the parent's own `--max-turns 0` is refused — before the first
+    request — rather than as a failed tool result on every delegation. A port that already publishes
+    `answer` or `delegate` refuses the run by name (`LoopError::Config`) **before the first
+    request**, rather than being found out by a wire rejecting a duplicate tool on turn one.
+  - **`--hooks <FILE>`.** The operator's own programs, run as an argv — never a shell — at three
+    moments: `before-call`, after the approver said yes, where exit 2 refuses the call and a hook
+    that could not run refuses it too; `after-call`, where a note is appended to the result the
+    model reads; `stop`, where exit 2 keeps the run working with the reason as the next user item,
+    at most three times — and never at the end of a delegate, whose ending is not the run's. A
+    hook can refuse what the gate allowed and can allow nothing the gate refused; `answer` and
+    `delegate` are calls like any other to a hook. Named on the command line and **never discovered in the workspace**: a hook found in a
+    repository would be a program the repository runs on the operator's machine. A run with hooks
+    attached batches nothing, so a hook fires exactly once per call, and every firing is a
+    `hook-ran` event naming the point and the decision. The refusal names the entry that would
+    have run — *"`run` (called through `tool_invoke`) was blocked by a hook: …"* — the same way an
+    approval refusal does. An `after-call` hook's exit 2 or failure becomes a note rather than
+    silence — and a failure is recorded as `hook-ran` with `decision: failed`, never `proceed`, so
+    the record shows a guard that crashed (`HookPort::after_call` returns `AfterCall { note,
+    decision }`). `after-call` does not fire for a call that never ran — an unpublished tool, an
+    argument over the bound, a call the approver refused — those are in `tool-completed` and
+    `approval-resolved`. A note that pushes a result over the result bound refuses the result by
+    name. On
+    the command line: exit `0` proceeds, `2` blocks with the reason from `{"reason"}` on stdout or
+    else stderr, any other status, a program that cannot start, more than 16 KiB on stdout or 60 s
+    of running — pipes included, so a grandchild holding them cannot stall the run — fails by
+    name; the child never inherits the variable this run's own credential was named in; a `stop` hook declaring `tools` is refused at load, because nothing
+    would ever match it. A hooks file this build cannot read, and a schema that is not an object
+    schema, refuse the run before the first request like every other run that never started. The
+    argv pin `contracts/cli/b10x-harness/2026-08-29` is re-pinned in place — it is unreleased, and
+    invariant 13's immutability starts at release — and now records `requires` per flag beside
+    `conflicts_with`, so a consumer can see that `--delegate-turns` needs `--delegate`.
+
+- **The model is handed the tools themselves.** `--surface flat` — the **default** on `run`,
+  `chat` and `tools` — publishes every catalogue entry as its own tool with its own input schema,
+  so the provider can refuse a misspelled field before the call is billed and no turn is spent
+  finding out what exists. Three live runs measured the cost of the alternative: **33–44% of every
+  tool call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` was an untyped
+  object nothing could validate. The neutral names the three verbs existed to protect are the
+  entry names themselves (`file_read`, `file_write`, …), which `harness_tools::operation_of` maps
+  for a reader of a finished run, so nothing downstream loses vocabulary. `--surface verbs` is
+  unchanged and fully served: metaharness offers it over MCP, and an arm comparing the two
+  surfaces asks for it by name. The standing instruction follows the surface — under `flat` it
+  names the entries in one line and leaves the schemas in `tools`, where the provider reads them
+  and a prompt cache holds them.
+
+- **Sessions on disk, and `--resume`.** A run that dies on turn 20 no longer takes the first
+  nineteen with it. `AgentLoop::run_in(&mut items, &mut spend, input, sink)` runs over a
+  conversation and a `RunLedger` the caller owns and writes both back on **every** exit path,
+  including the two that are errors — `LoopError` carries neither items nor usage, which is why
+  nothing could be saved before. The command line files
+  it: `transcript::Session` writes the whole conversation, its usage and its cost to
+  `$XDG_STATE_HOME/b10x-harness/sessions/<id>.json`, atomically, in a directory created `0700`,
+  outside the repository. Items are stored verbatim, opaque reasoning items included, so a
+  following run replays what the model already thought instead of paying for it again. No
+  credential is written, and no instruction text: the instruction is derived from this run's
+  catalogue and files, and replaying under a stale one would give a run nobody could reproduce
+  from its flags. New flags: `--session-dir <path>`, `--resume <id|latest>`, `--no-session` (for
+  an evaluation arm that must leave nothing on the machine). A session recorded on the other wire
+  is refused **before the first request**, by name, with the flag that fixes it — the loop would
+  refuse the opaque items anyway, and saying it here costs nothing; a different workspace is a
+  warning, because reading a second checkout is a legitimate thing to do.
+
+- **`b10x-harness sessions`** lists what there is to resume — identifier, UTC timestamp, model,
+  turns — newest first.
+
+- **`b10x-harness chat`**, the smallest thing that removes *one question, one answer, exit*. Every
+  line of standard input is one more turn on the same conversation, the session is written after
+  each of them, and `exit` or the end of the input stops. The same flags as `run` without
+  `--input`. No line editing, no history, no completion: a shell has all three, and a harness that
+  grew them would own a terminal library forever.
+
+- **A person can approve one write and refuse the next.** `--approve <auto|prompt|deny|all>`,
+  default `auto`. `approve::Terminal` asks over `/dev/tty`, so the question arrives even when
+  stdin and stdout are pipes, and the prompt names the entry the call resolved to — `file_write`
+  with its path and byte count, `file_edit` with the first lines of both sides, `run` with its
+  argv — never the verb it travelled through. `y` approves once, `a` stops asking about that entry
+  for this process only, `n` and an empty line refuse; nothing answering refuses every further
+  call, said once. `auto` asks when there is a terminal and stdin and stderr are one, and
+  otherwise prints a single line saying calls above the ceiling will be refused rather than
+  leaving it to be discovered from a refusal. `prompt` refuses the run when there is no terminal —
+  a run that asked for a person and silently refused everything looks like a harness whose tools
+  do not work. `--yes` is unchanged and is the same as `--approve all`. **The library's default
+  approver is still `DenyAll`** (invariant 12); what changed is the command line's choice.
+
+- **The model is told where it is.** With no `--instructions-file`, the standing instruction now
+  carries an environment block — the absolute workspace path, the OS and architecture, today's UTC
+  date, and the git branch, read from `.git/HEAD` and following a `.git` file to a linked
+  worktree, **never by spawning `git`** — and the project's own instruction file, `AGENTS.md`
+  before `CLAUDE.md` because the neutral one is the maintained one. Anything past 32 KiB is cut at
+  a line boundary and the instruction says in words which part of how many bytes was carried.
+  `--no-project-instructions` leaves the project's words out as an experiment control; the
+  environment block is always there.
+
+- **`find`, a seventh catalogue entry.** Name a glob and get every matching file in one call,
+  instead of one `dir_list` per directory level: `*.rs` is that file name at any depth,
+  `crates/**/*.rs` is the whole workspace-relative path. The same walk as `search` — build output
+  and version control skipped, depth 12, containment re-checked per entry — capped at 500 paths
+  with `truncated` when it binds.
+
+- **`search` takes `regex`, `glob` and `context`.** A regular expression that does not compile is
+  refused in the regex crate's own words rather than quietly matching nothing; `context` (0–5)
+  answers the lines either side of each match under `before`/`after`, each with its own number.
+
+- **Pure tool calls of one turn run side by side.** A turn that asks for six independent reads no
+  longer pays six round trips of tool latency: consecutive calls that are published, inside every
+  bound, and whose invoked envelope neither mutates nor asks a person are handed to the port as
+  one batch (`ToolPort::call_batch`, one thread per call in `Catalogue::invoke_batch`). A write
+  between two reads ends the group; a group of one goes down the single-call path unchanged. A
+  port that answers a different number of outcomes than it was given calls is **not trusted with
+  any of them** — the loop says so by name (`batch-miscounted`) and runs every call itself.
+
+- **A long think is no longer a silent minute.** `response.reasoning_summary_text.delta` on the
+  Responses wire and `thinking_delta` on the Messages wire become `StreamEvent::ReasoningDelta` and
+  reach a reader on stderr as they arrive. Shown and let go: nothing here is replayed, and what
+  carries reasoning across a tool round trip is still the opaque item the turn ends with. The
+  Responses summary's `.done` and `part` markers stay silent because each repeats text already
+  streamed, and a thinking block's signature is never shown at all.
+
+- **`contracts/provider-wires/anthropic-messages/2026-08-29b`: the Anthropic conversation is
+  cached, not just its head.** A run's transcript is resent whole every turn, so with one cache
+  breakpoint on the constant head every byte the conversation grew by was paid at full rate on
+  every remaining turn — a measured 81-turn run watched its hit rate fall from 66% to 12.5% and
+  spent 1.33M input tokens to produce 10.5k of output. A second, **rolling** breakpoint now marks
+  the last block of the last message, so each turn writes the prefix it just read and the next
+  turn reads it back. Two breakpoints against a documented cap of four, and never on a replayed
+  `thinking` block: the provider's signature covers those bytes, so marking one would be a
+  rejected turn (invariant 5). **`2026-08-29` stays as released and is superseded by `2026-08-29b`
+  wherever this changelog names it.**
+
+- **`contracts/cli/b10x-harness/2026-08-29`: the argv surface is a contract now.**
+  `--substrate-embedded` changed from taking a value to being bare — the right change — and a
+  consumer pinned to `0.1.0` went on passing a value, which clap refused before any harness code
+  ran. The wire contracts pin what goes to a model and the profile contract pins what a bridge
+  client sees; the command line is a **third** interface with consumers of its own. `argv.json` is
+  generated from clap's own definition (every long flag, whether it takes a value, its value name,
+  its default, whether it is required, and every flag it conflicts with, in both directions) and
+  checked from both sides: `scripts/check-cli-contract.py` against the manifest digest, and a Rust
+  test against clap, failing with a diff that says to cut a new version.
+
+- **A run that never starts leaves a terminal record.** A driver launched this binary with a flag
+  that had changed shape; clap wrote its usage and exited **2** before any harness code ran, and
+  the driver — which reads the `--json` record and the exit status — saw a status it already had a
+  meaning for and an empty stream. Two hours went into working that out. Now every refusal that
+  happens before the loop starts — a refused command line, a credential, a workspace, a
+  confinement, a session on the wrong wire — writes one line, `{"kind":"refused","reason":…}`, on
+  stdout under `--json` and exits **1**; on this command line `2` means *the run stopped for a
+  named reason*, which is a run that happened. `b10x-harness events` maps it onto the
+  `session.ended` record the stream already has, `subtype: "refused"`, with the reason in
+  `stop_reason`.
+
 - **A second wire: `anthropic-messages`, over `POST {base}/messages`.** Streaming SSE, request
   projection, tool-call decode, usage, stop reasons, cancellation and typed status mapping — the
   same loop, unchanged, behind a second projection. `b10x-harness run --wire anthropic-messages`
@@ -62,11 +245,106 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   above it still asks and — with no approver attached — is refused. A `file_edit` asks whatever
   the ceiling, because it is non-idempotent, and still needs `--yes`; the two flags do not
   combine, since `--yes` approves everything.
+
+  *Superseded 2026-08-29: idempotency no longer asks. `Envelope::needs_approval` is `risk >
+  ceiling` and nothing else, and `file_edit` is `medium` like `file_write` — so
+  `--approve-up-to medium` lets both through and neither needs `--yes`. See § Changed below.*
 - **A CI gate**, `.github/workflows/gate.yml`: `scripts/gate.sh` on `stable`, and a build on the
   declared `rust-version`. It needs the `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY` repository
   secrets to read the private substrate dependency, provisioned by atlas's `bot-ci-secrets.sh`.
 
 ### Changed
+
+- **`file_read` stops counting lines after 16 MiB.** Counting `lines.total` had become a full
+  sequential scan of the file on every read, which a deadline cannot reach into; past the bound
+  `lines.total` is `null` and `lines_counted_to` says where the scan stopped. `bytes` is still the
+  file's own size.
+- **A batch runs at most 8 calls at a time** instead of one OS thread per call — a turn asking for
+  two hundred reads is two hundred reads, not two hundred threads.
+- **`search` compiles a regular expression under a 1 MiB size and DFA limit**, refusing one over it
+  in the crate's own words, and echoes `context` when it capped it at 5.
+- **Both wires stop calling an error retriable once they have made four attempts**, whatever was
+  emitted. A turn that failed three times cold and then broke mid-stream used to buy the loop
+  another three rounds of four — sixteen requests and half a minute to learn one thing.
+- **The transport half of both wires is one crate now, `crates/harness-http`** — a new name in the
+  crate list, which is why an internal move gets an entry here. **No behaviour change.** Bounded
+  SSE framing, the retry rule, the back-off, the witnessed sink that makes the retry rule safe, the
+  status mapping and the blocking client with its two timeouts moved out of `harness-responses` and
+  `harness-messages`, which had held byte-identical copies since the second wire was written; each
+  wire is now its projection, its URL and its headers over `harness_http::HttpTransport`, and
+  neither depends on `reqwest` at all. `harness-wire` is untouched, and no vendor name, field name
+  or header name appears in the new crate.
+  **What proves nothing moved:** the two pinned contract suites, `scripts/check-provider-wires.py`
+  and both `provider_emulated` suites pass unchanged — not one fixture, manifest or case was
+  edited. One real difference between the two copies was found and is now explicit rather than
+  implicit: the first route ends its stream with `data: [DONE]` and the second has no sentinel at
+  all, so `Framing` is a per-wire setting and `crates/harness-messages/tests/transport.rs` fails if
+  the wires ever disagree about anything else. The status tables were already identical — 529 was
+  covered by the 5xx range on both sides, and only the comments differed.
+- **Bridge mode compacts on the context window too.** `ServerConfig::context_window` carries
+  `--context-window` into every bridged thread's `LoopConfig`, the same as `run` and `chat`.
+
+- **Idempotency no longer asks for approval; risk alone does.** `--approve-up-to high` let a `run`
+  and a whole-file `file_write` through unasked and refused every `file_edit`, because a second
+  clause asked about every non-idempotent mutation whatever the ceiling — a retry question written
+  into an approval gate. An unattended run was being pushed toward rewriting files whole when the
+  narrower edit was the safer act. `Envelope::needs_approval` is now `risk > ceiling`, and
+  `file_edit` and `file_write` are both `Medium`. `Idempotency` is still declared, for a scheduler
+  that re-runs a scope to read.
+
+- **Any part of any file is readable, and what comes back is numbered.** `file_read` takes
+  `offset` and `limit` in lines and answers numbered lines in `cat -n` shape — the numbers are
+  what let a model quote exact text back to `file_edit` — plus `lines: {from, to, total}`, so a
+  window is never mistaken for a whole file. A line over 2,000 characters is cut and its number
+  listed in `truncated_lines`, never silently. A window that starts past the end of the file is
+  refused with the number of lines there are; the confined path refuses by name saying which line
+  its byte ceiling reached.
+
+- **A test suite's verdict survives a long `run`.** Output over the 64 KiB cap kept the **first**
+  64 KiB and dropped the rest — which is the compiler's progress and never `test result: FAILED`.
+  Both ends are now kept with `\n… N bytes omitted here …\n` between them, and the result reports
+  `omitted_bytes`.
+
+- **`harness_tools::Operations` is a breaking change for an out-of-tree implementor.** metaharness
+  embeds this crate to serve the same catalogue over MCP, so it is named here rather than left to
+  be discovered at a build: `file_read(path, ReadWindow)` and `search(pattern, path,
+  &SearchOptions)` take the new argument shapes, `find(...)` is a new method with a **defaulted
+  refusal** so an implementor that does not answer it refuses by name instead of failing to
+  compile, and the trait is now `Operations: Send + Sync` — required by `Catalogue::invoke_batch`,
+  which gives each call of a batch a thread.
+
+- **The model may call a catalogue entry by its bare name.** 10 of 82 tool calls on one live run
+  were `file_read{path}` rather than `tool_invoke{name:"file_read"}`, each refused as unpublished
+  and each a dead turn. Under `--surface verbs` the published list is still the three verbs; a
+  bare name is routed to the entry and warned about (`unpublished-tool-routed`) so the waste stays
+  measurable. Routing widens nothing: the entry was already reachable through the verb, and it
+  meets the same approval gate, the same argument bound and the same result bound. The metaharness
+  converter reads a routed call as the act it performed, under either surface.
+
+- **Compaction can see the context window, and `--context-window` now drives it.** Given a window
+  in tokens it fires at 80% — measured by the provider's own last reported input count, or by a
+  bytes÷4 estimate where nothing reported — and frees down to 50%. Where eliding old tool output
+  cannot reach the target, because the weight is in user or assistant text or in opaque reasoning
+  items, the harness spends one extra turn asking the model to summarise the earlier part of the
+  run and replaces it with a single marked item; the task itself, the newest results and every
+  call-with-its-result survive. That turn is charged to the run's tokens, budget and bill like any
+  other and does not count against `max_turns`; a summary that fails on the wire is a warning
+  (`summary-failed`), not the end of the run. Without a declared window the fixed 192 KiB byte
+  rule is unchanged. `b10x-harness run` and `chat` pass `--context-window` into `LoopConfig`, so
+  the flag that had only ever bounded the request now also decides when the conversation is
+  compacted.
+
+- **A failure that may not repeat now says so.** A stream that stops mid-frame or closes before its
+  terminal event is a dropped connection, not a peer speaking a different protocol, and is
+  reported as retriable; `408` joins `429` and `5xx`; on the Responses wire a `server_error` or
+  `rate_limit_exceeded` **in the stream** is the provider's own state rather than a refusal of this
+  request. A malformed event, a bound, and anything refused on this request's own terms stay
+  final — retrying those spends a run's budget to be told the same thing four times. The wire
+  itself still never resends once a person has read part of an answer; the loop above it, which
+  owns the transcript, decides.
+
+- **`b10x-harness tools` states which surface it answered for**, and under `flat` the published
+  list and the catalogue name the same entries.
 
 - **`harness_wire::Usage` gained `cache_creation_input_tokens`,** an `Option`. The second route
   bills cache *writes* as their own class; dropping the figure would make a cache-writing turn
@@ -100,6 +378,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   every write and every `run`** and tells the model so; `--yes` approves them. A `file_edit`
   (non-idempotent) asks whatever the ceiling. Bridge mode is unchanged: the client is the gate
   there.
+
+  *Superseded 2026-08-29: idempotency no longer asks; risk alone does. A `file_edit` is `medium`
+  and asks exactly when a `file_write` does. The rest of this entry stands. See § Changed below.*
 - **`--substrate-embedded` is a flag, not an option.** It demanded a value it then ignored; the
   README showed it bare and no test exercised it. It is now `bool` on `run` and `tools`, and an
   end-to-end test drives the embedded path.
@@ -170,6 +451,60 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A run that failed now files what it spent, not only what it said.** A wire failure on turn
+  twenty handed the shell its nineteen turns of conversation and none of their figures: the usage
+  and cost of every turn that did happen scrolled past on stderr and then died with the process,
+  and the session file — the only record left afterwards — showed the whole conversation at zero
+  turns and no cost, so `b10x-harness sessions` listed a run that had been billed for nineteen
+  turns as `0 turn(s)`. `AgentLoop::run_in` now takes a `RunLedger` beside the items — `usage`,
+  `cost_micro_usd`, `turns` — and writes it on **every** exit path exactly as it writes the
+  conversation back; `run` keeps its signature and `LoopError` keeps its three payload-free
+  variants, so only a caller that lends a conversation pays for the extra argument.
+  `transcript::Session::spent` folds it into the session in the failed arm of both `run` and
+  `chat`. A run nobody could price still adds no cost rather than a zero. This is the rule
+  `RunState::absorb_child` already applies to a delegate — a child that broke on turn four still
+  bought three turns — reaching the top-level run, where the shell rather than the loop is the
+  thing holding the record.
+
+- **A compaction can no longer fold a tool call away from its result**, or a reasoning item away
+  from the call that follows it: the summary's fold boundary now falls only between whole turn
+  groups. Both shapes were provider 400s on the turn after the compaction.
+- **The summary turn's own request is one plain-text user item** with no tools, no tool blocks and
+  no opaque items, instead of a replay of the folded conversation. On the `anthropic-messages` wire
+  that replay was rejected twice over — an assistant-first message, and tool blocks with no `tools`
+  — so every compaction there paid for a doomed turn.
+- **`max_input_tokens` and `max_cost` are checked immediately after a compaction.** A summary
+  turn's spend was absorbed but never tested against the ceilings, so a run overshot by a summary
+  turn plus a full conversation turn.
+- **A confined `file_read` no longer answers the read route's byte-ceiling prefix as though it
+  were the whole file**: past the ceiling `lines.total` and `bytes` are `null`, `truncated` is
+  `true`, and `route_ceiling_bytes` and a `note` say the lines past it are unreachable on that
+  path. A `file_edit` of such a file is refused rather than writing the prefix back and deleting
+  everything after it.
+- **A tool call whose thread panics inside `Catalogue::invoke_batch` is a refusal naming the
+  entry**; it no longer takes every sibling's answer with it.
+- **`find` and `search` answer `depth_bound_reached`**, and both entries' descriptions name the
+  directories they skip and the depth they stop at, so a bound is never read as an empty tree.
+- **A CRLF file reads identically through the local and the confined provider**; a trailing `\r`
+  quoted back to `file_edit` used to match nothing.
+- **`find` refuses an empty `glob` by name** instead of answering an empty list.
+- **The `batch-miscounted` warning says the port had already run the calls**, so each one in the
+  group happens a second time — pure reads, and still stated.
+
+- **A network blip twenty turns into a long run no longer throws the run away.** A turn whose
+  stream broke after it had started speaking is attempted again — up to three times, pausing 0.5 s,
+  1 s then 2 s, honouring Ctrl-C and the wall-clock budget inside the pause. Whatever streamed for
+  that turn is announced as discardable (`turn-retried`) so a renderer can tell a person to
+  disregard it, and the renderer prints exactly that. The wire still refuses to retry once it has
+  emitted, because only the loop knows the conversation is unchanged by a failed turn; a failure
+  the wire calls final is still final, and an error it already tried four times before the first
+  byte goes up as final too, so a gateway that is down costs four requests and not sixteen.
+
+- **A provider `error` event stopped losing the provider's own words.** Its `code` and `message`
+  sit at the top level, not under `error`, and were read from the wrong place — every one of them
+  arrived as `unknown` with no message, which also meant no retriable classification could ever
+  fire.
+
 - **`file_write` could escape the workspace through a dangling symlink.** `LocalOperations`
   tested presence with `exists()`, which follows links, so a link inside the workspace whose
   target did not exist yet looked absent; the write then followed the link and created the file
@@ -207,13 +542,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   while it was the only one. A `harness-http` beneath both is what that argues for. It was
   deliberately not done here so that this change is the evidence rather than a guess acting on
   itself.
-- **No subscription route has been contacted, and nothing renews a token.** The Anthropic header
-  shapes are `provider_emulated`; the emulator records which header carried a credential and its
-  length, never its value. A token nobody renews expires and the run fails by name.
-- **The conversation is not prompt-cached on the second wire.** One `cache_control` breakpoint
-  covers the constant head (`tools`, then `system`); the growing tail — which is what makes a
-  stateless run's cost quadratic in its turns — needs a placement rule there is no measurement for
-  yet.
+- **Nothing renews a subscription token.** The Anthropic route has now been contacted — a
+  three-turn tool-using run against `https://api.anthropic.com/v1` on 2026-08-29, with a
+  deliberately invalid token to the same endpoint answering `401` so the 200 is the credential's
+  and not the endpoint's indifference (`STATUS.md` § *Subscription auth*). The ChatGPT/Codex route
+  still has not been. Nothing here holds a refresh token or calls an authorization server, so a
+  token nobody renews expires and the run fails by name.
+- **Sub-agents, hooks, an MCP client, multimodal input and structured output are still not owned
+  here** (`README.md` § *Not owned here*). Named because a comparison against other harnesses
+  ranked them as the remaining gap; each is a decision about what this component owns rather than
+  a defect in it, and the decision is pending.
+- **The `verbs` surface's discovery cost is measured; the flat surface's is not.** 33–44% of tool
+  calls went on discovery behind three verbs, across three live runs. What publishing flat costs
+  or saves on a real provider — schema validation refusals, prompt-cache behaviour with seven tool
+  definitions instead of three — is an experiment nobody has run yet, and both surfaces stay
+  reachable from a flag so that it can be.
 
 ## [0.1.0] — 2026-08-24
 

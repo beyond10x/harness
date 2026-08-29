@@ -6,8 +6,13 @@
 //! them to [`harness_loop`]. Everything interesting happens in the loop, which is what lets the
 //! same core run embedded in another process or behind a bridge without a second implementation.
 
+pub mod approve;
+pub mod contract;
+pub mod environment;
+pub mod hooks;
 mod metaharness;
 mod render;
+pub mod transcript;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -20,38 +25,62 @@ use clap::{Args, Parser, Subcommand};
 use harness_app_server::ServerConfig;
 use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopCancel, LoopConfig, LoopStop,
+    RunLedger,
 };
 use harness_wire::{ModelPort, Risk, Sampling, StaticBearer};
 
 pub use render::Renderer;
 
-/// The standing instruction when the caller supplies none.
+/// The sentences every surface carries, whatever the model is offered.
 ///
 /// # What this used to say, and what it cost
 ///
 /// Until the three verbs landed, this text named `workspace_list`, `workspace_read` and
 /// `workspace_grep` and told the model *"nothing you can call changes a file or runs a command, so
 /// say what you would change rather than claiming you changed it"*. Both halves went stale: those
-/// tools no longer exist under any name, and the catalogue behind the verbs now reaches six entries
-/// on a machine that can confine a process.
+/// tools no longer exist under any name, and the catalogue behind the verbs now reaches seven
+/// entries on a machine that can confine a process.
 ///
 /// It was not a harmless leftover. A run given a write-and-execute catalogue and this instruction
 /// was told in the same breath that it could do neither — and the measured result was a model that
 /// searched for read-only tools, read two files, changed nothing, and reported the task done.
 /// **The instruction had asked it to.**
 ///
-/// So this text states **no effects of its own**. What follows it is the catalogue, rendered from
-/// the live one by [`harness_tools::Catalogue::brief`], which cannot describe a tool this run does
-/// not have.
-const DEFAULT_INSTRUCTIONS: &str = "\
+/// So this text states **no effects of its own**. What names the effects is the surface below,
+/// rendered from the live catalogue, which cannot describe a tool this run does not have.
+const GROUNDING_INSTRUCTIONS: &str = "\
+Ground every claim about the workspace in something you actually read, and say plainly when you \
+have not looked. Never report work as done unless a tool you called made it so. A call that was \
+not approved did not happen: do not retry it — do what you can without it and say plainly what \
+you could not do.";
+
+/// The opening sentence under [`Surface::Verbs`], which is unchanged.
+const VERBS_INSTRUCTIONS: &str = "\
 You are the b10x coding harness. Everything you can do reaches you through three tools: \
 `tool_search` lists what this run has, `tool_describe` gives one entry's input schema, and \
-`tool_invoke` calls it — `tool_invoke` is the only one that acts. Ground every claim about the \
-workspace in something you actually read, and say plainly when you have not looked. Never report \
-work as done unless a tool you called made it so. A call that was not approved did not happen: do \
-not retry it — do what you can without it and say plainly what you could not do.";
+`tool_invoke` calls it — `tool_invoke` is the only one that acts. ";
 
-/// The standing instruction, with this run's catalogue written into it.
+/// The opening sentence under [`Surface::Flat`].
+const FLAT_INSTRUCTIONS: &str = "\
+You are the b10x coding harness. Everything you can do is one of the tools you have been given, \
+called by its own name; there is no other way to act, and there is nothing to discover first. ";
+
+/// The tools the **loop** owns for this run, when it was asked for them.
+///
+/// Neither is a catalogue entry and no `ToolPort` ever sees either, so the surface rendered from
+/// the catalogue cannot name them: `answer` performs no operation on a machine, and `delegate`
+/// performs whatever this run's own tools perform, through this run's own gate.
+#[derive(Debug, Default, Clone, Copy)]
+struct Owned<'a> {
+    /// The delegate tool's name, under `--delegate`.
+    delegate: Option<&'a str>,
+    /// The answer tool's name, under `--output-schema`.
+    answer: Option<&'a str>,
+}
+
+/// The standing instruction for this run, written for the surface the model is offered.
+///
+/// # Under `verbs`, the catalogue goes in the instruction
 ///
 /// **The catalogue belongs in the instructions, not in the conversation.** Discovering it through
 /// `tool_search` and `tool_describe` cost 33–44% of every tool call across three measured runs —
@@ -60,18 +89,57 @@ not retry it — do what you can without it and say plainly what you could not d
 /// the full input rate, rather than in the instructions, which are identical every turn and are
 /// what a prompt cache can hold.
 ///
-/// The verbs are unchanged and still the only way to act. What is removed is the requirement to
-/// ask before doing anything.
+/// # Under `flat`, only the names go in — and that is deliberate
+///
+/// [`harness_tools::Catalogue::brief`] renders every entry's **input schema**, and under a flat
+/// surface those schemas are already in `tools`: one per published tool, on every request, in the
+/// half of the request a prompt cache holds. Pasting them here would send each schema twice per
+/// turn to say the same thing, and the copy in the instruction is the one the provider cannot
+/// validate against. So the instruction names the entries in one line — that is what a model needs
+/// to plan with — and the shapes stay where the provider reads them.
 fn standing_instruction(
     catalogue: &harness_tools::Catalogue,
+    surface: Surface,
     context: &str,
     announce: bool,
+    owned: Owned<'_>,
 ) -> String {
-    let mut text = format!(
-        "{DEFAULT_INSTRUCTIONS}\n\nThis run's catalogue, which is what `tool_invoke` will \
-         accept — call `tool_search` only if you need to re-check it:\n\n{}",
-        catalogue.brief()
-    );
+    let mut text = match surface {
+        Surface::Flat => format!(
+            "{FLAT_INSTRUCTIONS}{GROUNDING_INSTRUCTIONS}\n\nThe tools this run has: {}. Their \
+             arguments are in the tool definitions themselves.",
+            catalogue
+                .entries()
+                .iter()
+                .map(|entry| format!("`{}`", entry.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Surface::Verbs => format!(
+            "{VERBS_INSTRUCTIONS}{GROUNDING_INSTRUCTIONS}\n\nThis run's catalogue, which is what \
+             `tool_invoke` will accept — call `tool_search` only if you need to re-check \
+             it:\n\n{}",
+            catalogue.brief()
+        ),
+    };
+    // The two tools the loop owns are not in the catalogue and cannot be rendered from it, so
+    // they are named here — one line each. Their own descriptions carry the rest, and repeating
+    // those here would send the same words twice per turn.
+    if let Some(name) = owned.delegate {
+        let _ = write!(
+            text,
+            "\n\n`{name}` hands one self-contained sub-task to a fresh context with these same \
+             tools. It cannot see this conversation, so the task must say everything it needs, and \
+             it reports back once, in text."
+        );
+    }
+    if let Some(name) = owned.answer {
+        let _ = write!(
+            text,
+            "\n\nFinish by calling `{name}` with the result, once and on its own. Nothing you \
+             write outside it is read as the answer."
+        );
+    }
     // Where the run may write, in the instruction as well as in the tool. The tool is what makes
     // it true; this is what stops the model spending a turn discovering it by being refused.
     if announce && !catalogue.scope().is_empty() {
@@ -112,6 +180,26 @@ enum Wire {
     AnthropicMessages,
 }
 
+impl Wire {
+    /// The identifier this wire tags its opaque items with.
+    ///
+    /// Taken from each wire crate's own constant rather than written out again here: a session
+    /// refused for being on the wrong wire has to compare the same bytes the loop compares, or the
+    /// refusal would be about a name only this file believes in.
+    ///
+    /// # Panics
+    ///
+    /// Only if a wire crate's own constant stops being a legal wire identifier, which its own
+    /// tests pin.
+    fn id(self) -> harness_wire::WireId {
+        let name = match self {
+            Self::OpenaiResponses => harness_responses::WIRE,
+            Self::AnthropicMessages => harness_messages::WIRE,
+        };
+        harness_wire::WireId::new(name).expect("a wire crate's own identifier is valid")
+    }
+}
+
 /// The highest risk a call may carry without a person being asked — `harness_wire::Risk`, as
 /// the command line spells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -135,6 +223,47 @@ impl From<ApproveUpTo> for Risk {
             ApproveUpTo::Destructive => Self::Destructive,
         }
     }
+}
+
+/// How the catalogue reaches the model.
+///
+/// Two surfaces over one catalogue, and the choice is a deployment decision rather than a claim
+/// about what the run may do — the catalogue is the same either way, and so is the approval gate.
+///
+/// `flat` is the default because of what the indirection measured: across three live runs **33–44%
+/// of every tool call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` is an
+/// untyped object the provider cannot validate, so a misspelled field becomes a failed call and
+/// another turn. The reason the verbs existed — neutral names across harnesses — is met by the
+/// entry names themselves, which is what `harness_tools::operation_of` maps.
+///
+/// `verbs` stays, and is not a legacy setting: metaharness serves the three-verb surface over MCP,
+/// and an evaluation arm that compares the two needs both to be reachable from a flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+enum Surface {
+    /// Every catalogue entry as its own tool, with its own schema.
+    #[default]
+    Flat,
+    /// `tool_search`, `tool_describe`, `tool_invoke` over the catalogue.
+    Verbs,
+}
+
+/// Who decides a call the run's ceiling does not cover.
+///
+/// The library's default approver is `DenyAll` and stays so (`AGENTS.md` invariant 12): what this
+/// chooses is the **command line's** approver, which is a different question. Until this existed a
+/// person at the terminal had `--yes` — approve everything for the whole run because one write was
+/// wanted — or nothing, and a run that needed one approved write could not be done at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+enum Approve {
+    /// Ask a person when there is one, and refuse when there is not.
+    #[default]
+    Auto,
+    /// Ask a person over `/dev/tty`, or refuse the run by name when there is no terminal.
+    Prompt,
+    /// Refuse everything above the ceiling, and tell the model it was refused.
+    Deny,
+    /// Approve everything above the ceiling. The declared unattended run; `--yes` spells it too.
+    All,
 }
 
 /// Whether a declared scope is stated in the instruction as well as bound into the tools.
@@ -161,7 +290,16 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run one request to completion.
-    Run(Box<RunOptions>),
+    Run(Box<RunCommand>),
+    /// Ask one question after another over the same session, reading a line at a time.
+    ///
+    /// The same flags as `run` without `--input`: each line of standard input is a follow-up turn
+    /// on one conversation, and the session is written after every one of them. `exit`, or the end
+    /// of the input, ends it. There is no line editing and no history — a shell already has both,
+    /// and a harness that reimplemented them would own a terminal library forever.
+    Chat(Box<RunOptions>),
+    /// List the sessions on this machine, newest first.
+    Sessions(SessionsOptions),
     /// Print the tools this harness publishes, without contacting an endpoint.
     Tools(ToolsOptions),
     /// Serve one connection over the pinned Codex app-server JSON-RPC format, on stdio.
@@ -179,6 +317,13 @@ enum Command {
     /// the driven arm's treatment back on top of it and measure that instead. What crosses is the
     /// record, not the control.
     Events(EventsOptions),
+}
+
+#[derive(Debug, Args)]
+struct SessionsOptions {
+    /// Where sessions are kept. Defaults to `$XDG_STATE_HOME/b10x-harness/sessions`.
+    #[arg(long, value_name = "PATH")]
+    session_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -249,6 +394,11 @@ struct RunOptions {
     #[arg(long)]
     model: String,
     /// Context window the endpoint serves for that model.
+    ///
+    /// It bounds the request the wire will build, and it is also what makes compaction
+    /// token-aware: the loop compacts at 80% of this figure — measured by the provider's own last
+    /// reported input count where there is one — and frees down to 50%, instead of the fixed
+    /// 192 KiB byte rule that left roughly 60% of a 128k window unused.
     #[arg(long, default_value_t = 128_000)]
     context_window: u64,
     /// File holding the bearer credential. Its contents are trimmed and never logged.
@@ -339,12 +489,49 @@ struct RunOptions {
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
     allow_program: Vec<String>,
-    /// The request.
-    #[arg(long)]
-    input: String,
+    /// How the catalogue reaches the model: every entry as its own tool, or three verbs over it.
+    ///
+    /// `flat` by default. The three-verb surface cost 33–44% of every tool call on discovery
+    /// across three measured runs and hands the provider an untyped argument object it cannot
+    /// validate; the neutral names it existed to protect are the entry names, which `flat`
+    /// publishes directly. `verbs` is still fully served — metaharness offers it over MCP — and is
+    /// what an arm comparing the two surfaces asks for.
+    #[arg(long, value_name = "SURFACE", default_value = "flat")]
+    surface: Surface,
     /// File holding the standing instruction. Defaults to the built-in one.
     #[arg(long)]
     instructions_file: Option<PathBuf>,
+    /// Where this run's conversation is written, so a later one can resume it.
+    ///
+    /// Defaults to `$XDG_STATE_HOME/b10x-harness/sessions`, or `$HOME/.local/state/…` — never the
+    /// workspace, because a transcript carries whatever the model read and a file beside the code
+    /// is one `git add -A` from being committed.
+    #[arg(long, value_name = "PATH")]
+    session_dir: Option<PathBuf>,
+    /// Continue a session: its identifier, or `latest`.
+    ///
+    /// The stored conversation is replayed into the run before this run's input, opaque reasoning
+    /// items included, so the model keeps what it already worked out instead of paying to think it
+    /// again. A session recorded on another wire is refused by name — an opaque item may not cross
+    /// wires (`AGENTS.md` invariant 5), and saying so here is cheaper than the far end saying it.
+    #[arg(long, value_name = "ID", conflicts_with = "no_session")]
+    resume: Option<String>,
+    /// Write no session file at all.
+    ///
+    /// For an evaluation arm that must leave nothing on the machine it ran on: a transcript is
+    /// evidence about a run, and an arm whose runs must be identically reproducible from their
+    /// flags cannot have one of them silently pick up the previous one's state. Nothing is
+    /// resumable afterwards, which is the trade.
+    #[arg(long)]
+    no_session: bool,
+    /// Leave the project's own `AGENTS.md` or `CLAUDE.md` out of the standing instruction.
+    ///
+    /// An experiment control, and only that: the environment block — workspace, OS, date, git
+    /// branch — is always there, because a run that does not know where it is spends a turn
+    /// finding out. What this removes is the project's own words, so a run can be measured against
+    /// the toolset rather than against the instructions a repository happens to carry.
+    #[arg(long)]
+    no_project_instructions: bool,
     /// Ceiling on model turns.
     #[arg(long)]
     max_turns: Option<u64>,
@@ -415,25 +602,74 @@ struct RunOptions {
     /// starts will ignore this; the route registry is what knows which ones do.
     #[arg(long)]
     reasoning_effort: Option<String>,
-    /// Approve every call that asks for a decision.
+    /// Approve every call that asks for a decision. The same as `--approve all`.
     ///
     /// What asks is the loop's answer, taken per call from the catalogue entry's declared risk
-    /// against a ceiling that defaults to low: every write and every `run` asks, and a `file_edit`
-    /// — non-idempotent, so a repeat is not the same act as one call — asks whatever the ceiling
-    /// is. Without this the default approver denies each of them and the model is told it was
-    /// denied, which is a confined run that can do nothing but read.
+    /// against a ceiling that defaults to low: every write and every `run` asks. Kept as its own
+    /// spelling because it is what every existing unattended invocation says, and it wins over
+    /// `--approve` when both are given.
     #[arg(long)]
     yes: bool,
+    /// Who decides a call above the ceiling: `auto`, `prompt`, `deny` or `all`.
+    ///
+    /// `auto` — the default — asks a person over `/dev/tty` when there is a terminal to ask on and
+    /// stdin and stderr are one, and otherwise denies, saying so in one line before the run rather
+    /// than leaving it to be discovered from a refusal. `prompt` asks or refuses the run by name.
+    /// `deny` is the library default, `DenyAll`. `all` is the declared unattended run.
+    ///
+    /// This chooses the **command line's** approver. The library's default is `DenyAll` whatever
+    /// this says, and a harness that approved by default would turn a review gate into decoration
+    /// (`AGENTS.md` invariant 12).
+    #[arg(long, value_name = "MODE", default_value = "auto")]
+    approve: Approve,
     /// Run calls at or below this risk without asking. Default `low`.
     ///
-    /// The ceiling the loop judges each call's declared risk against. A `file_write` is `medium`
-    /// and a `run` is `high`, so at `high` both run unasked and only a destructive call asks.
-    /// Above the ceiling the approver decides, and with none attached that is a refusal the model
-    /// is told about. A `file_edit` asks whatever the ceiling — non-idempotent, so a repeat is not
-    /// the same act as one call — and needs `--yes`. `--yes` approves everything and makes this
-    /// moot, so the two do not combine.
+    /// The ceiling the loop judges each call's declared risk against. A `file_write` and a
+    /// `file_edit` are `medium` and a `run` is `high`, so at `high` all three run unasked and only
+    /// a destructive call asks. Above the ceiling the approver decides, and with `--approve deny`
+    /// that is a refusal the model is told about. `--yes` approves everything and makes this moot,
+    /// so the two do not combine.
     #[arg(long, value_name = "RISK", conflicts_with = "yes")]
     approve_up_to: Option<ApproveUpTo>,
+    /// Let the model hand a self-contained sub-task to a fresh context on the same gate.
+    ///
+    /// Off by default: a new tool is a change in what the model can do. The delegate sees this
+    /// run's standing instruction and its task and **not** this conversation, gets the same tool
+    /// port, the same approver and the same hooks, and spends the run's remaining budget — so it
+    /// widens nothing and costs the parent one tool result instead of forty reads. It cannot
+    /// delegate in turn.
+    #[arg(long)]
+    delegate: bool,
+    /// Model turns one delegate may take before it reports what it got to.
+    ///
+    /// Its own ceiling and not the parent's remainder, so a child that loops does not spend the
+    /// run's remaining turns finding out.
+    ///
+    /// **At least one**, refused here rather than in the child. The parent's own `--max-turns 0`
+    /// is refused before the first request, and a bound that admits no turn has to be refused the
+    /// same way wherever it is written; left to the delegate's own `Budget::validate` a typed zero
+    /// becomes a failed tool result on *every* delegation, each one after a paid parent turn had
+    /// already asked for one.
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = harness_loop::DELEGATE_MAX_TURNS,
+        value_parser = clap::value_parser!(u64).range(1..),
+        requires = "delegate"
+    )]
+    delegate_turns: u64,
+    /// A file declaring the operator's own programs to run at each call and at the end.
+    ///
+    /// Named here and **never discovered**: a hook found in the workspace would be a program the
+    /// repository runs on this machine, which is the ambient fallback this harness refuses for
+    /// credentials. A hook can only narrow — `before-call` fires after the approver said yes and
+    /// its block is one more refusal — and it is spawned as an argv, never through a shell.
+    ///
+    /// It is otherwise **unconfined**: the operator's own program, with the environment this run
+    /// was started in — minus the variable `--api-key-env` or `--oauth-token-env` named. A hook is
+    /// trusted to act; it is not handed the key this run authenticates with.
+    #[arg(long, value_name = "FILE")]
+    hooks: Option<PathBuf>,
     /// Emit one JSON event per line on stdout instead of prose.
     #[arg(long)]
     json: bool,
@@ -442,8 +678,47 @@ struct RunOptions {
     quiet: bool,
 }
 
+/// `run`: everything `chat` takes, plus the one question this invocation asks.
+///
+/// Split from [`RunOptions`] rather than made optional, so that `run` without `--input` is a parse
+/// error and `chat` never carries a flag it would ignore. A flag that exists and does nothing is
+/// how `--substrate-embedded` came to demand a value it threw away.
+#[derive(Debug, Args)]
+struct RunCommand {
+    #[command(flatten)]
+    options: RunOptions,
+    /// The request.
+    #[arg(long)]
+    input: String,
+    /// A JSON Schema for an object, published as a tool the model calls to finish.
+    ///
+    /// **Standard output is then the answer and nothing else** — one line of compact JSON — so
+    /// the command composes with anything that reads JSON; the model's prose goes to stderr as
+    /// progress. A run that ends in prose anyway is nudged once and then stops
+    /// `Unstructured`, exiting 2: prose on stdout with a success status is the silent failure this
+    /// harness refuses to produce.
+    ///
+    /// Under `--json` stdout is the event record instead and there is no bare answer line at all:
+    /// the answer is the **last** `answered` event before a `finished` whose `stop` is
+    /// `completed`. Last and not first, because a `stop` hook may withdraw an ending — the loop
+    /// clears the structured answer and turns again — so an earlier `answered` can be followed by
+    /// a second one, or by a `finished` that is `unstructured`. A driver taking the first would
+    /// take the value the operator's hook refused.
+    ///
+    /// `run` only. A conversation has no single end, so there is nothing for `chat` to shape.
+    #[arg(long, value_name = "FILE")]
+    output_schema: Option<PathBuf>,
+}
+
 #[derive(Debug, Args)]
 struct ToolsOptions {
+    /// How the catalogue would reach the model: every entry as its own tool, or three verbs.
+    ///
+    /// The same flag `run` takes and the same default, because the question this command answers
+    /// is *what would that run publish* — and answering it for a surface the run would not use is
+    /// how a consumer comes to pin a tool list nothing serves.
+    #[arg(long, value_name = "SURFACE", default_value = "flat")]
+    surface: Surface,
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
@@ -681,6 +956,7 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
             max_output_tokens: options.max_output_tokens,
             ..Budget::default()
         },
+        context_window: Some(options.context_window),
         version: env!("CARGO_PKG_VERSION").to_owned(),
     };
     // One client per turn: a turn that was interrupted leaves its token set, and reusing the
@@ -757,22 +1033,92 @@ fn instructions(
     options: &RunOptions,
     catalogue: &harness_tools::Catalogue,
     context: &str,
+    owned: Owned<'_>,
 ) -> Result<String, String> {
-    match &options.instructions_file {
-        Some(path) => fs::read_to_string(path)
-            .map_err(|error| format!("reading `{}`: {error}", path.display())),
-        None => Ok(standing_instruction(
-            catalogue,
-            context,
-            options.scope_announce == ScopeAnnounce::Stated,
-        )),
+    if let Some(path) = &options.instructions_file {
+        return fs::read_to_string(path)
+            .map_err(|error| format!("reading `{}`: {error}", path.display()));
+    }
+    let mut text = standing_instruction(
+        catalogue,
+        options.surface,
+        context,
+        options.scope_announce == ScopeAnnounce::Stated,
+        owned,
+    );
+    // Last, after the tools, the scope and the given files: what the model needs first is what it
+    // can do, and where it is is what it needs in order to choose.
+    let mut environment = environment::discover(&options.workspace, std::time::SystemTime::now());
+    if options.no_project_instructions {
+        environment.instructions = None;
+    }
+    text.push_str("\n\n");
+    text.push_str(&environment.render());
+    Ok(text)
+}
+
+/// A run that produced no answer, and which half of the harness it failed in.
+///
+/// The distinction is the whole point of this type. A caller above this process — metaharness's
+/// `b10x` adapter, a shell script, a person — reads the exit status and the record; a run that
+/// **never started** writes no record at all, and a driver that saw only `exited 1` had two hours
+/// to guess why. So a refusal before the first request says so, in the record, under `--json`.
+enum RunFailure {
+    /// Nothing was sent. A credential, a workspace, a confinement or a session refused first.
+    Refused(String),
+    /// The loop started and could not finish. Its own events are already in the record.
+    Failed(String),
+}
+
+impl RunFailure {
+    fn message(&self) -> &str {
+        match self {
+            Self::Refused(message) | Self::Failed(message) => message,
+        }
+    }
+
+    /// Whether this is the run that never started, which is the one that needs a stated terminal.
+    fn never_started(&self) -> bool {
+        matches!(self, Self::Refused(_))
     }
 }
 
-fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
+/// Everything a run needs, resolved before the first request.
+///
+/// One struct because every one of these can refuse, and a refusal here is a run that never
+/// started — which is a different thing from a run that failed, and is reported as one.
+struct Prepared {
+    client: Box<dyn ModelPort>,
+    tools: Published,
+    approvals: Box<dyn ApprovalPort>,
+    config: LoopConfig,
+    cancel: LoopCancel,
+    /// The conversation this run continues, and the one it will leave behind.
+    session: transcript::Session,
+    /// Where that session is written, or [`None`] under `--no-session`.
+    session_dir: Option<PathBuf>,
+    /// The operator's hooks, or [`None`] when nobody named a file. The loop consults none then.
+    hooks: Option<hooks::Hooks>,
+}
+
+/// Resolves the endpoint, the credential, the toolset, the approver, the session and the hooks.
+///
+/// `output_schema` is `run`'s alone — `chat` passes [`None`], because a conversation has no single
+/// end for a schema to shape.
+///
+/// # Errors
+///
+/// Names whichever of them refused. Every one of these happens **before** the first request, so a
+/// caller can state that the run never started rather than that it failed. A schema that is not an
+/// object schema and a hooks file this build cannot read are refusals of exactly that kind: both
+/// are read here, in this harness's own words, rather than at the far end of a paid turn.
+fn prepare(
+    options: &RunOptions,
+    output_schema: Option<&std::path::Path>,
+) -> Result<Prepared, String> {
     let credential = resolve_credential(options)?;
     let cancel = LoopCancel::new();
-    let mut client = model_client(
+    let client = model_client(
         options.wire,
         &options.base_url,
         &options.model,
@@ -781,9 +1127,10 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
         credential,
         &cancel,
     )?;
-    let mut tools = published(
+    let tools = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
+        options.surface,
         &Confinement {
             substrate: options.substrate.as_deref(),
             embedded: options.substrate_embedded,
@@ -794,28 +1141,459 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
             scope: write_scope(&options.write_scope)?,
         },
     )?;
-    let mut approvals: Box<dyn ApprovalPort> = if options.yes {
-        Box::new(ApproveAll)
-    } else {
-        Box::new(DenyAll)
+    let approvals = approver(options)?;
+    let session_dir = session_dir(options)?;
+    let session = open_session(options, session_dir.as_deref())?;
+    // Read before the instruction is written, because the instruction names them.
+    let answer = schema(output_schema)?;
+    let delegation = delegation(options);
+    let owned = Owned {
+        delegate: delegation.as_ref().map(|tool| tool.name.as_str()),
+        answer: answer.as_ref().map(|tool| tool.name.as_str()),
     };
     let config = LoopConfig::new(
         &options.model,
-        instructions(options, tools.catalogue(), &context(&options.context)?)?,
+        instructions(
+            options,
+            tools.catalogue(),
+            &context(&options.context)?,
+            owned,
+        )?,
     )
     .with_sampling(sampling(options))
     .with_budget(budget(options))
     .with_prices(prices(options)?)
-    .with_unattended_ceiling(ceiling(options));
+    .with_unattended_ceiling(ceiling(options))
+    // What makes compaction token-aware rather than a fixed 192 KiB of bytes.
+    .with_context_window(Some(options.context_window))
+    .with_output_schema(answer)
+    .with_delegation(delegation);
+    // A hook is unconfined — it is the operator's own program — but it is not handed this run's
+    // credential. The child would otherwise inherit the whole environment, including whichever
+    // variable `--api-key-env` or `--oauth-token-env` named, and a hook that echoed it into its
+    // `{"note": …}` would put the key in the conversation and in the record.
+    let credential_variables: Vec<&str> = [
+        options.api_key_env.as_deref(),
+        options.oauth_token_env.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let hooks = options
+        .hooks
+        .as_deref()
+        .map(hooks::Hooks::load)
+        .transpose()?
+        .map(|hooks| {
+            hooks
+                .in_workspace(&options.workspace)
+                .without_env(credential_variables)
+        });
+    Ok(Prepared {
+        client,
+        tools,
+        approvals,
+        config,
+        cancel,
+        session,
+        session_dir,
+        hooks,
+    })
+}
 
-    install_interrupt(&cancel);
+/// The shape this run's answer must take, read from the file `--output-schema` named.
+///
+/// # Errors
+///
+/// Names the file it could not read, and refuses a schema that is not a JSON Schema for an object
+/// **in the loop's own words** — a tool's `input_schema` must be one on both wires, and a refusal
+/// before the run beats a 400 after it.
+fn schema(path: Option<&std::path::Path>) -> Result<Option<harness_loop::OutputSchema>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("reading the output schema `{}`: {error}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|error| format!("the output schema `{}`: {error}", path.display()))?;
+    harness_loop::OutputSchema::new(value)
+        .map(Some)
+        .map_err(|error| format!("the output schema `{}`: {error}", path.display()))
+}
+
+/// Whether this run may delegate, and how long a delegate may work.
+///
+/// [`None`] publishes no `delegate` at all, which is what every run did before this flag existed.
+fn delegation(options: &RunOptions) -> Option<harness_loop::Delegation> {
+    options
+        .delegate
+        .then(|| harness_loop::Delegation::default().with_max_turns(options.delegate_turns))
+}
+
+/// Who decides a call above this run's ceiling.
+///
+/// **The library's default is untouched.** `harness_loop`'s own default approver is `DenyAll` and
+/// stays so (`AGENTS.md` invariant 12); what this picks is the command line's, for a person who is
+/// usually sitting in front of it. `--yes` wins over `--approve` because it is the older spelling
+/// of `all` and every unattended invocation already written says it.
+///
+/// # Errors
+///
+/// Only under `--approve prompt`: a person was asked for by name and there is no terminal to ask
+/// on, so the run refuses rather than quietly denying every call it was meant to put to them.
+fn approver(options: &RunOptions) -> Result<Box<dyn ApprovalPort>, String> {
+    let mode = if options.yes {
+        Approve::All
+    } else {
+        options.approve
+    };
+    match mode {
+        Approve::All => Ok(Box::new(ApproveAll)),
+        Approve::Deny => Ok(Box::new(DenyAll)),
+        Approve::Prompt => match approve::Terminal::open() {
+            Ok(terminal) => Ok(Box::new(terminal)),
+            Err(reason) => Err(format!(
+                "`--approve prompt` asks a person about each call and there is no terminal to ask \
+                 on: {reason}. Run it from a terminal, or choose `--approve deny` or `--yes`."
+            )),
+        },
+        // The one branch that decides for itself, and it says so out loud. A run that silently
+        // fell back to refusing everything would look like a harness whose tools do not work.
+        Approve::Auto => {
+            if approve::stdio_is_interactive()
+                && let Ok(terminal) = approve::Terminal::open()
+            {
+                return Ok(Box::new(terminal));
+            }
+            eprintln!(
+                "no terminal to ask; calls above the ceiling will be refused — pass --yes or \
+                 --approve-up-to"
+            );
+            Ok(Box::new(DenyAll))
+        }
+    }
+}
+
+/// Where this run's session is written, or [`None`] when it must leave nothing behind.
+///
+/// # Errors
+///
+/// Names the reason there is no default directory, when the caller named none either.
+fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
+    if options.no_session {
+        return Ok(None);
+    }
+    match &options.session_dir {
+        Some(path) => Ok(Some(path.clone())),
+        None => transcript::default_dir().map(Some),
+    }
+}
+
+/// The session this run continues, or a new one.
+///
+/// # Errors
+///
+/// Names a session that cannot be read, one that does not exist, and — **before the first
+/// request** — one recorded on another wire. The loop would refuse the opaque items anyway
+/// (`AGENTS.md` invariant 5); saying it here says it in this harness's own words, with the flag
+/// that fixes it, instead of as a typed refusal from inside a turn nobody has paid for yet.
+fn open_session(
+    options: &RunOptions,
+    dir: Option<&std::path::Path>,
+) -> Result<transcript::Session, String> {
+    let workspace = options
+        .workspace
+        .canonicalize()
+        .unwrap_or_else(|_| options.workspace.clone());
+    let Some(which) = options.resume.as_deref() else {
+        return Ok(transcript::Session::new(
+            options.wire.id(),
+            &options.model,
+            &options.base_url,
+            workspace,
+        ));
+    };
+    // `--resume` and `--no-session` conflict at the parser, so this is only reachable from a
+    // caller that built the options itself.
+    let Some(dir) = dir else {
+        return Err(
+            "`--resume` needs a session directory, and `--no-session` removed it".to_owned(),
+        );
+    };
+    let session = if which == "latest" {
+        transcript::Session::latest(dir)?.ok_or_else(|| {
+            format!(
+                "there is no session in `{}` to resume; `b10x-harness sessions` lists what there is",
+                dir.display()
+            )
+        })?
+    } else {
+        transcript::Session::load(dir, which)?
+    };
+    if session.wire.as_str() != options.wire.id().as_str() {
+        return Err(format!(
+            "session `{}` was recorded on the `{}` wire and this run speaks `{}`; a provider's \
+             own reasoning items are replayed verbatim and may not cross wires, so resume it with \
+             `--wire {}` or start a new session",
+            session.id,
+            session.wire.as_str(),
+            options.wire.id().as_str(),
+            session.wire.as_str()
+        ));
+    }
+    // A warning and not a refusal: reading a different tree is a legitimate thing to do — the same
+    // conversation about a second checkout — and only the person running it knows whether the
+    // files it already read are the ones it will find.
+    if session.workspace != workspace {
+        eprintln!(
+            "warning [session-workspace] session `{}` was recorded over `{}` and this run reads \
+             `{}`; what it already read may not be there",
+            session.id,
+            session.workspace.display(),
+            workspace.display()
+        );
+    }
+    Ok(session)
+}
+
+/// Writes the session, and answers where it went.
+///
+/// # Errors
+///
+/// Names the path it could not write. The caller reports it as a warning: the run itself already
+/// happened, and calling it failed because its transcript could not be filed would be a second
+/// wrong answer.
+fn persist(
+    session: &transcript::Session,
+    dir: Option<&std::path::Path>,
+) -> Result<Option<PathBuf>, String> {
+    match dir {
+        None => Ok(None),
+        Some(dir) => session.save(dir).map(Some),
+    }
+}
+
+/// Saves the session and says so, however the run ended.
+///
+/// Both halves matter. A run that failed on turn twenty is exactly the one whose nineteen turns
+/// must survive, and a person who cannot see the identifier cannot resume it.
+fn close_session(prepared: &mut Prepared, options: &RunOptions, out: &mut dyn io::Write) {
+    prepared.session.updated_unix = unix_now();
+    match persist(&prepared.session, prepared.session_dir.as_deref()) {
+        Err(error) => eprintln!("warning [session] {error}"),
+        Ok(None) => {}
+        Ok(Some(path)) => {
+            if options.json {
+                // The last line of the record, so a driver reading the stream ends up holding the
+                // identifier it needs to continue the conversation.
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    serde_json::json!({
+                        "kind": "session",
+                        "id": prepared.session.id,
+                        "path": path.display().to_string(),
+                    })
+                );
+            } else if !options.quiet {
+                eprintln!(
+                    "session {} saved to {}",
+                    prepared.session.id,
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// Seconds since the epoch, or zero on a clock set before it.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
+fn run_command(command: &RunCommand) -> Result<LoopStop, RunFailure> {
+    let options = &command.options;
+    let mut prepared =
+        prepare(options, command.output_schema.as_deref()).map_err(RunFailure::Refused)?;
+    install_interrupt(&prepared.cancel);
+
+    // Under `--output-schema` stdout is the answer and nothing else, so the prose goes to stderr
+    // with the rest of the progress. `--json` is unchanged either way.
+    let mut renderer = Renderer::new(io::stdout(), io::stderr(), options.json, options.quiet)
+        .structured(command.output_schema.is_some());
+    let mut items = std::mem::take(&mut prepared.session.items);
+    // Held here rather than borrowed out of `prepared`, so the loop below can borrow the client,
+    // the tools and the approver from it at the same time.
+    let mut hooks = prepared.hooks.take();
+    let mut agent = AgentLoop::new(
+        prepared.client.as_mut(),
+        &mut prepared.tools,
+        prepared.approvals.as_mut(),
+        prepared.config.clone(),
+    )
+    .with_cancel(prepared.cancel.clone());
+    if let Some(hooks) = hooks.as_mut() {
+        agent = agent.with_hooks(hooks);
+    }
+    let mut spend = RunLedger::default();
+    let outcome = agent.run_in(&mut items, &mut spend, command.input.clone(), &mut renderer);
+
+    let answer = match outcome {
+        Ok(outcome) => {
+            prepared.session.extend(&outcome);
+            Ok(outcome.stop)
+        }
+        // The twenty-turn run a blip threw away: the conversation the loop handed back is the
+        // conversation, and it is saved exactly as a finished one is — **with what it cost**. The
+        // usage and the cost of the turns that did happen scrolled past on stderr while the run was
+        // alive; after it, the session file is the only place left holding them, and one that
+        // showed nineteen turns and no tokens would say the failure was free.
+        Err(error) => {
+            prepared.session.items = items;
+            prepared.session.spent(&spend);
+            Err(RunFailure::Failed(error.to_string()))
+        }
+    };
+    close_session(&mut prepared, options, &mut io::stdout());
+    answer
+}
+
+/// `b10x-harness chat` — one conversation, a line at a time.
+///
+/// The smallest thing that removes *one question, one answer, exit*: every line of standard input
+/// is one more turn on the same conversation, the session is written after each of them, and
+/// `exit` or the end of the input stops. There is no line editing, no history and no completion —
+/// a shell has all three, and a harness that grew them would own a terminal library forever.
+///
+/// A session is **named, never picked up**: `chat` starts a new one unless `--resume` says which,
+/// exactly as `run` does. Continuing whatever ran last by default would make two runs with the
+/// same flags mean different things.
+fn chat_command(options: &RunOptions) -> Result<LoopStop, RunFailure> {
+    use std::io::{BufRead as _, Write as _};
+
+    // `chat` takes no `--output-schema`: a conversation has no single end for one to shape.
+    let mut prepared = prepare(options, None).map_err(RunFailure::Refused)?;
+    install_interrupt(&prepared.cancel);
 
     let mut renderer = Renderer::new(io::stdout(), io::stderr(), options.json, options.quiet);
-    let outcome = AgentLoop::new(client.as_mut(), &mut tools, approvals.as_mut(), config)
-        .with_cancel(cancel)
-        .run(options.input.clone(), &mut renderer)
-        .map_err(|error| error.to_string())?;
-    Ok(outcome.stop)
+    let mut items = std::mem::take(&mut prepared.session.items);
+    let mut hooks = prepared.hooks.take();
+    let mut stop = LoopStop::Completed;
+    let stdin = io::stdin();
+    let mut line = String::new();
+    loop {
+        if !options.quiet && !options.json {
+            let _ = write!(io::stderr(), "> ");
+            let _ = io::stderr().flush();
+        }
+        line.clear();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(error) => {
+                close_session(&mut prepared, options, &mut io::stdout());
+                return Err(RunFailure::Failed(format!(
+                    "reading the next question: {error}"
+                )));
+            }
+        }
+        let question = line.trim();
+        if question.is_empty() {
+            continue;
+        }
+        if question == "exit" {
+            break;
+        }
+        let mut agent = AgentLoop::new(
+            prepared.client.as_mut(),
+            &mut prepared.tools,
+            prepared.approvals.as_mut(),
+            prepared.config.clone(),
+        )
+        .with_cancel(prepared.cancel.clone());
+        if let Some(hooks) = hooks.as_mut() {
+            agent = agent.with_hooks(hooks);
+        }
+        let mut spend = RunLedger::default();
+        let outcome = agent.run_in(&mut items, &mut spend, question, &mut renderer);
+        match outcome {
+            Ok(outcome) => {
+                stop = outcome.stop.clone();
+                prepared.session.extend(&outcome);
+                prepared.session.updated_unix = unix_now();
+                if let Err(error) = persist(&prepared.session, prepared.session_dir.as_deref()) {
+                    eprintln!("warning [session] {error}");
+                }
+                // A turn that stopped for a named reason — a budget, a cancel — is the end of the
+                // conversation, not a prompt for the next line: the next one would hit the same
+                // bound and cost another request to find out.
+                if !stop.is_completed() {
+                    break;
+                }
+            }
+            // The line that broke still bought whatever turns it got through, exactly as `run`'s
+            // failed run does — and the session it is written into already holds the lines before
+            // it, so a total that stopped counting here would be wrong about the whole
+            // conversation and not only about this line.
+            Err(error) => {
+                prepared.session.items = items;
+                prepared.session.spent(&spend);
+                close_session(&mut prepared, options, &mut io::stdout());
+                return Err(RunFailure::Failed(error.to_string()));
+            }
+        }
+    }
+    close_session(&mut prepared, options, &mut io::stdout());
+    Ok(stop)
+}
+
+/// `b10x-harness sessions` — what is on this machine to resume.
+///
+/// # Errors
+///
+/// Names the directory it could not read, and any file in it that is not a session this build
+/// understands. A corrupt file is not skipped: a listing that quietly left one out is a listing a
+/// person would resume the wrong session from.
+fn sessions_command(options: &SessionsOptions) -> Result<(), String> {
+    let dir = match &options.session_dir {
+        Some(path) => path.clone(),
+        None => transcript::default_dir()?,
+    };
+    let rows = transcript::Session::list(&dir)?;
+    if rows.is_empty() {
+        println!("no sessions in {}", dir.display());
+        return Ok(());
+    }
+    for row in rows {
+        println!(
+            "{}  {}  {}  {} turn(s)",
+            row.id,
+            utc_stamp(row.updated_unix),
+            row.model,
+            row.turns
+        );
+    }
+    Ok(())
+}
+
+/// A session's `updated` time as `YYYY-MM-DD hh:mm:ssZ`.
+///
+/// The time of day and not only the date, because the sessions worth resuming are usually today's
+/// and a column of identical dates distinguishes none of them. UTC, and it says so: the date
+/// arithmetic is `environment::utc_date`'s, and inventing a local zone here would be a second
+/// answer to what day it is.
+fn utc_stamp(unix: u64) -> String {
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix);
+    let seconds = unix % 86_400;
+    format!(
+        "{} {:02}:{:02}:{:02}Z",
+        environment::utc_date(when),
+        seconds / 3_600,
+        (seconds % 3_600) / 60,
+        seconds % 60
+    )
 }
 
 /// Makes Ctrl-C end the run rather than the process.
@@ -900,13 +1678,91 @@ struct Confinement<'a> {
     scope: harness_tools::Scope,
 }
 
+/// One catalogue, published under whichever surface the run asked for.
+///
+/// An enum rather than a `Box<dyn ToolPort>` because the command needs two things from it: the
+/// port, for the loop, and the **catalogue**, for the instruction and for `tools` — and the
+/// catalogue is not on the trait, because no loop has any business asking what stands behind the
+/// tools it was given.
+enum Published {
+    Flat(harness_tools::Flat),
+    Verbs(harness_tools::Verbs),
+}
+
+impl Published {
+    /// This run's catalogue, which is the same document whichever surface publishes it.
+    fn catalogue(&self) -> &harness_tools::Catalogue {
+        match self {
+            Self::Flat(flat) => flat.catalogue(),
+            Self::Verbs(verbs) => verbs.catalogue(),
+        }
+    }
+
+    fn as_port(&self) -> &dyn harness_wire::ToolPort {
+        match self {
+            Self::Flat(flat) => flat,
+            Self::Verbs(verbs) => verbs,
+        }
+    }
+
+    fn as_port_mut(&mut self) -> &mut dyn harness_wire::ToolPort {
+        match self {
+            Self::Flat(flat) => flat,
+            Self::Verbs(verbs) => verbs,
+        }
+    }
+}
+
+/// Every method delegated, none defaulted.
+///
+/// Taking the trait's defaults here would silently drop the surface's own answers — `invoked`,
+/// which is what the approval gate reads, and `call_batch`, which is what makes six reads cost one
+/// round trip. Both are overridden by at least one of the two surfaces.
+impl harness_wire::ToolPort for Published {
+    fn specs(&self) -> &[harness_wire::ToolSpec] {
+        self.as_port().specs()
+    }
+
+    fn subjects(&self, call: &harness_wire::ToolCall) -> Vec<harness_wire::Subject> {
+        self.as_port().subjects(call)
+    }
+
+    fn invoked(&self, call: &harness_wire::ToolCall) -> Option<harness_wire::ToolSpec> {
+        self.as_port().invoked(call)
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.as_port().operations()
+    }
+
+    fn call(&mut self, call: &harness_wire::ToolCall) -> harness_wire::ToolOutcome {
+        self.as_port_mut().call(call)
+    }
+
+    fn call_within(
+        &mut self,
+        call: &harness_wire::ToolCall,
+        remaining: Option<std::time::Duration>,
+    ) -> harness_wire::ToolOutcome {
+        self.as_port_mut().call_within(call, remaining)
+    }
+
+    fn call_batch(
+        &mut self,
+        calls: &[harness_wire::ToolCall],
+        remaining: Option<std::time::Duration>,
+    ) -> Vec<harness_wire::ToolOutcome> {
+        self.as_port_mut().call_batch(calls, remaining)
+    }
+}
+
 /// The tools this machine admits, which is the machine's answer and not a flag's.
 ///
-/// **The publication gate, in one function**, and it is unchanged by the move to three verbs: what
-/// the *model* sees is always `tool_search`, `tool_describe`, `tool_invoke`, and what the catalogue
-/// behind them holds is what the machine can perform. Three entries with no backend; five with a
-/// confined workspace; six inside a delegated cgroup. A tool the machine cannot confine is one
-/// `tool_search` never lists.
+/// **The publication gate, in one function**, and it is unchanged by either surface: what the
+/// catalogue holds is what the machine can perform. Four entries with no backend; six with a
+/// confined workspace; seven inside a delegated cgroup. A tool the machine cannot confine is one
+/// no surface ever lists. The `surface` argument decides only *how* those entries are offered —
+/// one tool each, or three verbs over them.
 ///
 /// A confinement **nobody asked for** is the read-only catalogue, which is how this harness has run
 /// since it was written and a legitimate way to run now. A confinement the operator **named** and
@@ -919,8 +1775,9 @@ struct Confinement<'a> {
 fn published(
     reading: harness_tools::LocalOperations,
     workspace_name: Option<String>,
+    surface: Surface,
     confinement: &Confinement<'_>,
-) -> Result<harness_tools::Verbs, String> {
+) -> Result<Published, String> {
     let Confinement {
         substrate,
         embedded,
@@ -930,15 +1787,15 @@ fn published(
         toolchain,
         scope,
     } = confinement;
-    let read_only = || {
-        harness_tools::Verbs::new(
-            harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()),
-        )
+    let publish = |catalogue: harness_tools::Catalogue| match surface {
+        Surface::Flat => Published::Flat(harness_tools::Flat::new(catalogue)),
+        Surface::Verbs => Published::Verbs(harness_tools::Verbs::new(catalogue)),
     };
+    let read_only = || publish(harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()));
 
     if *embedded {
         let workspace = adopted(&reading, workspace_name, *cgroup_root, toolchain)?;
-        return Ok(harness_tools::Verbs::new(
+        return Ok(publish(
             harness_tools::Catalogue::of(harness_tools::Split::new(
                 reading,
                 workspace.confined(programs.to_vec()),
@@ -968,7 +1825,7 @@ fn published(
         *workspace_id,
         programs.to_vec(),
     );
-    Ok(harness_tools::Verbs::new(
+    Ok(publish(
         harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
             .scoped(scope.clone()),
     ))
@@ -1061,6 +1918,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
+        options.surface,
         &Confinement {
             substrate: options.substrate.as_deref(),
             embedded: options.substrate_embedded,
@@ -1075,9 +1933,15 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "workspace": options.workspace.display().to_string(),
+            "surface": match options.surface {
+                Surface::Flat => "flat",
+                Surface::Verbs => "verbs",
+            },
             "tools": tools_specs(&tools),
-            // What the three verbs stand in front of, so `b10x-harness tools` still answers the
-            // question a reader is actually asking: what can this run do?
+            // What the surface stands in front of, so `b10x-harness tools` answers the question a
+            // reader is actually asking — what can this run do? — under either of them. Under
+            // `flat` the two lists name the same entries; under `verbs` they do not, and that
+            // difference is exactly what a reader has to be able to see.
             "catalogue": tools.catalogue().search(None, None),
         }))
         .map_err(|error| error.to_string())?
@@ -1105,39 +1969,69 @@ fn tools_specs(tools: &dyn harness_wire::ToolPort) -> serde_json::Value {
 /// the run stopped for a named reason, or the harness could not run at all.
 pub fn dispatch(cli: &Cli) -> ExitCode {
     match &cli.command {
-        Command::Run(options) => match run_command(options) {
-            Ok(stop) if stop.is_completed() => ExitCode::SUCCESS,
-            Ok(stop) => {
-                eprintln!("the run stopped without an answer: {stop:?}");
-                ExitCode::from(2)
-            }
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Command::Tools(options) => match tools_command(options) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Command::AppServer(options) => match app_server_command(options) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        },
-        Command::Events(options) => match events_command(options) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        },
+        Command::Run(command) => stopped(run_command(command), command.options.json),
+        Command::Chat(options) => stopped(chat_command(options), options.json),
+        Command::Sessions(options) => reported(sessions_command(options)),
+        Command::Tools(options) => reported(tools_command(options)),
+        Command::AppServer(options) => reported(app_server_command(options)),
+        Command::Events(options) => reported(events_command(options)),
     }
+}
+
+/// The exit status of a command that runs the loop, and the record it leaves when it could not.
+///
+/// Under `--json` a run that **never started** writes one line saying so, because otherwise it
+/// writes nothing at all and a driver above it sees an exit status and no record. `1` and not
+/// clap's `2`: on this command line `2` already means *the run stopped for a named reason*, which
+/// is a run that happened.
+fn stopped(outcome: Result<LoopStop, RunFailure>, json: bool) -> ExitCode {
+    match outcome {
+        Ok(stop) if stop.is_completed() => ExitCode::SUCCESS,
+        Ok(stop) => {
+            eprintln!("the run stopped without an answer: {stop:?}");
+            ExitCode::from(2)
+        }
+        Err(failure) => {
+            if json && failure.never_started() {
+                println!("{}", refused_line(failure.message()));
+            }
+            eprintln!("error: {}", failure.message());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The exit status of a command that answers once and has no loop to report.
+fn reported(outcome: Result<(), String>) -> ExitCode {
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The one-line record of a run that never started.
+///
+/// The same shape every other loop event has, so a reader parsing the `--json` stream line by line
+/// does not need a second parser for it. `b10x-harness events` maps it onto the terminal record
+/// the stream already has.
+fn refused_line(reason: &str) -> String {
+    serde_json::json!({"kind": "refused", "reason": one_line(reason)}).to_string()
+}
+
+/// A message flattened onto one line, so a line-delimited record stays line-delimited.
+///
+/// clap's refusals are several lines — the error, the usage, a suggestion — and every one of them
+/// is worth keeping, so they are joined rather than cut (`AGENTS.md` invariant 8).
+fn one_line(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `b10x-harness events`
@@ -1159,8 +2053,38 @@ fn events_command(options: &EventsOptions) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Parses the command line and runs it.
+///
+/// # Why the parse failure is caught rather than left to clap
+///
+/// A peer's driver launched this binary with a flag that had changed shape, clap wrote its usage
+/// to stderr and exited **2** before any harness code ran, and the driver — which reads the
+/// `--json` record and the exit status — saw a status it already had a meaning for and no record
+/// at all. Two hours went into working out that the run had never started.
+///
+/// So a refused command line writes the same terminal line every other unstartable run writes, and
+/// exits **1**: on this command line `2` means *the run stopped for a named reason*, which is a run
+/// that happened. clap's own message still goes to stderr, unchanged, because it is the one that
+/// tells a person what to type.
 pub fn run() -> ExitCode {
-    dispatch(&Cli::parse())
+    match Cli::try_parse() {
+        Ok(cli) => dispatch(&cli),
+        // `--help` and `--version` come back as errors too, and they are answers: clap writes them
+        // to stdout and this must not turn them into a failure.
+        Err(error) if !error.use_stderr() => {
+            let _ = error.print();
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            // The raw argv, because there is no parse to ask: a command line clap refused has no
+            // `--json` flag in any structured sense, only in the bytes the caller typed.
+            if std::env::args_os().any(|argument| argument == *"--json") {
+                println!("{}", refused_line(&error.render().to_string()));
+            }
+            let _ = error.print();
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1235,7 +2159,7 @@ mod tests {
         else {
             panic!("the run subcommand parses to run options");
         };
-        *options
+        options.options
     }
 
     #[test]
@@ -1477,20 +2401,28 @@ mod tests {
     }
 
     #[test]
-    fn the_default_instruction_carries_the_catalogue_so_nothing_has_to_be_discovered() {
-        // 33-44% of every tool call across three live runs was `tool_search` or `tool_describe`:
-        // four of ten spent finding out what exists, each a billed round trip replayed in every
-        // later turn. The answer is the same on every turn, so it belongs in the instructions -
-        // which are also the only half of a request a prompt cache can hold.
+    fn the_default_surface_names_every_tool_and_leaves_the_schemas_where_the_provider_reads_them() {
+        // Flat is the default because of what the verbs measured: 33-44% of every tool call across
+        // three live runs was `tool_search` or `tool_describe`. Under this surface there is nothing
+        // to discover — the names are in the instruction and the shapes are in `tools`, which the
+        // provider validates against and a prompt cache holds.
         let dir = tempfile::tempdir().expect("temporary directory");
         let catalogue = a_catalogue(dir.path());
-        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
+        let text = instructions(&options(&[]), &catalogue, "", Owned::default())
+            .expect("the default is available");
 
-        for entry in ["file_read", "dir_list", "search"] {
+        for entry in ["file_read", "dir_list", "search", "find"] {
             assert!(text.contains(entry), "`{entry}` is named up front: {text}");
         }
-        assert!(text.contains("file.read"), "with its operation: {text}");
-        assert!(text.contains("max_bytes"), "and its arguments: {text}");
+        assert!(
+            !text.contains("max_bytes"),
+            "the schemas are in `tools` on every request; a second copy here would be paid for \
+             twice and validated never: {text}"
+        );
+        assert!(
+            !text.contains("tool_invoke"),
+            "there is no verb to reach a tool through: {text}"
+        );
         assert!(
             !text.contains("file_write"),
             "and nothing this read-only run does not have: {text}"
@@ -1498,21 +2430,106 @@ mod tests {
     }
 
     #[test]
-    fn the_default_instruction_points_at_the_catalogue_and_promises_no_effects() {
+    fn the_verbs_surface_still_carries_the_whole_catalogue_in_the_instruction() {
+        // The measurement that put it there stands: discovering the catalogue through the verbs
+        // cost four calls in ten, each a billed round trip replayed in every later turn.
         let dir = tempfile::tempdir().expect("temporary directory");
         let catalogue = a_catalogue(dir.path());
-        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
+        let text = instructions(
+            &options(&["--surface", "verbs"]),
+            &catalogue,
+            "",
+            Owned::default(),
+        )
+        .expect("the default is available");
+
         assert!(text.contains("tool_search"), "{text}");
-        for stale in ["workspace_read", "workspace_list", "workspace_grep"] {
-            assert!(!text.contains(stale), "`{stale}` no longer exists: {text}");
+        assert!(text.contains("file.read"), "with its operation: {text}");
+        assert!(text.contains("max_bytes"), "and its arguments: {text}");
+    }
+
+    #[test]
+    fn every_surface_keeps_the_sentences_that_stop_a_run_reporting_work_it_did_not_do() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let catalogue = a_catalogue(dir.path());
+        for surface in [vec![], vec!["--surface", "verbs"]] {
+            let text = instructions(&options(&surface), &catalogue, "", Owned::default())
+                .expect("available");
+            for stale in ["workspace_read", "workspace_list", "workspace_grep"] {
+                assert!(!text.contains(stale), "`{stale}` no longer exists: {text}");
+            }
+            // The regression that made a live run change nothing and say it had: the standing
+            // instruction told a write-capable run that it could not write.
+            assert!(
+                !text.contains("read-only"),
+                "what a run can do is the toolset's answer, not this text's: {text}"
+            );
+            assert!(text.contains("Never report work as done"), "{text}");
+            assert!(text.contains("was not approved did not happen"), "{text}");
         }
-        // The regression that made a live run change nothing and say it had: the standing
-        // instruction told a write-capable run that it could not write.
+    }
+
+    #[test]
+    fn the_instruction_says_where_the_run_is_and_what_day_it_is() {
+        // A run that does not know its own directory spends a turn asking for `pwd`, and one that
+        // does not know the date writes a dated note with the wrong date.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let workspace = dir.path().canonicalize().expect("canonical");
+        let text = instructions(
+            &options(&["--workspace", workspace.to_str().expect("utf-8 path")]),
+            &a_catalogue(&workspace),
+            "",
+            Owned::default(),
+        )
+        .expect("the default is available");
+
         assert!(
-            !text.contains("read-only"),
-            "what a run can do is `tool_search`'s answer, not this text's: {text}"
+            text.contains(&workspace.display().to_string()),
+            "the absolute workspace path: {text}"
         );
-        assert!(text.contains("Never report work as done"), "{text}");
+        assert!(
+            text.contains(&environment::utc_date(std::time::SystemTime::now())),
+            "and today's date: {text}"
+        );
+    }
+
+    #[test]
+    fn the_project_own_instruction_file_is_carried_and_can_be_left_out_for_a_control() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let workspace = dir.path().canonicalize().expect("canonical");
+        fs::write(
+            workspace.join("AGENTS.md"),
+            "never touch the generated directory",
+        )
+        .expect("write");
+        let path = workspace.to_str().expect("utf-8 path");
+
+        let text = instructions(
+            &options(&["--workspace", path]),
+            &a_catalogue(&workspace),
+            "",
+            Owned::default(),
+        )
+        .expect("the default is available");
+        assert!(
+            text.contains("never touch the generated directory"),
+            "the project's own words reach the run: {text}"
+        );
+
+        // The control. The environment block stays either way — where a run is, is not an
+        // experimental treatment.
+        let text = instructions(
+            &options(&["--workspace", path, "--no-project-instructions"]),
+            &a_catalogue(&workspace),
+            "",
+            Owned::default(),
+        )
+        .expect("the default is available");
+        assert!(
+            !text.contains("never touch the generated directory"),
+            "{text}"
+        );
+        assert!(text.contains("## Environment"), "{text}");
     }
 
     #[test]
@@ -1522,7 +2539,8 @@ mod tests {
             harness_tools::ScopeRule::parse(".engineering/planning/**=partial-only")
                 .expect("a rule"),
         ]));
-        let text = instructions(&options(&[]), &catalogue, "").expect("the default is available");
+        let text = instructions(&options(&[]), &catalogue, "", Owned::default())
+            .expect("the default is available");
 
         assert!(text.contains(".engineering/planning/**"), "{text}");
         assert!(text.contains("file_edit"), "and the way in: {text}");
@@ -1538,8 +2556,13 @@ mod tests {
                 .expect("a rule"),
         ]);
         let catalogue = a_catalogue(dir.path()).scoped(scope);
-        let text = instructions(&options(&["--scope-announce", "silent"]), &catalogue, "")
-            .expect("the default is available");
+        let text = instructions(
+            &options(&["--scope-announce", "silent"]),
+            &catalogue,
+            "",
+            Owned::default(),
+        )
+        .expect("the default is available");
 
         assert!(!text.contains(".engineering/planning/**"), "{text}");
         assert!(
@@ -1558,8 +2581,184 @@ mod tests {
         // Verbatim, catalogue and all: appending to a document somebody wrote would make the run's
         // instruction something the file alone cannot reproduce.
         assert_eq!(
-            instructions(&options, &a_catalogue(dir2.path()), "").expect("readable"),
+            instructions(&options, &a_catalogue(dir2.path()), "", Owned::default())
+                .expect("readable"),
             "be terse"
         );
+    }
+
+    /// The whole `run` invocation, so the flags `chat` does not take can be exercised.
+    fn a_run(arguments: &[&str]) -> RunCommand {
+        let base = vec![
+            "b10x-harness",
+            "run",
+            "--base-url",
+            "https://gw.example/v1",
+            "--model",
+            "m",
+            "--input",
+            "hi",
+        ];
+        let Command::Run(command) = parse(&[base, arguments.to_vec()].concat())
+            .expect("the arguments parse")
+            .command
+        else {
+            panic!("the run subcommand parses to run options");
+        };
+        *command
+    }
+
+    #[test]
+    fn delegation_is_off_until_it_is_asked_for_and_then_carries_its_own_turn_ceiling() {
+        assert_eq!(delegation(&options(&[])), None, "a new tool is opt-in");
+        let on = delegation(&options(&["--delegate"])).expect("published");
+        assert_eq!(on.name.as_str(), harness_loop::DEFAULT_DELEGATE_NAME);
+        assert_eq!(on.max_turns, harness_loop::DELEGATE_MAX_TURNS);
+        assert_eq!(
+            delegation(&options(&["--delegate", "--delegate-turns", "3"]))
+                .expect("published")
+                .max_turns,
+            3
+        );
+    }
+
+    #[test]
+    fn a_turn_ceiling_for_a_delegate_nobody_published_is_a_parse_error() {
+        // And its own default must not trip that rule, or `run` would never parse at all.
+        parse(&[
+            "b10x-harness",
+            "run",
+            "--base-url",
+            "u",
+            "--model",
+            "m",
+            "--input",
+            "hi",
+            "--delegate-turns",
+            "3",
+        ])
+        .expect_err("a ceiling on a tool this run does not publish means nothing");
+    }
+
+    #[test]
+    fn a_delegate_that_may_take_no_turn_at_all_is_a_parse_error_naming_the_flag() {
+        // Refused by clap, so the run never starts and the message names what the operator typed.
+        // Left to the child's `Budget::validate` this same zero is discovered once per delegation
+        // — after a paid parent turn asked for one — while the parent's `--max-turns 0` is
+        // refused before the first request. One rule, both bounds.
+        let error = parse(&[
+            "b10x-harness",
+            "run",
+            "--base-url",
+            "u",
+            "--model",
+            "m",
+            "--input",
+            "hi",
+            "--delegate",
+            "--delegate-turns",
+            "0",
+        ])
+        .expect_err("a delegate that may take no turn is a delegate that can report nothing");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ValueValidation,
+            "a refused value, which clap exits 2 for, not a run that starts: {error}"
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains("--delegate-turns"),
+            "the message names the flag: {message}"
+        );
+    }
+
+    #[test]
+    fn chat_takes_no_output_schema_because_a_conversation_has_no_single_end() {
+        parse(&[
+            "b10x-harness",
+            "chat",
+            "--base-url",
+            "u",
+            "--model",
+            "m",
+            "--output-schema",
+            "s.json",
+        ])
+        .expect_err("`--output-schema` is `run`'s alone");
+        // The two `chat` does take.
+        parse(&[
+            "b10x-harness",
+            "chat",
+            "--base-url",
+            "u",
+            "--model",
+            "m",
+            "--delegate",
+            "--hooks",
+            "h.json",
+        ])
+        .expect("delegation and hooks are a conversation's business too");
+    }
+
+    #[test]
+    fn an_output_schema_is_read_from_the_file_and_refused_in_the_loops_own_words() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("schema.json");
+        fs::write(
+            &path,
+            r#"{"type": "object", "properties": {"verdict": {}}}"#,
+        )
+        .expect("write");
+        let command = a_run(&["--output-schema", path.to_str().expect("utf-8 path")]);
+        let published = schema(command.output_schema.as_deref())
+            .expect("an object schema")
+            .expect("published");
+        assert_eq!(published.name.as_str(), harness_loop::DEFAULT_ANSWER_NAME);
+
+        fs::write(&path, r#"{"type": "string"}"#).expect("write");
+        let error = schema(Some(path.as_path())).expect_err("refused before the run");
+        assert!(error.contains("JSON Schema for an object"), "{error}");
+        assert!(error.contains("schema.json"), "the file is named: {error}");
+
+        let missing = schema(Some(dir.path().join("absent.json").as_path()))
+            .expect_err("a file that is not there refuses the run");
+        assert!(missing.contains("absent.json"), "{missing}");
+    }
+
+    #[test]
+    fn a_hooks_file_that_this_build_cannot_read_refuses_the_run_rather_than_running_without_it() {
+        // The pre-loop refusal: a run started with `--hooks` and no hooks is a run whose gate the
+        // operator thinks is there.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("hooks.json");
+        fs::write(&path, r#"{"version": 9, "hooks": []}"#).expect("write");
+        let error = hooks::Hooks::load(&path).expect_err("refused");
+        assert!(error.contains("version 1"), "{error}");
+    }
+
+    #[test]
+    fn the_instruction_names_the_two_tools_the_loop_owns_only_when_the_run_has_them() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let catalogue = a_catalogue(dir.path());
+        let without = instructions(&options(&[]), &catalogue, "", Owned::default())
+            .expect("the default is available");
+        assert!(!without.contains("`delegate`"), "{without}");
+        assert!(!without.contains("`answer`"), "{without}");
+
+        let with = instructions(
+            &options(&[]),
+            &catalogue,
+            "",
+            Owned {
+                delegate: Some("delegate"),
+                answer: Some("answer"),
+            },
+        )
+        .expect("the default is available");
+        assert!(
+            with.contains("`delegate` hands one self-contained sub-task"),
+            "one line, because the tool's own description carries the rest: {with}"
+        );
+        assert!(with.contains("Finish by calling `answer`"), "{with}");
     }
 }

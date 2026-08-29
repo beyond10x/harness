@@ -103,4 +103,13 @@ An unpublished tool, rejected approval, blocked hook, invalid argument, oversize
 path becomes an explicit failed tool outcome. It is never reported to the model as success, and the
 run record carries enough information to distinguish the refusal from an executed call.
 
+## Narrowing for a named agent
+
+A named agent (`--agents-dir`, or a plugin's `agents/`) may declare `tools:`. The declaration is
+intersected with what the parent run was admitted — never with the port's whole list — so it can
+only remove entries. The narrowing is enforced at one chokepoint: it filters what the child is
+published and refuses a call to anything outside it, by the same rule that refuses a tool the run
+never published. Under the `verbs` surface the entry is an argument of `tool_invoke` and is decided
+inside the port, so this narrowing is a `flat`-surface feature for now.
+
 Continue with [Confined workspaces](../guides/confinement.md) before enabling writes or execution.

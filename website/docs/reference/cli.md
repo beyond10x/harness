@@ -13,8 +13,10 @@ b10x-harness --help
 b10x-harness run --help
 ```
 
-The repository pins that generated command-line surface as a versioned contract. This page groups
-the options by task rather than copying every help paragraph.
+The repository pins that generated command-line surface as a versioned contract; the current pin is
+`contracts/cli/b10x-harness/2026-08-29.3`. A released version — one reachable on `origin/main` —
+never changes, and a changed surface cuts the next one. This page groups the options by task rather
+than copying every help paragraph.
 
 ## Commands
 
@@ -25,7 +27,7 @@ the options by task rather than copying every help paragraph.
 | `workflow plan` | Validate a workflow document and print what runs in what order, without an endpoint |
 | `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
-| `tools` | Print the catalogue this machine would publish, without a model call |
+| `tools` | Print the catalogue, skills and agents this machine would publish, without a model call |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
 | `events` | Convert a Harness JSONL record into `metaharness.event/1` |
 
@@ -63,6 +65,25 @@ Harness has no ambient credential fallback.
 | `--no-project-instructions` | Omit `AGENTS.md` or `CLAUDE.md` from the standing instruction |
 | `--write-scope GLOB=SCOPE` | Restrict matching paths; repeatable, first match wins |
 | `--scope-announce stated\|silent` | Tell the model the write restrictions or test the gate silently |
+
+## Skills and agents
+
+Both `run` and `tools` take these. Each is repeatable, and a named directory that is not there
+refuses the run by name, as `--context` does.
+
+| Option | Meaning |
+|---|---|
+| `--skills-dir DIR` | Offer every `DIR/<name>/SKILL.md` as a skill: its `description` in the standing instruction, its body only when the model calls the `skill` tool by name |
+| `--agents-dir DIR` | Offer every `DIR/<name>.md` as a named agent a `delegate` call may pick; needs `--delegate` |
+| `--plugin-dir DIR` | `--skills-dir DIR/skills` plus `--agents-dir DIR/agents`, each name qualified `<plugin>:<name>` from `DIR/.claude-plugin/plugin.json` |
+
+The layout is the one Claude Code writes, so a plugin written for it runs here unchanged. The
+frontmatter reader takes top-level `key: value` lines and nothing else: a document using a key this
+build does not read refuses the run rather than being half-read. An agent's `tools:` list uses the
+vendor's names — `Read`, `Grep`, `Glob`, `Bash`, `Write`, `Edit`, `LS` — and a name outside that
+table refuses the document, as does `tools: []`. See
+[Structured runs, delegates and hooks](../guides/structured-runs.md#name-an-agent) for what an agent
+may and may not do.
 
 ## Confinement
 
@@ -114,7 +135,7 @@ object, and `workflow run` derives one schema per step for itself.
 
 | Option | Meaning |
 |---|---|
-| `--delegate` | Publish one fresh-context sub-agent tool |
+| `--delegate` | Publish one fresh-context sub-agent tool; with agents offered, a call may name one |
 | `--delegate-turns N` | Cap one delegate; default `20`, minimum `1` |
 | `--hooks FILE` | Load explicitly named operator hook programs |
 

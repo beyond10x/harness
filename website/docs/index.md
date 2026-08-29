@@ -57,7 +57,7 @@ was requested but withheld, together with the machine fact that withheld it.
 
 | Surface | Use it when |
 |---|---|
-| `b10x-harness run` and `chat` | A person, shell script or evaluator owns the process |
+| `b10x-harness run`, `chat` and `workflow run` | A person, shell script or evaluator owns the process |
 | `harness-loop` library | Another Rust component should bind model and tool ports in-process |
 | `b10x-harness app-server` | A compatible client owns tools and talks JSON-RPC over stdio |
 

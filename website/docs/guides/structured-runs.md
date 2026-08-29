@@ -1,6 +1,6 @@
 ---
 title: Structured runs, delegates and hooks
-description: Opt into machine-readable answers, fresh-context delegation, and operator hooks.
+description: Opt into machine-readable answers, skills loaded on demand, fresh-context and named delegation, and operator hooks.
 ---
 
 # Structured runs, delegates and hooks
@@ -50,6 +50,21 @@ The provider receives the schema as the tool's argument schema. Harness currentl
 an independent JSON Schema validation pass after the call. Treat that as a current limitation when
 the result crosses a trust boundary.
 
+## Offer skills on demand
+
+`--skills-dir DIR` offers every `DIR/<name>/SKILL.md` — YAML frontmatter with `name` and
+`description`, the document after — as a skill. Only the descriptions reach the model, one line each
+in the standing instruction; the body arrives as the result of a `skill` call the model makes by
+name. This loop replays the whole conversation every turn, so a body placed in the instruction is
+billed on every turn of every run: `--context` is for the files a run needs throughout, and a skill
+library is the other case. The `skill` tool's input is a schema `enum` of the offered names, so a
+name this run does not have is refused by the provider before it is sent.
+
+`--plugin-dir DIR` reads `DIR/skills/` and `DIR/agents/` the same way and qualifies each name
+`<plugin>:<name>` from `DIR/.claude-plugin/plugin.json`, so two plugins that both ship a `planning`
+stay distinguishable. The `started` event and `b10x-harness tools` list the offered names — always,
+empty included — because a run given skills and a run given none are different records.
+
 ## Delegate one task
 
 `--delegate` publishes another loop-owned tool. The model can hand one self-contained task to a
@@ -72,6 +87,32 @@ The delegate receives:
 It reports `{stop, turns, text}` once to the parent. Delegation is depth one: a delegate cannot
 delegate again. Child events are wrapped as `delegated` so a consumer cannot confuse child text
 with the parent answer.
+
+### Name an agent {#name-an-agent}
+
+`--agents-dir DIR`, or the `agents/` half of `--plugin-dir DIR`, describes delegates in advance in
+the on-disk shape Claude Code reads — `DIR/<name>.md`:
+
+```markdown
+---
+name: reviewer
+description: Reads a diff and reports what would break, without editing anything.
+tools: Read, Grep, Glob
+---
+You are reviewing, not fixing. Report findings as file:line and stop.
+```
+
+The body is that agent's standing instruction. The model calls `delegate(task, agent)`; the `agent`
+argument is a schema `enum` of the offered names, so a name this run does not have is refused before
+it is sent, and a run with no agents publishes no `agent` key at all.
+
+An agent narrows and never widens. Its `tools:` is mapped to Harness names and intersected with what
+the **parent was admitted**, so a child of an already narrowed run cannot climb back out by naming
+an agent, and a file arriving from an unaudited place — a plugin, a checked-out dependency — cannot
+grant `run` to a run whose catalogue never published it. What the agent asked for and did not get is
+a `withheld` record in the child's own session. The narrowing filters what is published **and**
+refuses the call, so a hidden tool is not reachable by name. A file with no `tools:` key is
+unrestricted, not disarmed; `tools: []` is refused.
 
 ## Run operator hooks
 

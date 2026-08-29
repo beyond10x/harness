@@ -15,10 +15,11 @@ unreleased work present on `main` as of 2026-08-29.
 | Provider turns | Streaming OpenAI Responses and Anthropic Messages projections |
 | Agent loop | Turn assembly, tool round trips, approvals, cancellation, compaction, and budgets |
 | Workspace tools | Bounded reads everywhere; writes and argv execution behind substrate capabilities |
-| Command line | `run`, `chat`, `sessions`, `tools`, `app-server`, and `events` |
+| Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `app-server`, and `events` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
-| Advanced loop | Opt-in depth-one delegation and operator hooks |
+| Advanced loop | Opt-in depth-one delegation, named agents and skills read from a Claude Code plugin layout, and operator hooks |
+| Workflows | A YAML or JSON flow walked one model turn per step, one session per section, with a `transition` hook asked at every section boundary |
 | Contracts | Pinned provider requests/streams, app-server profile, and generated argv surface |
 
 The full Rust workspace gate tests, formats, lints, and checks all three contract families. The two
@@ -47,6 +48,11 @@ work item rather than a completed compatibility claim.
   the `answer` tool input shape.
 - **Delegation is depth one and sequential.** Delegates cannot create delegate trees or run in
   parallel.
+- **A named agent's toolset narrows only under the `flat` surface.** Under `verbs` the call names
+  `tool_invoke` and the entry is decided inside the port, so named agents are a flat-surface feature
+  for now.
+- **The skill and agent frontmatter reader is deliberately small.** Top-level `key: value` only;
+  any other key refuses the run by name rather than being skipped.
 - **Hooks are host programs, not sandboxed tools.** They must be explicitly named and trusted.
 - **Bridge mode lacks live external-client evidence.** The implemented profile is contract-tested,
   but no real external bridge has driven it yet.
@@ -60,7 +66,10 @@ work item rather than a completed compatibility claim.
 ## Stability
 
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
-profile, or argv surface cuts a new versioned contract rather than rewriting the old one.
+profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
+means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
+a second cut on one day takes a `.N` suffix: `2026-08-29.3` is the third argv cut of that day and
+the current one.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

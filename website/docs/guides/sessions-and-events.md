@@ -90,8 +90,9 @@ Each line is one object with a kebab-case `kind`. The main event groups are:
 | Recovery | `turn-retried`, `compacted`, `warning` |
 | Advanced | `answered`, `delegate-started`, `delegated`, `delegate-finished`, `hook-ran` |
 
-The `started` event names the model, tools published to it, neutral operations, and any requested
-tool withheld by the machine. The `finished` event carries the typed stop and total model turns.
+The `started` event names the model, tools published to it, neutral operations, any requested tool
+withheld by the machine, and the `skills` and `agents` offered — the last three written even when
+empty, so *this run had none* and *this build does not say* are different records. The `finished` event carries the typed stop and total model turns.
 
 ### Warning codes
 

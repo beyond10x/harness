@@ -211,3 +211,72 @@ decides whether provider-native constrained decoding (M2) is cut as new contract
 Out of scope, and why: an MCP client would make this loop a client of a protocol whose tools
 nothing here confines — metaharness is the MCP side of this family; multimodal input is a new
 neutral value on both wires that nothing measuring this harness has asked for.
+
+## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
+
+**Status: the notation exists and nothing binds it.**
+
+`crates/harness-flow` is 1,891 lines and 27 tests: a DAG of sub-trees, a group as a context scope,
+`Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and
+`Flow::run` walking a validated plan against a caller's `StepRunner`. Every `StepRunner` that
+exists is in its own `tests.rs`; no crate in `harness-cli` depends on it. On the other side of the
+boundary, engineering-protocols already projects into it — `protocol workflow flow --id adp/default/2
+--map …` emits `fixtures/adp-default.projected.yaml`, and that document plans and retreats here.
+The projection says what it is: **an ordering, not a government.** Guards, the `declined` outcome
+and every early exit are dropped, and the retreat bound is a number on the command line because the
+source bounds a retreat with the engine's iteration budget.
+
+**Why the runner has to live here, and not stay a process-per-step driver.** Today a workflow runs
+this loop in exactly one way: `protocol drive run` in engineering-protocols spawns the binary once
+per `llm` step, through `metaharness run b10x`, with the step's prompt, `--context` files,
+`--write-scope` and `--allow-program`, and nothing else. The loop never sees the graph; every step
+starts cold; a retreat is the engine re-entering a state and paying for the context again.
+metaharness is the right spawner for a *vendor* harness — a scratch home, a copied plugin tree, a
+hook channel, a retained transcript — and for this loop it adds an argv and an attestation, which its
+own adapter says in as many words. Phase 5's consumer embeds this loop as a library. A driver that
+is a process tree of `protocol drive` → `metaharness` → `b10x-harness` per step cannot be embedded,
+and an embedder that wants a workflow wants its ordering, its context scope and its retreat *inside*
+the loop it holds. So the runner is this component's, and it must need neither metaharness nor a
+`protocol` process to walk a plan.
+
+**What stays outside, by decision.** The governor. The engine (`aep-engine`: guards, evidence,
+transitions, visit and attempt budgets) and the step map (`aep-driver-spec`) are
+engineering-protocols', and they stay there: this harness embeds nothing above it (invariant 2), and
+a driver that evaluated a gate would be a second protocol implementation with none of the
+conformance suites behind it — engineering-protocols' own guide refuses that by name. The driver is
+not in metaharness and nothing has to be extracted from it. What is worth taking apart is on the
+engineering-protocols side: the routing core (`aep-driver`, 90 lines) is a library already; the
+per-harness argv, the per-call `decide_tool`, store integrity and the run directory are the 6,994
+lines of `protocol drive`. The bridge asks that repository for one new thing — a way to put **one
+transition** to the engine from a run cursor, as a program the loop can call — and nothing else.
+
+**The bridge is bytes, in both directions, over ports this loop already has:**
+
+| leg | mechanism | owner |
+|---|---|---|
+| workflow in | the flow document, `protocol workflow flow --map <steps> --max-attempts N` | engineering-protocols, exists |
+| step → turn | a `StepRunner` in `harness-cli`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives` | here, absent |
+| transition out | a fourth hook point on `--hooks`, `transition`: fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is | here, absent |
+| the governor | any program behind that hook — `protocol drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | engineering-protocols, absent |
+| the record | `flow.*` events on `--json`; metaharness maps each to an IR family or lists it as control plane, when an eval wants the run | metaharness, absent, optional |
+
+**What this is not: an eval arm.** Under the three-arm program the workflow runs in the engine on
+every arm, and the arms are comparable because only the treatment varies. A run under this phase
+moves the sequencer, so it is a different experiment, not a fifth column of the same one. Where it
+is measured against the driven native arm is cost, tokens and wall-time under the **same** governor
+program — the warm-context claim above is a number to be produced, not a property to be asserted.
+
+Steps, each its own story:
+
+1. `StepRunner` bound to a turn: a group's steps share one session, a step in a new group starts
+   from `available` and nothing else, `handoff` reads the structured `answer`. Both emulators.
+2. `run --flow <FILE> [--max-attempts N]`, and `flow-started`, `group-entered{attempt}`,
+   `step-completed`, `group-exhausted`, `flow-completed` on `--json`, rendered on stderr like
+   everything else.
+3. The `transition` hook point, with the same *declared, never discovered; narrowing only* rules.
+4. The metaharness projection of `flow.*`, only when an eval asks for it.
+
+**Exit evidence:** the shipped binary walks `adp-default.projected.yaml` end to end over both
+emulators, takes one retreat and stops at its bound, and puts every transition to a hook program
+that refuses one of them — with no `metaharness` and no `protocol` process alive; and one embedded
+run under Phase 5's consumer does the same through the library.

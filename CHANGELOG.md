@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-30
+
 ### Added
 
 - **A workflow's `command` step is one call through the gate, not a model turn** (design 0003

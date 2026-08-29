@@ -95,7 +95,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "b10x-harness-app-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-responses",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-credential",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-credential"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-wire",
  "serde_json",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-flow"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-wire",
  "serde",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-http"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-wire",
  "reqwest",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-wire",
  "serde",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-messages"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-credential",
  "b10x-harness-http",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-responses"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-http",
  "b10x-harness-loop",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-substrate"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-tools",
  "b10x-harness-wire",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-harness-wire",
  "globset",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",

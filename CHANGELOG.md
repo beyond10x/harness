@@ -464,7 +464,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `chat`. A run nobody could price still adds no cost rather than a zero. This is the rule
   `RunState::absorb_child` already applies to a delegate — a child that broke on turn four still
   bought three turns — reaching the top-level run, where the shell rather than the loop is the
-  thing holding the record.
+  thing holding the record. The join is proved end to end by a new scenario both emulators serve,
+  `fails-after-turn` — one whole turn with usage and a tool call, then a request answered `400`,
+  which the retry rule treats as final so nothing waits out a back-off — against which
+  `crates/harness-cli/tests/end_to_end.rs` asserts that a `run` on either wire and a `chat` line
+  exit 1, leave a record that carries the bought turn and never a `finished`, and file a session
+  holding two turns, the answered turn's usage and its cost, while a run nobody could price
+  (`unauthorized` under a rate card) leaves that session unpriced rather than at zero.
 
 - **A compaction can no longer fold a tool call away from its result**, or a reasoning item away
   from the call that follows it: the summary's fold boundary now falls only between whole turn

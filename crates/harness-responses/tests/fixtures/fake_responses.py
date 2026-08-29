@@ -31,6 +31,7 @@ SCENARIOS = [
     "delegate",
     "dynamic-tool",
     "failed",
+    "fails-after-turn",
     "flat-tool",
     "flat-write",
     "hooks-block",
@@ -333,6 +334,27 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 ]
             )
+        elif scenario == "fails-after-turn":
+            # A turn is bought and answered -- it carries usage, and it asks for one tool call the
+            # loop comes back from -- and the request after it is refused. The only scenario where a
+            # run breaks on the wire with spend already on the meter, which is the case a session
+            # has to keep the figures of.
+            #
+            # 400 rather than a 5xx or a 429: `harness_http::status_error` maps it to `Refused` and
+            # not retriable, so the wire gives up on the first request and this costs no wall clock.
+            # A retriable status reaches the same failure after sleeping 1 + 2 + 4 s of back-off.
+            if has_function_output(body):
+                self._send_json(
+                    400,
+                    {
+                        "error": {
+                            "message": "that conversation is no longer accepted",
+                            "code": "invalid_request_error",
+                        }
+                    },
+                )
+            else:
+                self._send_sse(function_call_events("file_read", {"path": "README.md"}))
         elif scenario == "incomplete":
             self._send_sse(
                 [

@@ -40,8 +40,9 @@ wave (`docs/reviews/2026-08-29-sota-comparison.md`). The previous observation wa
 
 ## Test counts
 
-706 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
-the follow-up wave — failed-run spend handed back and persisted, and the transport extraction into
+711 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
+the follow-up wave — failed-run spend handed back and persisted, now proved end to end against a
+`fails-after-turn` scenario both emulators serve, and the transport extraction into
 `harness-http`):
 
 | Crate | Unit | Integration |
@@ -56,7 +57,7 @@ the follow-up wave — failed-run spend handed back and persisted, and the trans
 | `harness-substrate` | 42 | 4 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
 | `harness-tools` | 78 | — |
 | `harness-app-server` | 19 | 5 contract |
-| `harness-cli` | 125 | 36 end-to-end, 17 bridge-mode |
+| `harness-cli` | 125 | 41 end-to-end, 17 bridge-mode |
 
 The provider-emulated, end-to-end and bridge-mode suites drive real processes: a local HTTP endpoint
 over a socket, and the built binary over pipes — including `chat` driven down a pipe, a session

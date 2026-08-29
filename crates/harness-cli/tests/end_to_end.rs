@@ -607,6 +607,266 @@ fn a_run_that_never_got_an_answer_still_files_what_it_had() {
     );
 }
 
+/// A synthetic rate card naming the emulated model, in a directory of its own.
+///
+/// Written by the test rather than found anywhere (`AGENTS.md` invariant 17). Its own directory
+/// because a `.json` file beside the sessions is a file `only_session` would try to parse as one.
+/// Without a card the loop prices nothing, and the cost half of what a failed run hands back would
+/// be `None` in every assertion below for a reason that has nothing to do with the failure.
+fn rate_card(dir: &Path) -> PathBuf {
+    let path = dir.join("rates.json");
+    fs::write(
+        &path,
+        r#"{"source": "a synthetic card this test wrote", "as_of": "2026-08-29",
+            "models": {"b10x-emulated": {"input_usd_per_mtok": 1.0,
+                                         "cached_input_usd_per_mtok": 0.1,
+                                         "output_usd_per_mtok": 2.0}}}"#,
+    )
+    .expect("write");
+    path
+}
+
+#[test]
+fn a_run_that_broke_on_the_wire_files_the_turn_it_had_already_bought() {
+    // The `Err` arm's ledger fold, end to end. `fails-after-turn` is the only scenario that answers
+    // a whole turn — usage, a cost, one tool call the loop comes back from — and *then* breaks on
+    // the wire, so it is the only one where the session file can be wrong about what a failed run
+    // spent. Every figure asserted here scrolled past on stderr while the run was alive; after it,
+    // this file is the only place left holding them, and one showing a turn and no tokens would
+    // say the failure was free.
+    let fixture = Fixture::start("fails-after-turn");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+
+    let output = run_with_session(
+        &fixture,
+        &["--prices", card.to_str().expect("utf-8 path")],
+        workspace.path(),
+        sessions.path(),
+    );
+
+    // The status `README.md` documents for a run the harness could not finish — not the `2` of a
+    // run that stopped for a named reason.
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(
+        output.stderr.contains("400"),
+        "the failure names itself: {}",
+        output.stderr
+    );
+    // Turn one really happened first: the tool was called and answered before the wire refused.
+    assert!(output.stderr.contains("→ file_read"), "{}", output.stderr);
+    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+
+    let session = only_session(sessions.path());
+    assert_eq!(
+        session["turns"], 2,
+        "the turn that answered and the one that broke: {session}"
+    );
+    assert_eq!(
+        session["usage"].as_array().expect("usage").len(),
+        1,
+        "one entry, for the one turn the provider reported for: {session}"
+    );
+    assert_eq!(session["usage"][0]["input_tokens"], 42, "{session}");
+    assert_eq!(session["usage"][0]["output_tokens"], 8, "{session}");
+    // 35 fresh input at $1/Mtok, 7 cached at $0.10, 8 output at $2, rounded once for the turn.
+    assert_eq!(
+        session["cost_micro_usd"], 52,
+        "a run that failed is not a run that was free: {session}"
+    );
+    // And the conversation it had when it broke is filed beside the figures, as it always was.
+    let kinds: Vec<&str> = session["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter_map(|item| item["kind"].as_str())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["user-text", "tool-call", "tool-result"],
+        "{session}"
+    );
+}
+
+#[test]
+fn a_run_that_broke_on_the_wire_files_what_it_bought_on_the_second_wire_too() {
+    // The same scenario and the same assertions, one flag different. The fold is the shell's and
+    // cannot see which wire a run was on; the figures differ only because this route reports its
+    // cache read disjointly and the client sums it, so 42 + 7 arrives as 49.
+    let fixture = Fixture::messages("fails-after-turn");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+
+    let output = run_with_session(
+        &fixture,
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--prices",
+            card.to_str().expect("utf-8 path"),
+        ],
+        workspace.path(),
+        sessions.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+
+    let session = only_session(sessions.path());
+    assert_eq!(session["wire"], "anthropic-messages");
+    assert_eq!(session["turns"], 2, "{session}");
+    assert_eq!(session["usage"].as_array().expect("usage").len(), 1);
+    assert_eq!(session["usage"][0]["input_tokens"], 49, "{session}");
+    assert_eq!(session["usage"][0]["cached_input_tokens"], 7, "{session}");
+    assert_eq!(session["cost_micro_usd"], 59, "{session}");
+}
+
+#[test]
+fn the_record_of_a_run_that_broke_after_a_turn_carries_that_turn_and_stops() {
+    // What a driver above this process reads. The turn that was bought is in the record with its
+    // usage and its cost, the turn that broke is announced and never finishes, and there is no
+    // `finished` event at all — a run that ended on the wire must not be readable as one that
+    // completed. The failure itself is on stderr beside the exit status, because `refused` is
+    // reserved for a run that never started and this one did.
+    let fixture = Fixture::start("fails-after-turn");
+    let workspace = workspace();
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+
+    let output = run_against(
+        &fixture,
+        &["--json", "--prices", card.to_str().expect("utf-8 path")],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert_eq!(kinds.first(), Some(&"started"));
+    assert!(kinds.contains(&"tool-requested"), "{kinds:?}");
+    assert!(kinds.contains(&"tool-completed"), "{kinds:?}");
+    assert!(kinds.contains(&"usage"), "{kinds:?}");
+    assert!(kinds.contains(&"cost"), "{kinds:?}");
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "turn-started").count(),
+        2,
+        "the turn that answered and the one that broke: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.last(),
+        Some(&"turn-started"),
+        "the record stops where the wire did: {kinds:?}"
+    );
+    assert_eq!(
+        events.last().expect("a last event")["turn"],
+        serde_json::json!(2)
+    );
+    assert!(
+        !kinds.contains(&"finished"),
+        "a run that broke must not read as one that ended: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"refused"),
+        "`refused` is for a run that never started, and this one did: {kinds:?}"
+    );
+    assert!(
+        output.stderr.contains("400"),
+        "the failure is named on stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_chat_line_that_broke_on_the_wire_files_what_that_line_had_bought() {
+    // `chat` folds the ledger in its own `Err` arm, and it has to: the session it writes into is
+    // the whole conversation's, so a total that stopped counting at the line that broke would be
+    // wrong about every line before it and not only about this one. One line down the pipe is
+    // enough to show it, because the line that breaks ends the chat.
+    let fixture = Fixture::start("fails-after-turn");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+
+    let mut child = Command::new(BINARY)
+        .args([
+            "chat",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--api-key-env",
+            "B10X_HARNESS_TEST_KEY",
+            "--workspace",
+            workspace.path().to_str().expect("utf-8 path"),
+            "--session-dir",
+            sessions.path().to_str().expect("utf-8 path"),
+            "--prices",
+            card.to_str().expect("utf-8 path"),
+        ])
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(b"read the readme and tell me what it says\n")
+        .expect("write");
+    let output = child.wait_with_output().expect("the chat ends");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(stderr.contains("400"), "{stderr}");
+
+    let session = only_session(sessions.path());
+    assert_eq!(session["turns"], 2, "{session}");
+    assert_eq!(session["usage"].as_array().expect("usage").len(), 1);
+    assert_eq!(session["cost_micro_usd"], 52, "{session}");
+}
+
+#[test]
+fn a_failed_run_nobody_could_price_leaves_the_session_unpriced_rather_than_zero() {
+    // The other half of the same fold (`AGENTS.md` invariant 7). `unauthorized` breaks on the first
+    // request, so the run started a turn the provider never reported usage for. A rate card is in
+    // force, so a zero here would be a figure the harness computed rather than one it never had —
+    // and `b10x-harness sessions` would report the run as having cost nothing.
+    let fixture = Fixture::start("unauthorized");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+
+    let output = run_with_session(
+        &fixture,
+        &["--prices", card.to_str().expect("utf-8 path")],
+        workspace.path(),
+        sessions.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let session = only_session(sessions.path());
+    assert_eq!(
+        session["turns"], 1,
+        "the turn was started and paid for by the attempt: {session}"
+    );
+    assert!(
+        session["usage"].as_array().expect("usage").is_empty(),
+        "nothing was reported, and an empty list says so: {session}"
+    );
+    assert!(
+        session["cost_micro_usd"].is_null(),
+        "absent, never zero: {session}"
+    );
+}
+
 #[test]
 fn a_session_from_the_other_wire_is_refused_before_anything_is_sent() {
     // An opaque provider item may not cross wires. The loop would refuse it; saying so here says

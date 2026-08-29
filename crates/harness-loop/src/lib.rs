@@ -20,7 +20,7 @@ mod price;
 use std::time::Instant;
 
 use harness_wire::{
-    Approval, Item, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_RESULT_BYTES, ModelPort, Sampling,
+    Approval, Item, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_RESULT_BYTES, ModelPort, Risk, Sampling,
     StopReason, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort, ToolSpec, TurnRequest,
     Usage, WireError, WireErrorCode, exceeds,
 };
@@ -139,6 +139,17 @@ pub struct LoopConfig {
     /// [`Budget::max_cost_microunits`] enforceable or not: a ceiling is only real where the figure
     /// it bounds can be computed.
     pub prices: Option<RateCard>,
+    /// The highest risk a call may carry without a person being asked.
+    ///
+    /// [`Risk::Low`] by default, because the default approver is [`DenyAll`] and *a harness that
+    /// approves by default turns a review gate into decoration* — so the default posture is to ask
+    /// about anything above a cheap, visible read. Every tool this harness ships declares
+    /// `Approval::NotRequired`, so without this the gate decided nothing at all.
+    ///
+    /// Raising it is how a caller says *unattended* out loud, and it only means anything alongside
+    /// an approver that says yes: [`ApproveAll`] with [`Risk::Destructive`] is an unattended run
+    /// declared, rather than one arrived at because no tool happened to ask.
+    pub unattended_ceiling: Risk,
 }
 
 impl LoopConfig {
@@ -149,6 +160,7 @@ impl LoopConfig {
             budget: Budget::default(),
             sampling: Sampling::default(),
             prices: None,
+            unattended_ceiling: Risk::Low,
         }
     }
 
@@ -167,6 +179,12 @@ impl LoopConfig {
     #[must_use]
     pub fn with_prices(mut self, prices: Option<RateCard>) -> Self {
         self.prices = prices;
+        self
+    }
+
+    #[must_use]
+    pub fn with_unattended_ceiling(mut self, ceiling: Risk) -> Self {
+        self.unattended_ceiling = ceiling;
         self
     }
 }
@@ -589,7 +607,7 @@ impl<'a> AgentLoop<'a> {
             if calls.is_empty() {
                 return Ok(terminal_stop(stop_reason));
             }
-            if let Some(stop) = self.run_calls(calls, state, sink) {
+            if let Some(stop) = self.run_calls(calls, state, deadline, sink) {
                 return Ok(stop);
             }
             if let Some(stop) = self.stop_after_tokens(state) {
@@ -656,11 +674,12 @@ impl<'a> AgentLoop<'a> {
         None
     }
 
-    /// Runs the turn's calls in order, stopping the moment the caller cancels.
+    /// Runs the turn's calls in order, stopping the moment the caller cancels or time runs out.
     fn run_calls(
         &mut self,
         calls: Vec<ToolCall>,
         state: &mut RunState,
+        deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> Option<LoopStop> {
         let mut calls = calls.into_iter();
@@ -680,6 +699,21 @@ impl<'a> AgentLoop<'a> {
                     ));
                 }
                 return Some(cancelled());
+            }
+            // Between calls as well as between turns: one call can block for minutes, so a
+            // deadline checked only at the turn boundary overshoots by a whole call — and a turn
+            // asking for six of them overshoots by six. Every skipped call still gets an outcome,
+            // for the reason the cancellation branch above gives.
+            if let (Some(deadline), Some(limit_ms)) = (deadline, self.config.budget.max_duration_ms)
+                && Instant::now() >= deadline
+            {
+                for skipped in std::iter::once(call).chain(calls) {
+                    state.items.push(Item::result(
+                        skipped.call_id,
+                        ToolOutcome::failed("the run's deadline passed before this call ran"),
+                    ));
+                }
+                return Some(LoopStop::Deadline { limit_ms });
             }
             sink.emit(LoopEvent::ToolRequested(call.clone()));
             let result = self.invoke(&call, sink);
@@ -719,7 +753,15 @@ impl<'a> AgentLoop<'a> {
             ));
         }
 
-        if spec.approval == Approval::Required {
+        // The envelope that decides is the **call's**, not the published spec's: a verb over a
+        // catalogue has one spec that must honestly declare every effect any entry can have, so
+        // gating on that would ask a person about every read. `spec.approval` stays in the
+        // disjunction while the ports that set it are migrated — it can only add asking.
+        let envelope = self.tools.call_envelope(call);
+        let asks = spec.approval == Approval::Required
+            || envelope.needs_approval(self.config.unattended_ceiling);
+
+        if asks {
             sink.emit(LoopEvent::ApprovalRequired {
                 call_id: call.call_id.clone(),
                 name: call.name.clone(),

@@ -1,7 +1,7 @@
 use super::*;
 
 fn flow(yaml: &str) -> Flow {
-    serde_yaml::from_str(yaml).expect("the fixture is a flow")
+    serde_yaml_ng::from_str(yaml).expect("the fixture is a flow")
 }
 
 /// The shape the crate documentation shows: a step, a sub-tree, and a step that needs the sub-tree.
@@ -651,7 +651,7 @@ fn a_real_workflow_projected_by_another_component_plans_here() {
             .join("fixtures/adp-default.projected.yaml"),
     )
     .expect("the committed projection");
-    let flow: Flow = serde_yaml::from_str(&text).expect("a flow");
+    let flow: Flow = serde_yaml_ng::from_str(&text).expect("a flow");
     let plan = flow.plan().expect("it plans");
 
     assert_eq!(
@@ -695,7 +695,7 @@ fn the_projected_workflow_retreats_when_verification_fails() {
             .join("fixtures/adp-default.projected.yaml"),
     )
     .expect("the committed projection");
-    let flow: Flow = serde_yaml::from_str(&text).expect("a flow");
+    let flow: Flow = serde_yaml_ng::from_str(&text).expect("a flow");
 
     let mut sink = VecFlowSink::new();
     let report = flow

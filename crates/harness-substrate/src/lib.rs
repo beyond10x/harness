@@ -53,6 +53,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use substrate_wire::{
+    ConfinementRequest, ExecEnvironment, ExecLimits, ExecStartInput, NetworkMode, ReadOnlyRoot,
+    SandboxProfile,
+};
 
 mod backend;
 mod base64;
@@ -85,6 +89,14 @@ pub struct Facts {
     /// Every fact, by name.
     #[serde(default)]
     pub facts: BTreeMap<String, Value>,
+    /// The capability snapshot this document was probed as.
+    ///
+    /// Carried beside the facts because an exec has to **name** it: substrate refuses a start whose
+    /// admitted snapshot is stale, so a run that cannot say which probe it is acting on cannot be
+    /// admitted confined. Kept as a [`Value`] for the same reason the facts are a map — a daemon
+    /// that changes the shape of its own identifier must not become unreadable to this build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<Value>,
 }
 
 impl Facts {
@@ -99,6 +111,7 @@ impl Facts {
             driver: None,
             driver_version: None,
             facts: BTreeMap::new(),
+            snapshot: None,
         }
     }
 
@@ -143,6 +156,65 @@ impl Facts {
     /// write tools and not the `run` tool — a real configuration, not a degenerate one.
     pub fn holds_workspaces(&self) -> bool {
         self.get("workspace.guarded-io") == Some(&Value::Bool(true))
+    }
+}
+
+/// The one exec a confined backend starts, whichever backend is starting it.
+///
+/// **Both paths build it here, and that is the point.** The embedded driver asked for confinement
+/// by name from its first commit; the socket path posted `{workspace_id, argv}` and nothing else,
+/// so whether that ran unconfined or was refused was the daemon's choice rather than this harness's.
+/// Two call sites building the same request separately is how they came to differ without anybody
+/// deciding to, so there is now one and a divergence has to be written down here to happen.
+///
+/// The wire crate's own types decide the field names. Nothing hand-writes this JSON — that is the
+/// whole thing embedding bought, and the socket path never had it.
+pub(crate) fn confined_exec_input(
+    workspace: &str,
+    argv: &[String],
+    snapshot: String,
+    env: ExecEnvironment,
+    read_only_roots: Vec<ReadOnlyRoot>,
+) -> ExecStartInput {
+    ExecStartInput {
+        workspace: workspace.to_owned(),
+        argv: argv.to_vec(),
+        env,
+        // substrate mounts these read-only and reports them in the observation (its ADR 0010).
+        // Empty unless the caller declared a toolchain, which is every existing consumer.
+        read_only_roots,
+        sandbox: ConfinementRequest {
+            // The field the wire path never found: substrate refuses an exec whose admitted
+            // snapshot is stale, so the run has to name the one it probed.
+            capability_snapshot: snapshot,
+            network: NetworkMode::None,
+            profile: SandboxProfile::Workspace,
+            required: true,
+        },
+        // **Sized for a build, not for an interpreter.** Two minutes of wall clock and two minutes
+        // of CPU were right when the only thing a confined run could execute was something under
+        // `/usr`; a declared toolchain makes a compiler reachable, and a compiler blows through
+        // both without finishing anything. A bound that makes a capability unusable is the same as
+        // not having it.
+        //
+        // CPU is the larger of the two because a build is parallel: `cargo` will happily use every
+        // core, so the CPU a wall-clock minute can consume is a multiple of it. Both are still
+        // bounds — a run that loops is stopped, which is the whole point of having them.
+        limits: ExecLimits {
+            timeout_ms: 900_000,
+            output_bytes: 1_048_576,
+            // A parallel build is hundreds of processes and threads, not dozens: `cargo` fans out
+            // across every core and each `rustc` spawns its own codegen threads. At 64 the run did
+            // not fail cleanly — it died inside the standard library with `failed to spawn thread:
+            // Resource temporarily unavailable`, which reads as a machine under load rather than
+            // as a bound somebody set.
+            processes: 2_048,
+            memory_bytes: 8_589_934_592,
+            cpu_millis: 3_600_000,
+        },
+        wait: true,
+        capsule: None,
+        lease_ttl_ms: None,
     }
 }
 

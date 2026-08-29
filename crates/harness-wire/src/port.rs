@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::WireError;
-use crate::envelope::Subject;
+use crate::envelope::{Envelope, Subject};
 use crate::id::{CallId, WireId};
 use crate::item::{ToolCall, ToolOutcome};
 use crate::turn::{ToolSpec, TurnOutcome, TurnRequest};
@@ -118,6 +118,23 @@ pub trait ToolPort {
     /// the shape most tests and every existing port have.
     fn subjects(&self, _call: &ToolCall) -> Vec<Subject> {
         Vec::new()
+    }
+
+    /// What **this call** would do, for the gate that decides whether a person is asked.
+    ///
+    /// # Why this is per call and not per spec
+    ///
+    /// A port that publishes verbs over a catalogue — `tool_invoke` over `file_read`, `run`, … —
+    /// has one spec whose envelope must honestly declare every effect any entry can have. A gate
+    /// that read *that* would ask a person about every read. The envelope that decides is the
+    /// **entry's**, unwrapped from the call the same way [`ToolPort::subjects`] unwraps its
+    /// subjects. Defaulted to the published spec's own envelope, which is right for a flat port.
+    fn call_envelope(&self, call: &ToolCall) -> Envelope {
+        self.specs()
+            .iter()
+            .find(|spec| spec.name == call.name)
+            .map(|spec| spec.envelope.clone())
+            .unwrap_or_default()
     }
 
     /// Every neutral operation this port can perform, whatever it publishes them as.

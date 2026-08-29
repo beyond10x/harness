@@ -273,3 +273,76 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
         output.stdout
     );
 }
+
+/// A tree substrate's embedded driver can adopt: the named directory, under a root it can own.
+///
+/// The directory *is* the workspace — `--workspace`'s parent becomes substrate's root — so the
+/// temporary root has to outlive the call, which is why both come back.
+fn adoptable_workspace(name: &str) -> (tempfile::TempDir, PathBuf) {
+    let root = tempfile::tempdir().expect("a temporary directory");
+    let workspace = root.path().join(name);
+    fs::create_dir(&workspace).expect("create the workspace directory");
+    (root, workspace)
+}
+
+#[test]
+fn tools_over_an_adopted_embedded_workspace_publishes_the_writing_entries() {
+    let (_root, workspace) = adoptable_workspace("ws_probe");
+    let output = run(&["tools", "--substrate-embedded"], &workspace);
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let described: Value = serde_json::from_str(&output.stdout).expect("valid JSON");
+    let entries: Vec<&str> = described["catalogue"]["tools"]
+        .as_array()
+        .expect("a catalogue")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(entries.contains(&"file_write"), "{entries:?}");
+    assert!(entries.contains(&"file_edit"), "{entries:?}");
+    // No delegated cgroup and no declared program, so this machine confines no process and the
+    // catalogue says so by not holding the entry.
+    assert!(!entries.contains(&"run"), "{entries:?}");
+
+    let names: Vec<&str> = described["tools"]
+        .as_array()
+        .expect("a tool array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["tool_search", "tool_describe", "tool_invoke"],
+        "the three verbs are what the model sees, confined or not"
+    );
+}
+
+#[test]
+fn an_embedded_workspace_with_the_wrong_name_refuses_the_run_by_name() {
+    let (_root, workspace) = adoptable_workspace("not_a_ws");
+    let output = run(&["tools", "--substrate-embedded"], &workspace);
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(output.stderr.contains("ws_"), "{}", output.stderr);
+    assert!(output.stderr.contains("not_a_ws"), "{}", output.stderr);
+    // The failure this replaces: a silent read-only catalogue, which the operator asked to write
+    // into and the model then reported as done without writing anything.
+    assert!(
+        serde_json::from_str::<Value>(&output.stdout).is_err(),
+        "nothing was published: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn a_named_socket_with_no_daemon_refuses_rather_than_going_read_only() {
+    let (root, workspace) = adoptable_workspace("ws_probe");
+    let socket = root.path().join("nothing.sock");
+    let output = run(
+        &["tools", "--substrate", socket.to_str().expect("utf-8 path")],
+        &workspace,
+    );
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    assert!(output.stderr.contains("nothing.sock"), "{}", output.stderr);
+}

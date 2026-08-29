@@ -41,7 +41,13 @@ def check_version(directory: pathlib.Path, failures: list[str]) -> None:
     if not manifest_path.is_file():
         failures.append(f"{directory}: no manifest.json")
         return
-    manifest = json.loads(manifest_path.read_text())
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as error:
+        # Named, not raised: a corrupted manifest is a contract failure like any other, and a
+        # traceback reads as the checker breaking rather than the contract.
+        failures.append(f"{manifest_path}: not JSON: {error}")
+        return
 
     missing = REQUIRED_KEYS - manifest.keys()
     if missing:
@@ -96,10 +102,14 @@ def check_stream_fixture(
         failures.append(f"{directory}: no fixtures/turn-stream.sse")
         return
     seen = set()
-    for line in stream.read_text().splitlines():
+    for number, line in enumerate(stream.read_text().splitlines(), start=1):
         if not line.startswith("data: ") or line == "data: [DONE]":
             continue
-        payload = json.loads(line[len("data: ") :])
+        try:
+            payload = json.loads(line[len("data: ") :])
+        except json.JSONDecodeError as error:
+            failures.append(f"{stream}:{number}: not JSON: {error}")
+            return
         kind = payload.get("type")
         if not isinstance(kind, str):
             failures.append(f"{stream}: an event has no `type`")

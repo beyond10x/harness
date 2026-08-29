@@ -64,7 +64,7 @@
 //! [`StepRunner`] the caller supplies. Binding a step to an actual turn of the loop is the caller's
 //! business, which is what lets the whole scheduler be tested without a provider.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -311,7 +311,6 @@ pub(crate) fn check_edges(
 ) -> Result<(), FlowError> {
     for node in &group.nodes {
         let here = format!("{path}.{}", node.id());
-        let mut named: BTreeSet<&str> = BTreeSet::new();
         for need in node.needs() {
             if need == node.id() {
                 return Err(FlowError::SelfNeed { path: here });
@@ -322,7 +321,6 @@ pub(crate) fn check_edges(
                     missing: need.clone(),
                 });
             }
-            named.insert(need.as_str());
         }
     }
     Ok(())

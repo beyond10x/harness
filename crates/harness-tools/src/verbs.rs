@@ -66,17 +66,22 @@ impl Verbs {
     }
 }
 
+impl Verbs {
+    /// The catalogue entry a `tool_invoke` call names, if it names one this run has.
+    fn invoked_entry(&self, call: &ToolCall) -> Option<&crate::catalogue::Entry> {
+        if call.name.as_str() != INVOKE_VERB {
+            return None;
+        }
+        let name = call.arguments.get("name").and_then(Value::as_str)?;
+        self.catalogue.get(name)
+    }
+}
+
 impl ToolPort for Verbs {
     fn specs(&self) -> &[ToolSpec] {
         &self.specs
     }
 
-    /// The subjects of the **entry being invoked**, not of the verb.
-    ///
-    /// A gate that read `tool_invoke`'s own arguments would see one opaque blob for every call in
-    /// the run. What it needs is the file or the program underneath, so the verb is unwrapped
-    /// before the question is answered — which is the whole reason `subjects` is per-call rather
-    /// than per-spec.
     /// What the **catalogue** can do, which is the question the three verbs hide.
     ///
     /// The verbs are the same on every run; this is what differs, and it is what a reader of the
@@ -85,11 +90,14 @@ impl ToolPort for Verbs {
         self.catalogue.operations()
     }
 
+    /// The subjects of the **entry being invoked**, not of the verb.
+    ///
+    /// A gate that read `tool_invoke`'s own arguments would see one opaque blob for every call in
+    /// the run. What it needs is the file or the program underneath, so the verb is unwrapped
+    /// before the question is answered — which is the whole reason `subjects` is per-call rather
+    /// than per-spec.
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
-        if call.name.as_str() != INVOKE_VERB {
-            return Vec::new();
-        }
-        let Some(name) = call.arguments.get("name").and_then(Value::as_str) else {
+        let Some(entry) = self.invoked_entry(call) else {
             return Vec::new();
         };
         let arguments = call
@@ -97,9 +105,27 @@ impl ToolPort for Verbs {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        self.catalogue
-            .get(name)
-            .map(|entry| entry.subjects(&arguments))
+        entry.subjects(&arguments)
+    }
+
+    /// The envelope of the **entry being invoked**, not of the verb.
+    ///
+    /// `tool_invoke`'s own envelope declares every effect any entry can have, because it has to;
+    /// gating on it would ask a person before every `file_read`. What decides is what the named
+    /// entry does. A `tool_invoke` that names no entry, or one this run does not have, touches
+    /// nothing: the catalogue refuses it by name before anything runs, and the model learns the
+    /// names — so it is described as the read it amounts to rather than as the run it is not.
+    fn call_envelope(&self, call: &ToolCall) -> Envelope {
+        if call.name.as_str() != INVOKE_VERB {
+            return self
+                .specs
+                .iter()
+                .find(|spec| spec.name == call.name)
+                .map(|spec| spec.envelope.clone())
+                .unwrap_or_default();
+        }
+        self.invoked_entry(call)
+            .map(|entry| entry.envelope.clone())
             .unwrap_or_default()
     }
 

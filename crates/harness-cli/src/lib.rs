@@ -175,6 +175,8 @@ struct AppServerOptions {
     max_output_tokens: Option<u64>,
 }
 
+// A command line is a struct of switches; counting them says nothing about the type.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Args)]
 struct RunOptions {
     /// Endpoint origin plus API prefix, for example `https://llmgw.example/v1`.
@@ -216,11 +218,9 @@ struct RunOptions {
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
     /// substrate's root, and reads and writes land in the same place. The directory must therefore
     /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not leaves the run read-only rather than quietly writing somewhere else.
-    ///
-    /// Takes no value today; the root is derived from `--workspace`.
+    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
     #[arg(long, conflicts_with = "substrate")]
-    substrate_embedded: Option<PathBuf>,
+    substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.
     ///
     /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
@@ -331,8 +331,13 @@ struct RunOptions {
     /// starts will ignore this; the route registry is what knows which ones do.
     #[arg(long)]
     reasoning_effort: Option<String>,
-    /// Approve every tool that asks for a decision. The published toolset is read-only, so this
-    /// exists for a toolset that is not.
+    /// Approve every call that asks for a decision.
+    ///
+    /// What asks is the loop's answer, taken per call from the catalogue entry's declared risk
+    /// against a ceiling that defaults to low: every write and every `run` asks, and a `file_edit`
+    /// — non-idempotent, so a repeat is not the same act as one call — asks whatever the ceiling
+    /// is. Without this the default approver denies each of them and the model is told it was
+    /// denied, which is a confined run that can do nothing but read.
     #[arg(long)]
     yes: bool,
     /// Emit one JSON event per line on stdout instead of prose.
@@ -368,11 +373,9 @@ struct ToolsOptions {
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
     /// substrate's root, and reads and writes land in the same place. The directory must therefore
     /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not leaves the run read-only rather than quietly writing somewhere else.
-    ///
-    /// Takes no value today; the root is derived from `--workspace`.
+    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
     #[arg(long, conflicts_with = "substrate")]
-    substrate_embedded: Option<PathBuf>,
+    substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.
     ///
     /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
@@ -557,14 +560,14 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
         workspace_name(&options.workspace),
         &Confinement {
             substrate: options.substrate.as_deref(),
-            embedded: options.substrate_embedded.as_deref(),
+            embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
             programs: &options.allow_program,
             toolchain: &toolchain(options.toolchain.as_deref())?,
             scope: write_scope(&options.write_scope)?,
         },
-    );
+    )?;
     let mut approvals: Box<dyn ApprovalPort> = if options.yes {
         Box::new(ApproveAll)
     } else {
@@ -602,13 +605,6 @@ fn install_interrupt(cancel: &LoopCancel) {
     }
 }
 
-/// The toolchain the caller declared, or none.
-///
-/// # Errors
-///
-/// Names the toolchain that is not known, and lists the ones that are. A misspelling that silently
-/// declared nothing would produce a run whose builds fail deep inside a build tool, which is a much
-/// worse way to find out.
 /// The scope the caller declared, in order.
 ///
 /// # Errors
@@ -639,6 +635,13 @@ fn context(files: &[PathBuf]) -> Result<String, String> {
     Ok(text)
 }
 
+/// The toolchain the caller declared, or none.
+///
+/// # Errors
+///
+/// Names the toolchain that is not known, and lists the ones that are. A misspelling that silently
+/// declared nothing would produce a run whose builds fail deep inside a build tool, which is a much
+/// worse way to find out.
 fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     match name {
@@ -650,17 +653,6 @@ fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String>
     }
 }
 
-/// The tools this machine admits, which is the machine's answer and not a flag's.
-///
-/// **The publication gate, in one function**, and it is unchanged by the move to three verbs: what
-/// the *model* sees is always `tool_search`, `tool_describe`, `tool_invoke`, and what the catalogue
-/// behind them holds is what the machine can perform. Three entries with no backend; five with a
-/// confined workspace; six inside a delegated cgroup. A tool the machine cannot confine is one
-/// `tool_search` never lists.
-///
-/// A backend that cannot be reached is not an error, for the reason `Client::probe` gives. A daemon
-/// that answers something unreadable is, and every other failure here degrades to the read-only
-/// catalogue rather than to a run that thinks it can write.
 /// Everything about *where and how* a run may act, as one value.
 ///
 /// Grouped because they are one decision taken together — a socket or an embedded driver, the
@@ -669,7 +661,9 @@ fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String>
 /// positional paths nobody can read.
 struct Confinement<'a> {
     substrate: Option<&'a std::path::Path>,
-    embedded: Option<&'a std::path::Path>,
+    /// Whether the driver is held in this process, confining `--workspace` itself. A flag and not a
+    /// path: the root is derived from the workspace, so there is nothing else to name.
+    embedded: bool,
     cgroup_root: Option<&'a std::path::Path>,
     workspace_id: &'a str,
     programs: &'a [String],
@@ -679,11 +673,27 @@ struct Confinement<'a> {
     scope: harness_tools::Scope,
 }
 
+/// The tools this machine admits, which is the machine's answer and not a flag's.
+///
+/// **The publication gate, in one function**, and it is unchanged by the move to three verbs: what
+/// the *model* sees is always `tool_search`, `tool_describe`, `tool_invoke`, and what the catalogue
+/// behind them holds is what the machine can perform. Three entries with no backend; five with a
+/// confined workspace; six inside a delegated cgroup. A tool the machine cannot confine is one
+/// `tool_search` never lists.
+///
+/// A confinement **nobody asked for** is the read-only catalogue, which is how this harness has run
+/// since it was written and a legitimate way to run now. A confinement the operator **named** and
+/// the machine cannot provide refuses the run by name, because a read-only run that was asked to
+/// write reports work as done that it never did.
+///
+/// # Errors
+///
+/// Names the confinement that was asked for and what stopped it being provided.
 fn published(
     reading: harness_tools::LocalOperations,
     workspace_name: Option<String>,
     confinement: &Confinement<'_>,
-) -> harness_tools::Verbs {
+) -> Result<harness_tools::Verbs, String> {
     let Confinement {
         substrate,
         embedded,
@@ -693,59 +703,129 @@ fn published(
         toolchain,
         scope,
     } = confinement;
-    let (substrate, embedded, cgroup_root) = (*substrate, *embedded, *cgroup_root);
     let read_only = || {
         harness_tools::Verbs::new(
             harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()),
         )
     };
 
-    if embedded.is_some() {
-        // **One tree.** The workspace the reading provider sees *is* the confined workspace: its
-        // parent becomes substrate's root and the directory itself is adopted. Opening a fresh empty
-        // workspace beside it would mean a run read one tree and wrote into another, and was not
-        // doing the task it had been given.
-        let (Some(root), Some(name)) = (reading.root().parent(), workspace_name) else {
-            return read_only();
-        };
-        let cgroup = cgroup_root.map(std::path::Path::to_path_buf);
-        let (Ok(driver), Ok(tools)) = (
-            harness_substrate::Embedded::open_with(root, cgroup.clone(), (*toolchain).clone()),
-            harness_substrate::Embedded::open_with(root, cgroup, (*toolchain).clone()),
-        ) else {
-            return read_only();
-        };
-        let (Ok(facts), Ok(workspace)) = (
-            harness_substrate::Backend::machine(&driver),
-            driver.workspace_adopt(&name),
-        ) else {
-            return read_only();
-        };
-        let confined =
-            harness_substrate::ConfinedOperations::new(tools, &facts, workspace, programs.to_vec());
-        return harness_tools::Verbs::new(
-            harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
-                .scoped(scope.clone()),
-        );
+    if *embedded {
+        let workspace = adopted(&reading, workspace_name, *cgroup_root, toolchain)?;
+        return Ok(harness_tools::Verbs::new(
+            harness_tools::Catalogue::of(harness_tools::Split::new(
+                reading,
+                workspace.confined(programs.to_vec()),
+            ))
+            .scoped(scope.clone()),
+        ));
     }
 
-    let Some(socket) = substrate else {
-        return read_only();
+    let Some(socket) = *substrate else {
+        return Ok(read_only());
     };
     let client = harness_substrate::Client::at(socket);
-    let Ok(facts) = client.probe() else {
-        return read_only();
-    };
+    // `machine()` and not `probe()`. `probe`'s "unreachable is not an error" is for a harness
+    // nobody pointed at a socket; here the operator did, so a daemon that is not there is the
+    // answer to a question that was asked and not the absence of one.
+    let facts = client.machine().map_err(|error| {
+        format!(
+            "no usable substrate daemon at `{}`: {error}",
+            socket.display()
+        )
+    })?;
     let confined = harness_substrate::ConfinedOperations::new(
         harness_substrate::Client::at(socket),
         &facts,
         *workspace_id,
         programs.to_vec(),
     );
-    harness_tools::Verbs::new(
+    Ok(harness_tools::Verbs::new(
         harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
             .scoped(scope.clone()),
+    ))
+}
+
+/// One embedded driver, its machine facts and the adopted workspace, held together.
+///
+/// One driver and not two: the pair `published` used to open confined the same tree twice, which is
+/// two `openat2` roots and two runtimes for one workspace. `machine` and `workspace_adopt` take
+/// `&self`, so the instance that answered them is the one that goes on to serve the tools.
+struct Adopted {
+    driver: harness_substrate::Embedded,
+    facts: harness_substrate::Facts,
+    workspace: String,
+}
+
+impl Adopted {
+    fn confined(self, programs: Vec<String>) -> harness_substrate::ConfinedOperations {
+        harness_substrate::ConfinedOperations::new(
+            self.driver,
+            &self.facts,
+            self.workspace,
+            programs,
+        )
+    }
+}
+
+/// Opens the embedded driver over `--workspace`'s parent and adopts the workspace itself.
+///
+/// **One tree.** The workspace the reading provider sees *is* the confined workspace: its parent
+/// becomes substrate's root and the directory itself is adopted. Opening a fresh empty workspace
+/// beside it would mean a run read one tree and wrote into another, and was not doing the task it
+/// had been given.
+///
+/// # Errors
+///
+/// Names which of the four things `--substrate-embedded` needs was not there. Each is a refusal
+/// rather than a quiet fall-back to reading, because the operator asked for write and execute.
+fn adopted(
+    reading: &harness_tools::LocalOperations,
+    workspace_name: Option<String>,
+    cgroup_root: Option<&std::path::Path>,
+    toolchain: &harness_substrate::Toolchain,
+) -> Result<Adopted, String> {
+    let tree = reading.root().display().to_string();
+    let Some(root) = reading.root().parent() else {
+        return Err(format!(
+            "`--substrate-embedded` cannot adopt `{tree}`: it has no parent directory to be \
+             substrate's root"
+        ));
+    };
+    let Some(name) = workspace_name else {
+        return Err(format!(
+            "`--substrate-embedded` cannot adopt `{tree}`: its own name is not readable, so there \
+             is nothing for substrate to represent the workspace as"
+        ));
+    };
+    // Checked here, before the driver is opened, so the message a rename fixes is the harness's own
+    // and names the flag the operator typed rather than surfacing a driver's refusal from inside.
+    if !name.starts_with("ws_")
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return Err(format!(
+            "`--substrate-embedded` cannot adopt `{name}`: the directory must be named `ws_` \
+             followed by alphanumerics and underscores, because substrate's guarded filesystem \
+             represents no other name. Rename it, or drop the flag for a read-only run."
+        ));
+    }
+    let driver = harness_substrate::Embedded::open_with(
+        root,
+        cgroup_root.map(std::path::Path::to_path_buf),
+        toolchain.clone(),
     )
+    .map_err(|error| format!("the embedded substrate driver did not open: {error}"))?;
+    let facts = harness_substrate::Backend::machine(&driver)
+        .map_err(|error| format!("the embedded substrate driver has no machine facts: {error}"))?;
+    let workspace = driver
+        .workspace_adopt(&name)
+        .map_err(|error| format!("`--substrate-embedded` could not adopt `{name}`: {error}"))?;
+    Ok(Adopted {
+        driver,
+        facts,
+        workspace,
+    })
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
@@ -754,14 +834,14 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
         workspace_name(&options.workspace),
         &Confinement {
             substrate: options.substrate.as_deref(),
-            embedded: options.substrate_embedded.as_deref(),
+            embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
             programs: &options.allow_program,
             toolchain: &toolchain(options.toolchain.as_deref())?,
             scope: write_scope(&options.write_scope)?,
         },
-    );
+    )?;
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({

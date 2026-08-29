@@ -5,6 +5,7 @@
 //! streaming, redirects, compression or TLS — none of which a Unix socket to a local daemon
 //! serving bounded JSON has any use for.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -295,17 +296,66 @@ impl Client {
     /// **An argv, never a command line.** The wire takes a list and substrate's own `exec.start`
     /// predicate is `exec.argv-only`; nothing here builds a string a shell would then take apart.
     ///
+    /// **And confinement is asked for by name.** This posted `{workspace_id, argv}` until 2026-08-29
+    /// — no `sandbox`, so no `require`, no snapshot, no limits. Whether a daemon then ran that
+    /// unconfined or refused it was the daemon's choice, and a harness whose whole argument is *a
+    /// tool this machine cannot confine does not exist* cannot leave that decision elsewhere. The
+    /// request is built by [`crate::confined_exec_input`], the same function the embedded driver
+    /// calls, so the two paths cannot ask for different things.
+    ///
     /// # Errors
     ///
-    /// Returns [`SubstrateError`] when the daemon cannot be reached or refuses. A program that
-    /// exits non-zero is **not** an error: it is a result, and the caller needs to see it.
+    /// Returns [`SubstrateError`] when the daemon cannot be reached or refuses, and
+    /// [`SubstrateError::Refused`] before sending anything when the machine document carries no
+    /// capability snapshot to name. A program that exits non-zero is **not** an error: it is a
+    /// result, and the caller needs to see it.
     pub fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
+        // Asked per exec rather than cached: substrate refuses a start whose admitted snapshot is
+        // stale, and a snapshot held from launch is exactly the one that goes stale.
+        let facts = self.machine()?;
+        // `status: 0` is not an HTTP status — there was no request. The same convention
+        // `embedded.rs::refused` uses, and it is here for the same reason: the refusal happened on
+        // this side of the wire, so quoting a status would name a daemon that never answered.
+        let Some(snapshot) = facts.snapshot else {
+            return Err(SubstrateError::Refused {
+                status: 0,
+                body: "the substrate daemon's machine document carries no capability snapshot. An \
+                       exec has to name the snapshot it was admitted against, so one without it \
+                       cannot be admitted confined - and nothing was started."
+                    .to_owned(),
+            });
+        };
+        let snapshot =
+            serde_json::from_value(snapshot).map_err(|error| SubstrateError::Refused {
+                status: 0,
+                body: format!(
+                    "the substrate daemon's capability snapshot is not the shape this build \
+                     reads: {error}. Nothing was started."
+                ),
+            })?;
+        let input = crate::confined_exec_input(
+            workspace,
+            argv,
+            snapshot,
+            // Nothing inherited and nothing set: an exec that saw this process's environment would
+            // carry a credential into a confined workspace. A toolchain is the embedded driver's
+            // to declare; this path has no root to mount one from.
+            substrate_wire::ExecEnvironment {
+                allow: Vec::new(),
+                set: BTreeMap::new(),
+            },
+            Vec::new(),
+        );
+        // Serialised by the wire crate's own type, never hand-written: which field is `require` and
+        // which is `required` is substrate's to say, and a body assembled here is a second opinion
+        // about it.
+        let input = serde_json::to_value(&input).map_err(|error| SubstrateError::Unreadable {
+            reason: error.to_string(),
+        })?;
         let (status, body) = self.transport.request(
             "POST",
             "/v1/execs",
-            Some(&serde_json::json!({
-                "input": {"workspace_id": workspace, "argv": argv}
-            })),
+            Some(&serde_json::json!({"input": input})),
         )?;
         let started = Self::decode(status, body)?;
         let Some(id) = started

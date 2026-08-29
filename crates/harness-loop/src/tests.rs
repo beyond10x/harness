@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::time::Duration;
 
 use harness_wire::{
-    CallId, Envelope, Item, ModelPort, StopReason, StreamEvent, StreamSink, ToolCall, ToolName,
-    ToolOutcome, ToolPort, ToolSpec, TurnOutcome, TurnRequest, Usage, WireError, WireErrorCode,
-    WireId,
+    AccessKind, CallId, Effect, Envelope, Idempotency, Item, ModelPort, Risk, StopReason,
+    StreamEvent, StreamSink, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec, TurnOutcome,
+    TurnRequest, Usage, WireError, WireErrorCode, WireId,
 };
 use serde_json::{Value, json};
 
@@ -131,6 +132,8 @@ struct ScriptedTools {
     outcomes: BTreeMap<String, ToolOutcome>,
     calls: Vec<ToolCall>,
     cancel_after: Option<(usize, LoopCancel)>,
+    envelope: Option<Envelope>,
+    delay: Option<Duration>,
 }
 
 impl ScriptedTools {
@@ -140,6 +143,8 @@ impl ScriptedTools {
             outcomes: BTreeMap::new(),
             calls: Vec::new(),
             cancel_after: None,
+            envelope: None,
+            delay: None,
         }
     }
 
@@ -152,6 +157,19 @@ impl ScriptedTools {
         self.cancel_after = Some((calls, cancel));
         self
     }
+
+    /// Answers for the **call** rather than for the spec, which is the shape a port publishing
+    /// verbs over a catalogue has: one spec, a different envelope per entry behind it.
+    fn enveloped(mut self, envelope: Envelope) -> Self {
+        self.envelope = Some(envelope);
+        self
+    }
+
+    /// Makes every call block, so a wall-clock bound can be reached inside a turn.
+    fn taking(mut self, delay: Duration) -> Self {
+        self.delay = Some(delay);
+        self
+    }
 }
 
 impl ToolPort for ScriptedTools {
@@ -159,8 +177,20 @@ impl ToolPort for ScriptedTools {
         &self.specs
     }
 
+    fn call_envelope(&self, call: &ToolCall) -> Envelope {
+        self.envelope.clone().unwrap_or_else(|| {
+            self.specs
+                .iter()
+                .find(|spec| spec.name == call.name)
+                .map_or_else(Envelope::default, |spec| spec.envelope.clone())
+        })
+    }
+
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
         self.calls.push(call.clone());
+        if let Some(delay) = self.delay {
+            std::thread::sleep(delay);
+        }
         if let Some((after, cancel)) = &self.cancel_after
             && self.calls.len() == *after
         {
@@ -204,6 +234,12 @@ impl Harness {
 
     fn priced(mut self, card: RateCard) -> Self {
         self.config.prices = Some(card);
+        self
+    }
+
+    /// Raises the risk this run acts on without asking anybody.
+    fn unattended_above(mut self, ceiling: Risk) -> Self {
+        self.config = self.config.with_unattended_ceiling(ceiling);
         self
     }
 
@@ -399,6 +435,191 @@ fn approval_is_never_asked_for_a_tool_that_does_not_need_it() {
     );
 }
 
+/// The approval traffic in order, flattened so a test can compare the whole exchange at once.
+fn approvals(sink: &VecLoopSink) -> Vec<String> {
+    sink.events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::ApprovalRequired { call_id, .. } => {
+                Some(format!("asked {}", call_id.as_str()))
+            }
+            LoopEvent::ApprovalResolved { call_id, approved } => {
+                Some(format!("{} approved={approved}", call_id.as_str()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a `run` catalogue entry looks like: it starts a process, and wrong is not cheap.
+fn starts_a_process() -> Envelope {
+    Envelope {
+        effects: vec![Effect::Process],
+        risk: Risk::High,
+        idempotency: Idempotency::Conditional,
+        access: Vec::new(),
+    }
+}
+
+fn results(outcome: &LoopOutcome) -> Vec<(bool, String)> {
+    outcome
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::ToolResult { failed, output, .. } => {
+                Some((*failed, output.as_str().unwrap_or_default().to_owned()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_high_risk_call_under_the_default_approver_is_refused_and_the_model_is_told() {
+    // The defect this pins: every tool this harness ships declares `NotRequired`, so a gate that
+    // read only the spec never decided anything and a `run` entry executed unasked.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "tool_invoke",
+                json!({"tool": "run", "argv": ["rm", "-rf", "/"]}),
+            )])),
+            Ok(answer("understood")),
+        ]),
+        ScriptedTools::new(vec![spec("tool_invoke", Approval::NotRequired)])
+            .enveloped(starts_a_process()),
+    );
+    let (outcome, sink) = harness.run();
+    let outcome = outcome.expect("a denial is not a failure");
+
+    assert!(
+        harness.tools.calls.is_empty(),
+        "the effect must not happen before the decision"
+    );
+    assert_eq!(
+        approvals(&sink),
+        vec!["asked call-1", "call-1 approved=false"]
+    );
+    let told = results(&outcome);
+    assert_eq!(told.len(), 1);
+    assert!(told[0].0, "the model has to see that the call did not run");
+    assert!(told[0].1.contains("not approved"), "{:?}", told[0].1);
+}
+
+#[test]
+fn the_same_call_runs_under_approve_all() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "tool_invoke",
+                json!({"tool": "run"}),
+            )])),
+            Ok(answer("it ran")),
+        ]),
+        ScriptedTools::new(vec![spec("tool_invoke", Approval::NotRequired)])
+            .enveloped(starts_a_process()),
+    )
+    .approving(Box::new(ApproveAll));
+    let (outcome, sink) = harness.run();
+
+    assert_eq!(harness.tools.calls.len(), 1);
+    assert_eq!(outcome.expect("completes").text, "it ran");
+    assert_eq!(
+        approvals(&sink),
+        vec!["asked call-1", "call-1 approved=true"]
+    );
+}
+
+#[test]
+fn a_low_risk_call_never_asks() {
+    // Under `DenyAll`, so a gate that asked about reads would refuse this and the run would be
+    // unable to do anything at all.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "workspace_read", json!({}))])),
+            Ok(answer("read it")),
+        ]),
+        ScriptedTools::new(vec![spec("workspace_read", Approval::NotRequired)])
+            .enveloped(Envelope::read_only()),
+    );
+    let (outcome, sink) = harness.run();
+
+    assert_eq!(harness.tools.calls.len(), 1);
+    assert_eq!(outcome.expect("completes").text, "read it");
+    assert!(approvals(&sink).is_empty(), "{:?}", sink.events());
+}
+
+#[test]
+fn raising_the_ceiling_stops_the_asking() {
+    /// One idempotent, medium-risk write, run under the ceiling the caller declared.
+    fn write_under(ceiling: Option<Risk>) -> (usize, Vec<String>) {
+        let mut harness = Harness::new(
+            ScriptedModel::new(vec![
+                Ok(asks_for(&[("call-1", "edit", json!({"path": "a"}))])),
+                Ok(answer("done")),
+            ]),
+            ScriptedTools::new(vec![spec("edit", Approval::NotRequired)]).enveloped(Envelope {
+                effects: vec![Effect::Write, Effect::Filesystem],
+                risk: Risk::Medium,
+                idempotency: Idempotency::Idempotent,
+                access: vec![AccessKind::Filesystem],
+            }),
+        );
+        if let Some(ceiling) = ceiling {
+            harness = harness.unattended_above(ceiling);
+        }
+        let (outcome, sink) = harness.run();
+        assert!(outcome.expect("both arms are outcomes").stop.is_completed());
+        (harness.tools.calls.len(), approvals(&sink))
+    }
+
+    let (ran, asked) = write_under(Some(Risk::Medium));
+    assert_eq!(ran, 1, "at the ceiling, not above it");
+    assert!(asked.is_empty(), "{asked:?}");
+
+    let (ran, asked) = write_under(None);
+    assert_eq!(
+        ran, 0,
+        "the default ceiling is Low, and the default approver denies"
+    );
+    assert_eq!(asked, vec!["asked call-1", "call-1 approved=false"]);
+}
+
+#[test]
+fn a_non_idempotent_write_asks_whatever_the_ceiling() {
+    // `needs_approval`'s second clause, pinned in the loop: doing it twice is doing it twice, so
+    // somebody has to want it once however high the ceiling was set.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "append", json!({"path": "log"}))])),
+            Ok(answer("understood")),
+        ]),
+        ScriptedTools::new(vec![spec("append", Approval::NotRequired)]).enveloped(Envelope {
+            effects: vec![Effect::Write],
+            risk: Risk::Low,
+            idempotency: Idempotency::NonIdempotent,
+            access: Vec::new(),
+        }),
+    )
+    .unattended_above(Risk::Destructive);
+    let (outcome, sink) = harness.run();
+
+    assert!(
+        harness.tools.calls.is_empty(),
+        "a repeat is a second effect"
+    );
+    assert_eq!(
+        approvals(&sink),
+        vec!["asked call-1", "call-1 approved=false"]
+    );
+    assert_eq!(
+        results(&outcome.expect("a denial is not a failure")).len(),
+        1
+    );
+}
+
 #[test]
 fn a_turn_ceiling_stops_the_loop_and_names_itself() {
     let mut harness = Harness::new(
@@ -532,6 +753,124 @@ fn cancellation_between_tool_calls_stops_before_the_next_effect() {
         harness.tools.calls.len(),
         1,
         "the second effect must not happen after a cancel"
+    );
+}
+
+/// A wall-clock budget wide enough that the loop's own setup cannot spend it before the first
+/// call, paired with a call slow enough to spend all of it in one. A budget of a millisecond would
+/// race the machine rather than test the loop.
+const DEADLINE_MS: u64 = 40;
+const SLOW_CALL: Duration = Duration::from_millis(60);
+
+fn deadlined() -> Budget {
+    Budget {
+        max_duration_ms: Some(DEADLINE_MS),
+        ..Budget::default()
+    }
+}
+
+/// How many calls the conversation carries, and how many answers. They must be equal: a
+/// `function_call` replayed without its output is a provider error on the next turn.
+fn calls_and_results(outcome: &LoopOutcome) -> (usize, usize) {
+    let count =
+        |wanted: fn(&Item) -> bool| outcome.items.iter().filter(|item| wanted(item)).count();
+    (
+        count(|item| matches!(item, Item::ToolCall(_))),
+        count(|item| matches!(item, Item::ToolResult { .. })),
+    )
+}
+
+#[test]
+fn the_deadline_ends_the_run_between_turns() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "slow", json!({}))])),
+            Ok(asks_for(&[("call-2", "slow", json!({}))])),
+        ]),
+        ScriptedTools::new(vec![spec("slow", Approval::NotRequired)]).taking(SLOW_CALL),
+    )
+    .budgeted(deadlined());
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("a bound that binds is an outcome");
+
+    assert_eq!(
+        outcome.stop,
+        LoopStop::Deadline {
+            limit_ms: DEADLINE_MS
+        }
+    );
+    assert_eq!(
+        harness.tools.calls.len(),
+        1,
+        "no turn may start once the clock has run out"
+    );
+    assert_eq!(calls_and_results(&outcome), (1, 1));
+}
+
+#[test]
+fn the_deadline_is_checked_between_calls_in_one_turn() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(asks_for(&[
+            ("call-1", "slow", json!({})),
+            ("call-2", "slow", json!({})),
+            ("call-3", "slow", json!({})),
+        ]))]),
+        ScriptedTools::new(vec![spec("slow", Approval::NotRequired)]).taking(SLOW_CALL),
+    )
+    .budgeted(deadlined());
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("a bound that binds is an outcome");
+
+    assert_eq!(
+        outcome.stop,
+        LoopStop::Deadline {
+            limit_ms: DEADLINE_MS
+        }
+    );
+    assert_eq!(
+        harness.tools.calls.len(),
+        1,
+        "a turn of six slow calls would overshoot the budget six times over"
+    );
+    assert_eq!(calls_and_results(&outcome), (3, 3));
+    let refused: Vec<&str> = outcome
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::ToolResult {
+                failed: true,
+                output,
+                ..
+            } => output.as_str(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(refused.len(), 2);
+    assert!(
+        refused.iter().all(|text| text.contains("deadline")),
+        "{refused:?}"
+    );
+}
+
+#[test]
+fn no_deadline_means_no_deadline_stop() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[
+                ("call-1", "slow", json!({})),
+                ("call-2", "slow", json!({})),
+            ])),
+            Ok(answer("both ran")),
+        ]),
+        ScriptedTools::new(vec![spec("slow", Approval::NotRequired)]).taking(SLOW_CALL),
+    );
+    let (outcome, _) = harness.run();
+
+    assert_eq!(outcome.expect("completes").stop, LoopStop::Completed);
+    assert_eq!(
+        harness.tools.calls.len(),
+        2,
+        "an absent bound binds nothing"
     );
 }
 

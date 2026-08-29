@@ -115,12 +115,33 @@ impl Scope {
     /// The refusal names the path, what was refused and **what would work instead**. A message that
     /// said only "denied" would be retried until the run's turn budget ran out, which is money
     /// spent on a wall.
+    ///
+    /// The rule is matched against a lexically normalised path, not the spelling the caller used,
+    /// because otherwise `./target/x` walks past a rule that refuses `target/x`. The message still
+    /// names the path as it was written — that is what the caller has to change.
     #[must_use]
     pub fn refusal(&self, operation: &str, path: &str) -> Option<String> {
         if !matches!(operation, "file.write" | "file.edit") {
             return None;
         }
-        let rule = self.0.iter().find(|rule| glob_matches(&rule.paths, path))?;
+        // A scope nobody wrote restricts nothing, so nothing below it may turn silence into a
+        // refusal — including the absolute-path rule.
+        if self.0.is_empty() {
+            return None;
+        }
+        if path.starts_with('/') {
+            return Some(format!(
+                "`{path}` is absolute, and a scoped run's paths are relative to the workspace \
+                 root. This scope does not know where that root is, so it cannot tell whether the \
+                 path falls under a rule — and a write nobody could judge is exactly how a \
+                 declared scope gets stepped around. Spell the path relative to the workspace root."
+            ));
+        }
+        let normalised = normalise(path);
+        let rule = self
+            .0
+            .iter()
+            .find(|rule| glob_matches(&rule.paths, &normalised))?;
         match rule.write {
             WriteScope::Allowed => None,
             WriteScope::PartialOnly if operation == "file.edit" => None,
@@ -135,6 +156,32 @@ impl Scope {
             )),
         }
     }
+}
+
+/// The path as the rules see it: empty and `.` segments dropped, `..` resolved against what came
+/// before.
+///
+/// A glob matched against the raw string is a boundary anyone can step around by spelling the path
+/// differently. `target/x`, `./target/x` and `crates/../target/x` are one file, and a rule that
+/// refuses `target/**` has to refuse all three.
+///
+/// Lexical rather than filesystem: this crate cannot resolve links from here and does not need to,
+/// because the provider refuses by where a path *lands* as well. A `..` that would climb above the
+/// start is kept rather than dropped, so such a path still matches no workspace-relative glob
+/// instead of quietly turning into one that does.
+fn normalise(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if matches!(parts.last(), None | Some(&"..")) => parts.push(".."),
+            ".." => {
+                parts.pop();
+            }
+            name => parts.push(name),
+        }
+    }
+    parts.join("/")
 }
 
 /// `*` matches within a path segment, `**` across them, everything else is literal.
@@ -152,6 +199,13 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
                 } else {
                     &pattern[1..]
                 };
+                // `**/` names zero directories as readily as many, so `**/*.md` has to match
+                // `README.md` at the root. Without this it needs a `/` somewhere in the value and
+                // the rule silently skips the top level, which is where the files people mean by
+                // "every markdown file" usually start.
+                if crosses && rest.first() == Some(&b'/') && go(&rest[1..], value) {
+                    return true;
+                }
                 for taken in 0..=value.len() {
                     if !crosses && value[..taken].contains(&b'/') {
                         break;
@@ -228,6 +282,56 @@ mod tests {
         assert!(ScopeRule::parse("=denied").is_err(), "no path");
         let bad = ScopeRule::parse("crates/**=readonly").expect_err("refused");
         assert!(bad.contains("partial-only"), "{bad}");
+    }
+
+    #[test]
+    fn a_denied_path_spelled_another_way_is_still_the_same_path() {
+        // The glob used to be matched against the raw string, so every one of these but the first
+        // was allowed under `target/**=denied`.
+        for path in [
+            "target/x",
+            "./target/x",
+            "././target/x",
+            "crates/../target/x",
+            "target/./x",
+        ] {
+            assert!(store().refusal("file.write", path).is_some(), "{path}");
+        }
+        assert!(store().refusal("file.write", "crates/x.rs").is_none());
+    }
+
+    #[test]
+    fn an_absolute_path_is_refused_because_the_scope_cannot_judge_it() {
+        // The scope does not know the workspace root, so it cannot tell what an absolute path is
+        // under. Waving it through is the bypass; refusing it costs a turn and a rewrite.
+        let refusal = store()
+            .refusal("file.write", "/abs/target/x")
+            .expect("refused");
+        assert!(refusal.contains("absolute"), "{refusal}");
+        assert!(
+            Scope::default()
+                .refusal("file.write", "/abs/target/x")
+                .is_none(),
+            "a scope nobody wrote restricts nothing, absolute or not"
+        );
+    }
+
+    #[test]
+    fn leaving_the_workspace_is_the_providers_refusal_and_not_the_scopes() {
+        // A kept `..` matches no workspace-relative glob. The path is still refused, by the check
+        // that can see the filesystem and knows where it lands.
+        assert!(store().refusal("file.write", "../outside").is_none());
+    }
+
+    #[test]
+    fn a_leading_double_star_names_zero_directories_as_well_as_many() {
+        assert!(glob_matches("**/*.md", "README.md"));
+        assert!(glob_matches("**/*.md", "docs/a.md"));
+        assert!(glob_matches("**/*.md", "a/b/c.md"));
+        assert!(!glob_matches("**/*.md", "README.txt"));
+        // A trailing `**` is unchanged: `docs/**` is what is *under* `docs`, not `docs` itself.
+        assert!(glob_matches("docs/**", "docs/x"));
+        assert!(!glob_matches("docs/**", "docs"));
     }
 
     #[test]

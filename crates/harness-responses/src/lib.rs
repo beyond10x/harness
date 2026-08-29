@@ -12,7 +12,8 @@ mod sse;
 use std::collections::BTreeMap;
 use std::io::{BufReader, Read};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use harness_wire::{
     BearerSource, Cancel, Item, ModelPort, StreamEvent, StreamSink, TurnOutcome, TurnRequest,
@@ -66,6 +67,26 @@ const MAX_ATTEMPTS: u32 = 4;
 /// going nowhere; a backoff that outlived it would take the decision away from the caller.
 fn backoff(attempt: u32) -> Duration {
     Duration::from_millis(500u64 << attempt.min(4))
+}
+
+/// Sleeps for `duration` unless the caller cancels first.
+///
+/// In slices rather than one `sleep`: a person who pressed Ctrl-C during a back-off would otherwise
+/// wait out the whole pause before the next attempt noticed, which is the harness ignoring them
+/// for up to eight seconds.
+fn pause(duration: Duration, cancel: &Cancel) {
+    let end = Instant::now() + duration;
+    let slice = Duration::from_millis(50);
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        let now = Instant::now();
+        if now >= end {
+            return;
+        }
+        std::thread::sleep(slice.min(end - now));
+    }
 }
 
 /// A sink that remembers whether anything reached the caller.
@@ -153,6 +174,9 @@ pub struct ResponsesClient {
     /// (`prompt_cache_key`). Both are the same string on purpose — that is the shape the endpoint
     /// was observed honouring, serving `codex` at 85% cached where this loop was getting nothing.
     session: String,
+    /// Counts requests, so each carries its own `x-client-request-id`. A retry is a new request
+    /// and says so; an id that never changed would name every request of a run the same thing.
+    requests: AtomicU64,
     /// [`None`] sends no `authorization` header at all.
     ///
     /// Not the same as an empty credential, which is refused below: an empty bearer means a
@@ -213,6 +237,7 @@ impl ResponsesClient {
             wire: WireId::new(WIRE).expect("the wire id constant is valid"),
             endpoint,
             session: new_session(),
+            requests: AtomicU64::new(0),
             bearer,
             http,
             cancel: Cancel::new(),
@@ -281,7 +306,7 @@ impl ResponsesClient {
                     error.message
                 ),
             });
-            std::thread::sleep(backoff(attempt));
+            pause(backoff(attempt), &self.cancel);
         }
     }
 
@@ -300,7 +325,14 @@ impl ResponsesClient {
             // recognise across turns, which is what a prompt cache is keyed on.
             .header("originator", ORIGINATOR)
             .header("session-id", &self.session)
-            .header("x-client-request-id", &self.session)
+            .header(
+                "x-client-request-id",
+                format!(
+                    "{}-{}",
+                    self.session,
+                    self.requests.fetch_add(1, Ordering::Relaxed)
+                ),
+            )
             .json(body);
         // Held only for as long as it takes to become a header, and dropped before the send that
         // can block — the same custody the credential had before it became optional.

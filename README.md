@@ -8,8 +8,10 @@ to hold a loop, registering every tool through that vendor's mechanism, and livi
 budgets that vendor happens to enforce. Owning the loop makes tool names, budgets, cost accounting
 and approval decisions ours.
 
-It is deliberately small and carries no bridges to vendor binaries. **It depends on nothing else in
-`beyond10x`.** The arrow points inward — something else embeds this, never the reverse.
+It is deliberately small and carries no bridges to vendor binaries. **It depends on one other
+component in `beyond10x` — [substrate](https://github.com/beyond10x/substrate), pinned by git
+revision — and on nothing that could embed it.** The arrow points inward — something else embeds
+this, never the reverse.
 
 ## Where it sits
 
@@ -51,7 +53,7 @@ The gate is **`bash scripts/gate.sh`**. Green here is the bar for main.
 | lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | provider-wire pins | `python3 scripts/check-provider-wires.py` |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
-| brand | `bash scripts/check-brand.sh` |
+| brand | org-wide, from the atlas checkout: `bash ../atlas/scripts/check-org-brand.sh harness` |
 
 Rust 1.97, edition 2024. The binary is `b10x-harness`.
 
@@ -71,8 +73,9 @@ credential it was not pointed at, so a run can always be explained afterwards.
 |---|---|
 | `--json` | one event per line on stdout instead of prose |
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
-| `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace |
+| `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — a directory not called `ws_…`, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
+| `--yes` | approve what asks. Every write and every `run` asks — the loop judges each call's declared risk against a ceiling that defaults to low — and without `--yes` the default approver denies them and the model is told |
 
 Exit status distinguishes the three outcomes a caller acts on differently: `0` the model answered,
 `2` the run stopped for a named reason, `1` the harness could not run.
@@ -94,7 +97,17 @@ and no `run`; with it, six. That is the toolset following the machine rather tha
 The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes substrate's
 root, and reads and writes land in the same place. The directory must therefore be named
 `ws_something` — substrate's guarded filesystem will not represent any other name — and one that is
-not leaves the run read-only rather than quietly writing somewhere else.
+not refuses the run by name rather than quietly running read-only:
+
+```text
+error: `--substrate-embedded` cannot adopt `not_a_ws`: the directory must be named `ws_` followed by alphanumerics and underscores, because substrate's guarded filesystem represents no other name. Rename it, or drop the flag for a read-only run.
+```
+
+`--toolchain rust` mounts the operator's `~/.rustup` read-only inside the sandbox and points
+`CARGO_HOME` at **`<workspace>/.cargo`** — never at the operator's `~/.cargo`, which holds a
+registry credential. Nothing seeds that directory: a confined build has no network, so the caller
+copies the package cache the task needs (`registry/` from `~/.cargo`) into `<workspace>/.cargo`
+before the run, or the first `cargo build` fails inside cargo looking for a crate it cannot fetch.
 
 ## What the model sees
 
@@ -135,7 +148,10 @@ compiled in — a table baked into this binary would be numbers nobody could dat
 first time one moved. Without a card the run reports tokens and no price, and a model the card does
 not list is **warned about by name** rather than reported as free.
 
-Approval is a **blocking call**, not a protocol round trip that can land after the effect.
+Approval is a **blocking call**, not a protocol round trip that can land after the effect. What
+asks is derived from the call, never declared by the tool: the loop reads the envelope of the
+catalogue entry a `tool_invoke` names and asks when its risk is above the run's unattended ceiling
+(default low), or when it is a non-idempotent write. The default approver denies; `--yes` approves.
 
 ## Two shells, one loop
 

@@ -21,8 +21,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 1. **No bridges.** This component drives no vendor binary, no subprocess harness and no vendor
    control protocol as a client. Driving a vendor's loop is `metaharness`.
-2. **No dependency on any sibling component.** Something else embeds this; this embeds nothing. A
-   dependency here would quietly re-couple the components the split exists to separate.
+2. **No dependency on any sibling that could embed this.** Something else embeds this; this
+   embeds nothing above it — not `metaharness`, `llmgw`, `identity` or `eventlog`. A dependency
+   there would quietly re-couple the components the split exists to separate. **The one
+   dependency below it is substrate** — `substrate-host` and `substrate-wire`, pinned by git
+   revision in `crates/harness-substrate/Cargo.toml`, never by `path`: a path into a sibling
+   checkout builds against whatever is checked out there, and `--locked` cannot lock it. The
+   boundary that import crosses is argued in `crates/harness-substrate/src/embedded.rs`.
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
    byte lives in a wire crate. It defines the credential *types* — `Bearer`, zeroized on drop, and
    the `StaticBearer` a caller may hold for a process lifetime — but reads no credential from
@@ -82,7 +87,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
 - **Approvals are the review gate (invariant 12).** Changing the default, or adding a path that
-  reaches a tool without consulting the approver, removes the gate rather than tuning it.
+  reaches a tool without consulting the approver, removes the gate rather than tuning it. What
+  asks is **derived, never declared**: the loop reads `ToolPort::call_envelope` — for a verb over
+  a catalogue, the entry's envelope, not the verb's — and asks when `Envelope::needs_approval`
+  says so against `LoopConfig::unattended_ceiling` (default `Risk::Low`). `ToolSpec::approval`
+  can only add asking and is being retired. Until 2026-08-29 no shipped tool set it, so the gate
+  never fired; a test now pins that a `run` entry under `DenyAll` is refused.
+  **Bridge mode is the one place the approver is `ApproveAll`**
+  (`crates/harness-app-server/src/lib.rs`): the client registered every tool and executes every
+  `item/tool/call` itself, so the gate is the client's, and a second one on this side would decide
+  something nobody asked this side to decide. A bridge tool the client does not mediate would be a
+  new path, not a tuning.
 - **The shipped toolset is read-only.** Adding a tool that writes or executes is its own change, with
   its own gate and its own entry in `STATUS.md` — never a flag on an existing one.
 - **Three pinned wire manifests carry wire-visible identifiers.** The `b10x_operation_search`
@@ -118,9 +133,16 @@ the contract checkers. Run it before every commit. The former brand is fenced or
 **`python3` must be available**: the wire fixtures are a standard-library HTTP server, driven as a
 real subprocess over a real socket. A missing interpreter is a failed gate, not a skipped check.
 
-**A green local gate does not guarantee a green CI.** The steps mirror each other; the toolchain does
-not — CI installs whatever `stable` is that day, and a newer clippy can fail a commit that passed
-locally. Run `rustup update` before pushing, and read the gate's own exit status, never a pipeline's
+**CI is `.github/workflows/gate.yml`**, and it runs `scripts/gate.sh` itself rather than a copied
+step list, so the two cannot drift; a second job builds on the declared `rust-version`. It needs two
+repository secrets, `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY`, because the substrate dependency
+is a private repository and `GITHUB_TOKEN` cannot read it; without them the token step fails by name
+and nothing is built. They are provisioned from the atlas checkout —
+`bash ../atlas/scripts/bot-ci-secrets.sh beyond10x/harness` — never by hand.
+
+**A green local gate does not guarantee a green CI.** The script is the same; the toolchain is not —
+CI installs whatever `stable` is that day, and a newer clippy can fail a commit that passed locally.
+Run `rustup update` before pushing, and read the gate's own exit status, never a pipeline's
 (`gate.sh 2>&1 | tail` reports `tail`'s status, not the gate's).
 
 ## Releases
@@ -146,6 +168,12 @@ locally. Run `rustup update` before pushing, and read the gate's own exit status
 ## Bot identity
 
 Automated commits and pushes use the GitHub App via `scripts/as-bot.sh`, never a human credential.
-`scripts/bot-token.sh` mints the token, and **the bot-org default it applies at
-`scripts/bot-token.sh:8` is not the org this repository lives in** — set that variable explicitly to
-`beyond10x` rather than relying on the default.
+`scripts/bot-token.sh` mints the token; its org default is `beyond10x` (`scripts/bot-token.sh:8`),
+which is where the App is installed. **The bot's automation lives in atlas**
+(`atlas/scripts/`, `atlas/docs/bot-only-commits.md`); the copies here are byte-identical to it and
+are changed there first.
+
+The three commits before this repository became canonical (`fc676ec`, `14f53f4`, `b61a9bb`) carry
+the bot's former name, and two of them carry b10x-bot's own app ID (`316511680`) under it. A
+`.mailmap` would put the former brand back in the tree and fail the org fence, and history is not
+rewritten, so the record stands as it is.

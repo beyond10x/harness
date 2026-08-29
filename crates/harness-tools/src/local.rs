@@ -29,6 +29,7 @@
 //! provider instead, and the catalogue cannot tell the difference.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -48,6 +49,16 @@ const MAX_RUN_OUTPUT_BYTES: usize = 64 * 1024;
 /// A bound rather than none: `wait` on a child that never exits stops the run with no record of
 /// why. Ten minutes is longer than any suite this has been pointed at and shorter than a night.
 const MAX_RUN_SECONDS: u64 = 600;
+/// How much of a matched line `search` reports. One minified file on a single line would
+/// otherwise bury every other result, so the line is cut — and the match says that it was.
+const MAX_MATCH_CHARS: usize = 400;
+
+/// The only environment variables a declared program is started with.
+///
+/// An allow list rather than a deny list, because the parent process's environment is where this
+/// run's credentials live and the child's arguments came from the model. Naming what may cross
+/// keeps a token nobody thought about out of a program somebody else chose.
+const INHERITED_ENV: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM", "TMPDIR"];
 
 /// Directories skipped while walking. Each is either machine output or another tool's private
 /// state, and including them buries the answer the person asked for.
@@ -147,11 +158,23 @@ impl LocalOperations {
                 break;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            // A link's own type is not its target's, so a link to a directory used to be listed as
+            // a file with the length of the link text. Naming it a link says what it is without
+            // this listing having to follow it, which is a decision for whoever opens it.
+            let file_type = entry.file_type().ok();
+            let kind = match file_type {
+                Some(kind) if kind.is_symlink() => "symlink",
+                Some(kind) if kind.is_dir() => "directory",
+                _ => "file",
+            };
             entries.push(json!({
                 "name": name,
-                "kind": if is_dir { "directory" } else { "file" },
-                "bytes": entry.metadata().ok().filter(|_| !is_dir).map(|meta| meta.len()),
+                "kind": kind,
+                "bytes": entry
+                    .metadata()
+                    .ok()
+                    .filter(|_| kind == "file")
+                    .map(|meta| meta.len()),
             }));
         }
         Ok(json!({
@@ -170,15 +193,35 @@ impl LocalOperations {
         if !target.is_file() {
             return Err(format!("`{relative}` is not a file"));
         }
-        let bytes = fs::read(&target).map_err(|error| format!("`{relative}`: {error}"))?;
-        let total = bytes.len() as u64;
+        // The size comes from the metadata and only `limit` bytes are ever read. Reading the file
+        // whole and then cutting the reply means a multi-gigabyte artefact in the workspace is
+        // pulled into this process's memory to answer with 64 KiB of it.
+        let total = fs::metadata(&target)
+            .map_err(|error| format!("`{relative}`: {error}"))?
+            .len();
+        let mut head = Vec::new();
+        fs::File::open(&target)
+            .map_err(|error| format!("`{relative}`: {error}"))?
+            .take(limit)
+            .read_to_end(&mut head)
+            .map_err(|error| format!("`{relative}`: {error}"))?;
         let truncated = total > limit;
-        let head = &bytes[..usize::try_from(limit.min(total)).unwrap_or(bytes.len())];
+        // On a character boundary. A cut through a multi-byte character becomes U+FFFD, which reads
+        // as damage to the file rather than to the reply, so the last partial character is dropped
+        // instead. `error_len() == None` is exactly "the bytes ran out mid-character": anything
+        // else is the file's own encoding and is reported lossily, as before.
+        let text = match std::str::from_utf8(&head) {
+            Ok(text) => text.to_owned(),
+            Err(error) if truncated && error.error_len().is_none() => {
+                String::from_utf8_lossy(&head[..error.valid_up_to()]).into_owned()
+            }
+            Err(_) => String::from_utf8_lossy(&head).into_owned(),
+        };
         Ok(json!({
             "path": self.display(&target),
             "bytes": total,
             "truncated": truncated,
-            "text": String::from_utf8_lossy(head),
+            "text": text,
         }))
     }
 
@@ -189,11 +232,17 @@ impl LocalOperations {
     /// have moved — checks containment there, and rebuilds. A `..` left in the unresolved tail is
     /// refused rather than appended, because `PathBuf::push` treats it as a name and the containment
     /// check would then pass on a path that escapes.
+    ///
+    /// Presence is `symlink_metadata`, never `exists`. `Path::exists` follows links, so a dangling
+    /// link inside the workspace answered "not there" and the walk carried on up to the workspace
+    /// root, whose containment check of course passes — leaving `fs::write` to follow the link and
+    /// create the file wherever it pointed. Asking about the link itself stops the walk at it, and
+    /// then `canonicalize` fails on a link that leads nowhere and refuses one that leads out.
     fn resolve_new(&self, relative: &str) -> Result<PathBuf, String> {
         let candidate = self.root.join(relative);
         let mut tail = Vec::new();
         let mut existing = candidate.as_path();
-        while !existing.exists() {
+        while existing.symlink_metadata().is_err() {
             let (Some(name), Some(parent)) = (existing.file_name(), existing.parent()) else {
                 return Err(format!(
                     "`{relative}` names no path this workspace can write"
@@ -203,9 +252,12 @@ impl LocalOperations {
             existing = parent;
         }
 
-        let mut resolved = existing
-            .canonicalize()
-            .map_err(|error| format!("`{relative}`: {error}"))?;
+        let mut resolved = existing.canonicalize().map_err(|error| {
+            format!(
+                "`{relative}`: `{}` is a link that leads nowhere this workspace can write ({error})",
+                self.display(existing)
+            )
+        })?;
         if !resolved.starts_with(&self.root) {
             return Err(format!(
                 "`{relative}` resolves outside the workspace and was refused"
@@ -224,6 +276,17 @@ impl LocalOperations {
 
     fn write(&self, relative: &str, text: &str) -> Result<Value, String> {
         let target = self.resolve_new(relative)?;
+        // Belt and braces on top of `resolve_new`: a link put here between that check and this call
+        // would still be followed by `fs::write`, and the bytes would land wherever it points.
+        if target
+            .symlink_metadata()
+            .is_ok_and(|meta| meta.file_type().is_symlink())
+        {
+            return Err(format!(
+                "`{relative}` is a symlink, and this workspace writes files rather than through \
+                 links. Name the file itself."
+            ));
+        }
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|error| format!("`{relative}`: {error}"))?;
         }
@@ -269,12 +332,23 @@ impl LocalOperations {
             ));
         }
 
-        let mut child = std::process::Command::new(program)
+        let mut command = std::process::Command::new(program);
+        command
             .args(&argv[1..])
             .current_dir(&self.root)
+            // Cleared, then filled from [`INHERITED_ENV`] alone. A child started here inherits the
+            // whole of this process's environment otherwise, which is how a credential held for the
+            // harness reaches a program the model picked the arguments for.
+            .env_clear()
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        for name in INHERITED_ENV {
+            if let Ok(value) = std::env::var(name) {
+                command.env(name, value);
+            }
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("`{program}`: {error}"))?;
 
@@ -357,7 +431,10 @@ impl LocalOperations {
                     matches.push(json!({
                         "path": self.display(file),
                         "line": index + 1,
-                        "text": line.chars().take(400).collect::<String>(),
+                        "text": line.chars().take(MAX_MATCH_CHARS).collect::<String>(),
+                        // Always present, so the shape is stable and a reader who checks the flag
+                        // never has to wonder whether its absence means "whole" or "old reply".
+                        "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
                     }));
                 }
             }
@@ -493,5 +570,195 @@ impl Operations for LocalOperations {
 
     fn writes(&self) -> bool {
         self.programs.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::symlink;
+
+    use tempfile::{TempDir, tempdir};
+
+    use super::*;
+
+    fn workspace() -> TempDir {
+        tempdir().expect("a temporary directory")
+    }
+
+    fn writing(root: &Path) -> LocalOperations {
+        LocalOperations::unconfined(root, Vec::new()).expect("the workspace opens")
+    }
+
+    fn reading(root: &Path) -> LocalOperations {
+        LocalOperations::new(root).expect("the workspace opens")
+    }
+
+    #[test]
+    fn a_link_that_leads_nowhere_is_not_a_door_out_of_the_workspace() {
+        // `Path::exists` follows links, so a dangling one used to look absent: the walk climbed to
+        // the workspace root, containment passed, and the write created the file outside.
+        let outside = workspace();
+        let inside = workspace();
+        let escaped = outside.path().join("escaped.txt");
+        symlink(&escaped, inside.path().join("link")).expect("a link");
+
+        let refusal = writing(inside.path())
+            .file_write("link", "owned")
+            .expect_err("refused");
+        assert!(refusal.contains("link"), "{refusal}");
+        assert!(!escaped.exists(), "the write followed the link out");
+    }
+
+    #[test]
+    fn a_link_to_a_file_outside_the_workspace_does_not_get_to_overwrite_it() {
+        let outside = workspace();
+        let inside = workspace();
+        let victim = outside.path().join("victim.txt");
+        fs::write(&victim, "original").expect("the file is written");
+        symlink(&victim, inside.path().join("link")).expect("a link");
+
+        assert!(writing(inside.path()).file_write("link", "owned").is_err());
+        assert_eq!(
+            fs::read_to_string(&victim).expect("the file is read"),
+            "original"
+        );
+    }
+
+    #[test]
+    fn a_link_that_stays_inside_the_workspace_is_still_a_way_to_reach_its_target() {
+        // Refusing every link would break a workspace that uses one internally. The boundary is
+        // where the link *lands*, so one that lands inside is followed and the write goes to the
+        // target, under the target's own name.
+        let inside = workspace();
+        let target = inside.path().join("real.txt");
+        fs::write(&target, "before").expect("the file is written");
+        symlink(&target, inside.path().join("link")).expect("a link");
+
+        let value = writing(inside.path())
+            .file_write("link", "after")
+            .expect("the write lands");
+        assert_eq!(value["path"], json!("real.txt"));
+        assert_eq!(
+            fs::read_to_string(&target).expect("the file is read"),
+            "after"
+        );
+    }
+
+    #[test]
+    fn a_new_file_under_directories_that_do_not_exist_yet_still_writes() {
+        let inside = workspace();
+        writing(inside.path())
+            .file_write("new/dir/file.txt", "hello")
+            .expect("the write lands");
+        assert_eq!(
+            fs::read_to_string(inside.path().join("new/dir/file.txt")).expect("the file is read"),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_or_starts_at_the_root_is_refused() {
+        let inside = workspace();
+        let operations = writing(inside.path());
+        assert!(operations.file_write("../escape.txt", "owned").is_err());
+        assert!(
+            operations
+                .file_write("/etc/b10x-escape.txt", "owned")
+                .is_err()
+        );
+        let sibling = inside
+            .path()
+            .parent()
+            .expect("a temporary directory has a parent")
+            .join("escape.txt");
+        assert!(!sibling.exists(), "the write escaped upwards");
+    }
+
+    #[test]
+    fn a_large_file_is_bounded_before_it_is_read_rather_than_after() {
+        let inside = workspace();
+        fs::write(inside.path().join("big.txt"), "x".repeat(200 * 1024))
+            .expect("the file is written");
+
+        let value = reading(inside.path())
+            .file_read("big.txt", Some(1024))
+            .expect("the read answers");
+        assert_eq!(value["bytes"], json!(204_800));
+        assert_eq!(value["truncated"], json!(true));
+        assert!(value["text"].as_str().expect("text").len() <= 1024);
+    }
+
+    #[test]
+    fn truncation_lands_on_a_character_boundary_rather_than_through_one() {
+        let inside = workspace();
+        fs::write(inside.path().join("accents.txt"), "é".repeat(16)).expect("the file is written");
+
+        let value = reading(inside.path())
+            .file_read("accents.txt", Some(3))
+            .expect("the read answers");
+        assert_eq!(value["truncated"], json!(true));
+        assert_eq!(value["text"], json!("é"));
+    }
+
+    #[test]
+    fn a_match_that_was_cut_says_so() {
+        // Invariant 8: nothing is truncated silently. A 400-character cap is fine; a cap the
+        // reader cannot see is a line the model believes it has read whole.
+        let inside = workspace();
+        let long = format!("{}needle{}", "a".repeat(500), "b".repeat(500));
+        fs::write(inside.path().join("long.txt"), format!("{long}\nneedle\n"))
+            .expect("the file is written");
+
+        let value = reading(inside.path())
+            .search("needle", ".", None)
+            .expect("the search answers");
+        let matches = value["matches"].as_array().expect("matches");
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0]["line_truncated"], json!(true));
+        assert_eq!(
+            matches[0]["text"].as_str().expect("text").chars().count(),
+            MAX_MATCH_CHARS
+        );
+        assert_eq!(matches[1]["line_truncated"], json!(false));
+    }
+
+    #[test]
+    fn a_link_to_a_directory_is_listed_as_neither_a_file_nor_a_directory() {
+        let inside = workspace();
+        fs::write(inside.path().join("a.txt"), "x").expect("the file is written");
+        fs::create_dir(inside.path().join("sub")).expect("the directory is made");
+        symlink(inside.path().join("sub"), inside.path().join("zlink")).expect("a link");
+
+        let value = reading(inside.path())
+            .dir_list(".")
+            .expect("the listing answers");
+        let entries = value["entries"].as_array().expect("entries");
+        let kinds = entries
+            .iter()
+            .map(|entry| entry["kind"].as_str().expect("a kind"))
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, vec!["file", "directory", "symlink"]);
+        assert_eq!(entries[2]["bytes"], Value::Null);
+    }
+
+    #[test]
+    fn a_declared_program_is_started_without_this_process_s_environment() {
+        // Cargo puts `CARGO_MANIFEST_DIR` in every test process, so it stands in here for every
+        // credential a real run holds while the model chooses a child's arguments.
+        let env = Path::new("/usr/bin/env");
+        if !env.exists() {
+            return;
+        }
+        let inside = workspace();
+        let operations =
+            LocalOperations::unconfined(inside.path(), vec!["/usr/bin/env".to_owned()])
+                .expect("the workspace opens");
+
+        let value = operations
+            .run(&["/usr/bin/env".to_owned()])
+            .expect("the program runs");
+        let stdout = value["stdout"].as_str().expect("stdout");
+        assert!(!stdout.contains("CARGO_MANIFEST_DIR="), "{stdout}");
+        assert!(stdout.contains("PATH="), "{stdout}");
     }
 }

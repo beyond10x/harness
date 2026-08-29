@@ -39,7 +39,13 @@ def check_version(directory: pathlib.Path, failures: list[str]) -> None:
     if not manifest_path.is_file():
         failures.append(f"{directory}: no manifest.json")
         return
-    manifest = json.loads(manifest_path.read_text())
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as error:
+        # Named, not raised: a corrupted manifest is a contract failure like any other, and a
+        # traceback reads as the checker breaking rather than the contract.
+        failures.append(f"{manifest_path}: not JSON: {error}")
+        return
 
     missing = REQUIRED_KEYS - manifest.keys()
     if missing:
@@ -107,10 +113,14 @@ def check_trace(directory: pathlib.Path, manifest: dict, failures: list[str]) ->
     terminal = None
 
     for number, line in enumerate(trace_path.read_text().splitlines(), start=1):
-        entry = json.loads(line)
-        direction, frame = entry["direction"], entry["frame"]
-        method = frame.get("method")
         where = f"{trace_path}:{number}"
+        try:
+            entry = json.loads(line)
+            direction, frame = entry["direction"], entry["frame"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            failures.append(f"{where}: not a trace entry: {error!r}")
+            return
+        method = frame.get("method")
 
         if method is None:
             # A response or an error: either way it answers something that was actually asked.

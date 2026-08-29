@@ -7,6 +7,80 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **The approval gate now fires.** The loop asked its approver only for a tool whose spec said
+  `Approval::Required`, and no tool this harness ships says so — so `DenyAll`, which AGENTS.md
+  calls the review gate, decided nothing and `--yes` changed nothing. The loop now derives the
+  question from what the **call** does: `ToolPort::call_envelope` answers the envelope of the
+  catalogue entry a `tool_invoke` names (not the verb's own, which must declare every effect any
+  entry can have), and `Envelope::needs_approval` is judged against `LoopConfig::unattended_ceiling`,
+  default `Risk::Low`. Consequence for a person: a `b10x-harness run` with a write-capable or
+  exec-capable catalogue and no `--yes` now **refuses every write and every `run`** and tells the
+  model so; `--yes` approves them. A `file_edit` (non-idempotent) asks whatever the ceiling. Bridge
+  mode is unchanged: the client is the gate there.
+- **`--substrate-embedded` is a flag, not an option.** It demanded a value it then ignored; the
+  README showed it bare and no test exercised it. It is now `bool` on `run` and `tools`, and an
+  end-to-end test drives the embedded path.
+- **Confinement the operator named and the machine cannot provide refuses the run by name.**
+  `--substrate-embedded` over a directory not named `ws_…`, an embedded driver that does not open,
+  or `--substrate <socket>` with no usable daemon behind it used to fall back to the read-only
+  catalogue **silently** — the operator asked for write+exec, got a read-only run, and the model
+  reported the task done. Each case now exits 1 with the reason. The embedded driver is opened
+  once per run instead of twice.
+- **The socket client's exec asks for confinement.** `Client::exec` posted `{workspace_id, argv}`
+  and nothing else — no `sandbox`, no limits — so whether it ran unconfined was the daemon's
+  choice. It now probes `/v1/machine`, refuses by name when the daemon states no capability
+  snapshot, and posts a body serialised from `substrate-wire`'s own `ExecStartInput` (`require:
+  true`, `network: "none"`, the same limits the embedded path uses), built by one shared function
+  so the two paths cannot drift. The parked socket path is still parked; what changed is that it
+  can no longer run unconfined the day it is revived.
+- **The wall-clock deadline is checked between the tool calls of one turn**, not only between
+  turns, so a single slow call can no longer overshoot it by its whole timeout. It also has tests.
+- **A scoped run's paths are relative.** `Scope::refusal` normalises `./`, `.` and `..` lexically
+  before matching and refuses an absolute path when any rule is declared — a denied `target/**`
+  used to be bypassed by `./target/x`, `crates/../target/x` or an absolute spelling. `**/` now
+  matches zero directories too, so `**/*.md` covers `README.md`.
+- `x-client-request-id` is per request; `session-id` and `prompt_cache_key` stay per run. Retry
+  back-off sleeps in slices and stops on Ctrl-C. `serde_yaml` (deprecated) → `serde_yaml_ng` in
+  `harness-flow`'s tests; `chacha20 0.10.1` (yanked) → `0.10.2`.
+
+- **substrate is pinned by git revision, not reached by path.** `harness-substrate` depended on
+  `../../../substrate/crates/*` — a sibling checkout, so the gate was green against whatever tree
+  happened to be there and `--locked` could lock none of it. It now names `beyond10x/substrate` at
+  revision `f1cfc1c` (`0.2.0` plus the brand sweep; the tag itself still carries the former brand
+  in a wire hash domain). Fetching goes through the system `git` (`.cargo/config.toml`,
+  `net.git-fetch-with-cli`) because the repository is private. AGENTS.md invariant 2 now says what
+  the code does: no dependency on anything that could embed this, one pinned dependency below it.
+
+### Added
+
+- **A CI gate**, `.github/workflows/gate.yml`: `scripts/gate.sh` on `stable`, and a build on the
+  declared `rust-version`. It needs the `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY` repository
+  secrets to read the private substrate dependency, provisioned by atlas's `bot-ci-secrets.sh`.
+
+### Fixed
+
+- **`file_write` could escape the workspace through a dangling symlink.** `LocalOperations`
+  tested presence with `exists()`, which follows links, so a link inside the workspace whose
+  target did not exist yet looked absent; the write then followed the link and created the file
+  outside. Reproduced, and reachable through `LocalOperations::unconfined`, which metaharness's
+  MCP server uses. Presence is now `symlink_metadata`, a link that leads nowhere is refused, and a
+  target that is itself a link is refused. Unconfined `run` no longer inherits this process's
+  environment — only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR` reach the child, so a
+  credential held for the harness cannot reach a program the model chose the arguments for.
+- `file_read` reads at most `max_bytes` from disk rather than the whole file; a truncation lands
+  on a character boundary; `search` says `line_truncated: true` when it cut a matched line;
+  `dir_list` reports a symlink as `symlink`. A non-string `argv` item is refused rather than
+  dropped (`["cargo", 5, "test"]` no longer runs `cargo test`). Two workspaces opened with one
+  lease in one process no longer share an id. The contract checkers report a corrupted fixture by
+  name instead of a traceback.
+- **Documentation that had drifted from the tree.** `README.md` named a `scripts/check-brand.sh`
+  that moved to atlas; `STATUS.md` was dated 2026-08-21, counted 189 tests (324 pass, 1 ignored),
+  omitted the `2026-08-22` wire pin and named the profile directory wrongly; design 0001 said
+  nothing in it was implemented after most of it shipped in 0.1.0. AGENTS.md now records that
+  bridge mode's approver is the client's, not `DenyAll`, and why.
+
 ## [0.1.0] — 2026-08-24
 
 First tagged release. The entries below cover everything since the component was established;

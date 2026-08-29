@@ -79,7 +79,8 @@ fn the_catalogue_follows_the_machine_and_the_entries_do_not_know_which_backend_t
         .invoke("run", &json!({"argv": ["sh", "-c", "id"]}))
         .expect_err("refused");
     assert!(
-        refused.contains("not a program") || refused.contains("not a tool this run has"),
+        refused.message().contains("not a program")
+            || refused.message().contains("not a tool this run has"),
         "{refused}"
     );
 }

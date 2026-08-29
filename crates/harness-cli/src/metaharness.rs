@@ -122,11 +122,32 @@ pub fn convert(
                 "call_id": value["call_id"],
                 "is_error": value["failed"],
             }),
-            "approval-resolved" => json!({
-                "event": "tool.decided",
-                "call_id": value["call_id"],
-                "decision": if value["approved"].as_bool() == Some(true) { "allow" } else { "deny" },
-            }),
+            // **Not `tool.decided`.** Every `DecidedBy` the protocol has — `Embedder`, `Frame`,
+            // `Deadline`, `Adapter`, observe — names a *metaharness-side* decider, and metaharness
+            // invariant 9 says the adapter decides nothing. This loop's approver is none of them:
+            // it is the run's own gate, inside the harness, and describing it as a seam decision
+            // would put the driven arm's treatment on top of an arm that measures the opposite
+            // claim. So a denial is reported as what it is to a reader of this stream — a fact
+            // about the run — and the metaharness-side b10x seam maps it the same way, because the
+            // same run described through the two paths must not differ.
+            //
+            // An approval emits nothing. It is bookkeeping: the call proceeds and the
+            // `tool.requested`/`tool.result` pair already says so, and a warning per allowed call
+            // would bury the denials this exists to make visible.
+            "approval-resolved" => {
+                if value["approved"].as_bool() == Some(true) {
+                    continue;
+                }
+                let call = value["call_id"].as_str().unwrap_or("an unnamed call");
+                json!({
+                    "event": "warning",
+                    "code": "approval-denied",
+                    // The call and nothing else: `LoopEvent::ApprovalResolved` carries no reason,
+                    // and inventing one here would be this converter answering a question the
+                    // record does not hold an answer to.
+                    "message": format!("the approver denied {call}"),
+                })
+            }
             "usage" => json!({
                 "event": "usage",
                 "model": value["model"],
@@ -619,6 +640,64 @@ mod tests {
         // read - and `[]` is what says *this loop installs no plugins because it cannot*.
         let events = convert_all(RUN);
         assert_eq!(events[0]["hermetic"]["installed_plugins"], json!([]));
+    }
+
+    #[test]
+    fn a_program_the_run_may_not_start_crosses_as_a_named_warning() {
+        // The row that read `0 refusal(s)`. On this side of the wire every tool result's content
+        // is `null`, so the refusal's sentence is not there to be matched — the code is the only
+        // thing that can carry *the surface denied what is outside it* across, and it needs no
+        // special case here because a warning is passed through as a warning.
+        let events = convert_all(
+            r#"{"kind":"warning","code":"program-refused","message":"`sh` is not a program this run may start. Declared: cargo."}
+{"kind":"tool-completed","call_id":"c-1","failed":true}
+{"kind":"finished","stop":{"kind":"completed"}}"#,
+        );
+        assert_eq!(events[0]["event"], "warning");
+        assert_eq!(events[0]["code"], "program-refused");
+        assert!(
+            events[0]["message"]
+                .as_str()
+                .expect("a message")
+                .contains("`sh` is not a program this run may start"),
+            "{events:?}"
+        );
+        // Before the result it explains, in the order the loop emitted them.
+        assert_eq!(events[1]["event"], "tool.result");
+        assert_eq!(events[1]["is_error"], json!(true));
+    }
+
+    #[test]
+    fn an_approvers_denial_is_a_warning_not_a_decision_this_adapter_made() {
+        // `tool.decided` names a metaharness-side decider and this loop's approver is not one:
+        // reporting it there would describe the native arm as the driven arm, which is the one
+        // difference the two arms exist to measure. An allowed call says nothing at all — the
+        // request and the result already do.
+        let events = convert_all(
+            r#"{"kind":"approval-required","call_id":"c-1","name":"run"}
+{"kind":"approval-resolved","call_id":"c-1","approved":false}
+{"kind":"tool-completed","call_id":"c-1","failed":true}
+{"kind":"approval-resolved","call_id":"c-2","approved":true}
+{"kind":"tool-completed","call_id":"c-2","failed":false}
+{"kind":"finished","stop":{"kind":"completed"}}"#,
+        );
+        assert!(
+            !events.iter().any(|event| event["event"] == "tool.decided"),
+            "nothing on this arm decides at a seam: {events:?}"
+        );
+        assert_eq!(events[0]["event"], "warning");
+        assert_eq!(events[0]["code"], "approval-denied");
+        assert_eq!(events[0]["message"], "the approver denied c-1");
+        assert_eq!(events[1]["event"], "tool.result");
+        assert_eq!(
+            events[2]["event"], "tool.result",
+            "the allowed call is not announced twice"
+        );
+        assert_eq!(events[3]["event"], "session.ended");
+        assert!(
+            !events.iter().any(|event| event["event"] == "opaque"),
+            "read and understood, so nothing goes down the uncertain road: {events:?}"
+        );
     }
 
     #[test]

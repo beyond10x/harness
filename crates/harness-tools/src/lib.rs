@@ -54,9 +54,9 @@ mod verbs;
 
 pub use catalogue::{Catalogue, Entry, entry_names, operation_of, subjects_of};
 pub use flat::Flat;
-pub use harness_wire::Subject;
+pub use harness_wire::{Refusal, Subject};
 pub use local::LocalOperations;
-pub use operations::{Operations, ReadWindow, SearchOptions, Split};
+pub use operations::{Operations, ReadWindow, Refused, SearchOptions, Split};
 pub use scope::{Scope, ScopeRule, WriteScope};
 pub use verbs::{DESCRIBE_VERB, INVOKE_VERB, SEARCH_VERB, Verbs};
 

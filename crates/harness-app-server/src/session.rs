@@ -374,6 +374,9 @@ fn decode_tool_result(result: Option<&Value>) -> ToolOutcome {
     ToolOutcome {
         output: Value::String(text),
         failed: !success,
+        // The client's own refusals are the client's own gate (`AGENTS.md` § *Safety envelope*,
+        // bridge mode). Naming one here would be this side claiming a decision it did not make.
+        refusal: None,
     }
 }
 

@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use harness_wire::{AccessKind, Effect, Envelope, Idempotency, Risk, Subject, ToolName, ToolSpec};
 use serde_json::{Value, json};
 
-use crate::Operations;
+use crate::{Operations, Refused};
 
 /// One thing a run may do.
 pub struct Entry {
@@ -283,7 +283,10 @@ impl Catalogue {
     ///
     /// The name is not one the catalogue holds — refused **here**, with nothing performed and
     /// nothing sent anywhere — or the operation itself failed, in which case the words are its own.
-    pub fn invoke(&self, name: &str, arguments: &Value) -> Result<Value, String> {
+    ///
+    /// [`Refused`] rather than a bare sentence, so a refusal the run made by its own rule — a
+    /// program outside the declared set — reaches the caller as a fact and not only as prose.
+    pub fn invoke(&self, name: &str, arguments: &Value) -> Result<Value, Refused> {
         self.invoke_within(name, arguments, None)
     }
 
@@ -300,7 +303,7 @@ impl Catalogue {
         name: &str,
         arguments: &Value,
         remaining: Option<std::time::Duration>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, Refused> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
         // **Refused here, by the tool, because here is where this loop's policy lives.** Every
         // other arm adjudicates at a decision seam; this one has none and never grows one, so a
@@ -308,7 +311,7 @@ impl Catalogue {
         // nobody declared. Before the operation runs, so a refusal costs nothing but a turn.
         if let Some(path) = arguments.get("path").and_then(Value::as_str) {
             if let Some(refusal) = self.scope.refusal(entry.operation, path) {
-                return Err(refusal);
+                return Err(refusal.into());
             }
             // And by where it lands, not only by how it was spelled. The scope is lexical; a link
             // inside the workspace is a spelling it cannot see, and `ok/link -> target/x` used to
@@ -320,7 +323,7 @@ impl Catalogue {
                 && landing != path
                 && let Some(refusal) = self.scope.refusal(entry.operation, &landing)
             {
-                return Err(format!("`{path}` leads to `{landing}`, and {refusal}"));
+                return Err(format!("`{path}` leads to `{landing}`, and {refusal}").into());
             }
         }
         let string = |field: &str| -> Result<&str, String> {
@@ -336,65 +339,83 @@ impl Catalogue {
                 .and_then(Value::as_u64)
                 .and_then(|value| usize::try_from(value).ok())
         };
+        // Every arm but `shell` answers a sentence and nothing more; `shell` is the one that can
+        // name what it refused, so it is the one that is not converted.
         match entry.operation {
-            "file.read" => self.operations.file_read(
-                path()?,
-                crate::ReadWindow {
-                    offset: arguments.get("offset").and_then(Value::as_u64),
-                    limit: arguments.get("limit").and_then(Value::as_u64),
-                    max_bytes: arguments.get("max_bytes").and_then(Value::as_u64),
-                },
-            ),
-            "file.write" => self.operations.file_write(path()?, string("text")?),
+            "file.read" => self
+                .operations
+                .file_read(
+                    path()?,
+                    crate::ReadWindow {
+                        offset: arguments.get("offset").and_then(Value::as_u64),
+                        limit: arguments.get("limit").and_then(Value::as_u64),
+                        max_bytes: arguments.get("max_bytes").and_then(Value::as_u64),
+                    },
+                )
+                .map_err(Refused::from),
+            "file.write" => self
+                .operations
+                .file_write(path()?, string("text")?)
+                .map_err(Refused::from),
             "file.edit" => self
                 .operations
-                .file_edit(path()?, string("old")?, string("new")?),
+                .file_edit(path()?, string("old")?, string("new")?)
+                .map_err(Refused::from),
             "dir.list" => self
                 .operations
-                .dir_list(arguments.get("path").and_then(Value::as_str).unwrap_or(".")),
-            "search" => self.operations.search(
-                string("pattern")?,
-                arguments.get("path").and_then(Value::as_str).unwrap_or("."),
-                &crate::SearchOptions {
-                    regex: arguments
-                        .get("regex")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                    glob: arguments
-                        .get("glob")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned),
-                    context: arguments.get("context").and_then(Value::as_u64),
-                    max_results: under("max_results"),
-                },
-            ),
-            "find" => self.operations.find(
-                string("glob")?,
-                arguments.get("path").and_then(Value::as_str).unwrap_or("."),
-                under("max_results"),
-            ),
+                .dir_list(arguments.get("path").and_then(Value::as_str).unwrap_or("."))
+                .map_err(Refused::from),
+            "search" => self
+                .operations
+                .search(
+                    string("pattern")?,
+                    arguments.get("path").and_then(Value::as_str).unwrap_or("."),
+                    &crate::SearchOptions {
+                        regex: arguments
+                            .get("regex")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        glob: arguments
+                            .get("glob")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        context: arguments.get("context").and_then(Value::as_u64),
+                        max_results: under("max_results"),
+                    },
+                )
+                .map_err(Refused::from),
+            "find" => self
+                .operations
+                .find(
+                    string("glob")?,
+                    arguments.get("path").and_then(Value::as_str).unwrap_or("."),
+                    under("max_results"),
+                )
+                .map_err(Refused::from),
             "shell" => {
                 let items = arguments
                     .get("argv")
                     .and_then(Value::as_array)
                     .filter(|items| !items.is_empty())
-                    .ok_or_else(|| "`argv` is required and names the program first".to_owned())?;
+                    .ok_or_else(|| {
+                        Refused::from("`argv` is required and names the program first")
+                    })?;
                 // Every item, or nothing. Dropping a non-string item would run a command nobody
                 // asked for — `["cargo", 5, "test"]` is not `cargo test`, it is a mistake the model
                 // has to hear about.
                 let mut argv = Vec::with_capacity(items.len());
                 for (index, item) in items.iter().enumerate() {
                     let Some(text) = item.as_str() else {
-                        return Err(format!(
+                        return Err(Refused::from(format!(
                             "`argv[{index}]` is {item}, not a string; every item of an argv is a \
                              string, and nothing was run"
-                        ));
+                        )));
                     };
                     argv.push(text.to_owned());
                 }
                 self.operations.run_within(&argv, remaining)
             }
-            other => Err(format!("`{other}` is not an operation this build performs")),
+            other => Err(format!("`{other}` is not an operation this build performs").into()),
         }
     }
 
@@ -436,7 +457,7 @@ impl Catalogue {
         &self,
         calls: &[(&str, &Value)],
         remaining: Option<std::time::Duration>,
-    ) -> Vec<Result<Value, String>> {
+    ) -> Vec<Result<Value, Refused>> {
         let mut answers = Vec::with_capacity(calls.len());
         for chunk in calls.chunks(MAX_BATCH_THREADS) {
             std::thread::scope(|scope| {
@@ -448,22 +469,22 @@ impl Catalogue {
                                 self.invoke_within(name, arguments, remaining)
                             }))
                             .unwrap_or_else(|payload| {
-                                Err(format!(
+                                Err(Refused::from(format!(
                                     "`{name}` panicked while running: {}. Nothing else in this \
                                      batch was affected, and whether it did anything before it \
                                      stopped is unknown.",
                                     panic_words(payload.as_ref())
-                                ))
+                                )))
                             })
                         })
                     })
                     .collect();
                 for (handle, (name, _)) in running.into_iter().zip(chunk) {
                     answers.push(handle.join().unwrap_or_else(|_| {
-                        Err(format!(
+                        Err(Refused::from(format!(
                             "`{name}` did not finish: the thread running it stopped without an \
                              answer, so whether it did anything is unknown"
-                        ))
+                        )))
                     }));
                 }
             });
@@ -480,6 +501,22 @@ impl Catalogue {
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+}
+
+/// What the model reads: a failure is an outcome, never an error, or the next turn assumes the
+/// effect landed.
+///
+/// The one place a [`Refused`] becomes a [`ToolOutcome`], for both published surfaces — the three
+/// verbs and the flat one. A refusal the run made by rule keeps its name here; every other failure
+/// is words and only words, which is what it always was.
+pub(crate) fn outcome(result: Result<Value, Refused>) -> harness_wire::ToolOutcome {
+    match result {
+        Ok(output) => harness_wire::ToolOutcome::ok(output),
+        Err(refused) => match refused.into_parts() {
+            (_, Some(refusal)) => harness_wire::ToolOutcome::refused(refusal),
+            (message, None) => harness_wire::ToolOutcome::failed(message),
+        },
     }
 }
 

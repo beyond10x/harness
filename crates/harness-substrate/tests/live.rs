@@ -94,5 +94,12 @@ fn a_confined_workspace_takes_a_write_reads_it_back_and_runs_a_declared_program(
     let refused = tools
         .run(&["sh".to_owned(), "-c".to_owned(), "id".to_owned()])
         .expect_err("refused");
-    assert!(refused.contains("not a program"), "{refused}");
+    assert!(refused.message().contains("not a program"), "{refused}");
+    assert!(
+        matches!(
+            refused.refusal(),
+            Some(harness_tools::Refusal::ProgramNotDeclared { program, .. }) if program == "sh"
+        ),
+        "the confined provider names its refusal too: {refused}"
+    );
 }

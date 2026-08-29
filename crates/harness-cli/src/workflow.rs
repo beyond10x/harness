@@ -793,11 +793,15 @@ impl FlowRunner<'_> {
         Ok(given)
     }
 
-    /// A fresh session for one attempt of one section, named `<flow-run>.<path>.<attempt>`.
+    /// A fresh session for one attempt of one section, named by [`session_id`] after **every**
+    /// attempt above it: `<flow-run>.root.1.specify.2`.
     ///
     /// The flow-run half is [`transcript::Session::new_id`], taken once for the whole walk — the
     /// identifier `prepare` already minted for a run that, here, files nothing of its own. So the
     /// sessions of one walk sort together and name the section they hold.
+    ///
+    /// [`FlowRunner::open`] is read here rather than remembered anywhere, because at the moment a
+    /// section is entered it *is* the ancestor chain: `entering` mints this before it pushes.
     fn session_for(&self, path: &str, attempt: u32) -> transcript::Session {
         let template = &self.prepared.session;
         let mut session = transcript::Session::new(
@@ -806,7 +810,12 @@ impl FlowRunner<'_> {
             &template.base_url,
             template.workspace.clone(),
         );
-        session.id = format!("{}.{path}.{attempt}", self.flow_run);
+        let above: Vec<(&str, u32)> = self
+            .open
+            .iter()
+            .map(|open| (open.path.as_str(), open.attempt))
+            .collect();
+        session.id = session_id(&self.flow_run, &above, path, attempt);
         session
     }
 
@@ -1284,6 +1293,41 @@ impl StepRunner for FlowRunner<'_> {
     }
 }
 
+/// The name of one attempt of one section: the walk's identifier, then every open scope on the way
+/// down as its own name and the attempt that scope is on.
+///
+/// `<flow-run>.root.1.specify.2` is the second attempt of `root.specify`, run under the **first**
+/// attempt of the root. Naming only the section's own attempt — `<flow-run>.root.specify.2`, which
+/// is what this did until 2026-08-30 — files a re-entered ancestor's second pass over the first
+/// one's: the seventh paid native walk retreated the root, ran `root.specify` attempt 1 twice, and
+/// the transcript of the one whose validator exited `1` was overwritten by the one that came after
+/// it. Only the event record still said it had happened.
+///
+/// `above` is the ancestor chain, outermost first. Each scope after the first contributes its own
+/// name and not its whole path, so an id grows by two parts per level rather than by the whole path
+/// again; the outermost keeps its path, which is the document's root id and one name.
+///
+/// # Why two chains cannot come out as one string
+///
+/// Every scope contributes exactly two `.`-separated parts — a name, then a decimal attempt — so a
+/// chain of `d` scopes is `2d` parts and reading them back in pairs recovers the chain and the
+/// attempts. That rests on a name carrying no `.` of its own, which is not an assumption:
+/// `harness_flow::FlowError::DottedName` refuses one, because a name with a dot in it would already
+/// make two different sections read as the same path.
+fn session_id(flow_run: &str, above: &[(&str, u32)], path: &str, attempt: u32) -> String {
+    let here = (path, attempt);
+    let mut id = flow_run.to_owned();
+    let mut enclosing: Option<&str> = None;
+    for (scope, taken) in above.iter().chain(std::iter::once(&here)) {
+        let name = enclosing
+            .and_then(|outer| scope.strip_prefix(outer)?.strip_prefix('.'))
+            .unwrap_or(scope);
+        let _ = write!(id, ".{name}.{taken}");
+        enclosing = Some(scope);
+    }
+    id
+}
+
 /// What is left of a flow-wide ceiling, or [`None`] when nothing is.
 ///
 /// Zero is `None` and not `Some(0)` on purpose: a bound of zero admits nothing, and handing one to
@@ -1728,6 +1772,72 @@ mod tests {
                 .contains(harness_loop::DEFAULT_ANSWER_NAME),
             "and names the tool the derived schema publishes: {}",
             prepared.config.instructions
+        );
+    }
+
+    /// The naming rule of design 0003 § 4, as it is after the seventh paid native walk lost a
+    /// transcript to it: the section's own attempt is the last part, and every attempt above it is
+    /// in front of that.
+    #[test]
+    fn a_sections_session_names_every_attempt_above_it_and_not_only_its_own() {
+        assert_eq!(
+            session_id("walk", &[], "root", 1),
+            "walk.root.1",
+            "the root under nothing is its path and its attempt"
+        );
+        assert_eq!(
+            session_id("walk", &[("root", 1)], "root.specify", 2),
+            "walk.root.1.specify.2",
+            "a section carries the attempt of the scope it is running under"
+        );
+        assert_eq!(
+            session_id(
+                "walk",
+                &[("root", 2), ("root.implement-to-review", 3)],
+                "root.implement-to-review.verify",
+                1
+            ),
+            "walk.root.2.implement-to-review.3.verify.1",
+            "and of every scope above that, outermost first, each by its own name"
+        );
+    }
+
+    /// The bug the story was filed for, as arithmetic on the names alone: a root that retreats runs
+    /// the sections under it a second time, from attempt 1 again, and the two passes must not be
+    /// one file.
+    #[test]
+    fn no_two_sections_of_one_walk_can_share_a_session_name() {
+        // Every (scope, attempt) a walk of two root attempts opens, in the order it opens them,
+        // named the way this file names them and the way it used to.
+        let mut named: Vec<String> = Vec::new();
+        let mut by_own_attempt: Vec<String> = Vec::new();
+        for root in 1..=2 {
+            named.push(session_id("walk", &[], "root", root));
+            by_own_attempt.push(format!("walk.root.{root}"));
+            named.push(session_id("walk", &[("root", root)], "root.shape", 1));
+            by_own_attempt.push("walk.root.shape.1".to_owned());
+            named.push(session_id(
+                "walk",
+                &[("root", root), ("root.shape", 1)],
+                "root.shape.specify",
+                1,
+            ));
+            by_own_attempt.push("walk.root.shape.specify.1".to_owned());
+        }
+        let unique: std::collections::BTreeSet<&String> = named.iter().collect();
+        assert_eq!(
+            unique.len(),
+            6,
+            "one file per (scope, attempt) at every level: {named:?}"
+        );
+        assert_eq!(unique.len(), named.len(), "and no two of them alike");
+        // What this replaced, on the same walk: the section's own attempt and nothing above it,
+        // which is one name for both passes of everything under the re-entered root.
+        let survived: std::collections::BTreeSet<&String> = by_own_attempt.iter().collect();
+        assert_eq!(
+            survived.len(),
+            4,
+            "six sections ran and four files were left: {survived:?}"
         );
     }
 

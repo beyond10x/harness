@@ -35,6 +35,9 @@ root:
 `implement` needs the whole `shape` sub-tree, not one of its steps: a group is opaque to its
 siblings, which is what makes it substitutable.
 
+An `id` must be unique among its siblings and may not contain a `.`, because that is the character a
+path joins names with — `root.shape.specify`. A document that declares one is refused by name.
+
 A group may add `repeat: {max: N}` — run this section again while it does not come out clean — and
 `gives`, the list of names it promises to hand its siblings when it leaves. Nothing else crosses a
 group boundary.
@@ -301,10 +304,23 @@ not know crosses as `opaque`.
 
 ## Sessions and ids
 
-One session is filed per `(scope, attempt)` — per section, per attempt — with the id
-`<flow-run-id>.<path>.<attempt>`, where the flow-run id is allocated once for the walk. Each is
-saved as its scope closes, with what that scope cost, in the usual directory; `--session-dir` is
-honoured and `--no-session` writes nothing at all.
+One session is filed per `(scope, attempt)` — per section, per attempt. The id is the flow-run id,
+allocated once for the walk, followed by **every open section on the way down, each with the attempt
+it is on**:
+
+```text
+18d06ae681443bb4-0019ed82.root.2.implement-to-review.3.verify.1
+```
+
+That reads as: the first attempt of `verify`, inside the third attempt of `implement-to-review`,
+inside the second attempt of the root. Naming a session after its own attempt alone is not enough —
+when an ancestor is re-entered, everything under it runs its attempt 1 again, and two conversations
+would be one file. A section name may therefore not contain a `.`; the document is refused by name
+if one does, because a path is built out of them.
+
+Each session is saved as its scope closes, with what that scope cost, in the usual directory;
+`--session-dir` is honoured and `--no-session` writes nothing at all. A walk leaves as many files as
+it ran sections, so `b10x-harness sessions` lists every attempt that happened, retreats included.
 
 Under `--json` a `{"kind":"session", …}` line is emitted as each scope's session is filed — the same
 shape `run` prints last — and `flow-finished` is the last line of a finished flow.

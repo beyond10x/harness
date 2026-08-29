@@ -247,6 +247,12 @@ pub enum FlowError {
     #[error("`{path}` declares `{id}` twice: a name must be unique among its siblings")]
     DuplicateId { path: String, id: NodeId },
     #[error(
+        "`{path}` declares `{id}`, which carries a `.`: a path joins names with one — \
+         `root.shape.specify` — so a name holding one makes two different sections read as the \
+         same path, and their two sessions as one file"
+    )]
+    DottedName { path: String, id: NodeId },
+    #[error(
         "`{path}` needs `{missing}`, which is not one of its siblings. An edge may only join \
          siblings — to depend on something inside another group, depend on the group"
     )]
@@ -353,6 +359,11 @@ fn collect_steps(group: &Group, prefix: &str, found: &mut Vec<String>) {
 }
 
 /// The siblings of one group, indexed by name, with the order they were declared in.
+///
+/// A name carrying a `.` is refused here, where names are first read. The dot is the character a
+/// path is built out of — `root.shape.specify` — and everything downstream splits on it or reads
+/// it: a session is named after the section it holds and the attempts above it, and two sections
+/// whose names put the same dots in the same places would be one file on disk.
 pub(crate) fn index(group: &Group, path: &str) -> Result<BTreeMap<NodeId, usize>, FlowError> {
     if group.nodes.is_empty() {
         return Err(FlowError::EmptyGroup {
@@ -361,6 +372,12 @@ pub(crate) fn index(group: &Group, path: &str) -> Result<BTreeMap<NodeId, usize>
     }
     let mut seen: BTreeMap<NodeId, usize> = BTreeMap::new();
     for (position, node) in group.nodes.iter().enumerate() {
+        if node.id().contains('.') {
+            return Err(FlowError::DottedName {
+                path: path.to_owned(),
+                id: node.id().to_owned(),
+            });
+        }
         if seen.insert(node.id().to_owned(), position).is_some() {
             return Err(FlowError::DuplicateId {
                 path: path.to_owned(),

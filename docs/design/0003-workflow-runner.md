@@ -196,8 +196,13 @@ a step's loop events (`started` … `finished`) appear between its `step-started
 `retreat ↺ root.implement-to-review (2 of 3): <reason>`. `b10x-harness events` maps a kind it does
 not know to `opaque` today (`metaharness.rs:207`); the `flow.*` families for metaharness are M2.
 
-**Sessions.** One session per `(scope, attempt)`, id `<flow-run-id>.<path>.<attempt>` where the
-flow-run id is `Session::new_id()` taken once; saved through `Session::save` as it closes, with
+**Sessions.** One session per `(scope, attempt)`, id `<flow-run-id>` followed by every open scope on
+the way down as its own name and the attempt it is on — `….root.2.implement-to-review.3.verify.1` —
+where the flow-run id is `Session::new_id()` taken once. **Not `<flow-run-id>.<path>.<attempt>`**,
+which is what shipped first: an ancestor that is re-entered runs everything under it from attempt 1
+again, so the second pass overwrote the first (walk 7, 2026-08-30, lost the `specify` attempt whose
+validator exited `1`). A name may not contain a `.` — `FlowError::DottedName` — which is what makes
+the pairs readable back; saved through `Session::save` as it closes, with
 what it cost; `--no-session` writes nothing; `--session-dir` is honoured. Under `--json` a
 `{"kind":"session", …}` line is emitted as each scope's session is filed — the same shape `run`
 prints last — and the last line of a finished flow is `flow-finished`. `--resume` is refused (§ 1);
@@ -281,6 +286,7 @@ Through the shipped binary, over **both** emulators, `provider_emulated`:
 | test | proves |
 |---|---|
 | `a_flow_walks_its_plan_and_files_one_session_per_scope` | two groups, three steps: order, `available` rendered into the second scope's first turn and not the first scope's transcript, two session files with the ids of § 4 |
+| `a_walk_whose_root_retreats_files_one_session_for_every_section_that_ran` | a root with `repeat: {max: 2}` and a step of its own: four `group-entered`, four session files, no two ids alike, and the attempt that failed still readable under the root attempt it ran in |
 | `a_step_that_answers_failed_skips_what_needed_it_and_the_flow_exits_2` | `outcome: failed`, `node-skipped` for the dependant, `flow-finished` not clean |
 | `a_transition_hook_that_refuses_a_leave_re_enters_the_section_until_its_bound` | `repeat: {max: 2}`, a hook script refusing every `leave`: two attempts, `transition-refused` twice, exhausted, exit 2 |
 | `a_transition_hook_that_refuses_an_enter_skips_the_section_by_name` | `enter` refused: no model call for that section, its steps `node-skipped`, exit 2 |

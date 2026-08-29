@@ -194,6 +194,46 @@ root:
 }
 
 #[test]
+fn a_name_carrying_a_dot_is_refused_because_a_path_is_made_of_them() {
+    // `root.shape.specify` is a name joined to its ancestors with the character this refuses.
+    // A section called `shape.specify` sitting beside a group `shape` holding a step `specify`
+    // would read as the same path everywhere the walk names one — and a caller that files a
+    // session per (scope, attempt) would file both of them into one.
+    let dotted = flow(
+        r"
+id: dotted
+root:
+  id: root
+  nodes:
+    - id: shape.specify
+",
+    );
+    let error = dotted.plan().expect_err("refused");
+    assert!(matches!(error, FlowError::DottedName { .. }), "{error}");
+    let message = error.to_string();
+    assert!(message.contains("`shape.specify`"), "{message}");
+    assert!(
+        message.contains("`root`"),
+        "and where it was found: {message}"
+    );
+
+    // The root is where a path starts, and it is nobody's sibling, so it is read on its own.
+    let dotted_root = flow(
+        r"
+id: dotted-root
+root:
+  id: root.shape
+  nodes:
+    - id: specify
+",
+    );
+    assert!(matches!(
+        dotted_root.plan().expect_err("refused"),
+        FlowError::DottedName { .. }
+    ));
+}
+
+#[test]
 fn an_empty_group_is_refused_rather_than_walked_over() {
     let flow = flow(
         r"

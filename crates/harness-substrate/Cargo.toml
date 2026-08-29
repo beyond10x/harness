@@ -33,6 +33,9 @@ substrate-wire = { git = "https://github.com/beyond10x/substrate", rev = "f1cfc1
 tokio = { version = "1", features = ["rt"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Only to content-address a staged driver: the directory a read-only root points at is named by the
+# digest of the program in it, so a rebuilt binary cannot be served out of the previous run's stage.
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

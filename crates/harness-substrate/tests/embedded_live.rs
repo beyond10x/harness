@@ -135,3 +135,80 @@ fn a_directory_the_driver_cannot_represent_is_refused_by_name_and_says_what_to_d
         .to_string();
     assert!(error.contains("is not a directory to adopt"), "{error}");
 }
+
+#[test]
+fn a_staged_driver_is_a_program_the_confined_run_can_actually_start() {
+    // The whole point, end to end. A driven run allow-listed its own CLI by absolute host path,
+    // the sandbox had no such file, `run` died at `ENOENT`, and the model — told to reach the
+    // planning store only through that CLI — wrote the store's files directly instead. The
+    // allow-list admits the name; only a mount admits the file.
+    let Some(cgroup_root) = std::env::var_os("B10X_CGROUP_ROOT").map(std::path::PathBuf::from)
+    else {
+        // No delegated subtree named, so this machine admits no exec and the question does not
+        // arise. Same shape as the catalogue test above: the machine decides, not the test.
+        return;
+    };
+
+    let host = tempfile::tempdir().expect("a directory to build in");
+    let program = host.path().join("driver-under-test");
+    std::fs::write(
+        &program,
+        "#!/bin/sh\nprintf 'the driver ran as %s\\n' \"$1\"\n",
+    )
+    .expect("a program");
+    std::fs::set_permissions(
+        &program,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+    )
+    .expect("it is executable");
+
+    let stage = tempfile::tempdir().expect("a stage");
+    let toolchain = b10x_harness_substrate::Toolchain::default()
+        .with_driver(&program, stage.path())
+        .expect("the driver stages");
+    let inside = toolchain
+        .driver()
+        .expect("a driver was declared")
+        .program()
+        .to_owned();
+
+    let root = tempfile::tempdir().expect("a temporary root");
+    let embedded =
+        Embedded::open_with(root.path(), Some(cgroup_root), toolchain).expect("the driver opens");
+    let facts = embedded.machine().expect("facts");
+    if !facts.confines_execution() {
+        // The subtree named is not one this process sits inside, so substrate reports no exec
+        // facts. Nothing to assert about a tool the machine will not publish.
+        return;
+    }
+    let workspace = embedded.workspace_create(600_000).expect("a workspace");
+
+    let observation = embedded
+        .exec(
+            &workspace,
+            &[inside.clone(), "staged".to_owned()],
+            Some(std::time::Duration::from_secs(30)),
+        )
+        .expect("the exec starts");
+
+    assert_eq!(
+        observation["exit"]["exit"]["code"],
+        json!(0),
+        "the staged program ran: {observation:#?}"
+    );
+    // And substrate says which host directory it admitted to make that possible — the stage, never
+    // the directory the program was built in.
+    let mounted = observation["exit"].to_string();
+    assert!(
+        mounted.contains(r#""mount":"/toolchain/driver""#),
+        "substrate reports the host directory it admitted, and this is where a reader sees that it \
+         was the stage and not the directory the program was built in: {observation:#?}"
+    );
+    assert!(
+        observation["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("the driver ran as staged"),
+        "and it is the program that was staged, not something else on the path: {observation:#?}"
+    );
+}

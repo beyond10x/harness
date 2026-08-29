@@ -483,6 +483,19 @@ struct RunOptions {
     /// need a toolchain should not name one.
     #[arg(long, value_name = "NAME")]
     toolchain: Option<String>,
+    /// A program on this host, staged and admitted read-only so a confined `run` can execute it.
+    ///
+    /// **Allow-listing a program by absolute path admits its name, not its bytes.** The sandbox
+    /// reaches `/usr`, `/bin`, `/lib`, `/lib64` and the workspace; a path outside those is not
+    /// there, so the exec dies at `ENOENT` and the model reads that as *the command is wrong*.
+    /// Naming it here links exactly that one file into a private directory and mounts it read-only
+    /// at `/toolchain/driver`, and adds the mounted path to the allow-list, so declaring it once
+    /// is the whole declaration.
+    ///
+    /// Read-only on purpose: a run that could rewrite the program recording its own evidence has
+    /// no evidence. The digest of what was staged is reported by `tools`.
+    #[arg(long, value_name = "PATH")]
+    driver: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
@@ -776,6 +789,19 @@ struct ToolsOptions {
     /// Admit a build toolchain read-only, so `tools` describes the run a `run` would get.
     #[arg(long, value_name = "NAME")]
     toolchain: Option<String>,
+    /// A program on this host, staged and admitted read-only so a confined `run` can execute it.
+    ///
+    /// **Allow-listing a program by absolute path admits its name, not its bytes.** The sandbox
+    /// reaches `/usr`, `/bin`, `/lib`, `/lib64` and the workspace; a path outside those is not
+    /// there, so the exec dies at `ENOENT` and the model reads that as *the command is wrong*.
+    /// Naming it here links exactly that one file into a private directory and mounts it read-only
+    /// at `/toolchain/driver`, and adds the mounted path to the allow-list, so declaring it once
+    /// is the whole declaration.
+    ///
+    /// Read-only on purpose: a run that could rewrite the program recording its own evidence has
+    /// no evidence. The digest of what was staged is reported by `tools`.
+    #[arg(long, value_name = "PATH")]
+    driver: Option<PathBuf>,
 }
 
 /// Reads a credential from exactly the place the caller named, or none.
@@ -1127,6 +1153,8 @@ fn prepare(
         credential,
         &cancel,
     )?;
+    let confined_toolchain = toolchain(options.toolchain.as_deref(), options.driver.as_deref())?;
+    let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -1136,8 +1164,8 @@ fn prepare(
             embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
-            programs: &options.allow_program,
-            toolchain: &toolchain(options.toolchain.as_deref())?,
+            programs: &confined_programs,
+            toolchain: &confined_toolchain,
             scope: write_scope(&options.write_scope)?,
         },
     )?;
@@ -1650,15 +1678,41 @@ fn context(files: &[PathBuf]) -> Result<String, String> {
 /// Names the toolchain that is not known, and lists the ones that are. A misspelling that silently
 /// declared nothing would produce a run whose builds fail deep inside a build tool, which is a much
 /// worse way to find out.
-fn toolchain(name: Option<&str>) -> Result<harness_substrate::Toolchain, String> {
+fn toolchain(
+    name: Option<&str>,
+    driver: Option<&std::path::Path>,
+) -> Result<harness_substrate::Toolchain, String> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    match name {
-        None => Ok(harness_substrate::Toolchain::default()),
-        Some("rust") => harness_substrate::Toolchain::rust(home.as_deref()),
-        Some(other) => Err(format!(
-            "`{other}` is not a toolchain this build knows; there is `rust`"
-        )),
+    let toolchain = match name {
+        None => harness_substrate::Toolchain::default(),
+        Some("rust") => harness_substrate::Toolchain::rust(home.as_deref())?,
+        Some(other) => {
+            return Err(format!(
+                "`{other}` is not a toolchain this build knows; there is `rust`"
+            ));
+        }
+    };
+    // Composed rather than alternative: a run can want a compiler and the program that drives it,
+    // and substrate admits four roots for exactly this kind of assembly.
+    match driver {
+        None => Ok(toolchain),
+        Some(program) => toolchain.with_driver(program, &std::env::temp_dir()),
     }
+}
+
+/// The allow-list the caller declared, plus the staged driver where there is one.
+///
+/// Declaring a program worth mounting and then having to allow-list it again by its sandbox path
+/// is two declarations of one decision, and the second is the one a caller forgets — which
+/// produces a run that can see the program and not start it.
+fn programs(declared: &[String], toolchain: &harness_substrate::Toolchain) -> Vec<String> {
+    let mut programs = declared.to_vec();
+    if let Some(driver) = toolchain.driver()
+        && !programs.iter().any(|program| program == driver.program())
+    {
+        programs.push(driver.program().to_owned());
+    }
+    programs
 }
 
 /// Everything about *where and how* a run may act, as one value.
@@ -1959,6 +2013,8 @@ fn adopted(
 }
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
+    let confined_toolchain = toolchain(options.toolchain.as_deref(), options.driver.as_deref())?;
+    let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -1968,8 +2024,8 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
-            programs: &options.allow_program,
-            toolchain: &toolchain(options.toolchain.as_deref())?,
+            programs: &confined_programs,
+            toolchain: &confined_toolchain,
             scope: write_scope(&options.write_scope)?,
         },
     )?;
@@ -2002,6 +2058,14 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // difference between a six-entry catalogue nobody wanted a seventh entry in and one
             // that was refused it.
             "withheld": withheld,
+            // The staged driver, by its sandbox path and the digest of the bytes that were staged.
+            // substrate mounts a declared root read-only and reports it, and computes no digest
+            // over one — so "this run pinned the build its evidence is recorded against" is a
+            // claim only somebody writing this value down can make. `null` when none was declared.
+            "driver": confined_toolchain.driver().map(|driver| serde_json::json!({
+                "program": driver.program(),
+                "sha256": driver.sha256(),
+            })),
         }))
         .map_err(|error| error.to_string())?
     );

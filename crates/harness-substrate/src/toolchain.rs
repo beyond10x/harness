@@ -22,8 +22,10 @@
 //! a crate it does not already have will fail, and that is the confinement working.
 
 use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
 use substrate_wire::ReadOnlyRoot;
 
 /// Where a toolchain's directories appear inside the sandbox.
@@ -36,6 +38,14 @@ const MOUNT_PREFIX: &str = "/toolchain";
 /// Where substrate binds the workspace.
 const WORKSPACE: &str = "/workspace";
 
+/// Where a staged driver appears inside the sandbox.
+///
+/// Under [`MOUNT_PREFIX`] with the toolchains, because it is the same kind of thing: a closure
+/// brought in read-only for a process with no network to fetch one. A second mount point rather
+/// than a second entry under `/toolchain/rustup`, so a reader of the applied observation can tell
+/// the compiler from the program that drives the run.
+const DRIVER_MOUNT: &str = "/toolchain/driver";
+
 /// The toolchain directory `rustup` keeps a stable install under.
 ///
 /// Named rather than discovered because the shim directory `rustup` puts on `PATH` lives in
@@ -44,11 +54,39 @@ const WORKSPACE: &str = "/workspace";
 /// run wants anyway: one fixed compiler, chosen before the run started.
 const TOOLCHAIN: &str = "stable-x86_64-unknown-linux-gnu";
 
+/// One host program, staged so a confined run can execute it.
+///
+/// **Its digest is here because substrate will not compute one.** A declared root is mounted
+/// read-only and *reported*, and that is the whole guarantee (`substrate-wire`'s own note: "what
+/// cannot be verified must at least be visible"). So the claim that a run pins the build its
+/// evidence is recorded against is only true if somebody writes the digest down, and this is the
+/// value they write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedDriver {
+    program: String,
+    sha256: String,
+}
+
+impl StagedDriver {
+    /// Where the program is, **inside the sandbox** — the path an argv must name.
+    #[must_use]
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    /// The SHA-256 of the bytes that were staged, hex, lower case.
+    #[must_use]
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
 /// A toolchain the run may read, and the environment that points at it.
 #[derive(Debug, Clone, Default)]
 pub struct Toolchain {
     roots: Vec<ReadOnlyRoot>,
     env: BTreeMap<String, String>,
+    driver: Option<StagedDriver>,
 }
 
 impl Toolchain {
@@ -132,6 +170,93 @@ impl Toolchain {
         Ok(toolchain)
     }
 
+    /// The same, with one host program staged and admitted read-only.
+    ///
+    /// # Why a program needs this at all
+    ///
+    /// A confined run reaches `/usr`, `/bin`, `/lib` and `/lib64` and its own workspace, and
+    /// nothing else. Allow-listing a program by absolute host path admits the **name**; the
+    /// sandbox still has no such **file**, so the exec dies at `ENOENT` and a model reads that as
+    /// *the command is wrong* rather than *the program is not here*. A driven run whose only legal
+    /// route is its own CLI could not take it, and wrote the store's files directly instead.
+    ///
+    /// # Why a private stage and not the program's own directory
+    ///
+    /// A root must be a directory (substrate refuses `exec.read-only-root-not-a-directory`), and
+    /// the directory a build puts its binary in holds every other binary, every dependency and
+    /// every build script. Mounting it would admit all of them to answer for one. So exactly one
+    /// file is linked into a directory of its own, and that is what is mounted.
+    ///
+    /// The stage is **named by the digest of what is in it**, which makes this idempotent across
+    /// runs and makes a rebuilt program a different stage rather than a silently reused one. The
+    /// link is hard where the filesystem allows it: `cargo` replaces a binary by rename, so a hard
+    /// link keeps the exact bytes this run was launched against even if a build lands mid-run.
+    ///
+    /// # Errors
+    ///
+    /// Names the program that is not a readable file, or the stage that cannot be written. A
+    /// driver half-declared would produce a run that fails at its first `run` call with `ENOENT`,
+    /// which is the failure this exists to remove.
+    pub fn with_driver(mut self, program: &Path, stage_root: &Path) -> Result<Self, String> {
+        let program = program
+            .canonicalize()
+            .map_err(|error| format!("the driver program ({}): {error}", program.display()))?;
+        if !program.is_file() {
+            return Err(format!(
+                "the driver program ({}) is not a file",
+                program.display()
+            ));
+        }
+        let name = program
+            .file_name()
+            .ok_or_else(|| format!("the driver program ({}) has no name", program.display()))?
+            .to_string_lossy()
+            .into_owned();
+
+        let bytes = std::fs::read(&program)
+            .map_err(|error| format!("the driver program ({}): {error}", program.display()))?;
+        let sha256 = hex(&Sha256::digest(&bytes));
+
+        let stage = stage_root.join(format!("harness-driver-{}", &sha256[..16]));
+        std::fs::create_dir_all(&stage)
+            .map_err(|error| format!("the driver stage ({}): {error}", stage.display()))?;
+        // The stage is the operator's, not the run's: the mount is read-only, but a stage anyone
+        // could write is a stage anyone could swap before the mount happens.
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("the driver stage ({}): {error}", stage.display()))?;
+
+        let staged = stage.join(&name);
+        if !staged.exists() {
+            // Hard link first, and fall back only across a filesystem boundary. The digest in the
+            // stage's name means an existing file is already these bytes, so this runs once per
+            // build rather than once per run.
+            if std::fs::hard_link(&program, &staged).is_err() {
+                std::fs::copy(&program, &staged).map_err(|error| {
+                    format!("staging the driver at {}: {error}", staged.display())
+                })?;
+                std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o500)).map_err(
+                    |error| format!("staging the driver at {}: {error}", staged.display()),
+                )?;
+            }
+        }
+
+        self.roots.push(ReadOnlyRoot {
+            host_path: stage.display().to_string(),
+            mount: DRIVER_MOUNT.to_owned(),
+        });
+        self.driver = Some(StagedDriver {
+            program: format!("{DRIVER_MOUNT}/{name}"),
+            sha256,
+        });
+        Ok(self)
+    }
+
+    /// The staged driver, where one was declared.
+    #[must_use]
+    pub fn driver(&self) -> Option<&StagedDriver> {
+        self.driver.as_ref()
+    }
+
     /// The roots to declare on a start.
     #[must_use]
     pub fn roots(&self) -> &[ReadOnlyRoot] {
@@ -143,4 +268,13 @@ impl Toolchain {
     pub fn env(&self) -> &BTreeMap<String, String> {
         &self.env
     }
+}
+
+/// Lower-case hex, because a digest that reaches a record has one spelling.
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut text, byte| {
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
 }

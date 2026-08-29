@@ -9,6 +9,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`--driver <PATH>` — a program on this host that a confined `run` can actually start.**
+  Allow-listing a program by absolute host path admitted its *name*, never its *bytes*: the sandbox
+  reaches `/usr`, `/bin`, `/lib`, `/lib64` and the workspace and nothing else, so every exec of a
+  path outside those died at `ENOENT`, which a model reads as *the command is wrong* rather than
+  *the program is not here*. A driven run whose only sanctioned route was its own CLI could not
+  take it and wrote the store's files directly instead.
+
+  Naming a program here hard-links exactly that one file into a private directory — never the
+  directory it was built in, which holds every other binary and every dependency — and mounts that
+  directory read-only at `/toolchain/driver`, adding the mounted path to the allow-list so one
+  declaration is the whole declaration. Read-only on purpose: a run that can rewrite the program
+  recording its evidence has no evidence. The stage is named by the digest of what is in it, so a
+  rebuilt program is a new stage rather than a silently reused one, and a hard link keeps the exact
+  bytes the run was launched against even if a build lands mid-run.
+
+  substrate mounts a declared root and reports it but computes no digest over one, so `tools` now
+  answers `driver: {program, sha256}` — without it, "this run pinned the build its evidence is
+  recorded against" is a claim nothing supports. Composes with `--toolchain`: substrate admits four
+  roots, and a run can want a compiler and the program that drives it.
+
+  Contract version **2026-08-29.1** (`contracts/cli/b10x-harness/`), strictly additive — one new
+  flag, nothing renamed or removed. Cut rather than edited because `2026-08-29` is released
+  (invariant 13); same-day cuts take a `.N` suffix, which is the first time that has been needed.
+
 - **Public documentation website.** A Docusaurus site under `website/` now gives Harness a
   public-facing quickstart, an explanation of the loop and its safety boundary, operating guides
   for sessions, confinement, structured output, delegation and hooks, command-line and wire

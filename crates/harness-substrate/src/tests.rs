@@ -1234,3 +1234,55 @@ fn a_declared_rust_toolchain_never_mounts_the_operators_cargo_credential() {
         Some("/workspace/.cargo")
     );
 }
+
+#[test]
+fn a_staged_driver_admits_one_file_and_never_the_directory_it_came_from() {
+    // The failure this exists to remove: a driven run allow-listed its own CLI by absolute host
+    // path, the sandbox had no such file, every `run` died at `ENOENT`, and the model wrote the
+    // planning store's files directly instead. Allow-listing admits the name; only a mount admits
+    // the file.
+    let host = tempfile::tempdir().expect("a directory to build in");
+    let build = host.path().join("debug");
+    std::fs::create_dir_all(&build).expect("a build directory");
+    let program = build.join("protocol");
+    std::fs::write(&program, b"#!/bin/sh\nprintf driver\n").expect("a program");
+    // Everything else a build directory holds, and none of it is this run's business.
+    std::fs::write(build.join("some-other-binary"), b"x").expect("a sibling");
+    std::fs::create_dir_all(build.join("deps")).expect("a deps directory");
+
+    let stage_root = tempfile::tempdir().expect("a stage");
+    let toolchain = super::Toolchain::default()
+        .with_driver(&program, stage_root.path())
+        .expect("the driver stages");
+
+    let roots = toolchain.roots();
+    assert_eq!(roots.len(), 1, "one program is one root");
+    assert_eq!(roots[0].mount, "/toolchain/driver");
+    assert_ne!(
+        std::path::Path::new(&roots[0].host_path),
+        build.as_path(),
+        "mounting the build directory would admit `deps` and every other binary to answer for one"
+    );
+    assert_eq!(
+        std::fs::read_dir(&roots[0].host_path)
+            .expect("the stage is readable")
+            .count(),
+        1,
+        "the stage holds the driver and nothing else"
+    );
+
+    let driver = toolchain.driver().expect("a driver was declared");
+    assert_eq!(
+        driver.program(),
+        "/toolchain/driver/protocol",
+        "an argv has to name the path inside the sandbox, not the one on this host"
+    );
+    // substrate mounts a root read-only and reports it; it computes no digest over one. So the
+    // claim that a run pins the build its evidence is recorded against is only true because this
+    // value exists for a caller to write down.
+    assert_eq!(
+        driver.sha256(),
+        "2262eae9d3b679fe881472d86f942cd94b6065a63ad65f47a1a87bee31c7a276",
+        "the digest of the staged bytes, agreed by `sha256sum` on the same content"
+    );
+}

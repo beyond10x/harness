@@ -88,10 +88,12 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   add a `Display`.
 - **Approvals are the review gate (invariant 12).** Changing the default, or adding a path that
   reaches a tool without consulting the approver, removes the gate rather than tuning it. What
-  asks is **derived, never declared**: the loop reads `ToolPort::call_envelope` — for a verb over
-  a catalogue, the entry's envelope, not the verb's — and asks when `Envelope::needs_approval`
-  says so against `LoopConfig::unattended_ceiling` (default `Risk::Low`). `ToolSpec::approval`
-  can only add asking and is being retired. Until 2026-08-29 no shipped tool set it, so the gate
+  asks is **derived, never declared**: the loop reads `ToolPort::invoked` — for a verb over a
+  catalogue, the entry's own spec, not the verb's — and asks when `Envelope::needs_approval`
+  says so against `LoopConfig::unattended_ceiling` (default `Risk::Low`). The same spec is what
+  the approver is handed, what the `ApprovalRequired` event names and what the refusal says, so
+  a person decides on `file_write` and never on `tool_invoke`. `ToolSpec::approval` can only add
+  asking and is being retired. Until 2026-08-29 no shipped tool set it, so the gate
   never fired; a test now pins that a `run` entry under `DenyAll` is refused.
   **Bridge mode is the one place the approver is `ApproveAll`**
   (`crates/harness-app-server/src/lib.rs`): the client registered every tool and executes every

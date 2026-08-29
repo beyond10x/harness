@@ -73,15 +73,33 @@ impl ScopeRule {
     /// # Errors
     ///
     /// Names the half that is wrong. The separator is the last `=`, so a glob may contain one.
+    ///
+    /// A glob that is absolute, or that climbs above the workspace root, is refused here: the
+    /// paths a rule is matched against are workspace-relative, so such a rule could never fire,
+    /// and a rule that silently matches nothing is a boundary nobody knows is missing.
     pub fn parse(declaration: &str) -> Result<Self, String> {
         let (paths, word) = declaration.rsplit_once('=').ok_or_else(|| {
             format!("`{declaration}` is not `<glob>=<allowed|partial-only|denied>`")
         })?;
-        if paths.trim().is_empty() {
+        let paths = paths.trim();
+        if paths.is_empty() {
             return Err(format!("`{declaration}` names no path"));
         }
+        if paths.starts_with('/') {
+            return Err(format!(
+                "`{declaration}` is absolute, and a scope's paths are relative to the workspace \
+                 root; spell the rule relative to it"
+            ));
+        }
+        let normalised = normalise(paths);
+        if normalised.is_empty() || normalised == ".." || normalised.starts_with("../") {
+            return Err(format!(
+                "`{declaration}` names nothing inside the workspace, so it could never match a \
+                 path this run may write"
+            ));
+        }
         Ok(Self {
-            paths: paths.trim().to_owned(),
+            paths: paths.to_owned(),
             write: WriteScope::parse(word.trim())?,
         })
     }
@@ -117,8 +135,13 @@ impl Scope {
     /// spent on a wall.
     ///
     /// The rule is matched against a lexically normalised path, not the spelling the caller used,
-    /// because otherwise `./target/x` walks past a rule that refuses `target/x`. The message still
-    /// names the path as it was written — that is what the caller has to change.
+    /// because otherwise `./target/x` walks past a rule that refuses `target/x`. The rule's own
+    /// glob is normalised the same way, so `./target/**` refuses what `target/**` refuses — a rule
+    /// spelled with a `./` used to match nothing at all, silently. The message still names the
+    /// path as it was written — that is what the caller has to change.
+    ///
+    /// Lexical only. A link inside the workspace is a second spelling this cannot see; the
+    /// catalogue asks the provider where the path lands and puts that spelling through here too.
     #[must_use]
     pub fn refusal(&self, operation: &str, path: &str) -> Option<String> {
         if !matches!(operation, "file.write" | "file.edit") {
@@ -141,7 +164,7 @@ impl Scope {
         let rule = self
             .0
             .iter()
-            .find(|rule| glob_matches(&rule.paths, &normalised))?;
+            .find(|rule| glob_matches(&normalise(&rule.paths), &normalised))?;
         match rule.write {
             WriteScope::Allowed => None,
             WriteScope::PartialOnly if operation == "file.edit" => None,
@@ -282,6 +305,32 @@ mod tests {
         assert!(ScopeRule::parse("=denied").is_err(), "no path");
         let bad = ScopeRule::parse("crates/**=readonly").expect_err("refused");
         assert!(bad.contains("partial-only"), "{bad}");
+    }
+
+    #[test]
+    fn a_rule_spelled_with_a_dot_slash_refuses_what_the_bare_spelling_refuses() {
+        // Only the caller's path used to be normalised. `./target/**=denied` then matched nothing
+        // — not `target/x`, not even `./target/x` — and nothing said so.
+        let scope = Scope::of(vec![
+            ScopeRule::parse("./target/**=denied").expect("reads"),
+            ScopeRule::parse("docs//./generated/**=denied").expect("reads"),
+        ]);
+        assert!(scope.refusal("file.write", "target/x").is_some());
+        assert!(scope.refusal("file.write", "./target/x").is_some());
+        assert!(scope.refusal("file.write", "docs/generated/a.md").is_some());
+        assert!(scope.refusal("file.write", "docs/other.md").is_none());
+    }
+
+    #[test]
+    fn a_rule_that_could_never_match_a_workspace_path_is_refused_when_it_is_read() {
+        // A rule that silently matches nothing is a boundary nobody knows is missing.
+        let absolute = ScopeRule::parse("/abs/target/**=denied").expect_err("refused");
+        assert!(absolute.contains("relative"), "{absolute}");
+        assert!(ScopeRule::parse("../outside/**=denied").is_err());
+        assert!(
+            ScopeRule::parse("./=denied").is_err(),
+            "normalises to nothing"
+        );
     }
 
     #[test]

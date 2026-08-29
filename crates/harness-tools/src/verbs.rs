@@ -108,25 +108,27 @@ impl ToolPort for Verbs {
         entry.subjects(&arguments)
     }
 
-    /// The envelope of the **entry being invoked**, not of the verb.
+    /// The spec of the **entry being invoked**, not of the verb.
     ///
     /// `tool_invoke`'s own envelope declares every effect any entry can have, because it has to;
     /// gating on it would ask a person before every `file_read`. What decides is what the named
-    /// entry does. A `tool_invoke` that names no entry, or one this run does not have, touches
-    /// nothing: the catalogue refuses it by name before anything runs, and the model learns the
-    /// names — so it is described as the read it amounts to rather than as the run it is not.
-    fn call_envelope(&self, call: &ToolCall) -> Envelope {
+    /// entry does, under the entry's own name — so an approver is asked about `file_write` and a
+    /// refusal says `file_write`, not the verb it came through. A `tool_invoke` that names no
+    /// entry, or one this run does not have, touches nothing: the catalogue refuses it by name
+    /// before anything runs, and the model learns the names — so it is described as the read it
+    /// amounts to rather than as the run it is not.
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+        let published = self.specs.iter().find(|spec| spec.name == call.name)?;
         if call.name.as_str() != INVOKE_VERB {
-            return self
-                .specs
-                .iter()
-                .find(|spec| spec.name == call.name)
-                .map(|spec| spec.envelope.clone())
-                .unwrap_or_default();
+            return Some(published.clone());
         }
-        self.invoked_entry(call)
-            .map(|entry| entry.envelope.clone())
-            .unwrap_or_default()
+        Some(self.invoked_entry(call).map_or_else(
+            || ToolSpec {
+                envelope: Envelope::default(),
+                ..published.clone()
+            },
+            crate::catalogue::Entry::spec,
+        ))
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {

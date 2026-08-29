@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::WireError;
-use crate::envelope::{Envelope, Subject};
+use crate::envelope::Subject;
 use crate::id::{CallId, WireId};
 use crate::item::{ToolCall, ToolOutcome};
 use crate::turn::{ToolSpec, TurnOutcome, TurnRequest};
@@ -120,21 +120,26 @@ pub trait ToolPort {
         Vec::new()
     }
 
-    /// What **this call** would do, for the gate that decides whether a person is asked.
+    /// What **this call** invokes, for the gate that decides whether a person is asked.
     ///
     /// # Why this is per call and not per spec
     ///
     /// A port that publishes verbs over a catalogue — `tool_invoke` over `file_read`, `run`, … —
     /// has one spec whose envelope must honestly declare every effect any entry can have. A gate
-    /// that read *that* would ask a person about every read. The envelope that decides is the
-    /// **entry's**, unwrapped from the call the same way [`ToolPort::subjects`] unwraps its
-    /// subjects. Defaulted to the published spec's own envelope, which is right for a flat port.
-    fn call_envelope(&self, call: &ToolCall) -> Envelope {
+    /// that read *that* would ask a person about every read. What decides is the **entry's** spec,
+    /// unwrapped from the call the same way [`ToolPort::subjects`] unwraps its subjects — and it
+    /// is the whole spec, not only the envelope, because the person asked, the event that says
+    /// they were asked and the refusal the model reads all name it. A gate that decided on the
+    /// entry's envelope and then reported the verb told an approver `tool_invoke` was refused and
+    /// never said `file_write`.
+    ///
+    /// Defaulted to the published spec by name, which is right for a flat port. `None` when the
+    /// call names nothing this port published; the loop refuses such a call before it asks anyone.
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
         self.specs()
             .iter()
             .find(|spec| spec.name == call.name)
-            .map(|spec| spec.envelope.clone())
-            .unwrap_or_default()
+            .cloned()
     }
 
     /// Every neutral operation this port can perform, whatever it publishes them as.

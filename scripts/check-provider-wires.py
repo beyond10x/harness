@@ -110,6 +110,9 @@ def check_stream_fixture(
         except json.JSONDecodeError as error:
             failures.append(f"{stream}:{number}: not JSON: {error}")
             return
+        if not isinstance(payload, dict):
+            failures.append(f"{stream}:{number}: an event is not an object")
+            return
         kind = payload.get("type")
         if not isinstance(kind, str):
             failures.append(f"{stream}: an event has no `type`")

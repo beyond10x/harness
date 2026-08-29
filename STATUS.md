@@ -19,7 +19,7 @@ Observed on 2026-08-29, at `0.1.0` plus the substrate pin. The previous observat
 | Live provider | **first live run: 2026-08-23**, against `https://chatgpt.com/backend-api/codex` under the operator's own ChatGPT subscription credential, model `gpt-5.6-sol`. Two turns, two tool round trips, usage reported, `finished{completed}`. It found a real defect on turn 1 — the whole workspace toolset was named illegally for this wire (see the changelog) — which is exactly what the emulator could not find | pin a `2026-08-23` contract from live bytes rather than emulated ones; the current pin is still emulator-derived |
 | Embedding | **not started.** Nothing embeds this component yet | a `runtime/agent` direct-provider adapter binding `ToolPort` to its capability compiler |
 | Substrate confinement | **working, embedded, including execution.** `Backend` has two implementations and the tools cannot tell them apart: `Embedded` holds substrate's `HostDriver` in this process, `Client` reaches a daemon over a socket. Workspace adoption means the tree a run reads is the tree it writes. With a delegated cgroup the toolset is six tools — `workspace_list/read/grep`, `workspace_write`, `workspace_edit`, `run`; without one it is five; with no backend at all it is the three this component has always shipped | exec has been *published* and not yet *exercised*: no confined process has been started through `run` |
-| Substrate over a socket | **blocked, and parked.** `POST /v1/workspaces` on the daemon this machine runs answers `422 request.schema-invalid` at `input` for every body derivable from the committed 0.2.0 and 0.4.0 contracts. That daemon embeds `substrate-wire/0.4.0`, reports `driver_version 0.2.0`, and was installed on 2026-08-16 from a source this repository does not have. Embedding made the question moot for a simple run; the socket path is what an integrated deployment will need | the daemon's own accepted `workspace.create` body, or a daemon built from `beyond10x/substrate`. `tests/live.rs` is the standing probe |
+| Substrate over a socket | **blocked, and parked.** `POST /v1/workspaces` on the daemon this machine runs answers `422 request.schema-invalid` at `input` for every body derivable from the committed 0.2.0 and 0.4.0 contracts. That daemon embeds `substrate-wire/0.4.0`, reports `driver_version 0.2.0`, and was installed on 2026-08-16 from a source this repository does not have. Embedding made the question moot for a simple run; the socket path is what an integrated deployment will need. **Hypothesis, 2026-08-29, not yet run against that daemon:** every body this client posted carried `input` alone, and the pinned daemon's mutation decoder refuses a body without a top-level `op` as `request.schema-invalid` at `input` before it reads the input (`substrate-daemon/src/app/operations.rs`, `decode_mutation`). The client now posts `{op, input}` on every mutating route | the daemon's own accepted `workspace.create` body, or a daemon built from `beyond10x/substrate`. `tests/live.rs` is the standing probe |
 
 ## What this component does not claim
 
@@ -32,16 +32,16 @@ Observed on 2026-08-29, at `0.1.0` plus the substrate pin. The previous observat
 
 ## Test counts
 
-353 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29, after the review's fixes):
+362 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29, after the second review's fixes):
 
 | Crate | Unit | Integration |
 | --- | --- | --- |
 | `harness-wire` | 35 | — |
 | `harness-responses` | 38 | 18 provider-emulated, 4 contract |
-| `harness-loop` | 65 | — |
+| `harness-loop` | 66 | — |
 | `harness-flow` | 27 | — |
-| `harness-substrate` | 33 | 4 embedded-live; `live` ignored, it needs a daemon |
-| `harness-tools` | 44 | — |
+| `harness-substrate` | 35 | 4 embedded-live; `live` ignored, it needs a daemon |
+| `harness-tools` | 50 | — |
 | `harness-app-server` | 19 | 5 contract |
 | `harness-cli` | 34 | 10 end-to-end, 17 bridge-mode |
 

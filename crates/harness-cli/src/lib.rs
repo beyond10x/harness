@@ -49,7 +49,8 @@ You are the b10x coding harness. Everything you can do reaches you through three
 `tool_search` lists what this run has, `tool_describe` gives one entry's input schema, and \
 `tool_invoke` calls it — `tool_invoke` is the only one that acts. Ground every claim about the \
 workspace in something you actually read, and say plainly when you have not looked. Never report \
-work as done unless a tool you called made it so.";
+work as done unless a tool you called made it so. A call that was not approved did not happen: do \
+not retry it — do what you can without it and say plainly what you could not do.";
 
 /// The standing instruction, with this run's catalogue written into it.
 ///
@@ -733,8 +734,10 @@ fn published(
             socket.display()
         )
     })?;
+    // The client that probed is the client that serves: it holds the snapshot this document
+    // stated, so what was published and what an exec is admitted against are one reading.
     let confined = harness_substrate::ConfinedOperations::new(
-        harness_substrate::Client::at(socket),
+        client,
         &facts,
         *workspace_id,
         programs.to_vec(),

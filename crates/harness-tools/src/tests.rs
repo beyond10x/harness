@@ -568,6 +568,73 @@ fn a_path_no_rule_names_is_unrestricted_because_a_scope_declares_where_writing_i
     assert!(!answer.failed, "{}", output(&answer));
 }
 
+fn denying(root: &std::path::Path, rule: &str) -> Verbs {
+    let local = LocalOperations::unconfined(root, Vec::new()).expect("opens");
+    Verbs::new(
+        Catalogue::of(local).scoped(Scope::of(vec![ScopeRule::parse(rule).expect("a rule")])),
+    )
+}
+
+#[test]
+fn a_denied_path_reached_through_a_link_inside_the_workspace_is_refused_by_where_it_lands() {
+    // The scope is lexical and the provider follows a link that stays inside the workspace, so
+    // `ok/link -> target/x` matched no rule and the write overwrote `target/x` under
+    // `target/**=denied`. The catalogue now asks the provider where the path lands and puts that
+    // spelling through the scope as well.
+    let dir = tree();
+    std::fs::create_dir_all(dir.path().join("target")).expect("target");
+    std::fs::write(dir.path().join("target/x"), "built").expect("a file");
+    std::fs::create_dir(dir.path().join("ok")).expect("ok");
+    std::os::unix::fs::symlink(dir.path().join("target/x"), dir.path().join("ok/link"))
+        .expect("a link");
+    let mut verbs = denying(dir.path(), "target/**=denied");
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({"name": "file_write", "arguments": {"path": "ok/link", "text": "owned"}}),
+    ));
+
+    assert!(answer.failed, "{}", output(&answer));
+    let said = output(&answer);
+    assert!(said.contains("ok/link"), "names the spelling: {said}");
+    assert!(said.contains("target/x"), "and where it lands: {said}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("target/x")).expect("read"),
+        "built",
+        "nothing was written"
+    );
+}
+
+#[test]
+fn a_path_that_leaves_the_workspace_and_comes_back_is_judged_where_it_lands() {
+    // `../<workspace>/target/y` keeps its leading `..` under lexical normalisation, so it matched
+    // no workspace-relative glob; the provider then resolved it to `target/y`, inside the root,
+    // and wrote into the denied tree.
+    let dir = tree();
+    let name = dir
+        .path()
+        .file_name()
+        .expect("a name")
+        .to_str()
+        .expect("utf-8")
+        .to_owned();
+    let mut verbs = denying(dir.path(), "target/**=denied");
+
+    let answer = verbs.call(&call(
+        INVOKE_VERB,
+        json!({
+            "name": "file_write",
+            "arguments": {"path": format!("../{name}/target/y"), "text": "owned"},
+        }),
+    ));
+
+    assert!(answer.failed, "{}", output(&answer));
+    assert!(
+        !dir.path().join("target/y").exists(),
+        "the write reached the denied tree"
+    );
+}
+
 #[test]
 fn reading_a_denied_path_is_still_reading_because_a_write_scope_bounds_writes() {
     let dir = tree();

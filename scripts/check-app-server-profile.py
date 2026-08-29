@@ -120,6 +120,13 @@ def check_trace(directory: pathlib.Path, manifest: dict, failures: list[str]) ->
         except (json.JSONDecodeError, KeyError, TypeError) as error:
             failures.append(f"{where}: not a trace entry: {error!r}")
             return
+        # Both keys present is not yet a trace entry: a `frame` that is a string or a list has no
+        # `.get`, and the checker died with a traceback on exactly the corruption it exists to name.
+        if not isinstance(direction, str) or not isinstance(frame, dict):
+            failures.append(
+                f"{where}: not a trace entry: `direction` must be a string and `frame` an object"
+            )
+            return
         method = frame.get("method")
 
         if method is None:

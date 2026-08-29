@@ -53,12 +53,31 @@ const MAX_RUN_SECONDS: u64 = 600;
 /// otherwise bury every other result, so the line is cut — and the match says that it was.
 const MAX_MATCH_CHARS: usize = 400;
 
-/// The only environment variables a declared program is started with.
+/// The environment variables a declared program is started with, unless a caller names more.
 ///
 /// An allow list rather than a deny list, because the parent process's environment is where this
 /// run's credentials live and the child's arguments came from the model. Naming what may cross
 /// keeps a token nobody thought about out of a program somebody else chose.
-const INHERITED_ENV: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM", "TMPDIR"];
+///
+/// The toolchain names are here because the first list did not have them and `cargo` under a
+/// relocated rustup then started with `HOME` and `PATH` alone, looked in `~/.rustup`, and failed
+/// with *no default toolchain configured* — a build failure that read as the workspace's. None of
+/// them carries a secret: each is a path. A proxy URL can carry one, so `HTTPS_PROXY` and its kin
+/// are not here; a caller that needs them names them with [`LocalOperations::inheriting`].
+const INHERITED_ENV: &[&str] = &[
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "TMPDIR",
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN",
+    "CARGO_TARGET_DIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
 
 /// Directories skipped while walking. Each is either machine output or another tool's private
 /// state, and including them buries the answer the person asked for.
@@ -70,6 +89,8 @@ pub struct LocalOperations {
     /// `None` is read-only. `Some` is the declared program set, which may itself be empty — a
     /// provider that writes files and starts nothing.
     programs: Option<Vec<String>>,
+    /// Environment variables a declared program is started with, beyond [`INHERITED_ENV`].
+    inherited: Vec<String>,
 }
 
 impl LocalOperations {
@@ -82,7 +103,19 @@ impl LocalOperations {
         Ok(Self {
             root: Self::open(root)?,
             programs: None,
+            inherited: Vec::new(),
         })
+    }
+
+    /// Names more of this process's environment that a declared program may see.
+    ///
+    /// The default list is what a toolchain needs and nothing that carries a credential. A run
+    /// that needs a proxy, or a variable its build reads, names it here — by name, at the call
+    /// site, where a reader can see what was let through.
+    #[must_use]
+    pub fn inheriting(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.inherited.extend(names.into_iter().map(Into::into));
+        self
     }
 
     /// The same view, allowed to change it, with no confinement under the change.
@@ -98,6 +131,7 @@ impl LocalOperations {
         Ok(Self {
             root: Self::open(root)?,
             programs: Some(programs),
+            inherited: Vec::new(),
         })
     }
 
@@ -343,8 +377,14 @@ impl LocalOperations {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        for name in INHERITED_ENV {
-            if let Ok(value) = std::env::var(name) {
+        // `var_os`, not `var`: a value that is not UTF-8 is still the value, and `var` would drop
+        // it without a word.
+        for name in INHERITED_ENV
+            .iter()
+            .copied()
+            .chain(self.inherited.iter().map(String::as_str))
+        {
+            if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
         }
@@ -564,6 +604,12 @@ impl Operations for LocalOperations {
         self.exec(argv, programs)
     }
 
+    /// The same resolution a write does, answered as the workspace-relative name the write would
+    /// report — so the scope judges the file the bytes reach, under the name it actually has.
+    fn lands(&self, path: &str) -> Result<String, String> {
+        self.resolve_new(path).map(|target| self.display(&target))
+    }
+
     fn programs(&self) -> &[String] {
         self.programs.as_deref().unwrap_or_default()
     }
@@ -641,6 +687,27 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&target).expect("the file is read"),
             "after"
+        );
+    }
+
+    #[test]
+    fn where_a_path_lands_is_the_targets_own_name_and_a_new_path_is_its_own() {
+        // What the scope is given to judge: the file the bytes reach, under the name it has.
+        let inside = workspace();
+        fs::create_dir(inside.path().join("target")).expect("the directory is made");
+        fs::write(inside.path().join("target/x"), "built").expect("the file is written");
+        symlink(inside.path().join("target/x"), inside.path().join("link")).expect("a link");
+        let operations = writing(inside.path());
+
+        assert_eq!(operations.lands("link").expect("lands"), "target/x");
+        assert_eq!(operations.lands("./target/x").expect("lands"), "target/x");
+        assert_eq!(
+            operations.lands("new/dir/file.txt").expect("lands"),
+            "new/dir/file.txt"
+        );
+        assert!(
+            operations.lands("../escape.txt").is_err(),
+            "outside is the write's refusal, and this answers the same"
         );
     }
 
@@ -760,5 +827,27 @@ mod tests {
         let stdout = value["stdout"].as_str().expect("stdout");
         assert!(!stdout.contains("CARGO_MANIFEST_DIR="), "{stdout}");
         assert!(stdout.contains("PATH="), "{stdout}");
+    }
+
+    #[test]
+    fn a_caller_can_name_more_of_the_environment_and_only_what_it_named_crosses() {
+        // The same stand-in: cargo sets it in every test process, so letting it through by name
+        // is observable without setting anything in this process.
+        let env = Path::new("/usr/bin/env");
+        if !env.exists() {
+            return;
+        }
+        let inside = workspace();
+        let operations =
+            LocalOperations::unconfined(inside.path(), vec!["/usr/bin/env".to_owned()])
+                .expect("the workspace opens")
+                .inheriting(["CARGO_MANIFEST_DIR"]);
+
+        let value = operations
+            .run(&["/usr/bin/env".to_owned()])
+            .expect("the program runs");
+        let stdout = value["stdout"].as_str().expect("stdout");
+        assert!(stdout.contains("CARGO_MANIFEST_DIR="), "{stdout}");
+        assert!(!stdout.contains("CARGO_PKG_NAME="), "{stdout}");
     }
 }

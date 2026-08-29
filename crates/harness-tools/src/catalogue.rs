@@ -279,10 +279,22 @@ impl Catalogue {
         // other arm adjudicates at a decision seam; this one has none and never grows one, so a
         // tool that must not act on a path refuses on that path exactly as `run` refuses a program
         // nobody declared. Before the operation runs, so a refusal costs nothing but a turn.
-        if let Some(path) = arguments.get("path").and_then(Value::as_str)
-            && let Some(refusal) = self.scope.refusal(entry.operation, path)
-        {
-            return Err(refusal);
+        if let Some(path) = arguments.get("path").and_then(Value::as_str) {
+            if let Some(refusal) = self.scope.refusal(entry.operation, path) {
+                return Err(refusal);
+            }
+            // And by where it lands, not only by how it was spelled. The scope is lexical; a link
+            // inside the workspace is a spelling it cannot see, and `ok/link -> target/x` used to
+            // walk a write past `target/**=denied`. Only for a write under a declared scope: a
+            // read is never the scope's business, and an empty scope restricts nothing.
+            if !self.scope.is_empty()
+                && matches!(entry.operation, "file.write" | "file.edit")
+                && let Ok(landing) = self.operations.lands(path)
+                && landing != path
+                && let Some(refusal) = self.scope.refusal(entry.operation, &landing)
+            {
+                return Err(format!("`{path}` leads to `{landing}`, and {refusal}"));
+            }
         }
         let string = |field: &str| -> Result<&str, String> {
             arguments

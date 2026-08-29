@@ -520,7 +520,17 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
         ]
     );
 
-    let sent = &seen[1].2.as_ref().expect("a body")["input"];
+    let body = seen[1].2.as_ref().expect("a body");
+    // The daemon's mutation decoder reads `op` before it reads anything, and refuses a body with
+    // any third key. Every body this client posted until 2026-08-29 had `input` alone, so the
+    // confinement it asked for never reached a daemon that could read it.
+    assert_eq!(body["op"], json!("exec.start"), "{body}");
+    assert_eq!(
+        body.as_object().expect("an object").len(),
+        2,
+        "`op` and `input`, nothing else: {body}"
+    );
+    let sent = &body["input"];
     // `required` is spelled `require` on the wire - `ConfinementRequest` renames it - which is
     // exactly why this body is serialised from the wire crate's type instead of hand-written.
     assert_eq!(sent["sandbox"]["require"], json!(true), "{sent}");
@@ -538,6 +548,83 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
     assert_eq!(sent["wait"], json!(true));
     assert_eq!(sent["limits"]["timeout_ms"], json!(900_000));
     assert_eq!(sent["env"]["allow"], json!([]));
+}
+
+#[test]
+fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
+    // The daemon states one snapshot for its lifetime; asking before every exec was a round trip
+    // that bought nothing and let publication and admission read two different documents.
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, r#"{"result":{"exec_id":"ex_1"}}"#),
+        (200, r#"{"result":{}}"#),
+        (200, r#"{"result":{"exec_id":"ex_2"}}"#),
+        (200, r#"{"result":{}}"#),
+    ]);
+    let client = Client::with(script.clone());
+    client.machine().expect("probed");
+    client
+        .exec("ws_a", &["/usr/bin/true".to_owned()])
+        .expect("ran");
+    client
+        .exec("ws_a", &["/usr/bin/false".to_owned()])
+        .expect("ran");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(
+        seen.iter()
+            .map(|(method, path, _)| (method.as_str(), path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("GET", "/v1/machine"),
+            ("POST", "/v1/execs"),
+            ("GET", "/v1/execs/ex_1/output"),
+            ("POST", "/v1/execs"),
+            ("GET", "/v1/execs/ex_2/output"),
+        ],
+        "one probe, then the execs"
+    );
+    for start in [&seen[1], &seen[3]] {
+        let body = start.2.as_ref().expect("a body");
+        assert_eq!(
+            body["input"]["sandbox"]["capability_snapshot"],
+            json!("cap_7f3a")
+        );
+    }
+}
+
+#[test]
+fn every_mutating_route_posts_the_operation_id_beside_its_input() {
+    let script = Scripted::new(vec![
+        (200, r#"{"result":{"id":"ws_new"}}"#),
+        (200, r#"{"result":{}}"#),
+    ]);
+    let client = Client::with(script.clone());
+    client.workspace_create(60_000).expect("opened");
+    client
+        .file_write("ws_new", "a.txt", "hello")
+        .expect("written");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    let ops: Vec<(&str, &str, Value)> = seen
+        .iter()
+        .map(|(method, path, body)| {
+            let body = body.as_ref().expect("a body");
+            assert_eq!(body.as_object().expect("an object").len(), 2, "{body}");
+            (method.as_str(), path.as_str(), body["op"].clone())
+        })
+        .collect();
+    assert_eq!(
+        ops,
+        vec![
+            ("POST", "/v1/workspaces", json!("workspace.create")),
+            (
+                "PUT",
+                "/v1/workspaces/ws_new/files/a.txt",
+                json!("workspace.file.write")
+            ),
+        ]
+    );
 }
 
 #[test]

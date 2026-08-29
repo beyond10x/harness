@@ -37,8 +37,11 @@ pub struct DenyAll;
 
 impl ApprovalPort for DenyAll {
     fn decide(&mut self, _: &ToolCall, spec: &ToolSpec) -> ApprovalDecision {
+        // Says that a retry cannot help, because the alternative was measured: a model told only
+        // "not approved" tries the same call again until the turn budget is gone.
         ApprovalDecision::denied(format!(
-            "`{}` needs a person's decision and no approver is attached to this run",
+            "`{}` needs a person's decision and no approver is attached to this run, so retrying \
+             cannot approve it either; do what can be done without it and say what could not",
             spec.name
         ))
     }

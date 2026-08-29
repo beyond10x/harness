@@ -165,7 +165,12 @@ impl Operations for ConfinedOperations {
     }
 
     fn run(&self, argv: &[String]) -> Result<Value, String> {
-        let program = &argv[0];
+        // The catalogue refuses an empty argv before it gets here, but this is a public trait
+        // method and an embedder can call it directly; a refusal by name is what the unconfined
+        // provider answers, and a panic mid-turn is not.
+        let Some(program) = argv.first() else {
+            return Err("`argv` must name a program".to_owned());
+        };
         if !self.programs.iter().any(|allowed| allowed == program) {
             return Err(format!(
                 "`{program}` is not a program this run may start. Declared: {}.",

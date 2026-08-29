@@ -636,12 +636,17 @@ impl<'a> AgentLoop<'a> {
         {
             return Some(LoopStop::MaxTurns { limit });
         }
-        if let (Some(deadline), Some(limit_ms)) = (deadline, self.config.budget.max_duration_ms)
-            && Instant::now() >= deadline
-        {
-            return Some(LoopStop::Deadline { limit_ms });
-        }
-        None
+        self.deadline_passed(deadline)
+    }
+
+    /// The deadline as a stop, once the clock has passed it. One reading of the budget, so the
+    /// check between turns and the check between calls cannot disagree about what binds.
+    fn deadline_passed(&self, deadline: Option<Instant>) -> Option<LoopStop> {
+        let (Some(deadline), Some(limit_ms)) = (deadline, self.config.budget.max_duration_ms)
+        else {
+            return None;
+        };
+        (Instant::now() >= deadline).then_some(LoopStop::Deadline { limit_ms })
     }
 
     /// Token ceilings bind after a turn, because that is when the provider reports.
@@ -702,18 +707,17 @@ impl<'a> AgentLoop<'a> {
             }
             // Between calls as well as between turns: one call can block for minutes, so a
             // deadline checked only at the turn boundary overshoots by a whole call — and a turn
-            // asking for six of them overshoots by six. Every skipped call still gets an outcome,
-            // for the reason the cancellation branch above gives.
-            if let (Some(deadline), Some(limit_ms)) = (deadline, self.config.budget.max_duration_ms)
-                && Instant::now() >= deadline
-            {
+            // asking for six of them overshoots by six. A call already running still runs to its
+            // own timeout; nothing here reaches into it. Every skipped call still gets an
+            // outcome, for the reason the cancellation branch above gives.
+            if let Some(stop) = self.deadline_passed(deadline) {
                 for skipped in std::iter::once(call).chain(calls) {
                     state.items.push(Item::result(
                         skipped.call_id,
                         ToolOutcome::failed("the run's deadline passed before this call ran"),
                     ));
                 }
-                return Some(LoopStop::Deadline { limit_ms });
+                return Some(stop);
             }
             sink.emit(LoopEvent::ToolRequested(call.clone()));
             let result = self.invoke(&call, sink);
@@ -753,26 +757,39 @@ impl<'a> AgentLoop<'a> {
             ));
         }
 
-        // The envelope that decides is the **call's**, not the published spec's: a verb over a
+        // The spec that decides is the **invoked** one, not the published verb's: a verb over a
         // catalogue has one spec that must honestly declare every effect any entry can have, so
-        // gating on that would ask a person about every read. `spec.approval` stays in the
-        // disjunction while the ports that set it are migrated — it can only add asking.
-        let envelope = self.tools.call_envelope(call);
+        // gating on that would ask a person about every read. The same spec is what the approver
+        // is handed, what the event names and what the refusal says — a gate that decided on the
+        // entry and then reported the verb told the model `tool_invoke` was refused and never
+        // said which entry, and told an approver nothing it could decide on. `approval` stays in
+        // the disjunction while the ports that set it are migrated — it can only add asking.
+        let invoked = self.tools.invoked(call).unwrap_or_else(|| spec.clone());
         let asks = spec.approval == Approval::Required
-            || envelope.needs_approval(self.config.unattended_ceiling);
+            || invoked.approval == Approval::Required
+            || invoked
+                .envelope
+                .needs_approval(self.config.unattended_ceiling);
 
         if asks {
             sink.emit(LoopEvent::ApprovalRequired {
                 call_id: call.call_id.clone(),
-                name: call.name.clone(),
+                name: invoked.name.clone(),
             });
-            let decision = self.approvals.decide(call, &spec);
+            let decision = self.approvals.decide(call, &invoked);
             sink.emit(LoopEvent::ApprovalResolved {
                 call_id: call.call_id.clone(),
                 approved: decision.is_approved(),
             });
             if let ApprovalDecision::Denied { reason } = decision {
-                return ToolOutcome::failed(format!("`{}` was not approved: {reason}", call.name));
+                return ToolOutcome::failed(if invoked.name == call.name {
+                    format!("`{}` was not approved: {reason}", call.name)
+                } else {
+                    format!(
+                        "`{}` (called through `{}`) was not approved: {reason}",
+                        invoked.name, call.name
+                    )
+                });
             }
         }
 

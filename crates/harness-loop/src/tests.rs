@@ -133,6 +133,7 @@ struct ScriptedTools {
     calls: Vec<ToolCall>,
     cancel_after: Option<(usize, LoopCancel)>,
     envelope: Option<Envelope>,
+    invoked: Option<ToolSpec>,
     delay: Option<Duration>,
 }
 
@@ -144,6 +145,7 @@ impl ScriptedTools {
             calls: Vec::new(),
             cancel_after: None,
             envelope: None,
+            invoked: None,
             delay: None,
         }
     }
@@ -165,6 +167,12 @@ impl ScriptedTools {
         self
     }
 
+    /// Answers a whole other spec for every call — the entry behind a verb, under its own name.
+    fn invoking(mut self, spec: ToolSpec) -> Self {
+        self.invoked = Some(spec);
+        self
+    }
+
     /// Makes every call block, so a wall-clock bound can be reached inside a turn.
     fn taking(mut self, delay: Duration) -> Self {
         self.delay = Some(delay);
@@ -177,12 +185,17 @@ impl ToolPort for ScriptedTools {
         &self.specs
     }
 
-    fn call_envelope(&self, call: &ToolCall) -> Envelope {
-        self.envelope.clone().unwrap_or_else(|| {
-            self.specs
-                .iter()
-                .find(|spec| spec.name == call.name)
-                .map_or_else(Envelope::default, |spec| spec.envelope.clone())
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+        if let Some(invoked) = &self.invoked {
+            return Some(invoked.clone());
+        }
+        let published = self.specs.iter().find(|spec| spec.name == call.name)?;
+        Some(match &self.envelope {
+            Some(envelope) => ToolSpec {
+                envelope: envelope.clone(),
+                ..published.clone()
+            },
+            None => published.clone(),
         })
     }
 
@@ -508,6 +521,49 @@ fn a_high_risk_call_under_the_default_approver_is_refused_and_the_model_is_told(
 }
 
 #[test]
+fn what_is_asked_about_and_refused_is_the_entry_and_not_the_verb_it_came_through() {
+    // The gate decided on the entry's envelope and then reported the verb: the event said
+    // `tool_invoke`, the approver was handed `tool_invoke`'s spec, and the model read
+    // "`tool_invoke` was not approved" — and either stopped calling `tool_invoke` at all, losing
+    // every read behind it, or retried the same entry against the same refusal.
+    let entry = ToolSpec {
+        envelope: starts_a_process(),
+        ..spec("run", Approval::NotRequired)
+    };
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "tool_invoke",
+                json!({"name": "run", "arguments": {"argv": ["cargo", "test"]}}),
+            )])),
+            Ok(answer("understood")),
+        ]),
+        ScriptedTools::new(vec![spec("tool_invoke", Approval::NotRequired)]).invoking(entry),
+    );
+    let (outcome, sink) = harness.run();
+    let outcome = outcome.expect("a denial is not a failure");
+
+    assert!(harness.tools.calls.is_empty());
+    let asked: Vec<&str> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::ApprovalRequired { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, vec!["run"], "the event names what is being decided");
+    let told = results(&outcome);
+    assert!(told[0].1.contains("`run`"), "{:?}", told[0].1);
+    assert!(
+        told[0].1.contains("`tool_invoke`"),
+        "and the verb it came through, so the model can still use the verb: {:?}",
+        told[0].1
+    );
+}
+
+#[test]
 fn the_same_call_runs_under_approve_all() {
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
@@ -758,9 +814,11 @@ fn cancellation_between_tool_calls_stops_before_the_next_effect() {
 
 /// A wall-clock budget wide enough that the loop's own setup cannot spend it before the first
 /// call, paired with a call slow enough to spend all of it in one. A budget of a millisecond would
-/// race the machine rather than test the loop.
-const DEADLINE_MS: u64 = 40;
-const SLOW_CALL: Duration = Duration::from_millis(60);
+/// race the machine rather than test the loop — and 40 ms raced a shared CI runner, where one
+/// scheduling stall between the deadline being set and the first call being checked is enough to
+/// skip the call the test expects to see run.
+const DEADLINE_MS: u64 = 200;
+const SLOW_CALL: Duration = Duration::from_millis(300);
 
 fn deadlined() -> Budget {
     Budget {

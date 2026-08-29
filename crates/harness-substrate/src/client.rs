@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -138,6 +139,24 @@ impl Transport for UnixTransport {
 /// startup and a tool talks to per call.
 pub struct Client {
     transport: Box<dyn Transport + Send + Sync>,
+    /// The capability snapshot the first `GET /v1/machine` answered, held for the client's life.
+    ///
+    /// An exec has to name the snapshot it was admitted against, and the daemon states one
+    /// snapshot for its own lifetime — so it is asked for once and kept, not fetched before every
+    /// exec. The one event that changes it is a daemon restart, and a per-exec probe would not
+    /// close that either: the restart can land between the probe and the start, and the daemon
+    /// refuses the stale name then exactly as it does now. What the per-exec probe *did* do was
+    /// let publication and admission read two different documents.
+    snapshot: OnceLock<String>,
+}
+
+/// The body every mutating route takes: the operation's id beside its input, and nothing else.
+///
+/// The daemon's decoder reads `op` before it reads anything — a body without it is refused
+/// `request.schema-invalid` before the input is looked at, and a body with a third key is refused
+/// the same way. Every body this client posted until 2026-08-29 had only `input`.
+fn mutation(op: &str, input: &Value) -> Value {
+    serde_json::json!({"op": op, "input": input})
 }
 
 impl std::fmt::Debug for Client {
@@ -156,6 +175,7 @@ impl Client {
     pub fn with(transport: impl Transport + Send + Sync + 'static) -> Self {
         Self {
             transport: Box::new(transport),
+            snapshot: OnceLock::new(),
         }
     }
 
@@ -184,9 +204,45 @@ impl Client {
         // Both shapes are accepted: a bare document is what every test fixture and every hand-made
         // example is, and refusing one would be refusing the thing the contract's own schemas show.
         let document = value.get("result").unwrap_or(&value);
-        serde_json::from_value(document.clone()).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
-        })
+        let facts: Facts = serde_json::from_value(document.clone()).map_err(|error| {
+            SubstrateError::Unreadable {
+                reason: error.to_string(),
+            }
+        })?;
+        if let Some(Value::String(snapshot)) = &facts.snapshot {
+            let _ = self.snapshot.set(snapshot.clone());
+        }
+        Ok(facts)
+    }
+
+    /// The snapshot an exec is admitted against: the one already held, or the one the daemon
+    /// states when asked now.
+    ///
+    /// `status: 0` on the refusals is not an HTTP status — there was no request. The same
+    /// convention `embedded.rs::refused` uses, and for the same reason: the refusal happened on
+    /// this side of the wire, so quoting a status would name a daemon that never answered.
+    fn admitted_snapshot(&self) -> Result<String, SubstrateError> {
+        if let Some(snapshot) = self.snapshot.get() {
+            return Ok(snapshot.clone());
+        }
+        let facts = self.machine()?;
+        match facts.snapshot {
+            None => Err(SubstrateError::Refused {
+                status: 0,
+                body: "the substrate daemon's machine document carries no capability snapshot. An \
+                       exec has to name the snapshot it was admitted against, so one without it \
+                       cannot be admitted confined - and nothing was started."
+                    .to_owned(),
+            }),
+            Some(Value::String(snapshot)) => Ok(snapshot),
+            Some(other) => Err(SubstrateError::Refused {
+                status: 0,
+                body: format!(
+                    "the substrate daemon's capability snapshot is not the shape this build \
+                     reads: {other}. Nothing was started."
+                ),
+            }),
+        }
     }
 
     /// What this machine can confine, or nothing at all.
@@ -231,9 +287,12 @@ impl Client {
         let (status, body) = self.transport.request(
             "PUT",
             &route,
-            Some(&serde_json::json!({
-                "input": {"content": {"encoding": "base64", "data": base64::encode(text.as_bytes())}}
-            })),
+            Some(&mutation(
+                "workspace.file.write",
+                &serde_json::json!({
+                    "content": {"encoding": "base64", "data": base64::encode(text.as_bytes())}
+                }),
+            )),
         )?;
         Self::decode(status, body)
     }
@@ -276,9 +335,10 @@ impl Client {
         let (status, body) = self.transport.request(
             "POST",
             "/v1/workspaces",
-            Some(&serde_json::json!({
-                "input": {"source": "empty", "labels": {}, "lease_ttl_ms": lease_ttl_ms}
-            })),
+            Some(&mutation(
+                "workspace.create",
+                &serde_json::json!({"source": "empty", "labels": {}, "lease_ttl_ms": lease_ttl_ms}),
+            )),
         )?;
         let value = Self::decode(status, body)?;
         value
@@ -310,29 +370,7 @@ impl Client {
     /// capability snapshot to name. A program that exits non-zero is **not** an error: it is a
     /// result, and the caller needs to see it.
     pub fn exec(&self, workspace: &str, argv: &[String]) -> Result<Value, SubstrateError> {
-        // Asked per exec rather than cached: substrate refuses a start whose admitted snapshot is
-        // stale, and a snapshot held from launch is exactly the one that goes stale.
-        let facts = self.machine()?;
-        // `status: 0` is not an HTTP status — there was no request. The same convention
-        // `embedded.rs::refused` uses, and it is here for the same reason: the refusal happened on
-        // this side of the wire, so quoting a status would name a daemon that never answered.
-        let Some(snapshot) = facts.snapshot else {
-            return Err(SubstrateError::Refused {
-                status: 0,
-                body: "the substrate daemon's machine document carries no capability snapshot. An \
-                       exec has to name the snapshot it was admitted against, so one without it \
-                       cannot be admitted confined - and nothing was started."
-                    .to_owned(),
-            });
-        };
-        let snapshot =
-            serde_json::from_value(snapshot).map_err(|error| SubstrateError::Refused {
-                status: 0,
-                body: format!(
-                    "the substrate daemon's capability snapshot is not the shape this build \
-                     reads: {error}. Nothing was started."
-                ),
-            })?;
+        let snapshot = self.admitted_snapshot()?;
         let input = crate::confined_exec_input(
             workspace,
             argv,
@@ -352,11 +390,9 @@ impl Client {
         let input = serde_json::to_value(&input).map_err(|error| SubstrateError::Unreadable {
             reason: error.to_string(),
         })?;
-        let (status, body) = self.transport.request(
-            "POST",
-            "/v1/execs",
-            Some(&serde_json::json!({"input": input})),
-        )?;
+        let (status, body) =
+            self.transport
+                .request("POST", "/v1/execs", Some(&mutation("exec.start", &input)))?;
         let started = Self::decode(status, body)?;
         let Some(id) = started
             .pointer("/result/exec_id")

@@ -12,13 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The approval gate now fires.** The loop asked its approver only for a tool whose spec said
   `Approval::Required`, and no tool this harness ships says so — so `DenyAll`, which AGENTS.md
   calls the review gate, decided nothing and `--yes` changed nothing. The loop now derives the
-  question from what the **call** does: `ToolPort::call_envelope` answers the envelope of the
-  catalogue entry a `tool_invoke` names (not the verb's own, which must declare every effect any
-  entry can have), and `Envelope::needs_approval` is judged against `LoopConfig::unattended_ceiling`,
-  default `Risk::Low`. Consequence for a person: a `b10x-harness run` with a write-capable or
-  exec-capable catalogue and no `--yes` now **refuses every write and every `run`** and tells the
-  model so; `--yes` approves them. A `file_edit` (non-idempotent) asks whatever the ceiling. Bridge
-  mode is unchanged: the client is the gate there.
+  question from what the **call** does: `ToolPort::invoked` answers the spec of the catalogue
+  entry a `tool_invoke` names (not the verb's own, which must declare every effect any entry can
+  have), and `Envelope::needs_approval` is judged against `LoopConfig::unattended_ceiling`,
+  default `Risk::Low`. The same spec is what the approver is handed, what the `ApprovalRequired`
+  event names and what the refusal says — `file_write`, never `tool_invoke` — and the refusal
+  names the verb too, so the model keeps using it for the reads behind it; `DenyAll` says that a
+  retry cannot help, and the standing instruction says not to. Consequence for a person: a
+  `b10x-harness run` with a write-capable or exec-capable catalogue and no `--yes` now **refuses
+  every write and every `run`** and tells the model so; `--yes` approves them. A `file_edit`
+  (non-idempotent) asks whatever the ceiling. Bridge mode is unchanged: the client is the gate
+  there.
 - **`--substrate-embedded` is a flag, not an option.** It demanded a value it then ignored; the
   README showed it bare and no test exercised it. It is now `bool` on `run` and `tools`, and an
   end-to-end test drives the embedded path.
@@ -34,13 +38,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   snapshot, and posts a body serialised from `substrate-wire`'s own `ExecStartInput` (`require:
   true`, `network: "none"`, the same limits the embedded path uses), built by one shared function
   so the two paths cannot drift. The parked socket path is still parked; what changed is that it
-  can no longer run unconfined the day it is revived.
+  can no longer run unconfined the day it is revived. Every mutating body — `exec`,
+  `workspace_create`, `file_write` — now carries `op` beside `input`, the shape substrate's
+  decoder requires; each lacked it and was refused `request.schema-invalid` before being read.
+  The capability snapshot is asked for **once per client** and held, not before every exec, and
+  the CLI probes and serves with one client, so publication and admission read one document.
 - **The wall-clock deadline is checked between the tool calls of one turn**, not only between
-  turns, so a single slow call can no longer overshoot it by its whole timeout. It also has tests.
-- **A scoped run's paths are relative.** `Scope::refusal` normalises `./`, `.` and `..` lexically
-  before matching and refuses an absolute path when any rule is declared — a denied `target/**`
-  used to be bypassed by `./target/x`, `crates/../target/x` or an absolute spelling. `**/` now
-  matches zero directories too, so `**/*.md` covers `README.md`.
+  turns, so a turn of several slow calls stops at the first one past the deadline instead of
+  running all of them. A call already running still runs to its own timeout (600 s unconfined,
+  900 s confined): nothing yet passes the remaining budget into a call. It also has tests.
+- **A scoped run's paths are relative, and a write is judged by where it lands.**
+  `Scope::refusal` normalises `./`, `.` and `..` lexically before matching and refuses an
+  absolute path when any rule is declared — a denied `target/**` used to be bypassed by
+  `./target/x`, `crates/../target/x` or an absolute spelling. A rule's own glob is normalised the
+  same way: `./target/**=denied` used to match nothing, silently, and an absolute or climbing
+  rule is now refused when it is read. The catalogue also asks the provider where the path
+  **lands** (`Operations::lands`, which `LocalOperations` answers by resolving links) and puts that
+  spelling through the scope too, so a link inside the workspace (`ok/link -> target/x`) or a
+  path that leaves and re-enters it (`../<workspace>/target/y`) no longer steps past a `denied`
+  rule. `**/` now matches zero directories too, so `**/*.md` covers `README.md` — which also means
+  `docs/**/generated.md=denied` now names `docs/generated.md`.
 - `x-client-request-id` is per request; `session-id` and `prompt_cache_key` stay per run. Retry
   back-off sleeps in slices and stops on Ctrl-C. `serde_yaml` (deprecated) → `serde_yaml_ng` in
   `harness-flow`'s tests; `chacha20 0.10.1` (yanked) → `0.10.2`.
@@ -67,14 +84,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   outside. Reproduced, and reachable through `LocalOperations::unconfined`, which metaharness's
   MCP server uses. Presence is now `symlink_metadata`, a link that leads nowhere is refused, and a
   target that is itself a link is refused. Unconfined `run` no longer inherits this process's
-  environment — only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR` reach the child, so a
-  credential held for the harness cannot reach a program the model chose the arguments for.
+  environment — only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR` and the toolchain paths
+  (`CARGO_HOME`, `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`, `CARGO_TARGET_DIR`, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR`) reach the child, so a credential held for the harness cannot reach a program
+  the model chose the arguments for; `LocalOperations::inheriting` names more, by name. A value
+  that is not UTF-8 is passed as it is rather than dropped.
+- **`ConfinedOperations::run` refuses an empty argv by name** rather than panicking on `argv[0]`;
+  it is a public trait method and an embedder can reach it without the catalogue's check.
+- **The loop's deadline tests use a 200 ms budget and 300 ms calls**, not 40 and 60, so one
+  scheduling stall on a shared CI runner cannot fail them.
 - `file_read` reads at most `max_bytes` from disk rather than the whole file; a truncation lands
   on a character boundary; `search` says `line_truncated: true` when it cut a matched line;
   `dir_list` reports a symlink as `symlink`. A non-string `argv` item is refused rather than
   dropped (`["cargo", 5, "test"]` no longer runs `cargo test`). Two workspaces opened with one
   lease in one process no longer share an id. The contract checkers report a corrupted fixture by
-  name instead of a traceback.
+  name instead of a traceback — including a trace entry whose `frame`, or a stream event, is valid
+  JSON but not an object.
 - **Documentation that had drifted from the tree.** `README.md` named a `scripts/check-brand.sh`
   that moved to atlas; `STATUS.md` was dated 2026-08-21, counted 189 tests (324 pass, 1 ignored),
   omitted the `2026-08-22` wire pin and named the profile directory wrongly; design 0001 said

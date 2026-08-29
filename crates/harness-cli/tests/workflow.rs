@@ -2071,7 +2071,7 @@ fn a_step_runs_under_the_write_scope_its_own_node_declares() {
         let filed = sessions_in(sessions.path());
         let (_, session) = filed
             .iter()
-            .find(|(id, _)| id.ends_with(".root.guard.1"))
+            .find(|(id, _)| id.ends_with(".root.1.guard.1"))
             .unwrap_or_else(|| panic!("{wire:?}: the section's session"));
         let turn = first_turn(session);
         assert!(
@@ -2104,7 +2104,7 @@ fn a_step_runs_under_the_write_scope_its_own_node_declares() {
     let filed = sessions_in(sessions.path());
     let (_, session) = filed
         .iter()
-        .find(|(id, _)| id.ends_with(".root.guard.1"))
+        .find(|(id, _)| id.ends_with(".root.1.guard.1"))
         .expect("the section's session");
     assert!(
         !first_turn(session).contains("Where this step may write"),

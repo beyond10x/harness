@@ -37,6 +37,9 @@ SCENARIOS = [
     "fails-after-turn",
     "flat-tool",
     "flat-write",
+    "flow-dies-mid-step",
+    "flow-fails-second",
+    "flow-passes",
     "hooks-block",
     "incomplete",
     "malformed",
@@ -516,6 +519,60 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(called("answer", {"verdict": "second, after the hook"}))
             else:
                 self._send_sse(called("answer", {"verdict": "first"}))
+        elif scenario == "flow-passes":
+            # A walk of a workflow. Every step is one turn that ends in the `answer` call the
+            # runner derived for it, and every one of them passes. `gives` carries the name the
+            # test's document promises, so the section after it can be checked for having been
+            # handed it -- and a document that promises nothing simply never asks for it.
+            self._send_sse(
+                called(
+                    "answer",
+                    {
+                        "outcome": "passed",
+                        "note": f"step {Handler.turn_count} did what it was asked",
+                        "gives": {"specification_id": "SPEC-1"},
+                    },
+                )
+            )
+        elif scenario == "flow-fails-second":
+            # The same walk with the second step answering `failed`: its section does not come out
+            # clean, and whatever needed that section is skipped rather than run.
+            self._send_sse(
+                called(
+                    "answer",
+                    {
+                        "outcome": "failed" if Handler.turn_count == 2 else "passed",
+                        "note": f"step {Handler.turn_count}",
+                        "gives": {"specification_id": "SPEC-1"},
+                    },
+                )
+            )
+        elif scenario == "flow-dies-mid-step":
+            # The wire breaks in the middle of a walk: a broken wire is nobody's failed step, so
+            # the flow aborts rather than recording a network blip as a failure.
+            #
+            # 400 rather than a closed socket or a 5xx, for the reason `fails-after-turn` gives:
+            # `harness_http::status_error` maps it to `Refused` and not retriable, so the failure
+            # lands on the first request and costs no wall clock, while a stream cut mid-event is
+            # a truncation the loop retries.
+            if Handler.turn_count >= 2:
+                self._send_json(
+                    400,
+                    {
+                        "type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": "that conversation is no longer accepted",
+                        },
+                    },
+                )
+            else:
+                self._send_sse(
+                    called(
+                        "answer",
+                        {"outcome": "passed", "gives": {"specification_id": "SPEC-1"}},
+                    )
+                )
         elif scenario == "hooks-block":
             # A write the ceiling allows and a hook refuses. The second turn reports whichever
             # answer came back, exactly as it would for a denial.

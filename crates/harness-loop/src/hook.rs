@@ -30,6 +30,21 @@ pub enum HookPoint {
     AfterCall,
     /// When the run would otherwise end `Completed`.
     Stop,
+    /// At a section boundary of a workflow, on the way in and on the way out.
+    ///
+    /// # Why a fourth point exists in a crate that does not know what a workflow is
+    ///
+    /// **This loop never consults it.** Nothing in [`crate::AgentLoop`] asks a hook at this point,
+    /// no path here produces one, and a [`HookPort`] implementation may leave it unimplemented —
+    /// there is no method for it. It is here for one reason: [`crate::LoopEvent::HookRan`] is how
+    /// *every* consultation of the operator's programs enters the record, and the shell that walks
+    /// a workflow asks the same programs, through the same file, under the same rules (design 0003
+    /// § 3). Giving that firing a second event shape would mean a reader of the record needed two
+    /// parsers for one question — *what did the operator's program say* — and the two would drift.
+    ///
+    /// So the loop lends the word and reads nothing into it. The three points above are unchanged
+    /// in behaviour, in encoding and in who asks them.
+    Transition,
 }
 
 impl HookPoint {
@@ -38,6 +53,7 @@ impl HookPoint {
             Self::BeforeCall => "before-call",
             Self::AfterCall => "after-call",
             Self::Stop => "stop",
+            Self::Transition => "transition",
         }
     }
 }
@@ -256,5 +272,12 @@ mod tests {
             json!("before-call")
         );
         assert_eq!(HookPoint::Stop.as_str(), "stop");
+        // The fourth point nothing in this crate asks at: it is a word for the record, so that a
+        // shell consulting the operator's programs at a workflow boundary files the same event.
+        assert_eq!(
+            serde_json::to_value(HookPoint::Transition).expect("encodes"),
+            json!("transition")
+        );
+        assert_eq!(HookPoint::Transition.as_str(), "transition");
     }
 }

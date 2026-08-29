@@ -1,0 +1,24 @@
+{
+  "product": "b10x-harness",
+  "version": "2026-08-29.2",
+  "interface": "argv",
+  "generated_from": "clap::CommandFactory::command()",
+  "subcommands": [
+    "app-server",
+    "chat",
+    "events",
+    "run",
+    "sessions",
+    "tools",
+    "workflow",
+    "workflow plan",
+    "workflow run"
+  ],
+  "files": [
+    {
+      "path": "argv.json",
+      "bytes": 38454,
+      "sha256": "6efc7602875526047264b5f5617b0fe8822c6beaf166827f1d5decc47776cc39"
+    }
+  ]
+}

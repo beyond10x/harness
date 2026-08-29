@@ -2,6 +2,7 @@
 
 use std::io::Write;
 
+use harness_flow::{FlowEvent, FlowSink, Moment};
 use harness_loop::{LoopEvent, LoopSink};
 
 /// Writes the run as it happens.
@@ -25,6 +26,9 @@ use harness_loop::{LoopEvent, LoopSink};
 /// `unstructured`, and a block-then-answer-again put *two* JSON lines there. So under a schema the
 /// value is held, the latest one wins, and it is written at `Finished` only when the run actually
 /// completed. Every other stop leaves stdout empty, which is what the exit status already says.
+// Four switches over two streams, and each is one question a caller already asked on the command
+// line — a state machine over them would be a fifth thing to keep true.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Renderer<O: Write, E: Write> {
     out: O,
     err: E,
@@ -32,8 +36,20 @@ pub struct Renderer<O: Write, E: Write> {
     quiet: bool,
     /// Whether stdout belongs to the structured answer alone.
     structured: bool,
+    /// Whether an answer that stood is written to stdout at all.
+    ///
+    /// A step of a workflow runs under a schema like any other structured run, and its answer is
+    /// the **walk's** to read: stdout there is the flow's own record, and one JSON line per step
+    /// beside it would be eight answers to a question nobody asked.
+    answers: bool,
     /// The latest `Answered` value under a schema, until `Finished` says whether it stood.
     answer: Option<serde_json::Value>,
+    /// The words a `transition-refused` carried, until the retreat or the exit it explains.
+    ///
+    /// `group-repeating` says which attempt failed and not why, because the notation evaluates no
+    /// gate and has nothing to say about one. Here the two lines are next to each other on a
+    /// terminal, so the reason is carried across.
+    refusal: Option<String>,
 }
 
 impl<O: Write, E: Write> Renderer<O, E> {
@@ -44,7 +60,9 @@ impl<O: Write, E: Write> Renderer<O, E> {
             json,
             quiet,
             structured: false,
+            answers: true,
             answer: None,
+            refusal: None,
         }
     }
 
@@ -52,6 +70,19 @@ impl<O: Write, E: Write> Renderer<O, E> {
     #[must_use]
     pub fn structured(mut self, structured: bool) -> Self {
         self.structured = structured;
+        self
+    }
+
+    /// Keeps stdout for the walk: prose is progress and no answer line is ever written.
+    ///
+    /// Every step of a workflow runs under a schema, so the prose belongs on stderr exactly as it
+    /// does under `--output-schema`. What differs is the other half: the answer is read by the
+    /// walk, which turns it into `passed` or `failed`, and stdout carries the flow's record —
+    /// under `--json` the events, and under prose nothing at all.
+    #[must_use]
+    pub fn within_a_flow(mut self) -> Self {
+        self.structured = true;
+        self.answers = false;
         self
     }
 
@@ -242,8 +273,13 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 if self.structured {
                     // Only for a run that completed. A withdrawn answer, a bound, a cancel: the
                     // exit status says the run has no answer and stdout must say the same.
-                    if stop.is_completed() {
+                    if self.answers && stop.is_completed() {
                         self.answer();
+                    } else {
+                        // Dropped rather than held: inside a walk the next step must not inherit
+                        // the last one's answer, and a run with no answer has nothing to compose
+                        // with either way.
+                        self.answer = None;
                     }
                 } else {
                     let _ = writeln!(self.out);
@@ -251,6 +287,113 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 }
                 self.note(&format!("{stop:?}"));
             }
+        }
+    }
+}
+
+/// The walk's own events, on the same two streams the loop's go to.
+///
+/// Under `--json` they join the record on stdout, one per line, in the same stream — they already
+/// carry `kind`, so a reader parsing line by line needs nothing new. On a terminal each is one
+/// line of progress: a section entered, a step passed or failed, a retreat, a refusal. A step's
+/// loop events land between its `step-started` and `step-finished` because it is one renderer and
+/// one stream, which is the whole reason the walk and the runner share this object.
+impl<O: Write, E: Write> FlowSink for Renderer<O, E> {
+    fn emit(&mut self, event: FlowEvent) {
+        if self.json {
+            if let Ok(line) = serde_json::to_string(&event) {
+                let _ = writeln!(self.out, "{line}");
+                let _ = self.out.flush();
+            }
+            return;
+        }
+        match event {
+            FlowEvent::FlowStarted { flow, steps } => {
+                self.note(&format!("flow ▸ {flow} — {steps} step(s)"));
+            }
+            FlowEvent::GroupEntered {
+                path, attempt, of, ..
+            } => self.note(&format!("flow ▸ {path} (attempt {attempt} of {of})")),
+            // Named even when it holds one node: *these could have run together* is a fact about
+            // the document, and a reader who saw it only sometimes would infer concurrency from
+            // silence.
+            FlowEvent::LayerReady { path, nodes } => {
+                self.note(&format!("  layer {path}: {}", nodes.join(", ")));
+            }
+            FlowEvent::StepStarted { path } => self.note(&format!("step → {path}")),
+            FlowEvent::StepFinished { path, failed } => {
+                self.note(&format!("step {} {path}", if failed { "✗" } else { "✓" }));
+            }
+            FlowEvent::NodeSkipped { path, because } => {
+                self.note(&format!("step ⊘ {path}: {because}"));
+            }
+            FlowEvent::GroupRepeating { path, attempt, of } => {
+                let because = self
+                    .refusal
+                    .take()
+                    .unwrap_or_else(|| "it did not come out clean".to_owned());
+                self.note(&format!(
+                    "retreat ↺ {path} ({} of {of}): {because}",
+                    attempt.saturating_add(1)
+                ));
+            }
+            FlowEvent::HandoffIncomplete { path, missing } => {
+                self.note(&format!(
+                    "handoff ✗ {path}: never gave {}",
+                    missing.join(", ")
+                ));
+            }
+            FlowEvent::TransitionRefused {
+                path,
+                moment,
+                attempt,
+                reason,
+            } => {
+                let word = match moment {
+                    Moment::Enter => "enter",
+                    Moment::Leave => "leave",
+                };
+                self.note(&format!(
+                    "refused ⊘ {path} ({word}, attempt {attempt}): {reason}"
+                ));
+                self.refusal = Some(reason);
+            }
+            FlowEvent::GroupLeft {
+                path,
+                failed,
+                gave,
+                attempts,
+                exhausted,
+            } => {
+                // Whatever refused this section has been reported; it must not be read as the
+                // reason for the next section's retreat.
+                self.refusal = None;
+                let verdict = match (failed, exhausted) {
+                    (true, true) => "exhausted",
+                    (true, false) => "failed",
+                    (false, _) => "clean",
+                };
+                let gave = if gave.is_empty() {
+                    String::new()
+                } else {
+                    format!(", gave {}", gave.join(", "))
+                };
+                self.note(&format!(
+                    "flow ◂ {path} {verdict} after {attempts} attempt(s){gave}"
+                ));
+            }
+            FlowEvent::FlowFinished {
+                flow,
+                ran,
+                failed,
+                skipped,
+                retreats,
+                clean,
+            } => self.note(&format!(
+                "flow {} {flow} — {ran} ran, {failed} failed, {skipped} skipped, {retreats} \
+                 retreat(s)",
+                if clean { "✓" } else { "✗" }
+            )),
         }
     }
 }
@@ -326,7 +469,7 @@ mod tests {
         {
             let mut renderer = Renderer::new(&mut out, &mut err, json, false);
             for event in events {
-                renderer.emit(event);
+                LoopSink::emit(&mut renderer, event);
             }
         }
         (
@@ -388,7 +531,7 @@ mod tests {
         {
             let mut renderer = Renderer::new(&mut out, &mut err, false, false).structured(true);
             for event in events {
-                renderer.emit(event);
+                LoopSink::emit(&mut renderer, event);
             }
         }
         (
@@ -588,16 +731,22 @@ mod tests {
         let mut err = Vec::new();
         {
             let mut renderer = Renderer::new(&mut out, &mut err, true, false).structured(true);
-            renderer.emit(LoopEvent::Answered {
-                call_id: harness_wire::CallId::new("call-9").expect("valid"),
-                value: serde_json::json!({"verdict": "ok"}),
-            });
-            renderer.emit(LoopEvent::Delegated {
-                call_id: harness_wire::CallId::new("call-3").expect("valid"),
-                event: Box::new(LoopEvent::TextDelta {
-                    text: "child".to_owned(),
-                }),
-            });
+            LoopSink::emit(
+                &mut renderer,
+                LoopEvent::Answered {
+                    call_id: harness_wire::CallId::new("call-9").expect("valid"),
+                    value: serde_json::json!({"verdict": "ok"}),
+                },
+            );
+            LoopSink::emit(
+                &mut renderer,
+                LoopEvent::Delegated {
+                    call_id: harness_wire::CallId::new("call-3").expect("valid"),
+                    event: Box::new(LoopEvent::TextDelta {
+                        text: "child".to_owned(),
+                    }),
+                },
+            );
         }
         let out = String::from_utf8(out).expect("utf-8");
         let lines: Vec<&str> = out.lines().collect();
@@ -645,11 +794,14 @@ mod tests {
         let mut err = Vec::new();
         {
             let mut renderer = Renderer::new(&mut out, &mut err, false, true);
-            renderer.emit(LoopEvent::TurnStarted { turn: 1 });
-            renderer.emit(LoopEvent::Warning {
-                code: "unpublished-tool".to_owned(),
-                message: "nope".to_owned(),
-            });
+            LoopSink::emit(&mut renderer, LoopEvent::TurnStarted { turn: 1 });
+            LoopSink::emit(
+                &mut renderer,
+                LoopEvent::Warning {
+                    code: "unpublished-tool".to_owned(),
+                    message: "nope".to_owned(),
+                },
+            );
         }
         let err = String::from_utf8(err).expect("utf-8");
         assert!(!err.contains("turn 1"), "quiet drops progress: {err}");
@@ -687,11 +839,163 @@ mod tests {
         let mut err = Vec::new();
         {
             let mut renderer = Renderer::new(&mut out, &mut err, false, true);
-            renderer.emit(started());
+            LoopSink::emit(&mut renderer, started());
         }
         let err = String::from_utf8(err).expect("utf-8");
         assert!(!err.contains("model m"), "quiet drops progress: {err}");
         assert!(err.contains("note: `run` is not published"), "{err}");
+    }
+
+    fn render_flow(events: Vec<FlowEvent>, json: bool) -> (String, String) {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        {
+            let mut renderer = Renderer::new(&mut out, &mut err, json, false).within_a_flow();
+            for event in events {
+                FlowSink::emit(&mut renderer, event);
+            }
+        }
+        (
+            String::from_utf8(out).expect("utf-8"),
+            String::from_utf8(err).expect("utf-8"),
+        )
+    }
+
+    #[test]
+    fn a_walk_reads_as_one_line_per_thing_that_happened() {
+        let (out, err) = render_flow(
+            vec![
+                FlowEvent::GroupEntered {
+                    path: "root.shape".to_owned(),
+                    layers: 2,
+                    attempt: 1,
+                    of: 3,
+                },
+                FlowEvent::StepFinished {
+                    path: "root.shape.specify".to_owned(),
+                    failed: false,
+                },
+                FlowEvent::StepFinished {
+                    path: "root.shape.verify".to_owned(),
+                    failed: true,
+                },
+                FlowEvent::GroupRepeating {
+                    path: "root.shape".to_owned(),
+                    attempt: 1,
+                    of: 3,
+                },
+            ],
+            false,
+        );
+        assert!(
+            out.is_empty(),
+            "stdout belongs to the walk's record: {out:?}"
+        );
+        assert!(err.contains("flow ▸ root.shape (attempt 1 of 3)"), "{err}");
+        assert!(err.contains("step ✓ root.shape.specify"), "{err}");
+        assert!(err.contains("step ✗ root.shape.verify"), "{err}");
+        // The attempt about to be taken, not the one that just failed.
+        assert!(err.contains("retreat ↺ root.shape (2 of 3):"), "{err}");
+    }
+
+    #[test]
+    fn a_refused_boundary_is_reported_and_becomes_the_retreat_it_explains() {
+        // `group-repeating` says which attempt failed and not why, because the notation evaluates
+        // no gate. On a terminal the two lines are next to each other, so the words are carried.
+        let (_, err) = render_flow(
+            vec![
+                FlowEvent::TransitionRefused {
+                    path: "root.implement-to-review".to_owned(),
+                    moment: Moment::Leave,
+                    attempt: 1,
+                    reason: "the tests are red".to_owned(),
+                },
+                FlowEvent::GroupRepeating {
+                    path: "root.implement-to-review".to_owned(),
+                    attempt: 1,
+                    of: 3,
+                },
+            ],
+            false,
+        );
+        assert!(
+            err.contains(
+                "refused ⊘ root.implement-to-review (leave, attempt 1): the tests are red"
+            ),
+            "{err}"
+        );
+        assert!(
+            err.contains("retreat ↺ root.implement-to-review (2 of 3): the tests are red"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_walk_under_json_joins_the_record_on_stdout_one_event_per_line() {
+        let (out, err) = render_flow(
+            vec![
+                FlowEvent::StepStarted {
+                    path: "root.specify".to_owned(),
+                },
+                FlowEvent::FlowFinished {
+                    flow: "root".to_owned(),
+                    ran: 1,
+                    failed: 0,
+                    skipped: 0,
+                    retreats: 0,
+                    clean: true,
+                },
+            ],
+            true,
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "{out}");
+        assert!(
+            lines[0].contains("\"kind\":\"step-started\""),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("\"kind\":\"flow-finished\""),
+            "{}",
+            lines[1]
+        );
+        assert!(err.is_empty(), "json mode keeps stderr clean: {err}");
+    }
+
+    #[test]
+    fn inside_a_walk_a_step_answer_never_reaches_stdout() {
+        // Every step runs under a schema, and its answer is the walk's to read. One JSON line per
+        // step on stdout would be eight answers to a question nobody asked, in the middle of the
+        // flow's own record.
+        let (out, err) = render_flow(Vec::new(), false);
+        assert!(out.is_empty() && err.is_empty());
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        {
+            let mut renderer = Renderer::new(&mut out, &mut err, false, false).within_a_flow();
+            LoopSink::emit(
+                &mut renderer,
+                LoopEvent::Answered {
+                    call_id: harness_wire::CallId::new("call-9").expect("valid"),
+                    value: serde_json::json!({"outcome": "passed"}),
+                },
+            );
+            LoopSink::emit(
+                &mut renderer,
+                LoopEvent::Finished {
+                    stop: LoopStop::Completed,
+                    turns: 1,
+                },
+            );
+        }
+        assert_eq!(String::from_utf8(out).expect("utf-8"), "");
+        assert!(
+            String::from_utf8(err)
+                .expect("utf-8")
+                .contains("· answered"),
+            "still reported as progress"
+        );
     }
 
     #[test]

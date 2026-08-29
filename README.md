@@ -321,8 +321,9 @@ never discovered, narrowing only. Exit 2 at `enter` skips the section as failed,
 on a clean attempt forces a retreat, and a hook that cannot answer fails closed; the protocol is in
 the [workflows guide](website/docs/guides/workflows.md).
 
-**One session per `(scope, attempt)`**, id `<flow-run-id>.<path>.<attempt>`, filed with what it cost
-as the scope closes. `--no-session` writes nothing; `--resume` is refused, because a flow names its
+**One session per `(scope, attempt)`**, id `<flow-run-id>` then every open section on the way down
+with the attempt it is on — `….root.2.implement-to-review.3.verify.1` — filed with what it cost as
+the scope closes. `--no-session` writes nothing; `--resume` is refused, because a flow names its
 own sessions and resuming a *flow* is a later milestone. Exit status reads as it does everywhere
 else: `0` the flow came out clean, `2` it finished and did not — a failed step, a skipped or
 exhausted section, a cancelled run — `1` refused before it started, or aborted mid-step.

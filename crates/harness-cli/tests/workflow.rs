@@ -159,6 +159,32 @@ root:
             summary: \"Make the smallest change that satisfies the units.\"
 ";
 
+/// A root that may go round twice, with a step of its own and a section under it.
+///
+/// The shape that lost a transcript on the seventh paid native walk: the **root** is what retreats,
+/// so every section under it runs its attempt 1 a second time. The root holds `open` so that it has
+/// a conversation of its own to file — a section that ran nothing files nothing — and `shape` may
+/// not repeat, so the failure inside it is what pushes the root round rather than being absorbed
+/// one level down.
+const ROOT_RETREATS: &str = "\
+id: root-retreats
+root:
+  id: root
+  repeat: {max: 2}
+  nodes:
+    - id: open
+      run:
+        state: open
+        summary: \"Say what this run is for.\"
+    - id: shape
+      needs: [open]
+      nodes:
+        - id: specify
+          run:
+            state: specify
+            summary: \"State the required behaviour.\"
+";
+
 /// Two sections a governor can be asked about, one of which may be retreated into once.
 ///
 /// `build` does **not** need `shape`: a refusal at `shape`'s boundary must leave the rest of the
@@ -541,7 +567,7 @@ fn a_transition_hook_that_refuses_a_leave_re_enters_the_section_until_its_bound(
         let filed = sessions_in(sessions.path());
         let (id, build) = filed
             .iter()
-            .find(|(id, _)| id.ends_with(".root.build.1"))
+            .find(|(id, _)| id.ends_with(".root.1.build.1"))
             .unwrap_or_else(|| {
                 panic!(
                     "{wire:?}: the sibling filed a session: {:?}",
@@ -661,7 +687,7 @@ sys.exit(0)
         let filed = sessions_in(sessions.path());
         let names: Vec<&str> = filed.iter().map(|(id, _)| id.as_str()).collect();
         assert!(
-            names.iter().all(|id| !id.contains(".root.shape.")),
+            names.iter().all(|id| !id.contains(".shape.")),
             "{wire:?}: {names:?}"
         );
     }
@@ -993,16 +1019,17 @@ fn a_flow_walks_its_plan_and_files_one_session_per_scope() {
 
         let filed = sessions_in(sessions.path());
         assert_eq!(filed.len(), 2, "{wire:?}: one per section that ran");
-        // Sorted by identifier, so `…root.build.1` comes before `…root.shape.1`.
+        // Sorted by identifier, so `…root.1.build.1` comes before `…root.1.shape.1`.
         let (build_id, build) = &filed[0];
         let (shape_id, shape) = &filed[1];
-        // `<flow-run-id>.<path>.<attempt>`, and both sections of one walk share the first part.
+        // `<flow-run-id>.<root path>.<attempt>.…`, and both sections of one walk share the first
+        // part: the walk's own identifier, then the attempt of the root they ran under.
         let walk_id = shape_id
             .split_once(".root.")
             .expect("the identifier names its section")
             .0;
-        assert_eq!(build_id, &format!("{walk_id}.root.build.1"), "{wire:?}");
-        assert_eq!(shape_id, &format!("{walk_id}.root.shape.1"), "{wire:?}");
+        assert_eq!(build_id, &format!("{walk_id}.root.1.build.1"), "{wire:?}");
+        assert_eq!(shape_id, &format!("{walk_id}.root.1.shape.1"), "{wire:?}");
 
         assert_eq!(shape["turns"], 2, "{wire:?}: two steps, one conversation");
         assert_eq!(build["turns"], 1, "{wire:?}");
@@ -1119,9 +1146,9 @@ fn a_section_that_did_not_come_out_clean_is_re_entered_and_files_a_session_per_a
             3,
             "{wire:?}: one per attempt of a section: {names:?}"
         );
-        assert!(names[0].ends_with(".root.build.1"), "{names:?}");
-        assert!(names[1].ends_with(".root.shape.1"), "{names:?}");
-        assert!(names[2].ends_with(".root.shape.2"), "{names:?}");
+        assert!(names[0].ends_with(".root.1.build.1"), "{names:?}");
+        assert!(names[1].ends_with(".root.1.shape.1"), "{names:?}");
+        assert!(names[2].ends_with(".root.1.shape.2"), "{names:?}");
         // A new attempt starts from `available` and nothing else, which is what re-running the
         // whole scope means.
         assert_eq!(
@@ -1133,6 +1160,114 @@ fn a_section_that_did_not_come_out_clean_is_re_entered_and_files_a_session_per_a
             first_turn(&filed[2].1).contains("attempt 2 of section `root.shape`"),
             "{wire:?}: and it says which attempt it is: {}",
             first_turn(&filed[2].1)
+        );
+    }
+}
+
+#[test]
+fn a_walk_whose_root_retreats_files_one_session_for_every_section_that_ran() {
+    // The seventh paid native walk (2026-08-30) filed `…root.receive.1` twice and
+    // `…root.specify.1` twice: the root retreated, every section under it ran its attempt 1 a
+    // second time under the same name, and the second file overwrote the first. The transcript of
+    // the attempt whose validator exited `1` was gone from disk and only the event record still
+    // said it had happened.
+    for wire in WIRES {
+        let fixture = wire.fixture("flow-fails-second");
+        let workspace = workspace();
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let flow = flow_file(dir.path(), "flow.yaml", ROOT_RETREATS);
+        let sessions = tempfile::tempdir().expect("a temporary directory");
+
+        let output = walk(
+            &fixture,
+            wire,
+            &flow,
+            workspace.path(),
+            sessions.path(),
+            &["--json"],
+        );
+
+        assert_eq!(output.status, Some(0), "{wire:?}: {}", output.stderr);
+        let events = events(&output);
+        // The second step fails, `shape` has no attempt left, so what goes round again is the root.
+        assert_eq!(
+            steps_started(&events),
+            vec![
+                "root.open",
+                "root.shape.specify",
+                "root.open",
+                "root.shape.specify"
+            ],
+            "{wire:?}: the whole scope re-runs, root included"
+        );
+        assert_eq!(
+            of_kind(&events, "group-repeating")
+                .iter()
+                .map(|event| event["path"].as_str().expect("a path"))
+                .collect::<Vec<_>>(),
+            vec!["root"],
+            "{wire:?}: and it is the root that retreated"
+        );
+
+        // Every section of this document runs a step, so every `group-entered` opened a
+        // conversation, and one conversation is one file.
+        let entered = of_kind(&events, "group-entered");
+        let filed = sessions_in(sessions.path());
+        let names: Vec<&str> = filed.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(
+            filed.len(),
+            entered.len(),
+            "{wire:?}: {} sections ran and {} sessions were filed: {names:?}",
+            entered.len(),
+            filed.len()
+        );
+        assert_eq!(
+            entered.len(),
+            4,
+            "{wire:?}: two of the root, two of `shape`"
+        );
+        assert_eq!(
+            names
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            names.len(),
+            "{wire:?}: no two sessions of one walk share an identifier: {names:?}"
+        );
+        // Sorted by identifier: the walk, then every attempt on the way down to the section.
+        let walk_id = names[0]
+            .split_once(".root.")
+            .expect("the identifier names its section")
+            .0;
+        assert_eq!(
+            names,
+            vec![
+                format!("{walk_id}.root.1"),
+                format!("{walk_id}.root.1.shape.1"),
+                format!("{walk_id}.root.2"),
+                format!("{walk_id}.root.2.shape.1"),
+            ],
+            "{wire:?}"
+        );
+        // And the point of all of it: the attempt that failed is still readable, under the root
+        // attempt it belongs to, rather than overwritten by the pass that came out clean.
+        let (_, red) = filed
+            .iter()
+            .find(|(id, _)| id.ends_with(".root.1.shape.1"))
+            .expect("the first attempt of `shape`");
+        assert_eq!(
+            red["structured"]["outcome"], "failed",
+            "{wire:?}: {}",
+            red["structured"]
+        );
+        let (_, green) = filed
+            .iter()
+            .find(|(id, _)| id.ends_with(".root.2.shape.1"))
+            .expect("the second root attempt's `shape`");
+        assert_eq!(
+            green["structured"]["outcome"], "passed",
+            "{wire:?}: {}",
+            green["structured"]
         );
     }
 }
@@ -1189,14 +1324,14 @@ fn the_projected_adp_workflow_walks_end_to_end() {
              root nor the retreat holds a step of its own any more: {names:?}"
         );
         for section in [
-            ".root.receive.1",
-            ".root.specify.1",
-            ".root.decompose.1",
-            ".root.establish_verifiers.1",
-            ".root.implement-to-review.implement.1",
-            ".root.implement-to-review.verify.1",
-            ".root.implement-to-review.adversarial_verify.1",
-            ".root.implement-to-review.review.1",
+            ".root.1.receive.1",
+            ".root.1.specify.1",
+            ".root.1.decompose.1",
+            ".root.1.establish_verifiers.1",
+            ".root.1.implement-to-review.1.implement.1",
+            ".root.1.implement-to-review.1.verify.1",
+            ".root.1.implement-to-review.1.adversarial_verify.1",
+            ".root.1.implement-to-review.1.review.1",
         ] {
             assert!(
                 names.iter().any(|id| id.ends_with(section)),
@@ -1485,7 +1620,7 @@ fn an_interrupted_walk_files_what_ran_and_emits_no_ending() {
     let filed = sessions_in(sessions.path());
     let names: Vec<&str> = filed.iter().map(|(id, _)| id.as_str()).collect();
     assert_eq!(filed.len(), 1, "{names:?}");
-    assert!(names[0].ends_with(".root.shape.1"), "{names:?}");
+    assert!(names[0].ends_with(".root.1.shape.1"), "{names:?}");
     assert!(
         first_turn(&filed[0].1).contains("State the required behaviour"),
         "with the turn it had already bought: {}",
@@ -1682,7 +1817,7 @@ fn a_wire_failure_aborts_the_flow_and_files_what_ran() {
             "{wire:?}: the section that was open when the wire broke: {filed:?}"
         );
         assert!(
-            filed[0].0.ends_with(".root.shape.1"),
+            filed[0].0.ends_with(".root.1.shape.1"),
             "{wire:?}: {}",
             filed[0].0
         );
@@ -1859,7 +1994,7 @@ fn a_command_step_is_one_call_through_the_gate_and_no_turn_of_the_model() {
         let filed = sessions_in(sessions.path());
         let (_, session) = filed
             .iter()
-            .find(|(id, _)| id.ends_with(".root.verify.1"))
+            .find(|(id, _)| id.ends_with(".root.1.verify.1"))
             .expect("the section's session");
         let items = session["items"].as_array().expect("items");
         let call = items

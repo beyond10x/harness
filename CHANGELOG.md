@@ -81,6 +81,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `anthropic-messages/2026-08-30` and `openai-responses/2026-08-30`; the versions before them stay
   pinned as released, and neither stream fixture changed.
 
+### Fixed
+
+- **A section's session now names every attempt above it, so a re-entered ancestor overwrites
+  nothing.** `workflow run` named a session `<flow-run-id>.<path>.<attempt>` with the section's
+  **own** attempt and nothing else, which is unique only while nothing above it goes round twice.
+  When the root retreats — or a retreat group does — every section under it runs its attempt 1 a
+  second time under the same name, and the second file lands on top of the first. The seventh paid
+  native walk (2026-08-30, metaharness `native-eval.hUbOP5`) filed `…root.receive.1` twice and
+  `…root.specify.1` twice: the `specify` attempt whose validator exited `1` — the one worth reading —
+  was gone from disk, and only the event record still said it had happened.
+
+  The id now carries the attempt of **every open scope on the way down**:
+  `…root.2.implement-to-review.3.verify.1` is the first attempt of `verify`, inside the third attempt
+  of `implement-to-review`, inside the second attempt of the root. It still sorts by flow run, it
+  still names the section, and a walk now leaves as many files as it ran sections — `sessions` lists
+  every attempt that happened, retreats included. Anything reading these names by hand (a listing, a
+  glob) sees a longer id for a nested section; nothing parses them.
+
+- **A section name carrying a `.` is refused by the notation.** `FlowError::DottedName`, at the point
+  a group's names are first read. The dot is what a path is joined with — `root.shape.specify` — so a
+  name holding one made two different sections read as the same path, and would have made two
+  different attempt chains read as one session file. It was never legal in spirit and was never
+  checked.
+
 ## [0.2.0] — 2026-08-30
 
 ### Added

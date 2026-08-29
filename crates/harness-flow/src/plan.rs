@@ -45,6 +45,14 @@ impl Plan {
 }
 
 pub(crate) fn plan(root: &Group) -> Result<Plan, FlowError> {
+    // The root is where a path starts, so it meets the same rule about the character a path is
+    // joined with as every name under it — `index` reads those, and nobody's sibling reads this one.
+    if root.id.contains('.') {
+        return Err(FlowError::DottedName {
+            path: root.id.clone(),
+            id: root.id.clone(),
+        });
+    }
     if !root.gives.is_empty() {
         return Err(FlowError::RootGives {
             path: root.id.clone(),

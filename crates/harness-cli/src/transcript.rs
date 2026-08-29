@@ -357,8 +357,9 @@ fn unix_now() -> u64 {
 ///
 /// An identifier reaches this module from a command line, and `<dir>/<id>.json` with an `id` of
 /// `../../.ssh/config` is a write outside the session directory. Narrow rather than escaped: a
-/// run mints hex and one dash, and a walk adds the section it belongs to —
-/// `<flow-run>.root.shape.1` (design 0003 § 4), which is why the dot is a letter here.
+/// run mints hex and one dash, and a walk adds the section it belongs to and every attempt on the
+/// way down to it — `<flow-run>.root.1.shape.1` (design 0003 § 4), which is why the dot is a letter
+/// here.
 ///
 /// **`..` is not**, nor a leading one: those are the two spellings that leave the directory, and
 /// admitting the character without refusing the pair would have re-opened exactly the hole this
@@ -556,9 +557,13 @@ mod tests {
 
     #[test]
     fn a_section_of_a_walk_names_its_own_session_and_still_stays_one_file_name() {
-        // What design 0003 § 4 mints: the walk's identifier, the section's path, the attempt.
-        check_id(&format!("{}.root.implement-to-review.2", Session::new_id()))
-            .expect("a section identifier is a file name");
+        // What design 0003 § 4 mints: the walk's identifier, then every open scope on the way down
+        // as its own name and the attempt it is on.
+        check_id(&format!(
+            "{}.root.1.implement-to-review.2.implement.1",
+            Session::new_id()
+        ))
+        .expect("a section identifier is a file name");
     }
 
     #[test]

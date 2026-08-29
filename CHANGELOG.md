@@ -643,6 +643,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   omitted the `2026-08-22` wire pin and named the profile directory wrongly; design 0001 said
   nothing in it was implemented after most of it shipped in 0.1.0. AGENTS.md now records that
   bridge mode's approver is the client's, not `DenyAll`, and why.
+- **`--context` is pinned on both sides** (`crates/harness-cli/tests/context.rs`). A declared
+  context or hooks file that is absent refuses the run — exit `1`, `{"kind": "refused"}` under
+  `--json` — with no request sent and no session filed, and a context file that is present reaches
+  the standing instruction labelled by its own path. Both refusals were documented and untested, so
+  nothing would have caught either decaying into a warning.
 
 ### Known gaps
 

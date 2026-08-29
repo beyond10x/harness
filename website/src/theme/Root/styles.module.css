@@ -1,0 +1,73 @@
+.readingProgress {
+  position: fixed;
+  z-index: calc(var(--ifm-z-index-fixed) + 1);
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.readingProgress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--h-cyan), var(--h-lime));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--h-cyan) 48%, transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 80ms linear;
+}
+
+.backToTop {
+  position: fixed;
+  z-index: var(--ifm-z-index-fixed);
+  right: clamp(1rem, 2.5vw, 2rem);
+  bottom: clamp(1rem, 2.5vw, 2rem);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.7rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--h-line-strong);
+  border-radius: 999px;
+  color: var(--ifm-font-color-base);
+  background: color-mix(in srgb, var(--h-card) 88%, transparent);
+  box-shadow: 0 0.8rem 2rem rgba(8, 19, 30, 0.15);
+  cursor: pointer;
+  font: 800 0.65rem/1 var(--ifm-font-family-monospace);
+  letter-spacing: 0.05em;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.75rem);
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease;
+  backdrop-filter: blur(14px);
+}
+
+.backToTop span {
+  color: var(--h-cyan);
+  font-size: 0.95rem;
+}
+
+.backToTop:hover {
+  border-color: var(--h-cyan);
+  transform: translateY(-2px);
+}
+
+.backToTop:focus-visible {
+  outline: 2px solid var(--h-cyan);
+  outline-offset: 3px;
+}
+
+.backToTopVisible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .readingProgress span,
+  .backToTop {
+    transition: none;
+  }
+}

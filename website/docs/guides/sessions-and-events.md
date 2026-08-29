@@ -1,0 +1,118 @@
+---
+title: Sessions and events
+description: Resume conversations, use chat, and consume the JSONL run record correctly.
+---
+
+# Sessions and events
+
+Sessions preserve the conversation between invocations. Events expose a run while it is happening.
+They answer different needs and can be used independently.
+
+## Sessions
+
+Every `run` writes a session unless `--no-session` is set. It is saved after success, a named stop,
+or a loop error: a run that fails on turn 20 is the run whose first 19 turns are most useful to keep.
+
+List sessions newest first:
+
+```bash
+b10x-harness sessions
+```
+
+Continue the newest one:
+
+```bash
+b10x-harness run \
+  --resume latest \
+  --base-url https://gateway.example/v1 \
+  --model model-alias \
+  --api-key-env MY_MODEL_TOKEN \
+  --input "Now identify the riskiest assumption."
+```
+
+You can pass an exact session ID instead of `latest`, or select another directory with
+`--session-dir` on both commands.
+
+A session records:
+
+- the selected wire, model, base URL, and workspace;
+- the conversation items, including opaque provider items;
+- reported usage, accumulated turns, and measured cost;
+- the most recent structured answer, when there is one.
+
+It records neither credentials nor the standing instruction. The instruction is rebuilt from the
+current invocation, catalogue, environment, write scope, and project files.
+
+:::warning Resume must stay on one wire
+
+Opaque provider items are replayed verbatim. A session produced by `openai-responses` is refused by
+`anthropic-messages`, and vice versa. Start a new session to change wires.
+
+:::
+
+## Chat
+
+`chat` reads one line at a time and keeps one session:
+
+```bash
+b10x-harness chat \
+  --base-url https://gateway.example/v1 \
+  --model model-alias \
+  --api-key-env MY_MODEL_TOKEN \
+  --workspace .
+```
+
+Each input line is a follow-up. Enter `exit` or close stdin to finish. The command intentionally
+provides no line editing or terminal history.
+
+## JSON Lines event stream
+
+Pass `--json` when a process should consume events:
+
+```bash
+b10x-harness run \
+  --json \
+  --base-url https://gateway.example/v1 \
+  --model model-alias \
+  --api-key-env MY_MODEL_TOKEN \
+  --workspace . \
+  --input "Summarize the workspace" > run.jsonl
+```
+
+Each line is one object with a kebab-case `kind`. The main event groups are:
+
+| Group | Event kinds |
+|---|---|
+| Lifecycle | `started`, `turn-started`, `finished` |
+| Streaming | `text-delta`, `reasoning-delta`, `tool-arguments-delta` |
+| Tools | `tool-requested`, `approval-required`, `approval-resolved`, `tool-completed` |
+| Accounting | `usage`, `rates`, `cost` |
+| Recovery | `turn-retried`, `compacted`, `warning` |
+| Advanced | `answered`, `delegate-started`, `delegated`, `delegate-finished`, `hook-ran` |
+
+The `started` event names the model, tools published to it, neutral operations, and any requested
+tool withheld by the machine. The `finished` event carries the typed stop and total model turns.
+
+### Retried streams invalidate earlier deltas
+
+When a turn's stream breaks after output has been observed, Harness can retry the unchanged turn. A
+`turn-retried` event means all text and reasoning deltas already emitted for that turn attempt must
+be discarded. A terminal cannot erase printed text, so its renderer warns the person explicitly.
+
+### Structured answers under `--json`
+
+With `--output-schema`, JSON mode remains an event stream and does not print a separate bare answer.
+A stop hook can withdraw one answer and send the loop back to work, so consumers must take the last
+`answered` event before a `finished` event whose stop is `completed`.
+
+## Evaluation record
+
+The `events` command converts a saved Harness JSONL record into the `metaharness.event/1` stream used
+to compare evaluation arms:
+
+```bash
+b10x-harness events --in run.jsonl --out evaluation.jsonl
+```
+
+It converts observations only. It does not add the per-call control seam used to drive vendor
+harnesses.

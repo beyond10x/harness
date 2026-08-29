@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Public documentation website.** A Docusaurus site under `website/` now gives Harness a
+  public-facing quickstart, an explanation of the loop and its safety boundary, operating guides
+  for sessions, confinement, structured output, delegation and hooks, command-line and wire
+  reference, and an explicit pre-v1 limitations page. Its landing page follows the visual language
+  of the other beyond10x project sites; broken links, anchors and TypeScript fail the Pages build.
+
 - **Structured output, sub-agents and hooks** — the three of finding #13's five gaps that are this
   component's to own (`docs/design/0002-sub-agents-structured-output-hooks.md`; the MCP client and
   multimodal input stay out, with the reason in `README.md`). All three are opt-in per run, none

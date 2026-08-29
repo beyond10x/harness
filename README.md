@@ -3,6 +3,9 @@
 The b10x agent loop — ours, not a vendor's. It talks to LLM APIs directly and owns the cycle: one
 turn out, tool calls back, results in, next turn out.
 
+**[Read the public documentation](https://beyond10x.github.io/harness/)** for the quickstart,
+execution model, safety boundary, operational guides and reference.
+
 The problem it removes: driving a vendor's harness means booting a vendor binary whose only job is
 to hold a loop, registering every tool through that vendor's mechanism, and living with whatever
 budgets that vendor happens to enforce. Owning the loop makes tool names, budgets, cost accounting

@@ -76,7 +76,7 @@ acting on itself.
 
 ## Phase 4: subscription authentication
 
-**Status: the source exists; renewal and the authorized runs do not.**
+**Status: the source exists and the Anthropic route is authorized; renewal and the ChatGPT/Codex run do not.**
 
 ChatGPT/Codex and Claude subscription routes: OAuth plus per-route headers, as further
 `BearerSource` implementations. Last, because they carry credential-custody questions an API key
@@ -102,12 +102,28 @@ Not done, and stated so nobody reads the absence as working:
 
 - **renewal.** Nothing here holds a refresh token or calls an authorization server. A token nobody
   renews expires and the run fails by name;
-- **the authorized runs.** No subscription route has been contacted. The Anthropic header shapes are
-  `provider_emulated` — a deterministic local endpoint records *which header carried a credential*
-  and its length, never its value. The ChatGPT/Codex half needs no new code at all: that route takes
-  its access token as a plain bearer, which `StaticBearer` already does.
+- **the ChatGPT/Codex authorized run.** That route has not been contacted. It needs no new code at
+  all: it takes its access token as a plain bearer, which `StaticBearer` already does — what is
+  missing is the run that says so;
+- **a live contract version for the Anthropic route.** The run below happened; its *bytes* were not
+  captured, so `contracts/provider-wires/anthropic-messages/2026-08-29` is still
+  `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
+  place: a live pin is a **new dated version** cut from captured bytes, not an edit to this one.
+
+Done since, and it is the Anthropic half of this phase's exit:
+
+- **one authorized run, 2026-08-29.** `b10x-harness run --wire anthropic-messages` against
+  `https://api.anthropic.com/v1` on `claude-haiku-4-5-20251001`, reading a subscription token from a
+  named file at a named JSON pointer: three turns, two tool calls, completed. The same route also ran
+  end to end under `metaharness run b10x` and under `protocol drive`, which is what the flags were
+  for;
+- **the header shapes are discriminated against the route itself, not asserted.** A deliberately
+  invalid token to the same endpoint answers `401 authentication_error`. Without that control the
+  200 could be an endpoint indifferent to which header carried the credential, and the emulator
+  cannot tell the difference.
 
 **Exit:** one authorized run on each, with the credential never leaving the source that owns it.
+Anthropic: met. ChatGPT/Codex: not met.
 
 ## Phase 5: embedding and live characterization
 

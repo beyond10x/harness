@@ -7,6 +7,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A turn can be held to one tool, and the answer nudge holds one.** `TurnRequest::tool_choice`
+  is a new neutral value — `auto`, `required`, or a named tool — projected by both wires in their
+  own spellings (`{"type": "tool", "name": …}` and `{"type": "any"}` on the Messages route;
+  `{"type": "function", "name": …}` and `"required"` on Responses) and **absent for `auto`**,
+  because the model choosing is each provider's own default. A turn held to a tool it does not
+  publish is refused before it is sent.
+
+  The loop sends it on exactly one turn: the one the answer nudge opens (`--output-schema`). A run
+  that ended in prose has already read the tool's description and the nudge's sentence, so the
+  second ask is the provider's constraint rather than a third sentence. It is **not** sent from the
+  first turn — that would be a run that answers before doing its work — and on the Messages route
+  it sits outside the cache breakpoints, so one turn per run is also what keeps it cheap.
+
+  Measured, not assumed: `ROADMAP.md` Phase 7 said the prose rate would decide whether
+  provider-native constrained decoding was worth a contract version. The seventh paid native walk
+  (2026-08-30, Haiku 4.5, metaharness `native-eval.hUbOP5`) ended in prose on **three of four**
+  attempts at one section under the nudge alone. New contract versions:
+  `anthropic-messages/2026-08-30` and `openai-responses/2026-08-30`; the versions before them stay
+  pinned as released, and neither stream fixture changed.
+
 ## [0.2.0] — 2026-08-30
 
 ### Added

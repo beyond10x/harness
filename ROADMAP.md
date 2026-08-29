@@ -206,9 +206,15 @@ a port like the approver, with the process-running half in the shell. Each is op
 
 **Exit evidence:** the `answer` path (call, nudge, `unstructured`), a delegate that reads and
 reports, and each of the three hook points, all driven end to end over both emulators through the
-shipped binary. Reached the same day. **What is not reached**, and what the next evidence is: one
-live run per feature — how often a real model ends in prose under `answer` is the measurement that
-decides whether provider-native constrained decoding (M2) is cut as new contract versions.
+shipped binary. Reached the same day.
+
+**The measurement happened, and it decided.** The seventh paid native walk (2026-08-30, Haiku 4.5,
+metaharness `native-eval.hUbOP5`) ended in prose on three of four attempts at one section under the
+nudge alone. So provider-native constrained decoding is cut: `TurnRequest::tool_choice`, projected
+by both wires, sent on the turn the nudge opens and no other, pinned as
+`anthropic-messages/2026-08-30` and `openai-responses/2026-08-30`. What is still not reached is a
+live run per feature — everything above is `provider_emulated`, and whether either route honours a
+tool choice is the vendor's documentation, not this repository's evidence.
 
 Out of scope, and why: an MCP client would make this loop a client of a protocol whose tools
 nothing here confines — metaharness is the MCP side of this family; multimodal input is a new

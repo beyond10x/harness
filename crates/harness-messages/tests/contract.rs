@@ -11,14 +11,14 @@ use b10x_harness_messages::{
     ANTHROPIC_VERSION, OAUTH_BETA, WIRE, decode_stream, header_names, request_body,
 };
 use harness_wire::{
-    Approval, CallId, CredentialKind, Envelope, Item, Sampling, StopReason, ToolCall, ToolName,
-    ToolOutcome, ToolSpec, Usage, VecSink, WireId,
+    Approval, CallId, CredentialKind, Envelope, Item, Sampling, StopReason, ToolCall, ToolChoice,
+    ToolName, ToolOutcome, ToolSpec, TurnRequest, Usage, VecSink, WireId,
 };
 use serde_json::{Value, json};
 
-/// The cut that added the rolling prompt-cache breakpoint. `2026-08-29` is the same wire
-/// without it and stays pinned as it was released.
-const VERSION: &str = "2026-08-29b";
+/// The cut that added `tool_choice`. `2026-08-29b` is the same wire without it, and `2026-08-29`
+/// is the one before the rolling cache breakpoint; both stay pinned as they were released.
+const VERSION: &str = "2026-08-30";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -89,19 +89,27 @@ fn canonical_request() -> Value {
         envelope: Envelope::default(),
     }];
     request_body(
-        "b10x-emulated",
-        "be useful",
-        &items,
-        &tools,
+        &TurnRequest {
+            model: "b10x-emulated".to_owned(),
+            instructions: "be useful".to_owned(),
+            items,
+            tools,
+            // Resolved by the caller on this route, and passed beside the turn below.
+            max_output_tokens: None,
+            // Set, not defaulted, for the same reason the first wire's fixture sets them.
+            sampling: Sampling {
+                temperature: Some(0.2),
+                top_p: Some(0.95),
+                reasoning_effort: Some("medium".to_owned()),
+            },
+            // Held to the turn's own tool, because the fixture's job is to carry **every** field
+            // the harness sends and this one is only sent when a caller holds a turn. `auto` is
+            // what the other turns of a run send, and what they send is nothing.
+            tool_choice: ToolChoice::Named(ToolName::new("workspace_read").expect("valid")),
+        },
         // Named, not defaulted: this route requires an output bound, so the fixture pins what one
         // looks like rather than pinning that it can be left out — it cannot.
         4096,
-        // Set, not defaulted, for the same reason the first wire's fixture sets them.
-        &Sampling {
-            temperature: Some(0.2),
-            top_p: Some(0.95),
-            reasoning_effort: Some("medium".to_owned()),
-        },
     )
 }
 

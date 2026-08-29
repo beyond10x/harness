@@ -9,7 +9,9 @@
 //! output to prove the shape is wire-neutral rather than merely tolerated here.
 
 use b10x_harness_responses::{WIRE, request_body};
-use harness_wire::{CallId, Item, Sampling, ToolCall, ToolName, ToolOutcome, WireId};
+use harness_wire::{
+    CallId, Item, Sampling, ToolCall, ToolChoice, ToolName, ToolOutcome, TurnRequest, WireId,
+};
 use serde_json::json;
 
 /// The part of a conversation a compaction would fold: assistant-first, with a whole tool round
@@ -39,12 +41,15 @@ fn folded() -> Vec<Item> {
 fn body(items: &[Item]) -> serde_json::Value {
     request_body(
         "b10x-session",
-        "test-model",
-        "the standing instruction",
-        items,
-        &[],
-        None,
-        &Sampling::default(),
+        &TurnRequest {
+            model: "test-model".to_owned(),
+            instructions: "the standing instruction".to_owned(),
+            items: items.to_vec(),
+            tools: Vec::new(),
+            max_output_tokens: None,
+            sampling: Sampling::default(),
+            tool_choice: ToolChoice::Auto,
+        },
     )
 }
 

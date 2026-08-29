@@ -43,8 +43,14 @@ b10x-harness run \
 ```
 
 Without `--json`, stdout contains exactly one compact JSON value when the run completes. Model prose
-and progress go to stderr. If the model ends in prose, Harness nudges it once to call `answer`; a
-second prose ending stops as `unstructured` with status 2.
+and progress go to stderr. If the model ends in prose, Harness nudges it once to call `answer` —
+**and holds the turn that nudge opens to that tool at the provider**, so the model cannot answer
+in prose twice by choice. A second prose ending still stops as `unstructured` with status 2, which
+is now a route that ignored a constraint it documents rather than a model that preferred prose.
+
+The constraint is sent on that one turn and no other. Holding every turn to `answer` would be a run
+that answers before it does any work, and on one route the field sits outside the prompt cache — so
+one turn per run, on a run that was otherwise about to report nothing.
 
 The provider receives the schema as the tool's argument schema. Harness currently does not perform
 an independent JSON Schema validation pass after the call. Treat that as a current limitation when

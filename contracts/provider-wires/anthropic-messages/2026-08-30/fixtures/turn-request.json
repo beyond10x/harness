@@ -1,0 +1,88 @@
+{
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "read the readme",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "signature": "OPAQUE-SIGNATURE",
+          "thinking": "OPAQUE-REASONING-BLOB",
+          "type": "thinking"
+        },
+        {
+          "text": "Reading the readme.",
+          "type": "text"
+        },
+        {
+          "id": "toolu_1",
+          "input": {
+            "path": "README.md"
+          },
+          "name": "workspace_read",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "content": "{\"text\":\"hello harness\"}",
+          "is_error": false,
+          "tool_use_id": "toolu_1",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "b10x-emulated",
+  "output_config": {
+    "effort": "medium"
+  },
+  "stream": true,
+  "system": [
+    {
+      "cache_control": {
+        "type": "ephemeral"
+      },
+      "text": "be useful",
+      "type": "text"
+    }
+  ],
+  "temperature": 0.2,
+  "tool_choice": {
+    "name": "workspace_read",
+    "type": "tool"
+  },
+  "tools": [
+    {
+      "description": "Read one text file inside the workspace.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "workspace_read"
+    }
+  ],
+  "top_p": 0.95
+}

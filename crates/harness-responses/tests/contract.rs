@@ -8,12 +8,14 @@ use std::path::PathBuf;
 
 use b10x_harness_responses::{WIRE, decode_stream, request_body};
 use harness_wire::{
-    Approval, CallId, Envelope, Item, Sampling, StopReason, ToolCall, ToolName, ToolOutcome,
-    ToolSpec, Usage, VecSink, WireId,
+    Approval, CallId, Envelope, Item, Sampling, StopReason, ToolCall, ToolChoice, ToolName,
+    ToolOutcome, ToolSpec, TurnRequest, Usage, VecSink, WireId,
 };
 use serde_json::{Value, json};
 
-const VERSION: &str = "2026-08-22";
+/// The cut that added `tool_choice`. `2026-08-22` is the same wire without it, and `2026-08-21`
+/// the one before the prompt-cache key; both stay pinned as they were released.
+const VERSION: &str = "2026-08-30";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -77,17 +79,23 @@ fn canonical_request() -> Value {
     request_body(
         // Fixed here so the pinned fixture stays byte-stable; a real run's is per-conversation.
         "b10x-session-fixture",
-        "b10x-emulated",
-        "be useful",
-        &items,
-        &tools,
-        Some(4096),
-        // Set, not defaulted. A fixture with the sampling fields absent would pin only that they
-        // can be left out, which is what the previous version already pinned.
-        &Sampling {
-            temperature: Some(0.2),
-            top_p: Some(0.95),
-            reasoning_effort: Some("medium".to_owned()),
+        &TurnRequest {
+            model: "b10x-emulated".to_owned(),
+            instructions: "be useful".to_owned(),
+            items,
+            tools,
+            max_output_tokens: Some(4096),
+            // Set, not defaulted. A fixture with the sampling fields absent would pin only that
+            // they can be left out, which is what the previous version already pinned.
+            sampling: Sampling {
+                temperature: Some(0.2),
+                top_p: Some(0.95),
+                reasoning_effort: Some("medium".to_owned()),
+            },
+            // Held to the turn's own tool, because the fixture's job is to carry **every** field
+            // the harness sends and this one is only sent when a caller holds a turn. What every
+            // other turn of a run sends for it is nothing.
+            tool_choice: ToolChoice::Named(ToolName::new("workspace_read").expect("valid")),
         },
     )
 }

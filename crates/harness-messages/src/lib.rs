@@ -634,14 +634,10 @@ impl ModelPort for MessagesClient {
         project::check_sampling(&request.sampling)?;
         project::check_conversation(&request.items)?;
         let body = project::request_body(
-            &request.model,
-            &request.instructions,
-            &request.items,
-            &request.tools,
+            request,
             request
                 .max_output_tokens
                 .unwrap_or(self.endpoint.max_output_tokens),
-            &request.sampling,
         );
         self.attempt_turn(&body, &request.model, sink)
     }
@@ -1093,6 +1089,7 @@ mod tests {
             tools,
             max_output_tokens: None,
             sampling: harness_wire::Sampling::default(),
+            tool_choice: harness_wire::ToolChoice::Auto,
         }
     }
 
@@ -1167,6 +1164,7 @@ mod tests {
             tools: Vec::new(),
             max_output_tokens: None,
             sampling: harness_wire::Sampling::default(),
+            tool_choice: harness_wire::ToolChoice::Auto,
         };
         let mut sink = VecSink::new();
         let error = client

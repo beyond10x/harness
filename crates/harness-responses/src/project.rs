@@ -4,8 +4,8 @@
 //! which is what lets a second wire cost a second projection instead of a second loop.
 
 use harness_wire::{
-    Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolName, ToolSpec, Usage,
-    WireError, WireId,
+    Item, MAX_TOOL_ARGUMENT_BYTES, StopReason, ToolCall, ToolChoice, ToolName, ToolSpec,
+    TurnRequest, Usage, WireError, WireId,
 };
 use serde_json::{Map, Value, json};
 
@@ -293,15 +293,22 @@ fn compact(value: &Value) -> String {
 }
 
 /// Builds the request body for one turn.
-pub fn request_body(
-    session: &str,
-    model: &str,
-    instructions: &str,
-    items: &[Item],
-    tools: &[ToolSpec],
-    max_output_tokens: Option<u64>,
-    sampling: &Sampling,
-) -> Value {
+///
+/// Takes the whole [`TurnRequest`] rather than its fields one by one: the neutral value is what a
+/// caller already holds, every field here comes from it, and a projection that took them
+/// separately grew an argument every time the wire learned a field — it was eight by the time
+/// `tool_choice` arrived. `session` stays its own argument because it is **not** in the turn: it
+/// is this route's prompt-cache key, minted per conversation by the client.
+pub fn request_body(session: &str, request: &TurnRequest) -> Value {
+    let TurnRequest {
+        model,
+        instructions,
+        items,
+        tools,
+        max_output_tokens,
+        sampling,
+        tool_choice,
+    } = request;
     let mut body = Map::new();
     body.insert("model".to_owned(), json!(model));
     // **The standing instruction goes at the head of `input`, not in `instructions`.**
@@ -359,11 +366,52 @@ pub fn request_body(
     if let Some(effort) = &sampling.reasoning_effort {
         body.insert("reasoning".to_owned(), json!({"effort": effort}));
     }
+    // Absent for `Auto`, for the reason above: the model choosing is this route's own default, and
+    // sending `"auto"` would be us deciding it. `required` is this route's word for *some tool*;
+    // a named tool is an object, and its `name` is the same name `tools` published.
+    if let Some(choice) = tool_choice_to_wire(tool_choice) {
+        body.insert("tool_choice".to_owned(), choice);
+    }
     Value::Object(body)
+}
+
+/// This route's spelling of a tool choice, or [`None`] when the model decides.
+fn tool_choice_to_wire(choice: &ToolChoice) -> Option<Value> {
+    match choice {
+        ToolChoice::Auto => None,
+        ToolChoice::Required => Some(json!("required")),
+        ToolChoice::Named(name) => Some(json!({"type": "function", "name": name.as_str()})),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use harness_wire::Sampling;
+
+    /// One turn, from the pieces a test cares about.
+    ///
+    /// The projection takes the whole neutral value now, and a test that built one inline would
+    /// bury what it is actually asserting under seven fields it does not care about.
+    fn turn(
+        model: &str,
+        instructions: &str,
+        items: &[Item],
+        tools: &[ToolSpec],
+        max_output_tokens: Option<u64>,
+        sampling: &Sampling,
+        tool_choice: &ToolChoice,
+    ) -> TurnRequest {
+        TurnRequest {
+            model: model.to_owned(),
+            instructions: instructions.to_owned(),
+            items: items.to_vec(),
+            tools: tools.to_vec(),
+            max_output_tokens,
+            sampling: sampling.clone(),
+            tool_choice: tool_choice.clone(),
+        }
+    }
+
     #[test]
     fn a_tool_name_this_wire_cannot_publish_is_refused_before_it_is_sent() {
         use harness_wire::{ToolName, ToolSpec, WireErrorCode};
@@ -710,18 +758,21 @@ mod tests {
     fn the_request_body_is_stateless_and_asks_for_reasoning() {
         let body = request_body(
             "session-under-test",
-            "m",
-            "be useful",
-            &[Item::user("hi")],
-            &[ToolSpec {
-                name: ToolName::new("t").expect("valid"),
-                description: "d".to_owned(),
-                envelope: Envelope::default(),
-                input_schema: json!({"type": "object"}),
-                approval: Approval::NotRequired,
-            }],
-            Some(256),
-            &Sampling::default(),
+            &turn(
+                "m",
+                "be useful",
+                &[Item::user("hi")],
+                &[ToolSpec {
+                    name: ToolName::new("t").expect("valid"),
+                    description: "d".to_owned(),
+                    envelope: Envelope::default(),
+                    input_schema: json!({"type": "object"}),
+                    approval: Approval::NotRequired,
+                }],
+                Some(256),
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
         );
         assert_eq!(body["store"], json!(false));
         assert_eq!(body["stream"], json!(true));
@@ -733,13 +784,35 @@ mod tests {
 
     #[test]
     fn an_absent_output_bound_is_absent_from_the_body() {
-        let body = request_body("s", "m", "", &[], &[], None, &Sampling::default());
+        let body = request_body(
+            "s",
+            &turn(
+                "m",
+                "",
+                &[],
+                &[],
+                None,
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
+        );
         assert!(body.get("max_output_tokens").is_none(), "{body}");
     }
 
     #[test]
     fn sampling_nobody_set_is_absent_rather_than_defaulted() {
-        let body = request_body("s", "m", "", &[], &[], None, &Sampling::default());
+        let body = request_body(
+            "s",
+            &turn(
+                "m",
+                "",
+                &[],
+                &[],
+                None,
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
+        );
         // Writing a default here would take a choice the provider is entitled to make and quietly
         // make it ours, and the request would look identical to one somebody actually chose.
         for field in ["temperature", "top_p", "reasoning"] {
@@ -751,21 +824,65 @@ mod tests {
     fn each_sampling_field_travels_under_its_own_wire_name() {
         let body = request_body(
             "session-under-test",
-            "m",
-            "",
-            &[],
-            &[],
-            None,
-            &Sampling {
-                temperature: Some(0.2),
-                top_p: Some(0.95),
-                reasoning_effort: Some("high".to_owned()),
-            },
+            &turn(
+                "m",
+                "",
+                &[],
+                &[],
+                None,
+                &Sampling {
+                    temperature: Some(0.2),
+                    top_p: Some(0.95),
+                    reasoning_effort: Some("high".to_owned()),
+                },
+                &ToolChoice::Auto,
+            ),
         );
         assert_eq!(body["temperature"], json!(0.2));
         assert_eq!(body["top_p"], json!(0.95));
         // Effort is nested on this wire, not a flat field. A flat `reasoning_effort` is silently
         // ignored by the provider, which is the failure this assertion exists to prevent.
         assert_eq!(body["reasoning"], json!({"effort": "high"}));
+    }
+
+    /// This route's three spellings, and the one that is silence.
+    ///
+    /// `auto` is absent because the model choosing is this route's own default; `required` is a
+    /// bare string; a named tool is an object whose `name` is the same name `tools` published.
+    #[test]
+    fn a_tool_choice_travels_in_this_routes_own_spelling_and_auto_is_absent() {
+        use harness_wire::ToolChoice;
+
+        let with = |choice: &ToolChoice| {
+            request_body(
+                "s",
+                &turn(
+                    "m",
+                    "",
+                    &[],
+                    &[ToolSpec {
+                        name: ToolName::new("answer").expect("valid"),
+                        description: "d".to_owned(),
+                        input_schema: json!({"type": "object"}),
+                        approval: Approval::NotRequired,
+                        envelope: Envelope::default(),
+                    }],
+                    None,
+                    &Sampling::default(),
+                    choice,
+                ),
+            )
+        };
+
+        let auto = with(&ToolChoice::Auto);
+        assert!(auto.get("tool_choice").is_none(), "{auto}");
+        assert_eq!(
+            with(&ToolChoice::Required)["tool_choice"],
+            json!("required")
+        );
+        assert_eq!(
+            with(&ToolChoice::Named(ToolName::new("answer").expect("valid")))["tool_choice"],
+            json!({"type": "function", "name": "answer"})
+        );
     }
 }

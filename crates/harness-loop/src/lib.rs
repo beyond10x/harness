@@ -1961,6 +1961,7 @@ impl<'a> AgentLoop<'a> {
     fn request(&self, state: &RunState) -> TurnRequest {
         let mut tools = self.port_specs();
         tools.extend(self.owned_specs());
+        let tool_choice = self.held_to_the_answer(state);
         TurnRequest {
             model: self.config.model.clone(),
             instructions: self.config.instructions.clone(),
@@ -1968,6 +1969,34 @@ impl<'a> AgentLoop<'a> {
             tools,
             max_output_tokens: self.config.budget.max_output_tokens_per_turn,
             sampling: self.config.sampling.clone(),
+            tool_choice,
+        }
+    }
+
+    /// Holds the **turn after a nudge** to the answer tool, and no other turn.
+    ///
+    /// # Why after the nudge and not from the start
+    ///
+    /// A tool choice naming a tool means *call it now*. From the first turn that is a run that
+    /// answers before it does anything: the model would call `answer` on turn one and the work the
+    /// run was for would never happen. The nudge is the only moment where *call it now* is exactly
+    /// what the loop means — the model has already said it is finished, in prose, and the only
+    /// thing left is to say it in the shape the caller asked for.
+    ///
+    /// So this is asking twice, not asking harder: the first ask is the tool's description, the
+    /// second is the provider's own constraint. The seventh paid native walk (2026-08-30) ended in
+    /// prose on three of four attempts at one section under the nudge alone, which is what
+    /// `ROADMAP.md` Phase 7 said would decide whether this is worth a contract version.
+    ///
+    /// **It costs the nudge turn's cache**, on a route where changing this field invalidates the
+    /// cached prefix — one turn per run at most, and only on a run that was otherwise about to
+    /// report nothing. Nothing else in the run sees a different request.
+    fn held_to_the_answer(&self, state: &RunState) -> harness_wire::ToolChoice {
+        match self.config.output_schema.as_ref() {
+            Some(schema) if state.nudged > 0 && state.structured.is_none() => {
+                harness_wire::ToolChoice::Named(schema.name.clone())
+            }
+            _ => harness_wire::ToolChoice::Auto,
         }
     }
 
@@ -2247,6 +2276,9 @@ impl<'a> AgentLoop<'a> {
             tools: Vec::new(),
             max_output_tokens: self.config.budget.max_output_tokens_per_turn,
             sampling: self.config.sampling.clone(),
+            // Publishing nothing and holding it to something would be a request no provider can
+            // satisfy; `validate` refuses exactly that.
+            tool_choice: harness_wire::ToolChoice::Auto,
         };
         let outcome = {
             let mut quiet = Quiet(sink);
@@ -2355,6 +2387,8 @@ impl<'a> AgentLoop<'a> {
             "Finish by calling `{}` with the result; nothing else is read.",
             schema.name
         )));
+        // And the turn this opens is *held* to that tool at the provider, not only asked for it:
+        // see [`AgentLoop::held_to_the_answer`], which reads `state.nudged`.
         None
     }
 

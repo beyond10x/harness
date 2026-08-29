@@ -98,6 +98,55 @@ impl Sampling {
     }
 }
 
+/// Whether the model may choose to call a tool this turn, or is held to one.
+///
+/// # Why a harness needs this at all
+///
+/// A run under an output schema finishes by calling the schema's tool, and a model that ends in
+/// prose instead is told once and then the run stops `unstructured` — a walk that spent every turn
+/// and reported nothing. That was measured rather than assumed: the seventh paid native walk
+/// (2026-08-30, Haiku 4.5) ended in prose on **three of four** attempts at one section, which is
+/// the measurement `ROADMAP.md` Phase 7 said would decide whether provider-native constrained
+/// decoding is worth a contract version. It is.
+///
+/// # What it is not
+///
+/// Not a schema, and not a decoder. Both routes already take the answer's shape as a tool's input
+/// schema; this says only *which* tool the next turn may call, which is the one thing that turns
+/// *asked nicely* into *cannot do otherwise*. Neither route is told anything here it did not
+/// already document.
+///
+/// [`ToolChoice::Auto`] is the provider's own behaviour and is **not sent**: absent stays absent,
+/// so a request built before this existed and one built after are byte-identical.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolChoice {
+    /// The model decides: call a tool, or answer in prose.
+    #[default]
+    Auto,
+    /// The model must call one of the published tools, and picks which.
+    Required,
+    /// The model must call this tool, and no other.
+    Named(ToolName),
+}
+
+impl ToolChoice {
+    /// Whether this is the provider's own behaviour, which is never sent.
+    #[must_use]
+    pub const fn is_auto(&self) -> bool {
+        matches!(self, Self::Auto)
+    }
+
+    /// The tool a turn is held to, when it is held to one.
+    #[must_use]
+    pub const fn named(&self) -> Option<&ToolName> {
+        match self {
+            Self::Named(name) => Some(name),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurnRequest {
@@ -109,6 +158,12 @@ pub struct TurnRequest {
     pub max_output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Sampling::is_empty")]
     pub sampling: Sampling,
+    /// Which tool this turn may call, when the caller holds it to one.
+    ///
+    /// Defaults to [`ToolChoice::Auto`] and is skipped when it is, so a record written before this
+    /// field existed and one written after are the same bytes.
+    #[serde(default, skip_serializing_if = "ToolChoice::is_auto")]
+    pub tool_choice: ToolChoice,
 }
 
 impl TurnRequest {
@@ -133,6 +188,16 @@ impl TurnRequest {
             return Err(WireError::too_large(format!(
                 "{} tools published, over the {MAX_TOOLS} bound",
                 self.tools.len()
+            )));
+        }
+        // A turn held to a tool it does not publish is a request the provider rejects, and the
+        // rejection arrives as a vendor string about an unknown tool with nothing naming the
+        // caller's mistake. Refused here, where the two lists are both in hand.
+        if let Some(named) = self.tool_choice.named()
+            && !self.tools.iter().any(|tool| &tool.name == named)
+        {
+            return Err(WireError::protocol(format!(
+                "this turn is held to `{named}` and does not publish it; a tool choice names one                  of the turn's own tools"
             )));
         }
         let mut seen = BTreeSet::new();
@@ -336,6 +401,7 @@ mod tests {
             tools,
             max_output_tokens: None,
             sampling: Sampling::default(),
+            tool_choice: ToolChoice::Auto,
         }
     }
 
@@ -494,5 +560,86 @@ mod tests {
         };
         let encoded = serde_json::to_value(&outcome).expect("serializes");
         assert!(encoded.get("usage").is_none(), "{encoded}");
+    }
+}
+
+#[cfg(test)]
+mod tool_choice_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn spec(name: &str) -> ToolSpec {
+        ToolSpec {
+            name: ToolName::new(name).expect("a printable identifier"),
+            description: "d".to_owned(),
+            input_schema: json!({"type": "object"}),
+            approval: Approval::NotRequired,
+            envelope: crate::Envelope::default(),
+        }
+    }
+
+    fn request(tools: Vec<ToolSpec>, tool_choice: ToolChoice) -> TurnRequest {
+        TurnRequest {
+            model: "m".to_owned(),
+            instructions: "be useful".to_owned(),
+            items: vec![Item::user("hi")],
+            tools,
+            max_output_tokens: None,
+            sampling: Sampling::default(),
+            tool_choice,
+        }
+    }
+
+    /// A turn held to a tool it never published is a request the provider rejects, in words about
+    /// its own field names. Refused here, where both lists are in hand.
+    #[test]
+    fn a_turn_held_to_a_tool_it_does_not_publish_is_refused_before_it_is_sent() {
+        let held = ToolChoice::Named(ToolName::new("answer").expect("valid"));
+        let error = request(vec![spec("file_read")], held.clone())
+            .validate()
+            .expect_err("a choice naming nothing published");
+        assert_eq!(error.code, WireErrorCode::Protocol);
+        assert!(error.to_string().contains("answer"), "{error}");
+        assert!(error.to_string().contains("does not publish it"), "{error}");
+
+        request(vec![spec("file_read"), spec("answer")], held)
+            .validate()
+            .expect("published, so it may be named");
+    }
+
+    /// `Auto` is the provider's own behaviour and is never sent, so a request built before this
+    /// field existed and one built after serialise to the same bytes.
+    #[test]
+    fn the_default_choice_is_absent_from_a_serialised_request() {
+        let auto = serde_json::to_value(request(vec![spec("t")], ToolChoice::Auto)).expect("JSON");
+        assert!(auto.get("tool_choice").is_none(), "{auto}");
+
+        let held = serde_json::to_value(request(
+            vec![spec("t")],
+            ToolChoice::Named(ToolName::new("t").expect("valid")),
+        ))
+        .expect("JSON");
+        assert_eq!(held["tool_choice"], json!({"named": "t"}));
+
+        // And a request written without the field reads back as `Auto`, so a session filed before
+        // this existed still loads.
+        let old = json!({
+            "model": "m",
+            "instructions": "be useful",
+            "items": [],
+            "tools": [],
+        });
+        let read: TurnRequest = serde_json::from_value(old).expect("an older request loads");
+        assert!(read.tool_choice.is_auto());
+    }
+
+    #[test]
+    fn a_choice_says_which_tool_it_names_and_only_when_it_names_one() {
+        let name = ToolName::new("answer").expect("valid");
+        assert_eq!(ToolChoice::Named(name.clone()).named(), Some(&name));
+        assert_eq!(ToolChoice::Required.named(), None);
+        assert_eq!(ToolChoice::Auto.named(), None);
+        assert!(ToolChoice::Auto.is_auto());
+        assert!(!ToolChoice::Required.is_auto());
     }
 }

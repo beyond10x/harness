@@ -470,15 +470,7 @@ impl ModelPort for ResponsesClient {
         // cannot carry is refused here, naming what is wrong, rather than posted and explained by
         // the far side.
         project::check_tool_names(&request.tools)?;
-        let body = project::request_body(
-            &self.session,
-            &request.model,
-            &request.instructions,
-            &request.items,
-            &request.tools,
-            request.max_output_tokens,
-            &request.sampling,
-        );
+        let body = project::request_body(&self.session, request);
         self.attempt_turn(&body, &request.model, sink)
     }
 }
@@ -818,6 +810,7 @@ mod tests {
             tools: Vec::new(),
             max_output_tokens: None,
             sampling: harness_wire::Sampling::default(),
+            tool_choice: harness_wire::ToolChoice::Auto,
         };
         let mut sink = VecSink::new();
         let error = client

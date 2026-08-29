@@ -3955,6 +3955,67 @@ fn a_run_that_ended_in_prose_is_told_once_more_and_then_answers() {
     );
 }
 
+/// The nudge is **asked twice**: once in words, once as the provider's own constraint.
+///
+/// A model that ended in prose has already read the answer tool's description and the nudge's
+/// sentence; asking a third time in words buys nothing. The turn the nudge opens is therefore held
+/// to that tool at the wire, which is the difference between asking and requiring. Measured, not
+/// assumed: the seventh paid native walk (2026-08-30) ended in prose on three of four attempts at
+/// one section under the nudge alone.
+#[test]
+fn the_turn_a_nudge_opens_is_held_to_the_answer_tool_and_no_earlier_turn_is() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(answer("the verdict is green")),
+            Ok(asks_for(&[(
+                "call-1",
+                "answer",
+                json!({"verdict": "green"}),
+            )])),
+        ]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .answering_in(verdict_schema());
+    let (outcome, _) = harness.run();
+    outcome.expect("the nudged run completes");
+
+    assert!(
+        harness.model.seen[0].tool_choice.is_auto(),
+        "the first turn is the run doing its work, and a held turn would answer instead of doing it"
+    );
+    assert_eq!(
+        harness.model.seen[1].tool_choice,
+        harness_wire::ToolChoice::Named(tool_name("answer")),
+        "the turn after the nudge is held to the tool the nudge asked for"
+    );
+    // And what it is held to is published on that same turn, which is what `validate` requires.
+    assert!(
+        harness.model.seen[1]
+            .tools
+            .iter()
+            .any(|tool| tool.name.as_str() == "answer")
+    );
+}
+
+/// A run with no output schema is never held to anything: there is no tool to be held to, and a
+/// run that published none and named one would be refused by `TurnRequest::validate`.
+#[test]
+fn a_run_that_asked_for_no_shape_is_never_held_to_a_tool() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("done"))]),
+        ScriptedTools::new(Vec::new()),
+    );
+    let (outcome, _) = harness.run();
+    outcome.expect("a prose run is a run");
+    assert!(
+        harness
+            .model
+            .seen
+            .iter()
+            .all(|turn| turn.tool_choice.is_auto())
+    );
+}
+
 #[test]
 fn prose_twice_stops_unstructured_rather_than_completed_and_carries_no_answer() {
     // A consumer that piped stdout to a JSON reader and got prose with a success status would be

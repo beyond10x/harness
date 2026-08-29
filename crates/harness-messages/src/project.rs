@@ -4,8 +4,8 @@
 //! field, which is what lets a second wire cost a second projection instead of a second loop.
 
 use harness_wire::{
-    Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolName, ToolSpec, Usage,
-    WireError, WireErrorCode, WireId,
+    Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolChoice, ToolName, ToolSpec,
+    TurnRequest, Usage, WireError, WireErrorCode, WireId,
 };
 use serde_json::{Map, Value, json};
 
@@ -30,6 +30,15 @@ pub const MAX_TOOL_NAME_BYTES: usize = 128;
 /// value between the two ranges passes the neutral check and is refused here — by name, before a
 /// round trip that would come back as a vendor error string nobody can act on.
 pub const MAX_TEMPERATURE: f64 = 1.0;
+
+/// This route's spelling of a tool choice, or [`None`] when the model decides.
+fn tool_choice_to_wire(choice: &ToolChoice) -> Option<Value> {
+    match choice {
+        ToolChoice::Auto => None,
+        ToolChoice::Required => Some(json!({"type": "any"})),
+        ToolChoice::Named(name) => Some(json!({"type": "tool", "name": name.as_str()})),
+    }
+}
 
 /// Projects one tool specification into a Messages tool definition.
 pub fn tool_to_wire(tool: &ToolSpec) -> Value {
@@ -448,18 +457,26 @@ pub fn stream_error(event: &Value) -> WireError {
 
 /// Builds the request body for one turn.
 ///
-/// `max_output_tokens` is a plain `u64` and not an option, unlike the first wire's. This route
-/// **requires** `max_tokens`, so absence cannot be preserved on it; the caller resolves what to
-/// send before calling, and where that number came from is a decision written down at the call
-/// site rather than invented here.
-pub fn request_body(
-    model: &str,
-    instructions: &str,
-    items: &[Item],
-    tools: &[ToolSpec],
-    max_output_tokens: u64,
-    sampling: &Sampling,
-) -> Value {
+/// Takes the whole [`TurnRequest`] rather than its fields one by one: the neutral value is what a
+/// caller already holds, and a projection that took them separately grew an argument every time
+/// the wire learned a field.
+///
+/// `max_output_tokens` is the exception and is passed beside it — a plain `u64` and not an option,
+/// unlike the first wire's. This route **requires** `max_tokens`, so absence cannot be preserved
+/// on it; the caller resolves what to send before calling, and where that number came from is a
+/// decision written down at the call site rather than invented here.
+pub fn request_body(request: &TurnRequest, max_output_tokens: u64) -> Value {
+    let TurnRequest {
+        model,
+        instructions,
+        items,
+        tools,
+        sampling,
+        tool_choice,
+        // Resolved by the caller: see this function's own note above. The turn's own value is
+        // read there and never here, so there is one place that decides what this route is sent.
+        max_output_tokens: _,
+    } = request;
     let mut body = Map::new();
     body.insert("model".to_owned(), json!(model));
     body.insert("max_tokens".to_owned(), json!(max_output_tokens));
@@ -498,11 +515,44 @@ pub fn request_body(
     if let Some(effort) = &sampling.reasoning_effort {
         body.insert("output_config".to_owned(), json!({"effort": effort}));
     }
+    // Absent for `Auto`: the model choosing is this route's own default, and sending `auto` would
+    // be us deciding it. This route spells every choice as an object — `any` is its word for *some
+    // tool*, `tool` names one — where the first wire spells two of the three as bare strings.
+    //
+    // **It goes after `tools` and `system` in the body and is not covered by their cache
+    // breakpoint.** This route caches `tools`, then `system`, then `messages`; a turn that changes
+    // this field is a turn whose prefix the route may not serve from cache. The loop sends it on
+    // one turn per run at most (`AgentLoop::held_to_the_answer`), which is what makes that
+    // acceptable — a run holding every turn to a tool would pay full rate for all of them.
+    if let Some(choice) = tool_choice_to_wire(tool_choice) {
+        body.insert("tool_choice".to_owned(), choice);
+    }
     Value::Object(body)
 }
 
 #[cfg(test)]
 mod tests {
+    /// One turn, from the pieces a test cares about. `max_output_tokens` is resolved by the caller
+    /// on this route and is passed to the projection beside the turn, not inside it.
+    fn turn(
+        model: &str,
+        instructions: &str,
+        items: &[Item],
+        tools: &[ToolSpec],
+        sampling: &Sampling,
+        tool_choice: &ToolChoice,
+    ) -> TurnRequest {
+        TurnRequest {
+            model: model.to_owned(),
+            instructions: instructions.to_owned(),
+            items: items.to_vec(),
+            tools: tools.to_vec(),
+            max_output_tokens: None,
+            sampling: sampling.clone(),
+            tool_choice: tool_choice.clone(),
+        }
+    }
+
     use super::*;
     use harness_wire::{Approval, CallId, Envelope, ToolOutcome};
 
@@ -814,12 +864,15 @@ mod tests {
     #[test]
     fn the_request_body_is_stateless_and_carries_a_cache_breakpoint() {
         let body = request_body(
-            "m",
-            "be useful",
-            &[Item::user("hi")],
-            &[spec("t")],
+            &turn(
+                "m",
+                "be useful",
+                &[Item::user("hi")],
+                &[spec("t")],
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
             4096,
-            &Sampling::default(),
         );
         assert_eq!(body["stream"], json!(true));
         assert_eq!(body["max_tokens"], json!(4096));
@@ -842,23 +895,26 @@ mod tests {
         // **last** message, which on this loop is the user message carrying either the person's
         // input or the tool results just appended.
         let body = request_body(
-            "m",
-            "be useful",
-            &[
-                Item::user("read the readme"),
-                Item::ToolCall(ToolCall {
-                    call_id: CallId::new("toolu_1").expect("valid"),
-                    name: ToolName::new("workspace_read").expect("valid"),
-                    arguments: json!({"path": "README.md"}),
-                }),
-                Item::result(
-                    CallId::new("toolu_1").expect("valid"),
-                    ToolOutcome::ok(json!({"text": "hello harness"})),
-                ),
-            ],
-            &[spec("workspace_read")],
+            &turn(
+                "m",
+                "be useful",
+                &[
+                    Item::user("read the readme"),
+                    Item::ToolCall(ToolCall {
+                        call_id: CallId::new("toolu_1").expect("valid"),
+                        name: ToolName::new("workspace_read").expect("valid"),
+                        arguments: json!({"path": "README.md"}),
+                    }),
+                    Item::result(
+                        CallId::new("toolu_1").expect("valid"),
+                        ToolOutcome::ok(json!({"text": "hello harness"})),
+                    ),
+                ],
+                &[spec("workspace_read")],
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
             4096,
-            &Sampling::default(),
         );
         let messages = body["messages"].as_array().expect("an array");
         let last = messages.last().expect("a last message");
@@ -893,23 +949,26 @@ mod tests {
         // turn the route rejects. Here the model spoke last and its message ends in a thinking
         // block, so the marker must fall on the text block before it — or nowhere.
         let body = request_body(
-            "m",
-            "",
-            &[
-                Item::user("hi"),
-                Item::assistant("thinking about it"),
-                Item::Opaque {
-                    wire: wire(),
-                    payload: json!({
-                        "type": "thinking",
-                        "thinking": "OPAQUE",
-                        "signature": "SIG",
-                    }),
-                },
-            ],
-            &[],
+            &turn(
+                "m",
+                "",
+                &[
+                    Item::user("hi"),
+                    Item::assistant("thinking about it"),
+                    Item::Opaque {
+                        wire: wire(),
+                        payload: json!({
+                            "type": "thinking",
+                            "thinking": "OPAQUE",
+                            "signature": "SIG",
+                        }),
+                    },
+                ],
+                &[],
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
             1024,
-            &Sampling::default(),
         );
         let last = body["messages"]
             .as_array()
@@ -938,18 +997,21 @@ mod tests {
         // A missing breakpoint costs money; a modified opaque block costs the turn. So this is the
         // side to fail on, and it must not panic or mark something it does not understand.
         let body = request_body(
-            "m",
-            "",
-            &[
-                Item::user("hi"),
-                Item::Opaque {
-                    wire: wire(),
-                    payload: json!({"type": "redacted_thinking", "data": "OPAQUE"}),
-                },
-            ],
-            &[],
+            &turn(
+                "m",
+                "",
+                &[
+                    Item::user("hi"),
+                    Item::Opaque {
+                        wire: wire(),
+                        payload: json!({"type": "redacted_thinking", "data": "OPAQUE"}),
+                    },
+                ],
+                &[],
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
             1024,
-            &Sampling::default(),
         );
         let last = body["messages"]
             .as_array()
@@ -969,12 +1031,15 @@ mod tests {
     #[test]
     fn sampling_nobody_set_is_absent_rather_than_defaulted() {
         let body = request_body(
-            "m",
-            "",
-            &[Item::user("hi")],
-            &[],
+            &turn(
+                "m",
+                "",
+                &[Item::user("hi")],
+                &[],
+                &Sampling::default(),
+                &ToolChoice::Auto,
+            ),
             1024,
-            &Sampling::default(),
         );
         for field in ["temperature", "top_p", "output_config"] {
             assert!(body.get(field).is_none(), "{field} leaked into {body}");
@@ -984,16 +1049,19 @@ mod tests {
     #[test]
     fn each_sampling_field_travels_under_its_own_wire_name() {
         let body = request_body(
-            "m",
-            "",
-            &[Item::user("hi")],
-            &[],
+            &turn(
+                "m",
+                "",
+                &[Item::user("hi")],
+                &[],
+                &Sampling {
+                    temperature: Some(0.2),
+                    top_p: Some(0.95),
+                    reasoning_effort: Some("medium".to_owned()),
+                },
+                &ToolChoice::Auto,
+            ),
             1024,
-            &Sampling {
-                temperature: Some(0.2),
-                top_p: Some(0.95),
-                reasoning_effort: Some("medium".to_owned()),
-            },
         );
         assert_eq!(body["temperature"], json!(0.2));
         assert_eq!(body["top_p"], json!(0.95));
@@ -1001,5 +1069,38 @@ mod tests {
         // reused the other spelling would be silently ignored by this route.
         assert_eq!(body["output_config"], json!({"effort": "medium"}));
         assert!(body.get("reasoning").is_none(), "{body}");
+    }
+
+    /// This route spells every choice as an object, where the first wire spells two of three as
+    /// bare strings. Two wires, two spellings of one neutral field, neither guessable from the
+    /// other — and `auto` is absent on both, because that is the provider's own default.
+    #[test]
+    fn a_tool_choice_travels_in_this_routes_own_spelling_and_auto_is_absent() {
+        use harness_wire::ToolChoice;
+
+        let with = |choice: &ToolChoice| {
+            request_body(
+                &turn(
+                    "m",
+                    "",
+                    &[],
+                    &[spec("answer")],
+                    &Sampling::default(),
+                    choice,
+                ),
+                4096,
+            )
+        };
+
+        let auto = with(&ToolChoice::Auto);
+        assert!(auto.get("tool_choice").is_none(), "{auto}");
+        assert_eq!(
+            with(&ToolChoice::Required)["tool_choice"],
+            json!({"type": "any"})
+        );
+        assert_eq!(
+            with(&ToolChoice::Named(ToolName::new("answer").expect("valid")))["tool_choice"],
+            json!({"type": "tool", "name": "answer"})
+        );
     }
 }

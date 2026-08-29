@@ -55,9 +55,18 @@ pub enum LoopEvent {
         /// Beside `published_tools` and `operations`, which say what the run *has*. This says what
         /// it was *denied*, which is the only field that can distinguish those two silences.
         ///
-        /// Empty on every run that got what it asked for, and skipped when empty, so a record
-        /// written before this field existed and one written after are byte-identical.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        /// Empty on every run that got what it asked for, and **written even then**.
+        ///
+        /// It was skipped when empty, for byte-identity with records written before the field
+        /// existed. That cost more than it bought: absence then meant *nothing was withheld* or
+        /// *a build that predates the field*, and a reader outside this process cannot tell those
+        /// apart — `b10x-harness` reports `0.1.0` either way, so the version does not decide it.
+        /// A driven run that withheld nothing was read as one that never said, which is exactly
+        /// the silence this field was added to break.
+        ///
+        /// So it is always on the wire. Absence now means one thing only: a build older than this
+        /// one. Observers may keep reading absence as *did not say* and be right.
+        #[serde(default)]
         withheld: Vec<Withheld>,
     },
     TurnStarted {
@@ -303,9 +312,18 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_was_refused_nothing_writes_the_record_it_always_wrote() {
-        // The field is additive or it is a break: a driver reading this stream — metaharness reads
-        // exactly this one — must see the same bytes for a run whose machine admitted everything.
+    fn a_run_that_was_refused_nothing_says_so_instead_of_saying_nothing() {
+        // **This reverses a deliberate earlier choice, and the reason it was made is why it had to
+        // go.** The field was skipped when empty so a driver reading this stream saw the same
+        // bytes before and after it existed. But the driver is a separate binary observing an
+        // unknown build: absence meant *nothing was withheld* or *older than the field*, and
+        // nothing on the wire separates them — `b10x-harness` answers `0.1.0` either way. So a
+        // driven run that withheld nothing was recorded, correctly, as one that never said, which
+        // is the exact silence this field exists to break (`metaharness-b10x`'s `started` arm
+        // argues the observer's half).
+        //
+        // Adding a key breaks no reader here: metaharness reads it with `get("withheld")`, which
+        // answers `Some([])` now and answered `None` before.
         let started = LoopEvent::Started {
             model: "m".to_owned(),
             published_tools: Vec::new(),
@@ -314,8 +332,9 @@ mod tests {
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
-            encoded,
-            r#"{"kind":"started","model":"m","published_tools":[]}"#
+            encoded, r#"{"kind":"started","model":"m","published_tools":[],"withheld":[]}"#,
+            "a run that was refused nothing says `[]`, and only a build older than the field is \
+             silent"
         );
 
         // And a record written before the field existed still reads, as a run that withheld

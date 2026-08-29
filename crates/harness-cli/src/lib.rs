@@ -1108,6 +1108,11 @@ fn apply_provider(
 /// does not exist, or a configuration that declares programs without `write`.
 fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, String> {
     let Some(path) = profile::config_path() else {
+        // No `HOME` and no `XDG_CONFIG_HOME`: there is no file to read, but the run still owes
+        // the caller the same refusal. Returning early past the check below is what made a
+        // machine without either variable *panic* at `RunOptions::model` — which asserts that
+        // this function fills the model or refuses — instead of being told what to type.
+        require_endpoint_and_model(options, None)?;
         return Ok(Vec::new());
     };
     let source = path.display().to_string();
@@ -1168,12 +1173,39 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         options.max_turns = wanted.max_turns;
     }
 
-    if options.base_url.is_none() || options.model.is_none() {
-        return Err(format!(
-            "no endpoint or model: type `--base-url` and `--model`, or name a provider in              `{source}` with `[default] provider = \"claude\"`.              `b10x-harness providers list` shows the ones this build ships, and              `b10x-harness profiles init` writes a starter config."
-        ));
-    }
+    require_endpoint_and_model(options, Some(&source))?;
     Ok(resolved.used)
+}
+
+/// Refuse a run that has no endpoint or no model, naming what to type.
+///
+/// **Reached on every path out of [`apply_profiles`], which is the whole point of it being a
+/// function.** `RunOptions::model` unwraps on the promise that this ran; when the check lived at
+/// the end of `apply_profiles`, the early return for a machine with no config directory walked
+/// past it and the promise became a panic — exit 101, on a command line whose three documented
+/// statuses do not include it.
+///
+/// `source` is the config file that could have supplied them, or `None` when there is no config
+/// directory to hold one. The advice differs: pointing someone at a file that cannot exist on
+/// their machine is worse than saying so.
+fn require_endpoint_and_model(options: &RunOptions, source: Option<&str>) -> Result<(), String> {
+    if options.base_url.is_some() && options.model.is_some() {
+        return Ok(());
+    }
+    let config = match source {
+        Some(source) => format!(
+            ", or name a provider in `{source}` with `[default] provider = \"claude\"`. \
+             `b10x-harness providers list` shows the ones this build ships, and \
+             `b10x-harness profiles init` writes a starter config"
+        ),
+        None => String::from(
+            ". No configuration was read: neither `HOME` nor `XDG_CONFIG_HOME` is set, so this \
+             machine has no config directory for a profile to live in",
+        ),
+    };
+    Err(format!(
+        "no endpoint or model: type `--base-url` and `--model`{config}."
+    ))
 }
 
 fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {

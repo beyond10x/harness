@@ -680,6 +680,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A machine with no config directory is told what to type, instead of panicking.** With neither
+  `HOME` nor `XDG_CONFIG_HOME` set there is no `harness.toml` for a profile to live in, and
+  `apply_profiles` returned early for that case — past the refusal at the end of it that names the
+  missing endpoint and model. `RunOptions::model` unwraps on the promise that this function fills
+  the model or refuses the run, so the promise became a panic: exit **101**, a fourth status on a
+  command line documenting three, with a backtrace invitation where an instruction belonged. The
+  refusal is now `require_endpoint_and_model`, called on both paths out of `apply_profiles`, and it
+  tells this caller the truth rather than pointing at a config file that cannot exist on their
+  machine. Found by running the binary in that environment, not by reading it.
+
 - **A run that was refused the one tool it needed now says so, instead of looking like a run that
   never asked.** Publication is by absence: a tool this machine cannot confine is not published, so
   the model never plans around it. That is right, and it was also the whole failure — six catalogue

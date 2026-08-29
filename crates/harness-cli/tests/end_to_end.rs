@@ -1870,3 +1870,42 @@ sys.exit(2)
         "a refusal the model must learn about is an outcome, not a silence"
     );
 }
+
+/// A machine with no config directory is **refused**, not crashed.
+///
+/// `RunOptions::model` unwraps on the promise that `apply_profiles` filled the model or refused
+/// the run. When neither `HOME` nor `XDG_CONFIG_HOME` is set there is no config file, and the
+/// early return for that case walked straight past the refusal — so the promise became a panic
+/// and exit **101**, a fourth status on a command line documenting three.
+///
+/// Spawned rather than unit-tested because the variables are process-global: a test that cleared
+/// them in-process would clear them for every test sharing the binary.
+#[test]
+fn a_machine_with_no_config_directory_is_told_what_to_type_rather_than_panicking() {
+    let output = Command::new(BINARY)
+        .args(["run", "--base-url", "http://127.0.0.1:1", "--input", "hi"])
+        .env_remove("HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .output()
+        .expect("the binary runs");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a refusal exits 1; 101 is a panic escaping as an exit status. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("panicked"),
+        "the operator gets an instruction, not a backtrace invitation: {stderr}"
+    );
+    assert!(
+        stderr.contains("--model"),
+        "and the instruction names the flag that would fix it: {stderr}"
+    );
+    assert!(
+        stderr.contains("XDG_CONFIG_HOME"),
+        "pointing at a config file that cannot exist on this machine is worse than saying so: \
+         {stderr}"
+    );
+}

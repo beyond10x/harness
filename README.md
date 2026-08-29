@@ -36,7 +36,8 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | sub-agents (`delegate`), structured output (`answer`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
-| command line (`run`, `chat`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
+| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
+| workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
 | substrate confinement, embedded | working, including execution — but `run` has been *published*, not yet *exercised* against a confined process |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
@@ -274,6 +275,62 @@ Provider-native structured output (constrained decoding on the wire), schema val
 delegate trees and parallel delegates are labelled later milestones in the design, each waiting on
 a live run that shows the shipped path is not enough.
 
+## Workflows
+
+A workflow is a document this loop walks itself — [`harness-flow`](crates/harness-flow/src/lib.rs)'s
+notation, a DAG of sub-trees whose edges join siblings only, bound to the loop by
+[design 0003](docs/design/0003-workflow-runner.md). No `metaharness` and no `protocol` process is
+involved: the loop sees the whole graph, so a section stays warm across its steps and a retreat
+re-enters a scope instead of paying for its context again.
+
+```console
+b10x-harness workflow plan --flow flow.yaml                 # validate, print the plan; contacts nothing
+b10x-harness workflow run  --flow flow.yaml --input "…"     # walk it, with the run flags chat takes
+```
+
+`plan` takes only `--flow` and `--max-attempts` — no endpoint, no credential — so *does this
+document validate, and what runs in what order* is free, exactly as `tools` is. `run` flattens the
+same options `run` and `chat` do, plus `--flow <FILE>` (`.yaml`/`.yml` or `.json`, decided by
+extension), `--input <TEXT>` (the task, given to every step beside its own prompt) and
+`--max-attempts <N>`, which overrides every `repeat.max` — the root's included — for a document
+that carries none.
+
+**A step is one turn.** Every step runs under an output schema the runner derives — the model never
+sees a schema file — and finishes by calling `answer` with `outcome: passed` or `outcome: failed`,
+an optional `note`, and `gives` when its enclosing group promised names. `gives` is the only thing
+that crosses a group boundary, so a group that promised `specification_id` and never answered with
+one fails by the notation's own rule rather than by a new one — once, and without a retreat, since
+a section that came out clean and still did not produce it buys the same answer again. A budget stop, or prose after the
+nudge, is a failed step. A wire failure is nobody's failed step: it aborts the flow, because a walk
+that recorded a network blip as `failed` would misreport the plan.
+
+**A group is a conversation.** Steps sharing a scope continue the same items; a step in another
+group starts from the handoffs of the siblings that came out **clean** — rendered as *"Earlier
+sections established:"* — and nothing else, so a sibling's transcript never crosses and a result
+nobody accepted is not what the rest of the walk is built on. **A retreat is `Repeat`**: a group that
+did not come out clean is re-entered from nothing but those handoffs, up to the bound the document
+wrote down.
+
+**A section boundary can be refused.** `--hooks` learns a fourth point, `transition`, asked before a
+group is entered and again after it leaves, under the same rules as the other three — declared,
+never discovered, narrowing only. Exit 2 at `enter` skips the section as failed, exit 2 at `leave`
+on a clean attempt forces a retreat, and a hook that cannot answer fails closed; the protocol is in
+the [workflows guide](website/docs/guides/workflows.md).
+
+**One session per `(scope, attempt)`**, id `<flow-run-id>.<path>.<attempt>`, filed with what it cost
+as the scope closes. `--no-session` writes nothing; `--resume` is refused, because a flow names its
+own sessions and resuming a *flow* is a later milestone. Exit status reads as it does everywhere
+else: `0` the flow came out clean, `2` it finished and did not — a failed step, a skipped or
+exhausted section, a cancelled run — `1` refused before it started, or aborted mid-step.
+
+**What stays outside: the governor.** Guards, evidence and transition budgets are
+engineering-protocols' engine and stay there — this harness embeds nothing above it (invariant 2),
+and a runner that evaluated a gate would be a second protocol implementation with none of the
+conformance suites behind it. `protocol workflow flow` projects `adp/default/2` into this notation
+and says what the projection is: an ordering, not a government. Nor is this an eval arm — a run here
+moves the sequencer, so it is a different experiment, and where it is measured against the driven
+arm it is measured as cost, tokens and wall-time under the **same** governor program.
+
 ## Three shells, one loop
 
 | shell | what it is |
@@ -342,7 +399,7 @@ reading two files side by side.
 | `crates/harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers |
 | `crates/harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the two tools it owns itself (`answer`, `delegate`) and the hook port |
-| `crates/harness-flow` | a workflow notation the loop runs natively: a DAG of sub-trees, validated before anything runs |
+| `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-tools` | one catalogue, published flat or under three verbs |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
@@ -362,7 +419,7 @@ Every contract pin is checked **from both directions** — a Python checker veri
 against its fixtures, and a Rust test verifies the code produces those bytes or holds those
 constants. Neither half is sufficient alone.
 
-Three suites drive real processes over real sockets and pipes:
+These suites drive real processes over real sockets and pipes:
 
 | suite | drives |
 |---|---|
@@ -370,6 +427,7 @@ Three suites drive real processes over real sockets and pipes:
 | `crates/harness-messages/tests/provider_emulated.rs` | the same suite, pointed at the second wire |
 | `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace: both surfaces, both wires, sessions, resume, `chat`, the approver and a refused command line |
 | `crates/harness-cli/tests/bridge_mode.rs` | the shipped binary driven as a bridge would drive it |
+| `crates/harness-cli/tests/workflow.rs` | the shipped binary walking a flow document: one session per section, a retreat to its bound, and a hook refusing a transition |
 
 ## Not owned here
 

@@ -356,16 +356,20 @@ fn unix_now() -> u64 {
 /// Refuses an identifier that is not exactly one file name.
 ///
 /// An identifier reaches this module from a command line, and `<dir>/<id>.json` with an `id` of
-/// `../../.ssh/config` is a write outside the session directory. Narrow rather than escaped: every
-/// identifier this module mints is hex and one dash.
+/// `../../.ssh/config` is a write outside the session directory. Narrow rather than escaped: a
+/// run mints hex and one dash, and a walk adds the section it belongs to —
+/// `<flow-run>.root.shape.1` (design 0003 § 4), which is why the dot is a letter here.
+///
+/// **`..` is not**, nor a leading one: those are the two spellings that leave the directory, and
+/// admitting the character without refusing the pair would have re-opened exactly the hole this
+/// function exists to close.
 fn check_id(id: &str) -> Result<(), String> {
-    if id.is_empty()
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
+    let legal =
+        |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' || byte == b'.';
+    if id.is_empty() || !id.bytes().all(legal) || id.contains("..") || id.starts_with('.') {
         return Err(format!(
-            "`{id}` is not a session identifier: identifiers are letters, digits, `-` and `_`"
+            "`{id}` is not a session identifier: identifiers are letters, digits, `-`, `_` and \
+             `.`, and never `..` or a leading `.`"
         ));
     }
     Ok(())
@@ -543,9 +547,18 @@ mod tests {
     #[test]
     fn an_identifier_that_is_not_a_file_name_is_refused() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let error = Session::load(directory.path(), "../../etc/passwd")
-            .expect_err("a traversing identifier refuses");
-        assert!(error.contains("not a session identifier"), "{error}");
+        for traversing in ["../../etc/passwd", "..", ".ssh", "a/b"] {
+            let error = Session::load(directory.path(), traversing)
+                .expect_err("a traversing identifier refuses");
+            assert!(error.contains("not a session identifier"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_section_of_a_walk_names_its_own_session_and_still_stays_one_file_name() {
+        // What design 0003 § 4 mints: the walk's identifier, the section's path, the attempt.
+        check_id(&format!("{}.root.implement-to-review.2", Session::new_id()))
+            .expect("a section identifier is a file name");
     }
 
     #[test]

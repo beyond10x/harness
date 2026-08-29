@@ -259,7 +259,7 @@ concept, two consequences.
   written down in the document rather than inferred from whatever the model happened to say last.
 
 ```yaml
-- group: shape
+- id: shape          # a node with `nodes:` is a group
   needs: [receive]
   gives: [specification_id, task_ids]
   nodes: [...]

@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 harness-app-server = { workspace = true }
 harness-credential = { workspace = true }
+harness-flow = { workspace = true }
 harness-loop = { workspace = true }
 harness-messages = { workspace = true }
 harness-responses = { workspace = true }

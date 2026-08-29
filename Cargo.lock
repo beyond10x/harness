@@ -112,6 +112,7 @@ version = "0.1.0"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-credential",
+ "b10x-harness-flow",
  "b10x-harness-loop",
  "b10x-harness-messages",
  "b10x-harness-responses",

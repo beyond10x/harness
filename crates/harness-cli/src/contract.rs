@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-08-29.1";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-08-29.2";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -47,20 +47,21 @@ pub const ARGV_CONTRACT_VERSION: &str = "2026-08-29.1";
 #[must_use]
 pub fn argv() -> String {
     let command = Cli::command();
-    let mut subcommands: Vec<&clap::Command> = command.get_subcommands().collect();
-    subcommands.sort_by_key(|subcommand| subcommand.get_name());
+    let mut subcommands: Vec<(String, &clap::Command)> = Vec::new();
+    reachable(&command, "", &mut subcommands);
+    subcommands.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut arguments = Map::new();
     arguments.insert(command.get_name().to_owned(), flags(&command));
-    for subcommand in &subcommands {
-        arguments.insert((*subcommand).get_name().to_owned(), flags(subcommand));
+    for (path, subcommand) in &subcommands {
+        arguments.insert(path.clone(), flags(subcommand));
     }
 
     let document = json!({
         "product": command.get_name(),
         "subcommands": subcommands
             .iter()
-            .map(|subcommand| (*subcommand).get_name())
+            .map(|(path, _)| path.clone())
             .collect::<Vec<_>>(),
         "arguments": Value::Object(arguments),
     });
@@ -68,6 +69,29 @@ pub fn argv() -> String {
         .expect("a document of strings and booleans encodes");
     text.push('\n');
     text
+}
+
+/// Every command a caller can type, named by the words that reach it.
+///
+/// **Depth-first and space-joined** — `workflow`, `workflow plan`, `workflow run` — because a
+/// nested verb is a command line a consumer types, and a document that recorded only the top level
+/// would say `workflow` accepts no flags at all: true of the word, false of every verb under it,
+/// and the second is what would break a driver. The word itself is recorded too, with the empty
+/// flag list it really has, so `subcommands` still names everything that exists.
+fn reachable<'a>(
+    command: &'a clap::Command,
+    prefix: &str,
+    into: &mut Vec<(String, &'a clap::Command)>,
+) {
+    for subcommand in command.get_subcommands() {
+        let path = if prefix.is_empty() {
+            subcommand.get_name().to_owned()
+        } else {
+            format!("{prefix} {}", subcommand.get_name())
+        };
+        reachable(subcommand, &path, into);
+        into.push((path, subcommand));
+    }
 }
 
 /// One command's long flags, in name order.
@@ -284,6 +308,52 @@ mod tests {
         );
     }
 
+    /// Every released version is still pinned beside the current one.
+    ///
+    /// A released contract version is immutable (`AGENTS.md` invariant 13), and *immutable* is a
+    /// claim about the directory as much as about its bytes: `scripts/check-cli-contract.py` walks
+    /// whatever directories exist, so an older one that was deleted rather than kept would take its
+    /// verification with it and the checker would go on printing a pass. `2026-08-29.1` is on
+    /// `main` and consumers pin it; it stays, unchanged, beside `.2`.
+    #[test]
+    fn every_released_argv_version_is_still_pinned_beside_the_current_one() {
+        let versions = pinned()
+            .parent()
+            .expect("the version directory")
+            .parent()
+            .expect("the product directory")
+            .to_path_buf();
+        let mut present: Vec<String> = std::fs::read_dir(&versions)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", versions.display()))
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        present.sort();
+        assert_eq!(
+            present,
+            vec!["2026-08-29", "2026-08-29.1", "2026-08-29.2"],
+            "a released version may be superseded and never removed"
+        );
+        assert_eq!(
+            present.last().map(String::as_str),
+            Some(ARGV_CONTRACT_VERSION),
+            "this build pins the newest one"
+        );
+        for version in &present {
+            let manifest = versions.join(version).join("manifest.json");
+            let held: Value = serde_json::from_str(
+                &std::fs::read_to_string(&manifest)
+                    .unwrap_or_else(|error| panic!("reading `{}`: {error}", manifest.display())),
+            )
+            .expect("a manifest");
+            assert_eq!(
+                held["version"], *version,
+                "`{version}` names itself: {manifest:?}"
+            );
+        }
+    }
+
     #[test]
     fn the_document_is_canonical_so_two_builds_produce_the_same_bytes() {
         let text = argv();
@@ -323,6 +393,48 @@ mod tests {
             flag("run", "--yes")["conflicts_with"],
             json!(["--approve-up-to"]),
             "recorded on both flags, because clap enforces it on both"
+        );
+    }
+
+    #[test]
+    fn a_nested_verb_is_pinned_by_the_words_that_reach_it() {
+        // `workflow` on its own accepts nothing and runs nothing; what a consumer types is
+        // `workflow run`, and that is the command line this document has to describe.
+        let value: Value = serde_json::from_str(&argv()).expect("valid JSON");
+        let subcommands: Vec<&str> = value["subcommands"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        for name in ["workflow", "workflow plan", "workflow run"] {
+            assert!(subcommands.contains(&name), "{subcommands:?}");
+        }
+        let flag = |subcommand: &str, long: &str| -> Option<Value> {
+            value["arguments"][subcommand]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .find(|entry| entry["long"] == long)
+                .cloned()
+        };
+        assert_eq!(
+            flag("workflow run", "--flow").expect("the document is named")["required"],
+            true
+        );
+        assert_eq!(
+            flag("workflow run", "--input").expect("the task is named")["takes_value"],
+            true
+        );
+        // `plan` contacts nothing, and the pinned document is where a consumer reads that.
+        assert!(flag("workflow plan", "--base-url").is_none());
+        assert!(flag("workflow plan", "--flow").is_some());
+        assert!(
+            value["arguments"]["workflow"]
+                .as_array()
+                .expect("a list")
+                .is_empty(),
+            "the word itself takes no flags"
         );
     }
 

@@ -13,6 +13,7 @@ pub mod hooks;
 mod metaharness;
 mod render;
 pub mod transcript;
+mod workflow;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -317,6 +318,14 @@ enum Command {
     /// the driven arm's treatment back on top of it and measure that instead. What crosses is the
     /// record, not the control.
     Events(EventsOptions),
+    /// Walk a workflow document: one turn of the loop per step, one conversation per section.
+    ///
+    /// Two verbs over one notation. `plan` validates a document and says what runs in what order,
+    /// contacting nothing; `run` walks it. The scheduler is `harness-flow`'s and knows nothing
+    /// about a model — what a step *is* lives in `workflow.rs`, which is what lets the whole walk
+    /// be tested without a provider.
+    #[command(subcommand)]
+    Workflow(workflow::WorkflowCommand),
 }
 
 #[derive(Debug, Args)]
@@ -1129,8 +1138,12 @@ struct Prepared {
 
 /// Resolves the endpoint, the credential, the toolset, the approver, the session and the hooks.
 ///
-/// `output_schema` is `run`'s alone — `chat` passes [`None`], because a conversation has no single
-/// end for a schema to shape.
+/// `answer` is the schema the run ends under, already read: `run` reads it from the file
+/// `--output-schema` named, `workflow run` derives one, and `chat` passes [`None`] because a
+/// conversation has no single end for a schema to shape. It arrives resolved rather than as a path
+/// because the standing instruction written below **names the tool it publishes** — a caller that
+/// held its own schema and passed [`None`] would get a run publishing `answer` and never told to
+/// call it.
 ///
 /// # Errors
 ///
@@ -1140,7 +1153,7 @@ struct Prepared {
 /// are read here, in this harness's own words, rather than at the far end of a paid turn.
 fn prepare(
     options: &RunOptions,
-    output_schema: Option<&std::path::Path>,
+    answer: Option<harness_loop::OutputSchema>,
 ) -> Result<Prepared, String> {
     let credential = resolve_credential(options)?;
     let cancel = LoopCancel::new();
@@ -1172,8 +1185,10 @@ fn prepare(
     let approvals = approver(options)?;
     let session_dir = session_dir(options)?;
     let session = open_session(options, session_dir.as_deref())?;
-    // Read before the instruction is written, because the instruction names them.
-    let answer = schema(output_schema)?;
+    // The schema arrives already read — from a file under `--output-schema`, or derived by the
+    // caller, as `workflow run` derives one per section — because the instruction below names the
+    // tool it publishes. A caller that resolved its own schema and left this `None` would get a run
+    // under a schema that was never told to finish by calling `answer`.
     let delegation = delegation(options);
     let owned = Owned {
         delegate: delegation.as_ref().map(|tool| tool.name.as_str()),
@@ -1446,8 +1461,8 @@ fn unix_now() -> u64 {
 
 fn run_command(command: &RunCommand) -> Result<LoopStop, RunFailure> {
     let options = &command.options;
-    let mut prepared =
-        prepare(options, command.output_schema.as_deref()).map_err(RunFailure::Refused)?;
+    let answer = schema(command.output_schema.as_deref()).map_err(RunFailure::Refused)?;
+    let mut prepared = prepare(options, answer).map_err(RunFailure::Refused)?;
     install_interrupt(&prepared.cancel);
 
     // Under `--output-schema` stdout is the answer and nothing else, so the prose goes to stderr
@@ -2098,6 +2113,7 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
         Command::Tools(options) => reported(tools_command(options)),
         Command::AppServer(options) => reported(app_server_command(options)),
         Command::Events(options) => reported(events_command(options)),
+        Command::Workflow(command) => workflow::dispatch(command),
     }
 }
 

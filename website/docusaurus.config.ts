@@ -101,6 +101,7 @@ const config: Config = {
             {label: 'Sessions and events', to: '/docs/guides/sessions-and-events'},
             {label: 'Confined workspaces', to: '/docs/guides/confinement'},
             {label: 'Structured runs', to: '/docs/guides/structured-runs'},
+            {label: 'Workflows', to: '/docs/guides/workflows'},
             {label: 'Security boundary', to: '/docs/concepts/security-boundary'},
           ],
         },

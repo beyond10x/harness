@@ -1,7 +1,17 @@
 use super::*;
 
 fn flow(yaml: &str) -> Flow {
-    serde_yaml_ng::from_str(yaml).expect("the fixture is a flow")
+    Flow::from_yaml(yaml).expect("the fixture is a flow")
+}
+
+/// A document committed beside these tests.
+fn fixture(name: &str) -> String {
+    std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join(name),
+    )
+    .expect("the committed fixture")
 }
 
 /// The shape the crate documentation shows: a step, a sub-tree, and a step that needs the sub-tree.
@@ -646,12 +656,7 @@ fn a_real_workflow_projected_by_another_component_plans_here() {
     // What it pins is the contract between the two notations: a state graph with three back-edges
     // arrives here as a chain with one repeating sub-tree, and this crate plans it without
     // complaint.
-    let text = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("fixtures/adp-default.projected.yaml"),
-    )
-    .expect("the committed projection");
-    let flow: Flow = serde_yaml_ng::from_str(&text).expect("a flow");
+    let flow = Flow::from_yaml(&fixture("adp-default.projected.yaml")).expect("a flow");
     let plan = flow.plan().expect("it plans");
 
     assert_eq!(
@@ -690,12 +695,7 @@ fn a_real_workflow_projected_by_another_component_plans_here() {
 fn the_projected_workflow_retreats_when_verification_fails() {
     // The behaviour the whole translation exists to preserve: a red suite sends the work back to
     // `implement`, and the states after it run again rather than being skipped.
-    let text = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("fixtures/adp-default.projected.yaml"),
-    )
-    .expect("the committed projection");
-    let flow: Flow = serde_yaml_ng::from_str(&text).expect("a flow");
+    let flow = Flow::from_yaml(&fixture("adp-default.projected.yaml")).expect("a flow");
 
     let mut sink = VecFlowSink::new();
     let report = flow
@@ -867,8 +867,11 @@ fn a_group_that_breaks_its_promise_fails_and_stops_what_needed_it() {
 }
 
 #[test]
-fn a_handoff_is_asked_for_once_after_the_last_attempt_and_not_once_per_draft() {
+fn a_handoff_is_asked_for_once_per_attempt_that_leaves_and_not_once_per_draft() {
     // A group that retreated three times hands over what it ended up with, not three drafts of it.
+    // The handoff is collected on the attempt that is about to leave — one that came out clean, or
+    // the last one the document allows — so the two attempts that were going round again are never
+    // asked at all.
     #[derive(Default)]
     struct Counting {
         asked: usize,
@@ -911,7 +914,195 @@ root:
         .expect("valid");
     assert!(report.clean());
     assert_eq!(runner.seen, 3, "three attempts");
-    assert_eq!(runner.asked, 1, "and one handoff");
+    assert_eq!(
+        runner.asked, 1,
+        "and one handoff — only the third attempt was ever leaving"
+    );
+}
+
+#[test]
+fn a_section_that_did_not_come_out_clean_hands_nothing_to_its_siblings() {
+    // Two siblings with no edge between them, so the second runs whatever the first did. What it
+    // can *see* is the claim: a handoff from a section that did not come out clean is a result
+    // nobody accepted, and letting it cross would build the rest of the walk on a value the same
+    // record calls failed.
+    //
+    // Both ways a section fails, because they must not differ here: its own step said no, or
+    // whoever was asked declined its leave.
+    #[derive(Default)]
+    struct Watching {
+        fails_at: Option<&'static str>,
+        refuses_leave_of: Option<&'static str>,
+        available: Vec<(String, Vec<String>)>,
+    }
+    impl StepRunner for Watching {
+        fn run(&mut self, path: &str, _step: &Step, cx: &StepContext) -> StepOutcome {
+            let mut names: Vec<String> = cx.available.keys().cloned().collect();
+            names.sort();
+            self.available.push((path.to_owned(), names));
+            if self.fails_at == Some(path) {
+                StepOutcome::Failed
+            } else {
+                StepOutcome::Passed
+            }
+        }
+        fn handoff(&mut self, scope: &str, gives: &[NodeId]) -> Handoff {
+            gives
+                .iter()
+                .map(|name| (name.clone(), serde_json::json!({"from": scope})))
+                .collect()
+        }
+        fn leaving(
+            &mut self,
+            path: &str,
+            _attempt: u32,
+            _failed: bool,
+            _handoff: &Handoff,
+        ) -> Gate {
+            if self.refuses_leave_of == Some(path) {
+                return Gate::Refused {
+                    reason: "that specification was never approved".to_owned(),
+                };
+            }
+            Gate::Proceed
+        }
+    }
+
+    let document = r"
+id: unclean
+root:
+  id: root
+  nodes:
+    - id: shape
+      gives: [specification_id]
+      nodes:
+        - id: specify
+        - id: check
+          needs: [specify]
+    - id: build
+      nodes:
+        - id: implement
+";
+    let seen_by_build = |runner: &Watching| -> Vec<String> {
+        runner
+            .available
+            .iter()
+            .find(|(path, _)| path == "root.build.implement")
+            .map(|(_, names)| names.clone())
+            .expect("the sibling ran: it needs nothing")
+    };
+
+    // It handed over what it promised and its own step still failed.
+    let mut broke = Watching {
+        fails_at: Some("root.shape.check"),
+        ..Watching::default()
+    };
+    let report = flow(document)
+        .run(&mut broke, &mut VecFlowSink::new())
+        .expect("valid");
+    assert!(!report.clean());
+    assert!(
+        seen_by_build(&broke).is_empty(),
+        "a failed section hands nothing on: {:?}",
+        seen_by_build(&broke)
+    );
+
+    // It came out clean and whoever was asked declined the result. Same consequence, because the
+    // walk has one word for a section that did not come out clean.
+    let mut declined = Watching {
+        refuses_leave_of: Some("root.shape"),
+        ..Watching::default()
+    };
+    let report = flow(document)
+        .run(&mut declined, &mut VecFlowSink::new())
+        .expect("valid");
+    assert!(!report.clean());
+    assert!(
+        seen_by_build(&declined).is_empty(),
+        "a refused leave is a section nobody accepted: {:?}",
+        seen_by_build(&declined)
+    );
+
+    // And the sibling of a section that *did* come out clean still sees what it promised, so this
+    // is a rule about failure and not a handoff that stopped working.
+    let mut clean = Watching::default();
+    let report = flow(document)
+        .run(&mut clean, &mut VecFlowSink::new())
+        .expect("valid");
+    assert!(report.clean());
+    assert_eq!(seen_by_build(&clean), vec!["specification_id".to_owned()]);
+}
+
+#[test]
+fn a_group_that_breaks_its_promise_is_not_re_entered_however_many_attempts_it_has_left() {
+    // `gives` is the document's own contract, and a second attempt cannot make it truer: the
+    // section came out clean and still did not produce the name it declared, which is a document
+    // that does not describe what it runs rather than a run that went badly. A caller who wants
+    // that retreat has the leave gate, where somebody decided it.
+    let mut runner = Scopes {
+        withhold: Some("specification_id"),
+        ..Scopes::default()
+    };
+    let mut sink = VecFlowSink::new();
+    let report = flow(
+        r"
+id: promised
+root:
+  id: root
+  nodes:
+    - id: shape
+      repeat: {max: 3}
+      gives: [specification_id]
+      nodes:
+        - id: specify
+        - id: decompose
+          needs: [specify]
+",
+    )
+    .run(&mut runner, &mut sink)
+    .expect("valid");
+
+    assert_eq!(
+        sink.steps_started(),
+        vec!["root.shape.specify", "root.shape.decompose"],
+        "one pass, though the document allowed three"
+    );
+    assert_eq!(report.retreats, 0);
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| matches!(event, FlowEvent::GroupRepeating { .. }))
+            .count(),
+        0,
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| matches!(event, FlowEvent::HandoffIncomplete { .. }))
+            .count(),
+        1,
+        "said once, when it happened"
+    );
+    let FlowEvent::GroupLeft {
+        failed,
+        attempts,
+        exhausted,
+        ..
+    } = sink
+        .events()
+        .iter()
+        .find(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.shape"))
+        .expect("left")
+    else {
+        unreachable!()
+    };
+    assert!(failed);
+    assert_eq!(*attempts, 1);
+    assert!(
+        !exhausted,
+        "it did not use up its bound; it never asked for a second attempt"
+    );
+    assert!(!report.clean());
 }
 
 #[test]
@@ -963,5 +1154,475 @@ root:
     assert!(
         error.to_string().contains("no sibling on the other side"),
         "{error}"
+    );
+}
+
+// --- reading a document ---------------------------------------------------------------------------
+
+#[test]
+fn a_document_that_cannot_be_read_is_refused_by_format_and_in_the_readers_own_words() {
+    let error = Flow::from_yaml("id: [unclosed").expect_err("refused");
+    assert_eq!(error.format, "YAML");
+    assert!(error.to_string().contains("YAML"), "{error}");
+    assert!(
+        !error.message.is_empty(),
+        "the reader's own message, which knows a line and a column this crate does not"
+    );
+
+    let error = Flow::from_json(r#"{"id": "trailing",}"#).expect_err("refused");
+    assert_eq!(error.format, "JSON");
+    assert!(error.to_string().contains("JSON"), "{error}");
+
+    // Reading is not validating, and the two refusals are different types on purpose: a document
+    // that reads and does not validate comes back from `plan`, so a caller may hold one before
+    // deciding to run it.
+    let flow = Flow::from_yaml("id: hollow\nroot: {id: root, nodes: []}\n").expect("it reads");
+    assert!(matches!(
+        flow.plan().expect_err("refused"),
+        FlowError::EmptyGroup { .. }
+    ));
+}
+
+#[test]
+fn the_projection_reads_the_same_from_yaml_and_from_json() {
+    // One notation, two readers: YAML is what a person writes and JSON is what another program
+    // emits, and a workflow that could only arrive one way would push whoever generates one into
+    // writing a YAML serialiser. The twin is generated from the YAML, and this is what fails when
+    // somebody edits one of them alone.
+    let from_yaml = Flow::from_yaml(&fixture("adp-default.projected.yaml")).expect("a flow");
+    let from_json = Flow::from_json(&fixture("adp-default.projected.json")).expect("a flow");
+
+    assert_eq!(from_yaml, from_json);
+    assert_eq!(
+        from_json.plan().expect("it plans").layers.len(),
+        5,
+        "and the document that arrived as JSON plans the same as the one that arrived as YAML"
+    );
+}
+
+// --- being told no at a boundary ------------------------------------------------------------------
+
+/// Answers the two boundary gates from a list, and writes down everything it was asked, in order.
+///
+/// A refusal is named by `(moment, path, attempt)`; `None` for the attempt refuses every one of
+/// them. `asked` is the whole transcript, which is how the ordering of the gates against `run` and
+/// `handoff` is asserted rather than assumed.
+#[derive(Default)]
+struct Gated {
+    refuse: Vec<(Moment, &'static str, Option<u32>)>,
+    fails_at: Vec<&'static str>,
+    asked: Vec<String>,
+}
+
+impl Gated {
+    fn gate(&self, moment: Moment, path: &str, attempt: u32) -> Gate {
+        let refused = self.refuse.iter().any(|(when, at, which)| {
+            *when == moment && *at == path && which.is_none_or(|only| only == attempt)
+        });
+        if !refused {
+            return Gate::Proceed;
+        }
+        Gate::Refused {
+            reason: match moment {
+                Moment::Enter => format!("`{path}` may not run now"),
+                Moment::Leave => format!("attempt {attempt} of `{path}` is not accepted"),
+            },
+        }
+    }
+}
+
+impl StepRunner for Gated {
+    fn run(&mut self, path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
+        self.asked.push(format!("run {path}"));
+        if self.fails_at.iter().any(|name| path.ends_with(name)) {
+            StepOutcome::Failed
+        } else {
+            StepOutcome::Passed
+        }
+    }
+
+    fn handoff(&mut self, scope: &str, gives: &[NodeId]) -> Handoff {
+        self.asked.push(format!("handoff {scope}"));
+        gives
+            .iter()
+            .map(|name| (name.clone(), serde_json::json!({"from": scope})))
+            .collect()
+    }
+
+    fn entering(&mut self, path: &str, attempt: u32) -> Gate {
+        self.asked.push(format!("enter {path} {attempt}"));
+        self.gate(Moment::Enter, path, attempt)
+    }
+
+    fn leaving(&mut self, path: &str, attempt: u32, failed: bool, handoff: &Handoff) -> Gate {
+        let carrying: Vec<&str> = handoff.keys().map(String::as_str).collect();
+        self.asked.push(format!(
+            "leave {path} {attempt} {} [{}]",
+            if failed { "failed" } else { "clean" },
+            carrying.join(", ")
+        ));
+        self.gate(Moment::Leave, path, attempt)
+    }
+}
+
+/// A section with something before it, something inside it and something after it — so a refusal
+/// at its boundary can be seen to stop the right things and leave the rest alone.
+const GATED: &str = r"
+id: gated
+root:
+  id: root
+  nodes:
+    - id: prepare
+    - id: build
+      needs: [prepare]
+      repeat: {max: 3}
+      gives: [diff]
+      nodes:
+        - id: implement
+        - id: verify
+          needs: [implement]
+    - id: review
+      needs: [build]
+";
+
+#[test]
+fn a_refused_entering_skips_the_section_as_failed_and_names_every_step_inside_it() {
+    let mut runner = Gated {
+        refuse: vec![(Moment::Enter, "root.build", None)],
+        ..Gated::default()
+    };
+    let mut sink = VecFlowSink::new();
+    let report = flow(GATED).run(&mut runner, &mut sink).expect("valid");
+
+    assert_eq!(
+        sink.steps_started(),
+        vec!["root.prepare"],
+        "nothing inside the refused section ran"
+    );
+    assert!(
+        !runner.asked.iter().any(|line| line.starts_with("handoff")),
+        "and it was not asked to hand anything over: {:?}",
+        runner.asked
+    );
+
+    // The refusal is emitted before its consequence, so a record reads *why* ahead of *what next*.
+    let record: Vec<&FlowEvent> = sink
+        .events()
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                FlowEvent::TransitionRefused { .. } | FlowEvent::NodeSkipped { .. }
+            )
+        })
+        .collect();
+    let FlowEvent::TransitionRefused {
+        path,
+        moment,
+        attempt,
+        reason,
+    } = record[0]
+    else {
+        panic!("the refusal comes first: {record:?}")
+    };
+    assert_eq!(
+        (path.as_str(), *moment, *attempt),
+        ("root.build", Moment::Enter, 1)
+    );
+    assert_eq!(
+        reason, "`root.build` may not run now",
+        "carried, not rewritten"
+    );
+
+    let skipped: Vec<&str> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            FlowEvent::NodeSkipped { path, .. } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        skipped,
+        vec!["root.build.implement", "root.build.verify", "root.review"],
+        "every step inside it by name, and then what needed it"
+    );
+
+    let FlowEvent::GroupLeft {
+        failed,
+        exhausted,
+        gave,
+        ..
+    } = sink
+        .events()
+        .iter()
+        .find(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
+        .expect("left")
+    else {
+        unreachable!()
+    };
+    assert!(
+        failed,
+        "a section nobody allowed to run is failed to its siblings"
+    );
+    assert!(
+        !exhausted,
+        "what stopped it was a refusal, not a bound it used up"
+    );
+    assert!(gave.is_empty());
+
+    assert_eq!(report.ran, 1);
+    assert_eq!(report.skipped, 3);
+    assert_eq!(
+        report.retreats, 0,
+        "a section that may not run now is not retried"
+    );
+    assert!(!report.clean());
+}
+
+#[test]
+fn a_refused_entering_of_the_root_runs_nothing_at_all() {
+    // The root is a group and is gated like one. This is the whole run being told no.
+    let mut runner = Gated {
+        refuse: vec![(Moment::Enter, "root", None)],
+        ..Gated::default()
+    };
+    let mut sink = VecFlowSink::new();
+    let report = flow(GATED).run(&mut runner, &mut sink).expect("valid");
+
+    assert_eq!(
+        runner.asked,
+        vec!["enter root 1"],
+        "asked once, and then nothing"
+    );
+    assert!(sink.steps_started().is_empty());
+    assert_eq!(report.ran, 0);
+    assert_eq!(report.skipped, 4, "every step in the document");
+    assert!(!report.clean());
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| matches!(event, FlowEvent::GroupEntered { .. })),
+        "a section that was refused was not entered"
+    );
+    assert!(
+        sink.events()
+            .iter()
+            .any(|event| matches!(event, FlowEvent::FlowFinished { clean: false, .. })),
+        "the walk still finishes and still files a verdict"
+    );
+}
+
+#[test]
+fn a_refused_leaving_of_a_clean_attempt_re_enters_the_section_until_the_bound_stops_it() {
+    // How a caller forces a retreat: not with a new verb, but by declining the result. What
+    // happens next is the document's, which is why the bound still ends it.
+    let mut runner = Gated {
+        refuse: vec![(Moment::Leave, "root.build", None)],
+        ..Gated::default()
+    };
+    let mut sink = VecFlowSink::new();
+    let report = flow(GATED).run(&mut runner, &mut sink).expect("valid");
+
+    assert_eq!(
+        sink.steps_started(),
+        vec![
+            "root.prepare",
+            "root.build.implement",
+            "root.build.verify",
+            "root.build.implement",
+            "root.build.verify",
+            "root.build.implement",
+            "root.build.verify",
+        ],
+        "three attempts of the whole scope, and review never reached"
+    );
+    assert_eq!(
+        report.failed, 0,
+        "no step failed - the section was not accepted"
+    );
+    assert_eq!(report.retreats, 2, "two retreats between three attempts");
+    assert_eq!(report.skipped, 1, "review");
+    assert!(!report.clean());
+
+    let refusals: Vec<(&str, u32)> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            FlowEvent::TransitionRefused {
+                path,
+                moment: Moment::Leave,
+                attempt,
+                ..
+            } => Some((path.as_str(), *attempt)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        refusals,
+        vec![("root.build", 1), ("root.build", 2), ("root.build", 3)],
+        "asked, and refused, once per attempt"
+    );
+    assert!(
+        runner
+            .asked
+            .contains(&"leave root.build 1 clean [diff]".to_owned()),
+        "and asked having seen what the section hands over: {:?}",
+        runner.asked
+    );
+
+    let FlowEvent::GroupLeft {
+        failed,
+        attempts,
+        exhausted,
+        ..
+    } = sink
+        .events()
+        .iter()
+        .find(|event| matches!(event, FlowEvent::GroupLeft { path, .. } if path == "root.build"))
+        .expect("left")
+    else {
+        unreachable!()
+    };
+    assert!(failed);
+    assert_eq!(*attempts, 3);
+    assert!(
+        exhausted,
+        "at the bound it is exhausted, exactly as a section that kept breaking"
+    );
+}
+
+#[test]
+fn a_refused_leaving_of_an_attempt_that_already_failed_is_recorded_and_changes_nothing() {
+    let flow = flow(GATED);
+
+    let mut ungoverned = Gated {
+        fails_at: vec!["verify"],
+        ..Gated::default()
+    };
+    let mut ungoverned_sink = VecFlowSink::new();
+    let ungoverned_report = flow
+        .run(&mut ungoverned, &mut ungoverned_sink)
+        .expect("valid");
+
+    let mut refusing = Gated {
+        fails_at: vec!["verify"],
+        refuse: vec![(Moment::Leave, "root.build", None)],
+        ..Gated::default()
+    };
+    let mut refusing_sink = VecFlowSink::new();
+    let refusing_report = flow.run(&mut refusing, &mut refusing_sink).expect("valid");
+
+    assert_eq!(
+        refusing_report, ungoverned_report,
+        "the section had already failed; there was nothing left for a refusal to change"
+    );
+    let without_the_refusals: Vec<&FlowEvent> = refusing_sink
+        .events()
+        .iter()
+        .filter(|event| !matches!(event, FlowEvent::TransitionRefused { .. }))
+        .collect();
+    let ungoverned_events: Vec<&FlowEvent> = ungoverned_sink.events().iter().collect();
+    assert_eq!(
+        without_the_refusals, ungoverned_events,
+        "the two records differ by the refusals themselves and by nothing else"
+    );
+    assert_eq!(
+        refusing_sink
+            .events()
+            .iter()
+            .filter(|event| matches!(event, FlowEvent::TransitionRefused { .. }))
+            .count(),
+        3,
+        "recorded once per attempt of the failing section"
+    );
+    assert!(
+        refusing
+            .asked
+            .contains(&"leave root.build 1 failed []".to_owned()),
+        "and told, each time, that it was answering about an attempt that had already failed: {:?}",
+        refusing.asked
+    );
+}
+
+#[test]
+fn the_two_gates_bracket_every_attempt_and_leaving_is_asked_after_the_handoff() {
+    // One transcript, because the order is the claim: nothing runs before `entering`, the handoff
+    // is collected before `leaving` sees it, and each gate is asked once per attempt.
+    let mut runner = Gated {
+        refuse: vec![(Moment::Leave, "root.build", Some(1))],
+        ..Gated::default()
+    };
+    let report = flow(GATED)
+        .run(&mut runner, &mut VecFlowSink::new())
+        .expect("valid");
+
+    assert_eq!(
+        runner.asked,
+        vec![
+            "enter root 1",
+            "run root.prepare",
+            "enter root.build 1",
+            "run root.build.implement",
+            "run root.build.verify",
+            "handoff root.build",
+            "leave root.build 1 clean [diff]",
+            "enter root.build 2",
+            "run root.build.implement",
+            "run root.build.verify",
+            "handoff root.build",
+            "leave root.build 2 clean [diff]",
+            "run root.review",
+            "leave root 1 clean []",
+        ]
+    );
+    assert_eq!(report.retreats, 1);
+    assert!(
+        report.clean(),
+        "the second attempt was accepted, and a run that retreated and then succeeded is a \
+         successful run"
+    );
+}
+
+#[test]
+fn the_example_in_this_crates_own_header_reads_and_plans() {
+    // An example nobody parses is a description of a format that does not exist — the header once
+    // showed `- step: receive`, which this notation has never accepted. The text is taken out of
+    // the source exactly as a reader of the documentation sees it, so it cannot drift again.
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+    )
+    .expect("this crate's own source");
+    let example = source
+        .lines()
+        .map(|line| {
+            line.strip_prefix("//! ")
+                .or_else(|| line.strip_prefix("//!"))
+                .unwrap_or(line)
+        })
+        .skip_while(|line| *line != "```yaml")
+        .skip(1)
+        .take_while(|line| *line != "```")
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!example.is_empty(), "the header still shows one");
+
+    let flow = Flow::from_yaml(&example).expect("the header's example is a document");
+    let plan = flow.plan().expect("and it plans");
+    assert_eq!(
+        flow.steps(),
+        vec![
+            "root.receive",
+            "root.shape.specify",
+            "root.shape.decompose",
+            "root.implement",
+        ],
+        "a node with `nodes:` is a group and one without is a step, as the header says"
+    );
+    assert_eq!(
+        plan.layers.len(),
+        3,
+        "`implement` waits for the whole sub-tree, not for a step inside it"
     );
 }

@@ -1,4 +1,8 @@
-//! The operator's own programs, run at the three moments `harness_loop` consults a hook.
+//! The operator's own programs, run at the moments this harness consults a hook.
+//!
+//! Three of them are the loop's — `before-call`, `after-call`, `stop` — and the fourth is a
+//! workflow's: `transition`, asked on each side of a section boundary (design 0003 § 3). One file,
+//! one protocol, one set of rules; what differs is the document a hook reads on stdin.
 //!
 //! # Declared, never discovered
 //!
@@ -36,6 +40,23 @@
 //!   "workspace": "/abs/path" }
 //! ```
 //!
+//! and at a workflow's section boundary ([`Hooks::transition`]):
+//!
+//! ```text
+//! { "hook": "transition",
+//!   "flow": "adp/default",                  // the document's own id
+//!   "path": "root.implement-to-review",     // the section, from the root
+//!   "moment": "enter" | "leave",
+//!   "attempt": 2, "of": 3,                  // this attempt, and the document's bound
+//!   "failed": false,                        // leave only: did the attempt fail on its own
+//!   "handoff": { "specification_id": "…" }, // leave only: what the section is handing over
+//!   "workspace": "/abs/path" }
+//! ```
+//!
+//! `handoff` is `{}` on an attempt that **failed and still has one left**: a section going round
+//! again is never asked what it hands over, so there is nothing to show. It is not *the section
+//! produced nothing* — the last attempt is asked either way, whether it failed or not.
+//!
 //! `0` proceeds — and at `after-call` a `{"note": "…"}` on stdout is what the model reads beside
 //! the result. `2` blocks, with the reason from `{"reason": "…"}` on stdout, else from stderr.
 //! Any other status, a program that could not be started, more than [`MAX_HOOK_STDOUT_BYTES`] on
@@ -44,6 +65,10 @@
 //! *fail closed* before a call and *fail open* at a stop. At `after-call` nothing can be refused
 //! any more, so a failure there is reported both ways: the model reads it as a note, and the
 //! record carries it as the point's decision ([`AfterCall`]).
+//!
+//! A `transition` is read **fail closed at both of its moments**: a governor that could not answer
+//! did not say yes, and a section that ran because nobody could be asked is exactly the ungoverned
+//! walk the point exists to prevent.
 
 use std::fs;
 use std::io::{Read as _, Write as _};
@@ -52,6 +77,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use harness_flow::{Handoff, Moment};
 use harness_loop::{AfterCall, HookDecision, HookPoint, HookPort};
 use harness_wire::{ToolCall, ToolOutcome, ToolSpec};
 use serde::Deserialize;
@@ -187,10 +213,11 @@ impl Hooks {
                 "before-call" => HookPoint::BeforeCall,
                 "after-call" => HookPoint::AfterCall,
                 "stop" => HookPoint::Stop,
+                "transition" => HookPoint::Transition,
                 other => {
                     return Err(named(format!(
                         "hook {position} fires `{other}`, which is not a hook point; this build \
-                         knows `before-call`, `after-call` and `stop`"
+                         knows `before-call`, `after-call`, `stop` and `transition`"
                     )));
                 }
             };
@@ -206,10 +233,23 @@ impl Hooks {
                      omit it to mean every call"
                 )));
             }
-            if declared.tools.is_some() && point == HookPoint::Stop {
+            // A `tools` filter reads the **invoked entry** of a call, so it means nothing at a
+            // point where there is no call. Refused by name rather than accepted and never
+            // matched: a hook that silently never fires is a gate the operator believes is there.
+            let about_a_call = match point {
+                HookPoint::BeforeCall | HookPoint::AfterCall => None,
+                HookPoint::Stop => Some("a stop is about the run and not about one call"),
+                HookPoint::Transition => {
+                    Some("a transition is about a section boundary and not about one call")
+                }
+            };
+            if let Some(about) = about_a_call
+                && declared.tools.is_some()
+            {
                 return Err(named(format!(
-                    "hook {position} is a `stop` hook and declares `tools`; a stop is about the \
-                     run and not about one call, so nothing would ever match — omit it"
+                    "hook {position} is a `{}` hook and declares `tools`; {about}, so nothing \
+                     would ever match — omit it",
+                    declared.on
                 )));
             }
             hooks.push(Hook {
@@ -275,6 +315,72 @@ impl Hooks {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.declared.is_empty()
+    }
+
+    /// Whether any declared hook fires at a section boundary.
+    ///
+    /// Asked before a boundary is crossed so that a walk under a file naming only the loop's three
+    /// points records **nothing** for the fourth: a `hook-ran` line at every boundary of a run with
+    /// no governor would read as a gate that fired.
+    #[must_use]
+    pub fn governs_transitions(&self) -> bool {
+        self.declared
+            .iter()
+            .any(|hook| hook.point == HookPoint::Transition)
+    }
+
+    /// Asks the operator's programs whether a workflow may cross a section boundary.
+    ///
+    /// **The fourth point, and the only one no [`HookPort`] method reaches**: it is asked by the
+    /// walk rather than by the loop, because a boundary is a fact about a document and the loop
+    /// does not know it is inside one. Everything else is shared with the three that exist — the
+    /// same file, the same declaration, the same spawn, the same [`HOOK_TIMEOUT`] and
+    /// [`MAX_HOOK_STDOUT_BYTES`], the same credential removed from the environment.
+    ///
+    /// `leave` is `Some((failed, handoff))` at the `leave` moment and [`None`] at `enter`: those
+    /// two keys exist only where they mean something, so a governor reading `handoff` never has to
+    /// tell an empty one from one that could not exist yet.
+    ///
+    /// # Fail closed, at both moments
+    ///
+    /// `0` proceeds and `2` blocks, as everywhere. Anything else — a status that is neither, a
+    /// program that could not be started, an answer too big to trust, a hook still running at the
+    /// bound — is [`HookDecision::Failed`], and the caller reads that as a refusal on both sides of
+    /// the boundary. A section that ran because nobody could be asked is the ungoverned walk this
+    /// point exists to prevent, and letting one *leave* unasked accepts a result the governor never
+    /// saw.
+    pub fn transition(
+        &mut self,
+        flow: &str,
+        path: &str,
+        moment: Moment,
+        attempt: u32,
+        of: u32,
+        leave: Option<(bool, &Handoff)>,
+    ) -> HookDecision {
+        let hooks = self.matching(HookPoint::Transition, None);
+        if hooks.is_empty() {
+            return HookDecision::Proceed;
+        }
+        let mut document = json!({
+            "hook": HookPoint::Transition.as_str(),
+            "flow": flow,
+            "path": path,
+            "moment": match moment {
+                Moment::Enter => "enter",
+                Moment::Leave => "leave",
+            },
+            "attempt": attempt,
+            "of": of,
+            "workspace": self.workspace.display().to_string(),
+        });
+        if let Some((failed, handoff)) = leave
+            && let Some(object) = document.as_object_mut()
+        {
+            object.insert("failed".to_owned(), json!(failed));
+            object.insert("handoff".to_owned(), json!(handoff));
+        }
+        self.decide(&hooks, &document)
     }
 
     /// The document one hook reads on stdin at a call point.
@@ -1076,6 +1182,11 @@ mod tests {
                 "nothing would ever match",
             ),
             (
+                json!({"version": 1, "hooks": [{"on": "transition", "tools": ["run"], "command": ["x"]}]})
+                    .to_string(),
+                "is a `transition` hook and declares `tools`",
+            ),
+            (
                 json!({"hooks": []}).to_string(),
                 "missing field `version`",
             ),
@@ -1088,6 +1199,153 @@ mod tests {
             );
             assert!(error.contains("hooks.json"), "the file is named: {error}");
         }
+    }
+
+    #[test]
+    fn a_transition_hook_that_declares_tools_is_refused_by_name_and_by_point() {
+        // A `tools` filter reads the invoked entry of a call and a boundary has none, so this hook
+        // would be declared, loaded and never fire — a gate the operator believes is there. The
+        // message names the point it was written for, not merely that something is wrong.
+        let error = Hooks::parse(
+            &json!({"version": 1, "hooks": [
+                {"on": "transition", "tools": ["file_write"], "command": ["governor"]},
+            ]})
+            .to_string(),
+            Path::new("hooks.json"),
+        )
+        .expect_err("refused");
+        assert!(error.contains("hook 1 is a `transition` hook"), "{error}");
+        assert!(error.contains("section boundary"), "{error}");
+        assert!(error.contains("omit it"), "{error}");
+    }
+
+    #[test]
+    fn a_file_written_before_transitions_existed_still_loads_exactly_as_it_did() {
+        // The fourth point is additive: a file naming only the three the loop asks at parses into
+        // the same three hooks, in the same order, and nothing new fires for it.
+        let text = json!({
+            "version": 1,
+            "hooks": [
+                {"on": "before-call", "tools": ["file_write"], "command": shell("exit 0")},
+                {"on": "after-call", "command": shell("exit 0")},
+                {"on": "stop", "command": shell("exit 0")},
+            ],
+        })
+        .to_string();
+        let mut port = hooks(&text);
+        assert_eq!(port.len(), 3);
+        assert_eq!(
+            port.declared
+                .iter()
+                .map(|hook| hook.point)
+                .collect::<Vec<_>>(),
+            vec![HookPoint::BeforeCall, HookPoint::AfterCall, HookPoint::Stop],
+        );
+        assert_eq!(
+            port.declared[0].tools.as_deref(),
+            Some(["file_write".to_owned()].as_slice()),
+            "the entry filter is unchanged"
+        );
+        // And a boundary crossed under it spawns nothing, because no hook named that point.
+        assert_eq!(
+            port.transition("f", "root", Moment::Enter, 1, 1, None),
+            HookDecision::Proceed
+        );
+    }
+
+    #[test]
+    fn a_transition_hook_reads_the_boundary_it_is_being_asked_about() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let seen = dir.path().join("stdin.json");
+        let mut port = declared("transition", None, &format!("cat > {}", seen.display()))
+            .in_workspace(dir.path());
+
+        let handoff: Handoff = [("specification_id".to_owned(), json!("SPEC-1"))]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            port.transition(
+                "adp/default",
+                "root.implement-to-review",
+                Moment::Leave,
+                2,
+                3,
+                Some((false, &handoff)),
+            ),
+            HookDecision::Proceed
+        );
+
+        let document: Value =
+            serde_json::from_str(&fs::read_to_string(&seen).expect("the hook wrote its stdin"))
+                .expect("one JSON document");
+        assert_eq!(document["hook"], json!("transition"));
+        assert_eq!(document["flow"], json!("adp/default"));
+        assert_eq!(document["path"], json!("root.implement-to-review"));
+        assert_eq!(document["moment"], json!("leave"));
+        assert_eq!(document["attempt"], json!(2));
+        assert_eq!(document["of"], json!(3));
+        assert_eq!(document["failed"], json!(false));
+        assert_eq!(document["handoff"]["specification_id"], json!("SPEC-1"));
+        assert!(
+            Path::new(document["workspace"].as_str().expect("a path")).is_absolute(),
+            "{document}"
+        );
+        // A boundary is not a call, so there is nothing to name one with.
+        assert_eq!(document["call"], Value::Null);
+        assert_eq!(document["entry"], Value::Null);
+    }
+
+    #[test]
+    fn an_enter_carries_neither_the_verdict_nor_the_handoff_of_a_leave() {
+        // Absent rather than empty: a governor reading `handoff` at an `enter` would otherwise have
+        // to tell a section that handed nothing over from one that has not run yet.
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let seen = dir.path().join("stdin.json");
+        let mut port = declared("transition", None, &format!("cat > {}", seen.display()));
+        assert_eq!(
+            port.transition("f", "root.shape", Moment::Enter, 1, 2, None),
+            HookDecision::Proceed
+        );
+
+        let document: Value =
+            serde_json::from_str(&fs::read_to_string(&seen).expect("the hook wrote its stdin"))
+                .expect("one JSON document");
+        assert_eq!(document["moment"], json!("enter"));
+        assert_eq!(document["failed"], Value::Null);
+        assert_eq!(document["handoff"], Value::Null);
+    }
+
+    #[test]
+    fn a_transition_hook_that_cannot_answer_says_so_and_the_caller_reads_it_closed() {
+        // Exit 3 is neither a yes nor a no, and the reason names the program: the caller turns a
+        // `Failed` into a refusal at both moments, so this is the whole of *fail closed* on this
+        // side of the boundary.
+        let mut port = declared("transition", None, "echo 'no engine' >&2; exit 3");
+        let HookDecision::Failed { reason } =
+            port.transition("f", "root", Moment::Enter, 1, 1, None)
+        else {
+            panic!("a hook that could not answer did not say yes");
+        };
+        assert!(reason.contains("/bin/sh"), "{reason}");
+        assert!(reason.contains("exited 3"), "{reason}");
+        assert!(reason.contains("no engine"), "{reason}");
+
+        let mut refusing = declared(
+            "transition",
+            None,
+            r#"printf '{"reason": "the tests are red"}'; exit 2"#,
+        );
+        assert_eq!(
+            refusing.transition(
+                "f",
+                "root",
+                Moment::Leave,
+                1,
+                1,
+                Some((false, &Handoff::new()))
+            ),
+            HookDecision::block("the tests are red")
+        );
     }
 
     #[test]

@@ -271,6 +271,7 @@ mod tests {
             input_tokens: input,
             output_tokens: output,
             cached_input_tokens: cached,
+            cache_creation_input_tokens: None,
         }
     }
 

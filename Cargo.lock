@@ -102,7 +102,9 @@ name = "b10x-harness-cli"
 version = "0.1.0"
 dependencies = [
  "b10x-harness-app-server",
+ "b10x-harness-credential",
  "b10x-harness-loop",
+ "b10x-harness-messages",
  "b10x-harness-responses",
  "b10x-harness-substrate",
  "b10x-harness-tools",
@@ -110,6 +112,15 @@ dependencies = [
  "clap",
  "ctrlc",
  "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "b10x-harness-credential"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-wire",
  "serde_json",
  "tempfile",
 ]
@@ -133,6 +144,19 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "b10x-harness-messages"
+version = "0.1.0"
+dependencies = [
+ "b10x-harness-credential",
+ "b10x-harness-loop",
+ "b10x-harness-wire",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

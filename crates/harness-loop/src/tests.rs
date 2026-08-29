@@ -39,6 +39,7 @@ fn usage(input: u64, output: u64) -> Usage {
         input_tokens: input,
         output_tokens: output,
         cached_input_tokens: 0,
+        cache_creation_input_tokens: None,
     }
 }
 

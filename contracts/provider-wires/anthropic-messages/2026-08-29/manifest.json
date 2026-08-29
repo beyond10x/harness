@@ -1,0 +1,83 @@
+{
+  "wire": "anthropic-messages",
+  "version": "2026-08-29",
+  "transport": "https-sse",
+  "endpoint": "POST {base_url}/messages",
+  "streaming": true,
+  "stateful": false,
+  "api_version": "2023-06-01",
+  "request_headers": {
+    "always": [
+      "accept",
+      "content-type",
+      "anthropic-version"
+    ],
+    "api-key": [
+      "accept",
+      "content-type",
+      "anthropic-version",
+      "x-api-key"
+    ],
+    "oauth": [
+      "accept",
+      "content-type",
+      "anthropic-version",
+      "authorization",
+      "anthropic-beta"
+    ],
+    "oauth_beta": "oauth-2025-04-20"
+  },
+  "request_fields": [
+    "max_tokens",
+    "messages",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "temperature",
+    "tools",
+    "top_p"
+  ],
+  "stream_events": [
+    "content_block_delta",
+    "content_block_start",
+    "content_block_stop",
+    "message_delta",
+    "message_start",
+    "message_stop",
+    "ping"
+  ],
+  "content_block_deltas": [
+    "input_json_delta",
+    "signature_delta",
+    "text_delta",
+    "thinking_delta"
+  ],
+  "output_items": [
+    "text",
+    "tool_use",
+    "thinking",
+    "redacted_thinking"
+  ],
+  "unmodelled_output_items": "preserved as opaque and reported as a warning",
+  "usage_fields": [
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "output_tokens"
+  ],
+  "usage_is_disjoint": true,
+  "conformance": "provider_emulated",
+  "files": [
+    {
+      "path": "fixtures/turn-request.json",
+      "bytes": 1537,
+      "sha256": "8d35d4397509f5b8fcc7221014df838b0595e967c3a85051ad952e68d535bcc6"
+    },
+    {
+      "path": "fixtures/turn-stream.sse",
+      "bytes": 2064,
+      "sha256": "87c6d3adf88176d1b692d5148442651a721f2507c226abe93882a2c968e7e5c9"
+    }
+  ]
+}

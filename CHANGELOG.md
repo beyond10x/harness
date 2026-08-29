@@ -7,6 +7,94 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A second wire: `anthropic-messages`, over `POST {base}/messages`.** Streaming SSE, request
+  projection, tool-call decode, usage, stop reasons, cancellation and typed status mapping — the
+  same loop, unchanged, behind a second projection. `b10x-harness run --wire anthropic-messages`
+  selects it, defaulting to the wire this harness shipped with so every existing invocation still
+  means what it did. The wire is a branch in exactly one function; below it the loop holds a
+  `ModelPort` and cannot tell which projection it got.
+
+  What the projection actually had to do, none of which the first wire needed: group a flat item
+  list into **role-alternating messages** with content blocks, put a tool result in the *user*
+  message that answers a `tool_use` block in an assistant one, carry tool arguments as a JSON
+  **object** rather than as encoded text, send `effort` under `output_config` rather than under
+  `reasoning`, and supply `max_tokens` — which this route **requires**, so absence cannot be
+  preserved and resolves to a number the endpoint declares.
+
+- **`thinking` and `redacted_thinking` blocks are opaque items.** Assembled from their
+  `thinking_delta` and `signature_delta` fragments, kept whole, and replayed byte for byte **and in
+  place** — nothing reorders content blocks, which is what keeps a thinking block first in its
+  message without this code having to know why that matters. The reasoning text is never emitted to
+  a reader: opaque means opaque. Replaying one into the Responses wire, or a `reasoning` item into
+  this one, is a typed refusal naming both wires rather than a silent drop (invariant 5); both
+  directions are now tested at the client, not only at the type.
+
+- **`contracts/provider-wires/anthropic-messages/2026-08-29`**, checked from both directions like
+  every other pin. It adds two halves the first wire has no equivalent of: the
+  `content_block_delta` sub-types — on this route the interesting variation is *inside* one outer
+  event name, so pinning the outer names alone would pin almost nothing — and the **header names
+  each credential kind travels under**, checked against the same function the client calls to build
+  them.
+
+- **`harness-credential`, and a `BearerSource` for a subscription token.**
+  `SubscriptionToken` reads a token from a file or an environment variable the caller **names**,
+  optionally at a caller-named JSON pointer, and re-reads it on **every** call — so a token an owner
+  outside this process renews is followed without restarting the run. There is no default path, no
+  vendor directory it looks in, and no fallback when the named source is missing: a source that
+  searched on failure would be an ambient credential fallback whichever way it was spelled. New
+  flags: `--oauth-token-file`, `--oauth-token-env`, `--oauth-token-pointer`, mutually exclusive with
+  the API-key flags.
+
+  Its own crate rather than part of a wire, because **nothing about it is vendor-shaped**: the two
+  subscription routes this harness cares about hang off two different wires, and putting the source
+  in one would make the other depend on it to reuse it. What *is* vendor-shaped is how the fetched
+  credential is presented, and that stays in the wire crate.
+
+- **Both wires pass the same loop suite.** `harness-messages`'s provider-emulated suite is
+  `harness-responses`'s, case for case, over a second deterministic local endpoint with the same
+  scenario names — and `the_two_wires_serve_the_same_scenarios` compares the two emulators' own
+  declarations, so a case added to one and not the other fails the gate instead of being noticed a
+  release later.
+
+### Changed
+
+- **`harness_wire::Usage` gained `cache_creation_input_tokens`,** an `Option`. The second route
+  bills cache *writes* as their own class; dropping the figure would make a cache-writing turn
+  indistinguishable from one that wrote nothing. It is optional because a route that never mentions
+  cache writes has **not** said there were none (invariant 7). Nothing prices it separately — the
+  rate card has no cache-write field — so it is counted inside `input_tokens` and priced at the
+  input rate, which understates such a turn; carrying the figure is what makes that visible.
+
+  `Usage` now also documents the invariant it had only ever implied: **`input_tokens` is the whole
+  and the cache figures are parts of it.** The second route reports its three input figures
+  *disjointly*, so its projection sums them — left unsummed, every cached turn would have reported
+  fewer input tokens than it was charged for and priced itself low.
+
+- **`harness_wire::BearerSource` gained `kind`,** defaulted to `CredentialKind::ApiKey`. One
+  endpoint, two routes, the same secret under **different header names** — so which kind a
+  credential is stopped being derivable from the wire alone and became a property of the source.
+  The kind is neutral; the header names (`x-api-key`, `authorization`, `anthropic-beta`) stay in the
+  wire crate, which is where every vendor-shaped byte belongs (invariant 3).
+
+### Known gaps
+
+- **The transport half of the two wires is duplicated, and that is this change's real finding.**
+  Bounded SSE framing, the retry rule, the witnessed sink that makes the retry rule safe, the
+  back-off and the status mapping were copied from `harness-responses` unchanged, because none of it
+  is vendor-shaped — it is *transport*-shaped, and the first wire could not tell the difference
+  while it was the only one. A `harness-http` beneath both is what that argues for. It was
+  deliberately not done here so that this change is the evidence rather than a guess acting on
+  itself.
+- **No subscription route has been contacted, and nothing renews a token.** The Anthropic header
+  shapes are `provider_emulated`; the emulator records which header carried a credential and its
+  length, never its value. A token nobody renews expires and the run fails by name.
+- **The conversation is not prompt-cached on the second wire.** One `cache_control` breakpoint
+  covers the constant head (`tools`, then `system`); the growing tail — which is what makes a
+  stateless run's cost quadratic in its turns — needs a placement rule there is no measurement for
+  yet.
+
 ## [0.1.0] — 2026-08-24
 
 First tagged release. The entries below cover everything since the component was established;

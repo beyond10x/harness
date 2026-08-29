@@ -43,22 +43,69 @@ processes have never spoken, and `STATUS.md` says so rather than implying otherw
 
 ## Phase 3: the second wire
 
-**Status: not started.**
+**Status: complete.**
 
-`anthropic-messages` over `POST {base}/messages`. Same loop, same fixtures re-pointed; the work is
+`anthropic-messages` over `POST {base}/messages`. Same loop, same fixtures re-pointed; the work was
 the projection, plus `thinking` blocks becoming opaque items.
 
-**Exit:** both wires pass the same loop suite. If `harness-wire` needs widening to fit the second
-wire, that widening is the evidence the first abstraction was wrong — it lands here, with the
-reason recorded, rather than being guessed at in phase 1.
+**Exit evidence:** both wires pass the same 20-case loop suite against a real socket — the same case
+names over the same scenario names, with `the_two_wires_serve_the_same_scenarios` failing if either
+side grows a case the other lacks. The shipped binary drives either one on a `--wire` flag and the
+loop below it cannot tell which it got. `contracts/provider-wires/anthropic-messages/2026-08-29`
+pins the request, the stream and the credential headers, checked from both directions. Reached.
+
+`harness-wire` needed widening twice, and each widening carries its reason where it lands:
+
+- **`Usage::cache_creation_input_tokens`.** The second route bills cache *writes* as their own
+  class. It is an `Option` because a route that never mentions cache writes has not said there were
+  none. `Usage` now also states out loud what it had only ever implied — `input_tokens` is the whole
+  and the cache figures are parts of it — because the second route reports its three input figures
+  **disjointly** and something had to reconcile the two. The projection sums them; a value whose
+  meaning depended on which wire produced it would make every figure downstream ambiguous.
+- **`BearerSource::kind`.** One endpoint, two routes, the same secret under **different header
+  names**. The first wire never needed to know what kind of credential it held because there was
+  only one answer. The kind is neutral; the header names stay in the wire crate.
+
+**And one thing the second wire proved wrong that is not in `harness-wire` at all.** Everything
+between the HTTP client and the projection — bounded SSE framing, the retry rule, the witnessed sink
+that makes the retry rule safe, the back-off, the status mapping — was copied unchanged, because
+none of it is vendor-shaped. It is *transport*-shaped, and the first wire could not tell the
+difference while it was the only one. A `harness-http` beneath both wires is the next structural
+move; it was deliberately not made here, so that this change is the evidence rather than a guess
+acting on itself.
 
 ## Phase 4: subscription authentication
 
-**Status: not started.**
+**Status: the source exists; renewal and the authorized runs do not.**
 
 ChatGPT/Codex and Claude subscription routes: OAuth plus per-route headers, as further
 `BearerSource` implementations. Last, because they carry credential-custody questions an API key
 does not.
+
+Done:
+
+- `harness_credential::SubscriptionToken`, a `BearerSource` that reads a token from a file or an
+  environment variable the caller **names**, optionally at a caller-named JSON pointer. No default
+  path, no vendor directory, no fallback when the named source is missing — the harness reads
+  nothing it was not pointed at, and a source that searched on failure would be an ambient
+  credential fallback whichever way it was spelled;
+- re-read on **every** call rather than cached at construction, which is the whole of the renewal
+  story here: an owner outside this process that renews the token is followed on the next turn;
+- per-route presentation, keyed off the neutral `CredentialKind`: `authorization: Bearer` plus
+  `anthropic-beta: oauth-2025-04-20` for a subscription token, `x-api-key` for a key issued to a
+  program. The header names are pinned in the Messages contract and checked against the function the
+  client itself calls;
+- `--oauth-token-file` / `--oauth-token-env` / `--oauth-token-pointer`, mutually exclusive with the
+  API-key flags.
+
+Not done, and stated so nobody reads the absence as working:
+
+- **renewal.** Nothing here holds a refresh token or calls an authorization server. A token nobody
+  renews expires and the run fails by name;
+- **the authorized runs.** No subscription route has been contacted. The Anthropic header shapes are
+  `provider_emulated` — a deterministic local endpoint records *which header carried a credential*
+  and its length, never its value. The ChatGPT/Codex half needs no new code at all: that route takes
+  its access token as a plain bearer, which `StaticBearer` already does.
 
 **Exit:** one authorized run on each, with the credential never leaving the source that owns it.
 

@@ -20,12 +20,21 @@ struct Fixture {
 
 impl Fixture {
     fn start(scenario: &str) -> Self {
+        Self::of("harness-responses", "fake_responses.py", scenario)
+    }
+
+    /// The same fixture, pointed at the second wire's emulator.
+    fn messages(scenario: &str) -> Self {
+        Self::of("harness-messages", "fake_messages.py", scenario)
+    }
+
+    fn of(crate_name: &str, script: &str, scenario: &str) -> Self {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("harness-responses")
+            .join(crate_name)
             .join("tests")
             .join("fixtures")
-            .join("fake_responses.py");
+            .join(script);
         let mut child = Command::new("python3")
             .arg(&script)
             .arg("--scenario")
@@ -271,5 +280,61 @@ fn the_tools_subcommand_describes_the_toolset_without_an_endpoint() {
             .all(|tool| tool["approval"] == serde_json::json!("not-required")),
         "the shipped toolset is read-only: {}",
         output.stdout
+    );
+}
+
+#[test]
+fn the_binary_drives_the_second_wire_and_calls_a_real_tool_through_it() {
+    // Phase 3's exit criterion at the outermost layer: the shipped binary, one flag different,
+    // against the other endpoint. Everything between the flag and the answer — the loop, the
+    // catalogue, the tools, the renderer — is the same code, which is the whole claim the second
+    // wire was built to test.
+    let fixture = Fixture::messages("tool");
+    let workspace = workspace();
+    let output = run_against(
+        &fixture,
+        &["--wire", "anthropic-messages", "--yes"],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert_eq!(output.stdout.trim(), "The file says: hello harness");
+}
+
+#[test]
+fn a_thinking_round_trip_completes_through_the_shipped_binary() {
+    // The second wire's opaque item, all the way out and back through the real binary: the
+    // `reasoning` scenario answers turn one with a `thinking` block and a tool call, and only
+    // completes turn two if the block was replayed byte for byte at the head of the assistant
+    // message. A wire that dropped it or reordered it ends here instead.
+    let fixture = Fixture::messages("reasoning");
+    let workspace = workspace();
+    let output = run_against(
+        &fixture,
+        &["--wire", "anthropic-messages", "--yes", "--json"],
+        workspace.path(),
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+
+    let usage: Vec<Value> = output
+        .stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|event| event["kind"] == "usage")
+        .collect();
+    assert!(
+        !usage.is_empty(),
+        "no usage reached the record: {}",
+        output.stdout
+    );
+    // 42 fresh plus 7 read from cache. This wire reports the two disjointly and the projection
+    // sums them, because the neutral `input_tokens` is the whole and cached is a part of it — a
+    // run that reported 42 here would price every cached turn low.
+    assert_eq!(usage[0]["input_tokens"], 49, "{}", usage[0]);
+    assert_eq!(
+        usage[0]["cached_input_tokens"],
+        Value::from(7),
+        "{}",
+        usage[0]
     );
 }

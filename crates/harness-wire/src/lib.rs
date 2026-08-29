@@ -15,7 +15,7 @@ mod item;
 mod port;
 mod turn;
 
-pub use bearer::{Bearer, BearerSource, StaticBearer};
+pub use bearer::{Bearer, BearerSource, CredentialKind, StaticBearer};
 pub use bound::{
     MAX_INSTRUCTION_BYTES, MAX_TOOL_ARGUMENT_BYTES, MAX_TOOL_DESCRIPTION_BYTES,
     MAX_TOOL_RESULT_BYTES, MAX_TOOLS, encoded_len, exceeds,

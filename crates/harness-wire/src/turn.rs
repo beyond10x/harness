@@ -220,6 +220,17 @@ pub enum StopReason {
 ///
 /// Every field is a report, never a host measurement. A provider that reports nothing produces no
 /// `Usage` at all rather than a zeroed one, because a zero is a claim that no tokens were spent.
+///
+/// # `input_tokens` is the whole, and the cache figures are parts of it
+///
+/// Stated here because it was previously stated nowhere and only one wire existed to disagree
+/// with. `input_tokens` counts **every** input token the turn was charged for, and
+/// [`Usage::cached_input_tokens`] and [`Usage::cache_creation_input_tokens`] are subsets of it —
+/// which is why [`crate`]'s only consumer computes the uncached count as a difference.
+///
+/// The second wire reports its three input figures **disjointly**, so its projection sums them
+/// before filling this in. That is the projection's job, not the reader's: a value whose meaning
+/// depended on which wire produced it would make every figure downstream ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
@@ -227,6 +238,21 @@ pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_input_tokens: u64,
+    /// Input tokens the provider charged to **write** into its prompt cache, when it says so.
+    ///
+    /// # Why this is an `Option` and the others are not
+    ///
+    /// It is the one figure a provider may not report at all, and the distinction matters: a wire
+    /// whose provider never mentions cache writes must not claim there were none. [`None`] is
+    /// *unreported*; `Some(0)` is *reported as zero* (AGENTS.md invariant 7).
+    ///
+    /// It arrived with the second wire, which reports it and bills it above the plain input rate.
+    /// Nothing here prices it separately — the rate card has no field for a cache-write premium —
+    /// so it is counted inside `input_tokens` and priced at the input rate, which understates a
+    /// cache-writing turn. Carrying the figure is what makes that understatement visible instead
+    /// of invisible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -428,6 +454,35 @@ mod tests {
             Vec::new(),
         );
         assert!(turn.check_opaque_items(&wire).is_ok());
+    }
+
+    #[test]
+    fn a_cache_write_figure_nobody_reported_is_absent_rather_than_zero() {
+        // `Some(0)` is *reported as zero*; `None` is *not reported*. A wire whose provider never
+        // mentions cache writes must not claim on its behalf that there were none.
+        let usage = Usage {
+            model: "m".to_owned(),
+            input_tokens: 10,
+            output_tokens: 2,
+            cached_input_tokens: 0,
+            cache_creation_input_tokens: None,
+        };
+        let encoded = serde_json::to_value(&usage).expect("serializes");
+        assert!(
+            encoded.get("cache_creation_input_tokens").is_none(),
+            "{encoded}"
+        );
+        // And a wire that does report it round trips the number rather than the absence.
+        let reported = Usage {
+            cache_creation_input_tokens: Some(0),
+            ..usage.clone()
+        };
+        let encoded = serde_json::to_value(&reported).expect("serializes");
+        assert_eq!(encoded["cache_creation_input_tokens"], serde_json::json!(0));
+        assert_eq!(
+            serde_json::from_value::<Usage>(encoded).expect("deserializes"),
+            reported
+        );
     }
 
     #[test]

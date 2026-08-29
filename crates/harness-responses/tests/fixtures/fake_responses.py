@@ -17,6 +17,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MODEL = "b10x-emulated"
 
+# The scenarios both emulators serve. Declared here and in the Messages emulator, and asserted
+# equal by a test: the roadmap's exit criterion for the second wire is that both wires pass the
+# same loop suite, and a suite the two sides could name differently is one that could drift
+# apart while both stayed green.
+SCENARIOS = [
+    "bad-arguments",
+    "cold",
+    "cold-once",
+    "dynamic-tool",
+    "failed",
+    "incomplete",
+    "malformed",
+    "no-usage",
+    "reasoning",
+    "slow",
+    "text",
+    "tool",
+    "truncated",
+    "unauthorized",
+    "unknown-events",
+    "unpublished-tool"
+]
+
 RECORD_LOCK = threading.Lock()
 
 
@@ -371,7 +394,16 @@ def main():
     parser.add_argument("--scenario", default="text")
     parser.add_argument("--record")
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--list-scenarios",
+        action="store_true",
+        help="print the scenario names this emulator serves and exit",
+    )
     arguments = parser.parse_args()
+
+    if arguments.list_scenarios:
+        print(json.dumps(SCENARIOS), flush=True)
+        return 0
 
     Handler.scenario = arguments.scenario
     Handler.record_path = arguments.record

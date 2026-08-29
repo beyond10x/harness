@@ -30,6 +30,27 @@ impl std::fmt::Debug for Bearer {
     }
 }
 
+/// What kind of secret a source answers with, so a wire can present it the way its route wants.
+///
+/// # Why the neutral layer knows this at all
+///
+/// The first wire never needed it: one route, one presentation, one header, and the adapter could
+/// hard-code it. The second wire has two routes for the same endpoint that take the *same string*
+/// under **different header names** — one for a key issued to a program, one for a token obtained
+/// on a person's behalf — so which one a credential is stopped being derivable from the wire alone
+/// and became a property of the source that produced it.
+///
+/// This names the **kind**, never the header. Header names are vendor-shaped bytes and live in the
+/// wire crate (AGENTS.md invariant 3); a source declares what it holds and the wire decides how to
+/// send it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CredentialKind {
+    /// A long-lived secret issued to a program.
+    ApiKey,
+    /// A short-lived token obtained on a person's behalf, which expires and is renewed elsewhere.
+    Oauth,
+}
+
 /// Where a wire adapter obtains its credential, at call time.
 ///
 /// The indirection is the point: no config struct in this component holds a secret, so no config
@@ -42,6 +63,14 @@ pub trait BearerSource: Send + Sync {
     /// Returns a typed refusal when the credential is unavailable. The message must name the
     /// source, never the value.
     fn bearer(&self) -> Result<Bearer, WireError>;
+
+    /// What kind of secret [`BearerSource::bearer`] answers with.
+    ///
+    /// Defaulted to [`CredentialKind::ApiKey`], which is what every source written before a wire
+    /// could tell the difference actually holds.
+    fn kind(&self) -> CredentialKind {
+        CredentialKind::ApiKey
+    }
 }
 
 /// A credential the caller already holds.
@@ -77,6 +106,13 @@ mod tests {
         let source = StaticBearer::new("token");
         assert_eq!(source.bearer().expect("available").expose(), "token");
         assert_eq!(format!("{source:?}"), "StaticBearer(<redacted>)");
+    }
+
+    #[test]
+    fn a_source_that_says_nothing_holds_an_api_key() {
+        // The default is what every source written before a wire could tell the difference
+        // actually holds. A source whose secret is presented differently says so.
+        assert_eq!(StaticBearer::new("token").kind(), CredentialKind::ApiKey);
     }
 
     #[test]

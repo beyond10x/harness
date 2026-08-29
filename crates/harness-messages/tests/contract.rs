@@ -3,17 +3,20 @@
 //! A contract that is only prose drifts silently. These two fixtures are the wire: change what the
 //! harness sends or what it accepts, and one of them stops matching.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use b10x_harness_responses::{WIRE, decode_stream, request_body};
+use b10x_harness_messages::{
+    ANTHROPIC_VERSION, OAUTH_BETA, WIRE, decode_stream, header_names, request_body,
+};
 use harness_wire::{
-    Approval, CallId, Envelope, Item, Sampling, StopReason, ToolCall, ToolName, ToolOutcome,
-    ToolSpec, Usage, VecSink, WireId,
+    Approval, CallId, CredentialKind, Envelope, Item, Sampling, StopReason, ToolCall, ToolName,
+    ToolOutcome, ToolSpec, Usage, VecSink, WireId,
 };
 use serde_json::{Value, json};
 
-const VERSION: &str = "2026-08-22";
+const VERSION: &str = "2026-08-29";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,7 +41,16 @@ fn manifest() -> Value {
     .expect("the manifest is JSON")
 }
 
-/// The canonical turn: an instruction, a person's input, a replayed reasoning item, one call and
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|entry| entry.as_str().expect("a string").to_owned())
+        .collect()
+}
+
+/// The canonical turn: an instruction, a person's input, a replayed thinking block, one call and
 /// its result. Every field the harness ever sends appears here.
 fn canonical_request() -> Value {
     let items = vec![
@@ -46,19 +58,19 @@ fn canonical_request() -> Value {
         Item::Opaque {
             wire: WireId::new(WIRE).expect("valid"),
             payload: json!({
-                "id": "rs_1",
-                "type": "reasoning",
-                "summary": [],
-                "encrypted_content": "OPAQUE",
+                "type": "thinking",
+                "thinking": "OPAQUE-REASONING-BLOB",
+                "signature": "OPAQUE-SIGNATURE",
             }),
         },
+        Item::assistant("Reading the readme."),
         Item::ToolCall(ToolCall {
-            call_id: CallId::new("call_1").expect("valid"),
+            call_id: CallId::new("toolu_1").expect("valid"),
             name: ToolName::new("workspace_read").expect("valid"),
             arguments: json!({"path": "README.md"}),
         }),
         Item::result(
-            CallId::new("call_1").expect("valid"),
+            CallId::new("toolu_1").expect("valid"),
             ToolOutcome::ok(json!({"text": "hello harness"})),
         ),
     ];
@@ -75,15 +87,14 @@ fn canonical_request() -> Value {
         envelope: Envelope::default(),
     }];
     request_body(
-        // Fixed here so the pinned fixture stays byte-stable; a real run's is per-conversation.
-        "b10x-session-fixture",
         "b10x-emulated",
         "be useful",
         &items,
         &tools,
-        Some(4096),
-        // Set, not defaulted. A fixture with the sampling fields absent would pin only that they
-        // can be left out, which is what the previous version already pinned.
+        // Named, not defaulted: this route requires an output bound, so the fixture pins what one
+        // looks like rather than pinning that it can be left out — it cannot.
+        4096,
+        // Set, not defaulted, for the same reason the first wire's fixture sets them.
         &Sampling {
             temperature: Some(0.2),
             top_p: Some(0.95),
@@ -111,13 +122,27 @@ fn the_manifest_names_exactly_the_request_fields_the_harness_sends() {
         .keys()
         .cloned()
         .collect();
-    let pinned: Vec<String> = manifest()["request_fields"]
-        .as_array()
-        .expect("an array")
-        .iter()
-        .map(|value| value.as_str().expect("a string").to_owned())
-        .collect();
-    assert_eq!(sent, pinned);
+    assert_eq!(sent, strings(&manifest()["request_fields"]));
+}
+
+#[test]
+fn the_manifest_names_exactly_the_headers_the_harness_sends() {
+    // **The half the Python checker cannot see.** The credential's presentation is not in the
+    // body, and it is the difference between a key issued to a program and a token obtained on a
+    // person's behalf. Sending either under the other's header is a 401 that names authentication
+    // and never mentions the header, which is the failure this pin exists to prevent.
+    let pinned = &manifest()["request_headers"];
+    assert_eq!(strings(&pinned["always"]), header_names(None));
+    assert_eq!(
+        strings(&pinned["api-key"]),
+        header_names(Some(CredentialKind::ApiKey))
+    );
+    assert_eq!(
+        strings(&pinned["oauth"]),
+        header_names(Some(CredentialKind::Oauth))
+    );
+    assert_eq!(pinned["oauth_beta"], json!(OAUTH_BETA));
+    assert_eq!(manifest()["api_version"], json!(ANTHROPIC_VERSION));
 }
 
 #[test]
@@ -132,14 +157,17 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
 
     assert_eq!(sink.text(), "Reading the readme.");
     assert_eq!(outcome.stop_reason, StopReason::ToolCalls);
+    // 42 fresh, 7 read from cache, 3 written to it. The neutral total is the sum, because
+    // `Usage::input_tokens` is the whole and the cache figures are parts of it — this route
+    // reports them disjointly and the projection is what reconciles the two.
     assert_eq!(
         outcome.usage,
         Some(Usage {
             model: "b10x-emulated".to_owned(),
-            input_tokens: 42,
+            input_tokens: 52,
             output_tokens: 11,
             cached_input_tokens: 7,
-            cache_creation_input_tokens: None,
+            cache_creation_input_tokens: Some(3),
         })
     );
 
@@ -155,11 +183,24 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
         .collect();
     assert_eq!(kinds, vec!["opaque", "tool-call", "assistant-text"]);
 
+    // The thinking block is carried whole, signature and all, and never reinterpreted.
+    assert_eq!(
+        outcome.items[0],
+        Item::Opaque {
+            wire: WireId::new(WIRE).expect("valid"),
+            payload: json!({
+                "type": "thinking",
+                "thinking": "OPAQUE-REASONING-BLOB",
+                "signature": "OPAQUE-SIGNATURE",
+            }),
+        }
+    );
+
     let call = outcome
         .tool_calls()
         .next()
         .expect("the pinned stream carries one call");
-    assert_eq!(call.call_id.as_str(), "call_1");
+    assert_eq!(call.call_id.as_str(), "toolu_1");
     assert_eq!(call.arguments, json!({"path": "README.md"}));
 
     // Nothing in the pinned stream may be unrecognized: a warning here means the subset drifted.
@@ -174,10 +215,9 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
 
 #[test]
 fn the_manifest_names_exactly_the_stream_events_the_fixture_carries() {
-    let seen: std::collections::BTreeSet<String> = fixture("turn-stream.sse")
+    let seen: BTreeSet<String> = fixture("turn-stream.sse")
         .lines()
         .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|payload| *payload != "[DONE]")
         .map(|payload| {
             serde_json::from_str::<Value>(payload).expect("each event is JSON")["type"]
                 .as_str()
@@ -185,11 +225,29 @@ fn the_manifest_names_exactly_the_stream_events_the_fixture_carries() {
                 .to_owned()
         })
         .collect();
-    let pinned: std::collections::BTreeSet<String> = manifest()["stream_events"]
-        .as_array()
-        .expect("an array")
-        .iter()
-        .map(|value| value.as_str().expect("a string").to_owned())
+    let pinned: BTreeSet<String> = strings(&manifest()["stream_events"]).into_iter().collect();
+    assert_eq!(seen, pinned);
+}
+
+#[test]
+fn the_manifest_names_exactly_the_content_block_deltas_the_fixture_carries() {
+    // A second layer the first wire does not have: on this route the interesting variation is
+    // inside `content_block_delta`, so pinning the outer event names alone would pin almost
+    // nothing.
+    let seen: BTreeSet<String> = fixture("turn-stream.sse")
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|payload| {
+            let event: Value = serde_json::from_str(payload).expect("each event is JSON");
+            event
+                .get("delta")
+                .and_then(|delta| delta.get("type"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    let pinned: BTreeSet<String> = strings(&manifest()["content_block_deltas"])
+        .into_iter()
         .collect();
     assert_eq!(seen, pinned);
 }

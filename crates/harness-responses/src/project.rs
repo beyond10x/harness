@@ -217,6 +217,9 @@ pub fn usage_from_response(response: &Value, model: &str) -> Option<Usage> {
         input_tokens: input,
         output_tokens: output,
         cached_input_tokens: cached,
+        // Absent, not zero: this wire's provider reports no cache-write figure at all, and a zero
+        // here would be this crate claiming on its behalf that it wrote nothing to its cache.
+        cache_creation_input_tokens: None,
     })
 }
 
@@ -596,6 +599,7 @@ mod tests {
                 input_tokens: 11,
                 output_tokens: 8,
                 cached_input_tokens: 4,
+                cache_creation_input_tokens: None,
             })
         );
     }

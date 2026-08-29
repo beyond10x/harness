@@ -17,7 +17,7 @@ It is deliberately small and carries no bridges to vendor binaries. **It depends
 |---|---|
 | observed by | [metaharness](https://github.com/beyond10x/metaharness) — its `b10x` adapter launches `b10x-harness run` and reads the `--json` record. Observed, not driven: the published toolset already *is* the policy |
 | confined by | [substrate](https://github.com/beyond10x/substrate) — embedded in-process, or over the daemon's socket |
-| reaches models through | any OpenAI-Responses endpoint, e.g. [llmgw](https://github.com/beyond10x/llmgw) |
+| reaches models through | any OpenAI-Responses endpoint, e.g. [llmgw](https://github.com/beyond10x/llmgw), or any Anthropic-Messages one |
 | mapped in | [atlas](https://github.com/beyond10x/atlas) |
 
 ## Status
@@ -28,7 +28,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | area | state |
 |---|---|
 | `openai-responses` wire | implemented, streaming, pinned by contract |
-| `anthropic-messages` wire | **not started** |
+| `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | command line (`run`, `tools`, `app-server`, `events`) | implemented |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
@@ -160,19 +160,30 @@ are refused by name rather than answered with a silent success.
 | wire | endpoint | state |
 | --- | --- | --- |
 | `openai-responses` | `POST {base}/responses`, streaming | implemented |
-| `anthropic-messages` | `POST {base}/messages`, streaming | not started |
+| `anthropic-messages` | `POST {base}/messages`, streaming | implemented |
 
-Turns are **stateless**: `store: false`, the whole conversation replayed each time. Reasoning items
-are carried verbatim as [`Item::Opaque`](crates/harness-wire/src/item.rs) tagged with the wire that
-produced them, so the model keeps its own chain of thought across a tool round trip and cannot have
-one provider's blob replayed into another's.
+`b10x-harness run --wire anthropic-messages` picks the second one. The wire is a branch in exactly
+one function; below it the loop holds a `ModelPort` and cannot tell which projection it got, which
+is the whole reason a second wire cost a second projection instead of a second loop.
+
+Turns are **stateless**: nothing is retained on the far side and the whole conversation is replayed
+each time. Reasoning — `reasoning` items on one wire, `thinking` and `redacted_thinking` blocks on
+the other — is carried verbatim as [`Item::Opaque`](crates/harness-wire/src/item.rs) tagged with the
+wire that produced it, so the model keeps its own chain of thought across a tool round trip and
+cannot have one provider's blob replayed into another's. Replaying one into a wire that did not
+produce it is a typed refusal naming both wires, not a silent drop.
+
+Both wires are exercised by the **same** loop suite over a real socket: the same case names against
+the same scenario names, with a test that fails if either side grows a case the other lacks.
 
 ## Layout
 
 | crate | owns |
 |---|---|
 | `crates/harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`. No I/O, no clock, no vendor field name. It defines the credential types; it reads and sends none |
+| `crates/harness-credential` | credential sources that read exactly what a caller pointed them at. Nothing vendor-shaped: how a fetched credential is *presented* belongs to the wire |
 | `crates/harness-responses` | the Responses projection and its HTTP/SSE client |
+| `crates/harness-messages` | the Messages projection and its HTTP/SSE client |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation |
 | `crates/harness-flow` | a workflow notation the loop runs natively: a DAG of sub-trees, validated before anything runs |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
@@ -197,7 +208,8 @@ Three suites drive real processes over real sockets and pipes:
 
 | suite | drives |
 |---|---|
-| `crates/harness-responses/tests/provider_emulated.rs` | the client and the loop against a local HTTP endpoint |
+| `crates/harness-responses/tests/provider_emulated.rs` | the first wire's client and the loop against a local HTTP endpoint |
+| `crates/harness-messages/tests/provider_emulated.rs` | the same suite, pointed at the second wire |
 | `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace |
 | `crates/harness-cli/tests/bridge_mode.rs` | the shipped binary driven as a bridge would drive it |
 

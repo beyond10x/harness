@@ -710,6 +710,44 @@ mod tests {
     }
 
     #[test]
+    fn a_foreign_opaque_item_is_refused_by_name_rather_than_replayed() {
+        // AGENTS.md invariant 5, from this side. The symmetric case lives in `harness-messages`;
+        // both exist because the failure is asymmetric in practice — a `thinking` block carries a
+        // signature the other provider cannot verify, and a `reasoning` blob is encrypted to an
+        // account this route knows nothing about. Either one, replayed, is at best a hard error
+        // and at worst silently poisoned context.
+        use harness_wire::StaticBearer;
+
+        let endpoint = Endpoint::new("https://gw.example/v1", "m", 8192).expect("valid");
+        let mut client = ResponsesClient::new(
+            endpoint,
+            std::sync::Arc::new(StaticBearer::new("synthetic")),
+        )
+        .expect("the client builds");
+        let request = TurnRequest {
+            model: "m".to_owned(),
+            instructions: String::new(),
+            items: vec![
+                Item::user("hi"),
+                Item::Opaque {
+                    wire: WireId::new("anthropic-messages").expect("valid"),
+                    payload: json!({"type": "thinking", "signature": "SIG"}),
+                },
+            ],
+            tools: Vec::new(),
+            max_output_tokens: None,
+            sampling: harness_wire::Sampling::default(),
+        };
+        let mut sink = VecSink::new();
+        let error = client
+            .turn(&request, &mut sink)
+            .expect_err("a foreign opaque item refuses");
+        assert_eq!(error.code, WireErrorCode::Unsupported);
+        assert!(error.message.contains("anthropic-messages"), "{error}");
+        assert!(error.message.contains(WIRE), "{error}");
+    }
+
+    #[test]
     fn http_statuses_map_to_actionable_codes() {
         assert_eq!(
             status_error(reqwest::StatusCode::UNAUTHORIZED, "").code,

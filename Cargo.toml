@@ -2,7 +2,9 @@
 resolver = "3"
 members = [
     "crates/harness-wire",
+    "crates/harness-credential",
     "crates/harness-responses",
+    "crates/harness-messages",
     "crates/harness-loop",
     "crates/harness-flow",
     "crates/harness-substrate",
@@ -21,7 +23,9 @@ publish = false
 
 [workspace.dependencies]
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
+harness-credential = { package = "b10x-harness-credential", path = "crates/harness-credential" }
 harness-responses = { package = "b10x-harness-responses", path = "crates/harness-responses" }
+harness-messages = { package = "b10x-harness-messages", path = "crates/harness-messages" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
 harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }

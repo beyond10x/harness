@@ -21,8 +21,7 @@ use harness_app_server::ServerConfig;
 use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopCancel, LoopConfig, LoopStop,
 };
-use harness_responses::{Endpoint, ResponsesClient};
-use harness_wire::{Sampling, StaticBearer};
+use harness_wire::{ModelPort, Sampling, StaticBearer};
 
 pub use render::Renderer;
 
@@ -96,6 +95,22 @@ fn standing_instruction(
     text
 }
 
+/// Which model API this run speaks.
+///
+/// A flag and not a guess. Two wires reach different endpoints under the same `--base-url`, take
+/// different credential headers, and carry opaque items that may not cross between them — so a
+/// harness that inferred the wire from the URL would be one whose run failed at the far side
+/// instead of at the command line. The default is the wire this harness shipped with, so every
+/// existing invocation means what it did before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+enum Wire {
+    /// `POST {base-url}/responses`.
+    #[default]
+    OpenaiResponses,
+    /// `POST {base-url}/messages`.
+    AnthropicMessages,
+}
+
 /// Whether a declared scope is stated in the instruction as well as bound into the tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum ScopeAnnounce {
@@ -151,6 +166,7 @@ struct EventsOptions {
 }
 
 #[derive(Debug, Args)]
+#[command(group = clap::ArgGroup::new("oauth_source").args(["oauth_token_file", "oauth_token_env"]))]
 struct AppServerOptions {
     /// Endpoint origin plus API prefix, for example `https://llmgw.example/v1`.
     #[arg(long)]
@@ -167,6 +183,26 @@ struct AppServerOptions {
     /// Name of an environment variable holding the bearer credential.
     #[arg(long, conflicts_with = "api_key_file")]
     api_key_env: Option<String>,
+    /// File holding a subscription OAuth token, for a route that takes one instead of an API key.
+    ///
+    /// Named, like every other credential source here: there is no default path and no vendor
+    /// directory this looks in. The file is re-read on **every** call, so a token an owner outside
+    /// this process renews is picked up without restarting the run — nothing here renews one.
+    #[arg(long, conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_env"])]
+    oauth_token_file: Option<PathBuf>,
+    /// Name of an environment variable holding a subscription OAuth token.
+    #[arg(long, conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_file"])]
+    oauth_token_env: Option<String>,
+    /// JSON pointer to the token inside the named source, when that source is a JSON document.
+    ///
+    /// Absent means the whole source is the token. Named rather than known: which field a given
+    /// credential store puts its access token in is that store's business, and a built-in path
+    /// would silently read the wrong field the day it changed.
+    #[arg(long, value_name = "POINTER", requires = "oauth_source")]
+    oauth_token_pointer: Option<String>,
+    /// Which model API to speak. Both reach `--base-url`; they are different endpoints under it.
+    #[arg(long, value_name = "WIRE", default_value = "openai-responses")]
+    wire: Wire,
     /// Ceiling on model turns, applied to every turn on the connection.
     #[arg(long)]
     max_turns: Option<u64>,
@@ -176,6 +212,7 @@ struct AppServerOptions {
 }
 
 #[derive(Debug, Args)]
+#[command(group = clap::ArgGroup::new("oauth_source").args(["oauth_token_file", "oauth_token_env"]))]
 struct RunOptions {
     /// Endpoint origin plus API prefix, for example `https://llmgw.example/v1`.
     #[arg(long)]
@@ -193,6 +230,26 @@ struct RunOptions {
     /// the harness reads no credential it was not pointed at.
     #[arg(long, conflicts_with = "api_key_file")]
     api_key_env: Option<String>,
+    /// File holding a subscription OAuth token, for a route that takes one instead of an API key.
+    ///
+    /// Named, like every other credential source here: there is no default path and no vendor
+    /// directory this looks in. The file is re-read on **every** call, so a token an owner outside
+    /// this process renews is picked up without restarting the run — nothing here renews one.
+    #[arg(long, conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_env"])]
+    oauth_token_file: Option<PathBuf>,
+    /// Name of an environment variable holding a subscription OAuth token.
+    #[arg(long, conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_file"])]
+    oauth_token_env: Option<String>,
+    /// JSON pointer to the token inside the named source, when that source is a JSON document.
+    ///
+    /// Absent means the whole source is the token. Named rather than known: which field a given
+    /// credential store puts its access token in is that store's business, and a built-in path
+    /// would silently read the wrong field the day it changed.
+    #[arg(long, value_name = "POINTER", requires = "oauth_source")]
+    oauth_token_pointer: Option<String>,
+    /// Which model API to speak. Both reach `--base-url`; they are different endpoints under it.
+    #[arg(long, value_name = "WIRE", default_value = "openai-responses")]
+    wire: Wire,
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
@@ -413,8 +470,20 @@ struct ToolsOptions {
 /// the run sends no `authorization` header, which is right for a gateway on this machine that
 /// authenticates nobody, and for a run deliberately started with no credential whose first request
 /// is meant to be refused by the far end.
-fn resolve_credential(options: &RunOptions) -> Result<Option<String>, String> {
-    credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())
+fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
+    if let Some(token) = subscription_token(
+        options.oauth_token_file.as_ref(),
+        options.oauth_token_env.as_ref(),
+        options.oauth_token_pointer.as_ref(),
+    ) {
+        return Ok(Credential::Subscription(token));
+    }
+    Ok(
+        match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())? {
+            Some(value) => Credential::Key(value),
+            None => Credential::Unnamed,
+        },
+    )
 }
 
 fn credential_from(
@@ -443,26 +512,128 @@ fn credential_from(
     Ok(Some(value))
 }
 
-/// A client for this endpoint, authenticated or deliberately not.
-fn model_client(
-    endpoint: Endpoint,
-    credential: Option<String>,
-    cancel: &LoopCancel,
-) -> Result<ResponsesClient, String> {
-    match credential {
-        Some(value) => ResponsesClient::new(endpoint, Arc::new(StaticBearer::new(value))),
-        None => ResponsesClient::unauthenticated(endpoint),
+/// Where this run's credential comes from, resolved once from the flags.
+///
+/// Three states and not two. **Naming nothing is itself a declaration** — the run sends no
+/// credential header at all, which is right for a gateway on this machine that authenticates
+/// nobody, and for a run deliberately started with no credential whose first request is meant to be
+/// refused by the far end.
+enum Credential {
+    /// The caller named no source.
+    Unnamed,
+    /// A key issued to a program, read once from the file or variable the caller named.
+    Key(String),
+    /// A token obtained on a person's behalf, re-read from its named source on every call.
+    ///
+    /// Held as the source and not as a value: nothing in this process ever holds the token, which
+    /// is what makes an expired one recoverable without restarting the run.
+    Subscription(harness_credential::SubscriptionToken),
+    /// A source the caller already built, for a server that makes one client per turn and must
+    /// hand each of them the same source rather than resolving the flags again.
+    Shared(Arc<dyn harness_wire::BearerSource>),
+}
+
+impl std::fmt::Debug for Credential {
+    /// Redacted, and deliberately. The `Key` variant **is** the secret, so a derived `Debug` would
+    /// print it into every assertion failure and every panic message — which is the one thing
+    /// `harness_wire::Bearer` has no `Display` in order to prevent, undone one layer up.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Unnamed => "Credential::Unnamed",
+            Self::Key(_) => "Credential::Key(<redacted>)",
+            Self::Subscription(_) => "Credential::Subscription(<redacted>)",
+            Self::Shared(_) => "Credential::Shared(<redacted>)",
+        })
     }
-    .map(|client| client.with_cancel(cancel.clone()))
+}
+
+impl Credential {
+    fn source(self) -> Option<Arc<dyn harness_wire::BearerSource>> {
+        match self {
+            Self::Unnamed => None,
+            Self::Key(value) => Some(Arc::new(StaticBearer::new(value))),
+            Self::Subscription(token) => Some(Arc::new(token)),
+            Self::Shared(source) => Some(source),
+        }
+    }
+}
+
+fn subscription_token(
+    file: Option<&PathBuf>,
+    variable: Option<&String>,
+    pointer: Option<&String>,
+) -> Option<harness_credential::SubscriptionToken> {
+    let source = match (file, variable) {
+        (Some(path), _) => harness_credential::NamedSource::file(path),
+        (None, Some(name)) => harness_credential::NamedSource::environment(name),
+        (None, None) => return None,
+    };
+    let token = harness_credential::SubscriptionToken::new(source);
+    Some(match pointer {
+        Some(pointer) => token.at_pointer(pointer),
+        None => token,
+    })
+}
+
+/// A client for this endpoint on the wire the caller named, authenticated or deliberately not.
+///
+/// The wire is a branch **here and nowhere else**: below this line the loop holds a
+/// [`ModelPort`] and cannot tell which projection it got, which is the whole reason a second wire
+/// cost a second projection instead of a second loop.
+fn model_client(
+    wire: Wire,
+    base_url: &str,
+    model: &str,
+    context_window: u64,
+    max_output_tokens_per_turn: Option<u64>,
+    credential: Credential,
+    cancel: &LoopCancel,
+) -> Result<Box<dyn ModelPort>, String> {
+    let bearer = credential.source();
+    match wire {
+        Wire::OpenaiResponses => {
+            let endpoint = harness_responses::Endpoint::new(base_url, model, context_window)
+                .map_err(|error| error.to_string())?;
+            match bearer {
+                Some(source) => harness_responses::ResponsesClient::new(endpoint, source),
+                None => harness_responses::ResponsesClient::unauthenticated(endpoint),
+            }
+            .map(|client| Box::new(client.with_cancel(cancel.clone())) as Box<dyn ModelPort>)
+        }
+        Wire::AnthropicMessages => {
+            let mut endpoint = harness_messages::Endpoint::new(base_url, model, context_window)
+                .map_err(|error| error.to_string())?;
+            // This route requires an output bound, so a run that named one has named this too;
+            // one that did not gets the endpoint's declared number rather than a silent absence.
+            if let Some(limit) = max_output_tokens_per_turn {
+                endpoint = endpoint
+                    .with_max_output_tokens(limit)
+                    .map_err(|error| error.to_string())?;
+            }
+            match bearer {
+                Some(source) => harness_messages::MessagesClient::new(endpoint, source),
+                None => harness_messages::MessagesClient::unauthenticated(endpoint),
+            }
+            .map(|client| Box::new(client.with_cancel(cancel.clone())) as Box<dyn ModelPort>)
+        }
+    }
     .map_err(|error| error.to_string())
 }
 
 fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
-    let credential = credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())?;
-    let endpoint = Endpoint::new(&options.base_url, &options.model, options.context_window)
-        .map_err(|error| error.to_string())?;
-    let bearer: Option<Arc<dyn harness_wire::BearerSource>> = credential
-        .map(|value| Arc::new(StaticBearer::new(value)) as Arc<dyn harness_wire::BearerSource>);
+    let bearer: Option<Arc<dyn harness_wire::BearerSource>> = match subscription_token(
+        options.oauth_token_file.as_ref(),
+        options.oauth_token_env.as_ref(),
+        options.oauth_token_pointer.as_ref(),
+    ) {
+        Some(token) => Credential::Subscription(token).source(),
+        None => {
+            match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())? {
+                Some(value) => Credential::Key(value).source(),
+                None => None,
+            }
+        }
+    };
     let config = ServerConfig {
         model: options.model.clone(),
         budget: Budget {
@@ -475,12 +646,19 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
     // One client per turn: a turn that was interrupted leaves its token set, and reusing the
     // client would end the next turn before it started.
     let mut new_model = |cancel: harness_wire::Cancel| {
-        match &bearer {
-            Some(source) => ResponsesClient::new(endpoint.clone(), Arc::clone(source)),
-            None => ResponsesClient::unauthenticated(endpoint.clone()),
-        }
-        .map(|client| Box::new(client.with_cancel(cancel)) as Box<dyn harness_wire::ModelPort>)
-        .map_err(|error| error.to_string())
+        let credential = match &bearer {
+            None => Credential::Unnamed,
+            Some(source) => Credential::Shared(Arc::clone(source)),
+        };
+        model_client(
+            options.wire,
+            &options.base_url,
+            &options.model,
+            options.context_window,
+            options.max_output_tokens,
+            credential,
+            &cancel,
+        )
     };
     harness_app_server::serve(
         &config,
@@ -548,10 +726,16 @@ fn instructions(
 
 fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     let credential = resolve_credential(options)?;
-    let endpoint = Endpoint::new(&options.base_url, &options.model, options.context_window)
-        .map_err(|error| error.to_string())?;
     let cancel = LoopCancel::new();
-    let mut client = model_client(endpoint, credential, &cancel)?;
+    let mut client = model_client(
+        options.wire,
+        &options.base_url,
+        &options.model,
+        options.context_window,
+        options.max_output_tokens_per_turn,
+        credential,
+        &cancel,
+    )?;
     let mut tools = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -581,7 +765,7 @@ fn run_command(options: &RunOptions) -> Result<LoopStop, String> {
     install_interrupt(&cancel);
 
     let mut renderer = Renderer::new(io::stdout(), io::stderr(), options.json, options.quiet);
-    let outcome = AgentLoop::new(&mut client, &mut tools, approvals.as_mut(), config)
+    let outcome = AgentLoop::new(client.as_mut(), &mut tools, approvals.as_mut(), config)
         .with_cancel(cancel)
         .run(options.input.clone(), &mut renderer)
         .map_err(|error| error.to_string())?;
@@ -942,9 +1126,107 @@ mod tests {
         let path = dir.path().join("key");
         fs::write(&path, "  sk-test\n").expect("write");
         let options = options(&["--api-key-file", path.to_str().expect("utf-8 path")]);
+        let Credential::Key(value) = resolve_credential(&options).expect("readable") else {
+            panic!("an api key file resolves to a key");
+        };
+        assert_eq!(value, "sk-test");
+    }
+
+    #[test]
+    fn a_credential_never_reaches_a_panic_message() {
+        // `Bearer` has no `Display` so a secret cannot reach a log line by accident. That is
+        // undone one layer up the moment this enum derives `Debug`, and every assertion in this
+        // module prints it on failure.
         assert_eq!(
-            resolve_credential(&options).expect("readable"),
-            Some("sk-test".to_owned())
+            format!("{:?}", Credential::Key("sk-do-not-print-me".to_owned())),
+            "Credential::Key(<redacted>)"
+        );
+    }
+
+    #[test]
+    fn a_named_oauth_source_is_held_as_a_source_rather_than_read_at_startup() {
+        // The token is re-read on every call, so the flags resolve to something that knows *where*
+        // rather than to a value. A source that read at startup would serve an expired token for
+        // the rest of the run.
+        let options = options(&[
+            "--oauth-token-file",
+            "/named/by/the/caller",
+            "--oauth-token-pointer",
+            "/store/accessToken",
+        ]);
+        let credential =
+            resolve_credential(&options).expect("naming a source is not the same as reading it");
+        assert!(matches!(credential, Credential::Subscription(_)));
+        // And a file that is not there is not an error *yet*: it becomes one at the call, where
+        // the wire can report it as a typed refusal the loop understands.
+    }
+
+    #[test]
+    fn the_credential_kinds_are_mutually_exclusive_on_the_command_line() {
+        for pair in [
+            vec!["--api-key-env", "KEY", "--oauth-token-file", "/t"],
+            vec!["--api-key-file", "/k", "--oauth-token-env", "TOKEN"],
+            vec!["--oauth-token-file", "/t", "--oauth-token-env", "TOKEN"],
+        ] {
+            let base = vec![
+                "b10x-harness",
+                "run",
+                "--base-url",
+                "https://gw.example/v1",
+                "--model",
+                "m",
+                "--input",
+                "hi",
+            ];
+            assert!(
+                parse(&[base, pair.clone()].concat()).is_err(),
+                "{pair:?} must not parse: a run has one credential, not two"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pointer_without_a_source_to_point_into_is_refused() {
+        assert!(
+            parse(&[
+                "b10x-harness",
+                "run",
+                "--base-url",
+                "https://gw.example/v1",
+                "--model",
+                "m",
+                "--input",
+                "hi",
+                "--oauth-token-pointer",
+                "/store/accessToken",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_wire_defaults_to_the_one_this_harness_shipped_with() {
+        // Every invocation written before the second wire existed must still mean what it did.
+        assert_eq!(options(&[]).wire, Wire::OpenaiResponses);
+        assert_eq!(
+            options(&["--wire", "anthropic-messages"]).wire,
+            Wire::AnthropicMessages
+        );
+        assert!(
+            parse(&[
+                "b10x-harness",
+                "run",
+                "--base-url",
+                "https://gw.example/v1",
+                "--model",
+                "m",
+                "--input",
+                "hi",
+                "--wire",
+                "not-a-wire",
+            ])
+            .is_err(),
+            "an unknown wire is refused by name rather than falling back to a default"
         );
     }
 
@@ -963,7 +1245,10 @@ mod tests {
         // without a credential needs: no `authorization` header, refused by the far end rather
         // than by this process. An *empty* named source stays an error, above — that is a
         // credential that went wrong, not one nobody asked for.
-        assert_eq!(resolve_credential(&options(&[])).expect("declared"), None);
+        assert!(matches!(
+            resolve_credential(&options(&[])).expect("declared"),
+            Credential::Unnamed
+        ));
     }
 
     #[test]

@@ -81,6 +81,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `anthropic-messages/2026-08-30` and `openai-responses/2026-08-30`; the versions before them stay
   pinned as released, and neither stream fixture changed.
 
+### Changed
+
+- **A workflow step runs under the write scope its own node declares.** `protocol workflow flow
+  --map` has always written each step's first-match-wins scope into the projected node's `run:`
+  block as a `scope:` list of `<glob>=<word>` — the same grammar `--write-scope` takes. Nothing
+  read it: the toolset was built once per run in `prepare`, so every step of a walk ran under the
+  run's scope and the document's own was decorative. The eighth paid native walk (metaharness
+  `native-eval.ew4lFi`, 2026-08-30) proved what that costs: the eval's deliberate-denial step, whose
+  node denies `.engineering/**` precisely so a refusal can be observed, wrote `revision: 99` into a
+  planning store on disk, and the only thing that caught it was the store's own after-the-fact
+  validator. *Prevented* and *detected* are not the same guarantee, and the document said prevented.
+
+  The node's scope is now laid over the run's for the length of the step and taken off again
+  however the step ends, so the same map denies the same write on both arms. It is refused **in the
+  tool, before the write**, and comes back as a failed `ToolOutcome` the model is told about
+  (invariants 9 and 12) — never a run-ending error and never an audit afterwards. The step is also
+  told its node's rules beside its prompt, in the same words the standing instruction uses for the
+  run's, so no paid turn is spent discovering the document's own rule by being refused.
+
+  **A node can only narrow.** Both layers are asked and the first refusal wins, so a node that says
+  `allowed` where `--write-scope` says `denied` changes nothing at all — there is no arrangement of
+  rules a generated document can write that gives back what the operator's command line took away.
+  A node that declares no `scope` runs under the run's, exactly as before: a document that says
+  nothing does not silently narrow a run. The list is applied in the order the map wrote it and
+  nothing sorts it, because re-ordering it is what changes its meaning.
+
+  A `scope` this build cannot read — not a list, holding something that is not a string, or naming
+  a word that is not `allowed`, `partial-only` or `denied` — refuses the document **by node path**
+  when it is read, and `workflow plan` refuses it for free with the same words. It never falls
+  through to the run's scope: a document that states a boundary and a walk that quietly ran without
+  it is the failure the key exists to close.
+
+  The tool list and `--allow-program` are still the run's for every step; a published toolset per
+  group remains open (design 0003 § 6).
+
 ## [0.2.0] — 2026-08-30
 
 ### Added

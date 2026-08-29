@@ -75,6 +75,14 @@ impl Verbs {
     pub fn catalogue(&self) -> &Catalogue {
         &self.catalogue
     }
+
+    /// The same, to narrow for one step: [`Catalogue::narrow`] and nothing else needs this.
+    ///
+    /// A published surface is otherwise fixed for the length of a run — the entries and their
+    /// specs are built once, here — and this hands out no route to change them.
+    pub fn catalogue_mut(&mut self) -> &mut Catalogue {
+        &mut self.catalogue
+    }
 }
 
 /// The arguments of a `tool_invoke` that carried none.

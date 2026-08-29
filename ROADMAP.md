@@ -1,5 +1,7 @@
 # Harness roadmap
 
+Serves **O1**, **O3** and **O6** of `atlas/ROADMAP.md`, the collection's objectives; this page orders the work inside this repository.
+
 An outcome roadmap. A phase advances only when its exit evidence exists; a compiling scaffold does
 not stand in for behavioral proof.
 

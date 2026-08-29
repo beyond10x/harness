@@ -8,6 +8,18 @@ and are not restated here.
 `README.md` orients a reader; `STATUS.md` says what is built and `ROADMAP.md` what is next. This
 file says what must not break.
 
+## Serves
+
+The objectives of the collection this repository moves, by id from `atlas/ROADMAP.md` — the only
+cross-repository roadmap, and the page that says what each id means and which evidence closes it:
+
+- **O1 — governed reach.** A tool the machine will not admit is refused by name, an agent's `tools:` is intersected at publish and at call, and a run declares where it may write.
+- **O3 — any harness, observed and compared.** This loop is the native arm metaharness observes and the eval compares against a vendor's.
+- **O6 — self-improvement, built into all of it.** Every session is filed with what it cost, so a run can be read back and improved on.
+
+A change here that moves none of these is a question for the operator, not a task.
+`atlas/scripts/check-map.sh` fails a repository whose `AGENTS.md` names no objective.
+
 ## What this repository owns
 
 The b10x agent loop: turn assembly, tool round trips, approvals, budgets. A harness that talks to

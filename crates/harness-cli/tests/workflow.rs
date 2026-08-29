@@ -1875,3 +1875,169 @@ fn a_command_step_is_one_call_through_the_gate_and_no_turn_of_the_model() {
         );
     }
 }
+
+/// One section, one step, and a node that denies writes to the planning store.
+const SCOPED: &str = "id: scoped
+root:
+  id: root
+  nodes:
+    - id: guard
+      nodes:
+        - id: guard-1
+          run:
+            state: guard
+            prompt: \"Raise the revision.\"
+            scope:
+              - \".engineering/**=denied\"
+              - \"**=allowed\"
+";
+
+/// The same document with the same step and no `scope` key at all.
+const UNSCOPED: &str = "id: scoped
+root:
+  id: root
+  nodes:
+    - id: guard
+      nodes:
+        - id: guard-1
+          run:
+            state: guard
+            prompt: \"Raise the revision.\"
+";
+
+#[test]
+fn a_step_runs_under_the_write_scope_its_own_node_declares() {
+    // The unit tests pin what a narrowed catalogue refuses; this pins that a walk narrows it, and
+    // does so before the turn is composed. The step is told its node's rules out of the same field
+    // the tool refuses on, so a turn that carries them is a toolset that is bound by them — and a
+    // step whose node says nothing is told nothing, which is the run's scope unchanged.
+    for wire in WIRES {
+        let fixture = wire.fixture("flow-passes");
+        let workspace = workspace();
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let sessions = tempfile::tempdir().expect("a temporary directory");
+        let flow = flow_file(dir.path(), "scoped.yaml", SCOPED);
+
+        let output = walk(
+            &fixture,
+            wire,
+            &flow,
+            workspace.path(),
+            sessions.path(),
+            &[],
+        );
+
+        assert_eq!(
+            output.status,
+            Some(0),
+            "{wire:?}: stderr: {}",
+            output.stderr
+        );
+        let filed = sessions_in(sessions.path());
+        let (_, session) = filed
+            .iter()
+            .find(|(id, _)| id.ends_with(".root.guard.1"))
+            .unwrap_or_else(|| panic!("{wire:?}: the section's session"));
+        let turn = first_turn(session);
+        assert!(
+            turn.contains("Where this step may write"),
+            "{wire:?}: {turn}"
+        );
+        assert!(turn.contains(".engineering/**"), "{wire:?}: {turn}");
+        assert!(
+            turn.contains("must not be changed at all"),
+            "{wire:?}: and what the word means: {turn}"
+        );
+    }
+
+    let fixture = Wire::Responses.fixture("flow-passes");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let flow = flow_file(dir.path(), "unscoped.yaml", UNSCOPED);
+
+    let output = walk(
+        &fixture,
+        Wire::Responses,
+        &flow,
+        workspace.path(),
+        sessions.path(),
+        &[],
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let filed = sessions_in(sessions.path());
+    let (_, session) = filed
+        .iter()
+        .find(|(id, _)| id.ends_with(".root.guard.1"))
+        .expect("the section's session");
+    assert!(
+        !first_turn(session).contains("Where this step may write"),
+        "a document that says nothing does not silently narrow a run: {}",
+        first_turn(session)
+    );
+}
+
+#[test]
+fn a_node_whose_scope_this_build_cannot_read_is_refused_before_any_session() {
+    // Never a fall-through to the run's scope. A document that states a boundary and a walk that
+    // quietly ran without it is exactly the failure the key exists to close, so an unreadable
+    // `scope` refuses the run by name — and `workflow plan` refuses it for free with the same
+    // words, before anybody pays for a turn.
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let workspace = workspace();
+    let sessions = dir.path().join("sessions");
+    let flow = flow_file(
+        dir.path(),
+        "bad-scope.yaml",
+        &SCOPED.replace("\".engineering/**=denied\"", "\".engineering/**=readonly\""),
+    );
+
+    let output = raw(&[
+        "workflow",
+        "run",
+        "--base-url",
+        "http://127.0.0.1:1/v1",
+        "--model",
+        "b10x-emulated",
+        "--api-key-env",
+        "B10X_HARNESS_TEST_KEY",
+        "--workspace",
+        workspace.path().to_str().expect("utf-8 path"),
+        "--session-dir",
+        sessions.to_str().expect("utf-8 path"),
+        "--flow",
+        flow.to_str().expect("utf-8 path"),
+        "--input",
+        "add a CSV export",
+        "--json",
+    ]);
+
+    assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
+    let refused: Value =
+        serde_json::from_str(output.stdout.trim()).expect("one line saying the run never started");
+    assert_eq!(refused["kind"], "refused");
+    let reason = refused["reason"].as_str().expect("a reason");
+    assert!(reason.contains("`root.guard.guard-1`"), "{reason}");
+    assert!(
+        reason.contains("partial-only"),
+        "naming the three words: {reason}"
+    );
+    assert!(
+        !sessions.exists(),
+        "a document that never ran leaves no session directory behind"
+    );
+
+    let planned = raw(&[
+        "workflow",
+        "plan",
+        "--flow",
+        flow.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(planned.status, Some(1), "stdout: {}", planned.stdout);
+    assert!(
+        planned.stderr.contains("partial-only"),
+        "{}",
+        planned.stderr
+    );
+}

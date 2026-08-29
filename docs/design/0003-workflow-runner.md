@@ -227,9 +227,18 @@ beside the group — or, under `--json`, the `Plan` itself; exit `0` valid, `1` 
 - **Resuming a flow.** A crashed flow leaves its per-scope sessions and its record; nothing today
   turns them back into a cursor. M2: a flow cursor file beside the sessions, `workflow run
   --resume <flow-run-id>`.
-- **A published toolset per group.** The notation calls a group a unit of scope; the loop builds
-  `Published` once in `prepare`. M2 rebuilds it per section from a `scope`/`programs` key in the
-  group, through the same `published()` path, so a section's tools are computed the way a run's are.
+- **A published toolset per group.** **Half done (2026-08-30): the write scope.** A step's node
+  carries the map's own first-match-wins `scope:` list, and it is now laid over the run's for the
+  length of that step and taken off again however it ends — refused in the tool, before the write,
+  as a failed `ToolOutcome` (invariants 9, 12). It can only narrow: both layers are asked and the
+  first refusal wins, so a generated document cannot give back what `--write-scope` denied, and a
+  node declaring nothing runs under the run's exactly as before. A `scope` this build cannot read
+  refuses the document by node path at read time rather than falling through to the run's. It is
+  the half with a safety consequence — a narrower toolset is a smaller surface, but an unenforced
+  `denied` is a stated rule that does not hold. What is still open is the rest: the **tool list**
+  and **`--allow-program`** are the run's for every step, so a section cannot yet publish fewer
+  entries than the run does and a `command` step whose program the run does not declare is still a
+  refused step. That half rebuilds `Published` per section through the same `published()` path.
 - **Parallel layers.** `Plan` says what may run beside what; the walk is sequential over
   `&mut dyn StepRunner`, and the loop holds one client. M3, after a measurement says it is worth
   a client per thread.

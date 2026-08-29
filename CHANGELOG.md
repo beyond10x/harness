@@ -19,7 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   names. Exit `0` is a passed step; a non-zero exit, a timeout, a program the run does not
   publish, a person's *no* or a hook's block is a failed step with a `step-command` warning saying
   which. A `command` step whose `command` is missing, empty or not a list of strings is an error
-  and not a turn. In `harness-loop`, `AgentLoop::call` is the new public entry: one call outside
+  and not a turn. The exit is read from either shape the `run` tool answers in — the local port's
+  `exit: <code>` and the confined port's `exit: <execution record>` with `exit.exit: {code,
+  signal}` — because the sixth paid native walk read a validator that exited `0` in the sandbox as
+  *no exit code*. In `harness-loop`, `AgentLoop::call` is the new public entry: one call outside
   any turn, through `invoke`'s stages, leaving the events a turn's call leaves.
 
 - **`harness-flow`'s fixture `adp-default.projected.yaml` is refreshed from

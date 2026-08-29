@@ -16,6 +16,18 @@
 //! what its siblings promised and nothing else. Every step runs under a schema this module derives,
 //! so a step says *passed* or *failed* by calling `answer` rather than by being read out of prose.
 //!
+//! # A `command` step is a call, not a turn
+//!
+//! A step whose `run` says `kind: command` names a program the document runs — the projection's
+//! verifiers, `producer: verifier` — and no model is asked anything (design 0003 § 6, M2). The
+//! argv becomes one `run` call made through [`AgentLoop::call`], which is the gate a model's call
+//! meets in the order it meets it: published, the approver, the operator's `before-call` hook, the
+//! tool, `after-call`. The call and its result are filed into the section's conversation exactly
+//! as a model's would be, so the next step in the scope reads the suite's output where it would
+//! have read a tool's; exit `0` is a passed step and anything else — a non-zero exit, a timeout, a
+//! refusal at any stage — is a failed one, with the reason in the record beside it. A runner that
+//! reached the tool port directly would be a second answer to *what may this run do*.
+//!
 //! # Where the governor plugs in
 //!
 //! [`StepRunner::entering`] and [`StepRunner::leaving`] ask the operator's `transition` hook — the
@@ -64,7 +76,7 @@ use harness_loop::{
     AgentLoop, Budget, HookDecision, HookPoint, LoopEvent, LoopOutcome, LoopSink, LoopStop,
     RunLedger,
 };
-use harness_wire::Item;
+use harness_wire::{CallId, Item, ToolCall, ToolName, ToolOutcome};
 use serde_json::{Map, Value};
 
 use crate::{Prepared, Renderer, RunFailure, RunOptions, hooks, persist, transcript};
@@ -410,6 +422,7 @@ fn walk(command: &WorkflowRunOptions) -> Result<Report, RunFailure> {
         renderer: &renderer,
         halted: &halted,
         aborted: None,
+        commands: 0,
     };
     let mut record = FlowRecord {
         renderer: &renderer,
@@ -647,6 +660,8 @@ struct FlowRunner<'a> {
     halted: &'a Cell<bool>,
     /// The wire failure that ended the walk, when one did. `1` and not `2`.
     aborted: Option<String>,
+    /// How many `command` steps have run, which names the next one's call.
+    commands: u32,
 }
 
 impl FlowRunner<'_> {
@@ -904,6 +919,66 @@ impl FlowRunner<'_> {
     ///
     /// The innermost match, which is the section the walk is standing in: a step of a group runs
     /// while no child of that group is open.
+    /// Runs a `command` step: its argv as one `run` call through the run's gate, filed into the
+    /// section's conversation, and read as the step's outcome.
+    ///
+    /// The call is named `flow-command-<n>` for the walk, because a call id is what the result is
+    /// matched to in the conversation and a model never minted one for this call. The budget is
+    /// the walk's remainder, exactly as a model step's is: the clock the call runs under is what
+    /// `--max-duration-ms` has left.
+    fn command(
+        &mut self,
+        path: &str,
+        index: usize,
+        argv: &[String],
+        budget: Budget,
+    ) -> StepOutcome {
+        self.commands = self.commands.saturating_add(1);
+        let call = ToolCall {
+            call_id: CallId::new(format!("flow-command-{}", self.commands))
+                .expect("a counter is printable ASCII"),
+            name: ToolName::new("run").expect("`run` is a tool name"),
+            arguments: serde_json::json!({ "argv": argv }),
+        };
+        let config = self.prepared.config.clone().with_budget(budget);
+        let outcome = {
+            let mut record = self.renderer.borrow_mut();
+            let prepared = &mut *self.prepared;
+            let mut agent = AgentLoop::new(
+                prepared.client.as_mut(),
+                &mut prepared.tools,
+                prepared.approvals.as_mut(),
+                config,
+            )
+            .with_cancel(prepared.cancel.clone());
+            if let Some(hooks) = self.hooks.as_mut() {
+                agent = agent.with_hooks(hooks);
+            }
+            agent.call(&call, &mut *record)
+        };
+        {
+            // Filed as a model's call would be — the call, then its result — so the section's
+            // next step reads what the program said where it would have read a tool's answer,
+            // and the session shows the command that ran and what it printed.
+            let scope = &mut self.open[index];
+            scope.items.push(Item::ToolCall(call.clone()));
+            scope
+                .items
+                .push(Item::result(call.call_id.clone(), outcome.clone()));
+            scope.session.items.clone_from(&scope.items);
+        }
+        match command_outcome(&outcome) {
+            Ok(()) => StepOutcome::Passed,
+            Err(reason) => {
+                self.warn(
+                    "step-command",
+                    &format!("`{path}` ran `{}`: {reason}", argv.join(" ")),
+                );
+                StepOutcome::Failed
+            }
+        }
+    }
+
     fn scope_of(&self, context: &StepContext) -> Option<usize> {
         self.open
             .iter()
@@ -977,6 +1052,16 @@ impl StepRunner for FlowRunner<'_> {
                 return StepOutcome::Failed;
             }
         };
+        // A `command` step is the document's own program and not a question for the model: one
+        // call through the run's gate, no turn bought (module header, design 0003 § 6).
+        match command_of(step) {
+            Ok(None) => {}
+            Ok(Some(argv)) => return self.command(path, index, &argv, budget),
+            Err(reason) => {
+                self.warn("step-command", &format!("`{path}` {reason}"));
+                return StepOutcome::Failed;
+            }
+        }
         // Also before anything is sent: a step whose declared context this run may not read is a
         // step nobody could reproduce from the document, and asking a model without it would be
         // answering a different question at full price.
@@ -1144,6 +1229,78 @@ fn left(ceiling: u64, spent: u64) -> Option<u64> {
 ///
 /// A quoted `"SPEC-1"` in a prompt reads as a literal with quotes in it, which is not what the
 /// section handed over.
+/// The argv of a `command` step, or [`None`] for a step that is a turn.
+///
+/// # Errors
+///
+/// A step that says `kind: command` and carries no usable `command` — absent, not a list, empty,
+/// or holding something that is not a string — is an error and not a turn: a document that meant
+/// to run a verifier and would instead have asked a model about it is the misreport this exists
+/// to prevent.
+fn command_of(step: &Step) -> Result<Option<Vec<String>>, String> {
+    let payload = step.run.as_object();
+    let kind = payload
+        .and_then(|map| map.get("kind"))
+        .and_then(Value::as_str);
+    if kind != Some("command") {
+        return Ok(None);
+    }
+    let Some(command) = payload
+        .and_then(|map| map.get("command"))
+        .and_then(Value::as_array)
+    else {
+        return Err("is a `command` step and carries no `command` list to run".to_owned());
+    };
+    let argv: Option<Vec<String>> = command
+        .iter()
+        .map(|word| word.as_str().map(str::to_owned))
+        .collect();
+    match argv {
+        Some(argv) if !argv.is_empty() => Ok(Some(argv)),
+        Some(_) => Err("is a `command` step whose `command` is empty".to_owned()),
+        None => Err(
+            "is a `command` step whose `command` holds something that is not a string".to_owned(),
+        ),
+    }
+}
+
+/// What one `run` call says the command step did: exit `0` passed, everything else did not.
+///
+/// A refusal at any stage of the gate, a tool that failed the call, a killed process and a non-zero
+/// exit are all the step failing, each with its own words. The words are what a reader gets, so a
+/// suite that went red and a program nobody approved are not the same line in the record.
+///
+/// # Errors
+///
+/// The reason the step is not passed, in one sentence.
+fn command_outcome(outcome: &ToolOutcome) -> Result<(), String> {
+    if let Some(refusal) = &outcome.refusal {
+        return Err(format!("it was refused by rule: {}", refusal.message()));
+    }
+    if outcome.failed {
+        return Err(format!(
+            "it did not run: {}",
+            outcome.output.as_str().map_or_else(
+                || plain(&outcome.output),
+                |text| text.chars().take(240).collect()
+            )
+        ));
+    }
+    if outcome
+        .output
+        .get("timed_out")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err("it timed out".to_owned());
+    }
+    match outcome.output.get("exit").and_then(Value::as_i64) {
+        Some(0) => Ok(()),
+        Some(code) => Err(format!("exit {code}")),
+        None => Err("it ended without an exit code".to_owned()),
+    }
+}
+
 fn plain(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -1205,6 +1362,83 @@ mod tests {
         let error = read(&path, None).expect_err("refused");
         assert!(error.contains("`.toml`"), "{error}");
         assert!(error.contains(".yaml"), "and what it does read: {error}");
+    }
+
+    /// Design 0003 § 6's outcome rule for a command step, case by case: only a clean exit `0` is a
+    /// passed step, and each of the other ways a call ends says which one it was.
+    #[test]
+    fn a_command_step_passes_on_exit_zero_and_names_every_other_ending() {
+        let ran = |exit: Value, timed_out: bool| {
+            ToolOutcome::ok(serde_json::json!({
+                "argv": ["cargo", "test"],
+                "exit": exit,
+                "stdout": "",
+                "stderr": "",
+                "timed_out": timed_out,
+            }))
+        };
+        assert_eq!(command_outcome(&ran(serde_json::json!(0), false)), Ok(()));
+        assert_eq!(
+            command_outcome(&ran(serde_json::json!(101), false)),
+            Err("exit 101".to_owned())
+        );
+        assert_eq!(
+            command_outcome(&ran(Value::Null, false)),
+            Err("it ended without an exit code".to_owned())
+        );
+        assert_eq!(
+            command_outcome(&ran(Value::Null, true)),
+            Err("it timed out".to_owned())
+        );
+        assert_eq!(
+            command_outcome(&ToolOutcome::failed("`run` was not approved: the ceiling")),
+            Err("it did not run: `run` was not approved: the ceiling".to_owned())
+        );
+    }
+
+    /// Which steps are commands, and what a document that meant one and wrote it wrong is told.
+    #[test]
+    fn a_command_step_is_read_from_its_kind_and_a_malformed_one_is_an_error_not_a_turn() {
+        let step = |run: Value| Step {
+            id: "check".to_owned(),
+            needs: Vec::new(),
+            run,
+        };
+        assert_eq!(
+            command_of(&step(
+                serde_json::json!({"state": "verify", "prompt": "Run it."})
+            )),
+            Ok(None)
+        );
+        assert_eq!(
+            command_of(&step(serde_json::json!({"state": "verify"}))),
+            Ok(None),
+            "a step with no kind is a turn, as every step was"
+        );
+        assert_eq!(
+            command_of(&step(serde_json::json!({
+                "state": "verify", "kind": "command", "command": ["cargo", "test", "--workspace"]
+            }))),
+            Ok(Some(vec![
+                "cargo".to_owned(),
+                "test".to_owned(),
+                "--workspace".to_owned()
+            ]))
+        );
+        assert!(
+            command_of(&step(serde_json::json!({"kind": "command"})))
+                .is_err_and(|reason| reason.contains("no `command` list")),
+        );
+        assert!(
+            command_of(&step(serde_json::json!({"kind": "command", "command": []})))
+                .is_err_and(|reason| reason.contains("is empty")),
+        );
+        assert!(
+            command_of(&step(
+                serde_json::json!({"kind": "command", "command": ["sh", 1]})
+            ))
+            .is_err_and(|reason| reason.contains("not a string")),
+        );
     }
 
     #[test]

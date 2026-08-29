@@ -1293,6 +1293,14 @@ fn remainder(
 /// and the model's are one string. Nothing about the call changes: it still failed, and it still
 /// says so.
 fn complete(call: &ToolCall, result: ToolOutcome, state: &mut RunState, sink: &mut dyn LoopSink) {
+    completed(call, &result, sink);
+    state.items.push(Item::result(call.call_id.clone(), result));
+}
+
+/// What the record hears when a call is over: the refusal it met by name, if one, then that it
+/// completed and whether it failed. Shared by a turn's calls and by [`AgentLoop::call`], so a call
+/// made outside a turn leaves exactly the events a model's would.
+fn completed(call: &ToolCall, result: &ToolOutcome, sink: &mut dyn LoopSink) {
     if let Some(refusal) = &result.refusal {
         sink.emit(LoopEvent::Warning {
             code: refusal.code().to_owned(),
@@ -1303,7 +1311,6 @@ fn complete(call: &ToolCall, result: ToolOutcome, state: &mut RunState, sink: &m
         call_id: call.call_id.clone(),
         failed: result.failed,
     });
-    state.items.push(Item::result(call.call_id.clone(), result));
 }
 
 /// What every other call of a turn that carried the run's answer is told.
@@ -1574,6 +1581,35 @@ impl<'a> AgentLoop<'a> {
     pub fn with_hooks(mut self, hooks: &'a mut dyn HookPort) -> Self {
         self.hooks = Some(hooks);
         self
+    }
+
+    /// Runs **one call outside any turn**, through the gate a model's call meets.
+    ///
+    /// # What this is for
+    ///
+    /// A workflow's `command` step is a program the document names — a verifier, a validator — and
+    /// not a question for a model (`harness-cli` design 0003 § 6, M2). Nothing is sent to the
+    /// provider. The call is the caller's, and it runs through [`AgentLoop::invoke`]'s stages in
+    /// their order — published or routed, the argument bound, the approver, the operator's
+    /// `before-call` hook, the tool, the result bound, the `after-call` hook — and leaves the
+    /// record a model's call leaves: `ToolRequested`, then `ToolCompleted`, with a `Warning` naming
+    /// any refusal between them. A caller that reached the port directly would be a second answer
+    /// to *what may this run do*, and the approver and the hooks would never hear of it.
+    ///
+    /// The clock is the budget's `max_duration_ms`, measured from now: this is one call and not a
+    /// run, so there is no earlier start to measure from. The conversation is the caller's to keep
+    /// — the result comes back and is pushed nowhere — because a call no turn asked for belongs
+    /// wherever the caller files it.
+    pub fn call(&mut self, call: &ToolCall, sink: &mut dyn LoopSink) -> ToolOutcome {
+        sink.emit(LoopEvent::ToolRequested(call.clone()));
+        let deadline = self
+            .config
+            .budget
+            .max_duration_ms
+            .map(|millis| Instant::now() + Duration::from_millis(millis));
+        let result = self.invoke(call, deadline, sink);
+        completed(call, &result, sink);
+        result
     }
 
     /// Runs until the model answers, a budget binds, or the caller cancels.

@@ -9,6 +9,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A workflow's `command` step is one call through the gate, not a model turn** (design 0003
+  § 6, M2). A step whose `run` says `kind: command` names a program the document runs — the
+  projection's verifiers — and `workflow run` now runs its `command` argv as one `run` call
+  through the same stages a model's call meets, in the same order: published or withheld, the
+  approver, the operator's `before-call` hook, the tool, `after-call`. No request is sent for it.
+  The call and its result are filed into the section's conversation as a model's would be, and
+  the record carries `tool-requested`, `tool-completed` and any refusal's `warning` under the same
+  names. Exit `0` is a passed step; a non-zero exit, a timeout, a program the run does not
+  publish, a person's *no* or a hook's block is a failed step with a `step-command` warning saying
+  which. A `command` step whose `command` is missing, empty or not a list of strings is an error
+  and not a turn. In `harness-loop`, `AgentLoop::call` is the new public entry: one call outside
+  any turn, through `invoke`'s stages, leaving the events a turn's call leaves.
+
+- **`harness-flow`'s fixture `adp-default.projected.yaml` is refreshed from
+  `protocol workflow flow`** (engineering-protocols `870894d`): every state is now a section — a
+  group named for the state, holding `<state>-1`… — so a governor asked at group boundaries is
+  asked at every state; the retreat `implement-to-review` is a group of those groups. A walk of it
+  files eight sessions, one per state, and neither the root nor the retreat holds a step of its
+  own any more.
+
 - **`--skills-dir` and `--plugin-dir` — the operator's own instructions, in the on-disk format
   Claude Code already writes.** A skill library written for that harness had to be rewritten to
   reach a run here, so an evaluation comparing the two arms compared who had rewritten their

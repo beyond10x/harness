@@ -115,6 +115,31 @@ sibling cannot depend on a step inside a group and therefore must not see that s
 either. A retreat — `Repeat` — re-enters the whole section from the same handoffs, which is what
 *the whole scope re-runs* means.
 
+### A `command` step is a call, not a turn
+
+A step whose `run` says `kind: command` names a program the document runs — the projection's
+verifiers — and the model is never asked:
+
+```yaml
+- id: verify-2
+  needs: [verify-1]
+  run:
+    state: verify
+    kind: command
+    command: [cargo, test, --workspace]
+```
+
+The argv becomes one `run` call made through the same gate a model's call meets, in the same
+order: published or withheld, the approver, the operator's `before-call` hook, the tool, the
+`after-call` hook. It is recorded as a model's call would be — `tool-requested`, `tool-completed`,
+a `warning` naming any refusal between them — and filed into the section's conversation as the
+call and its result, so the next step in the scope reads what the suite printed where it would
+have read a tool's answer. Exit `0` is a passed step. A non-zero exit, a timeout, a program this
+run does not publish, a person's *no* or a hook's block is a failed step, and a `step-command`
+warning says which. A `command` step whose `command` is missing, empty or not a list of strings is
+an error and not a turn: a document that meant to run a verifier is never quietly asked a model
+about it instead.
+
 ### How a step reports: the derived schema
 
 Every step runs under an output schema the runner derives. The model never sees a schema file, and
@@ -266,8 +291,9 @@ each with the condition that would bring it in.
   is the `before-call` hook's job today.
 - **Parallel layers.** `plan` says what may run beside what; the walk is sequential, and the loop
   holds one client. A measurement comes before a client per thread.
-- **Command steps.** A step that is a verifier the runner executes, rather than a model turn, is not
-  bound yet: every step is a turn.
+- **A published toolset per `command` step.** A command runs under the run's own toolset and
+  approvals; there is no per-step `--allow-program`, so a verifier the run does not publish is a
+  refused step rather than an admitted one.
 - **The `metaharness.event/1` projection** of flow events, and their listing as control-plane events.
 - **Live evidence.** Everything here is `provider_emulated`: the walk, the retreat and the refused
   transitions are proved against the local deterministic endpoint, never against a real provider.

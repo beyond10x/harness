@@ -6,40 +6,60 @@
     "nodes": [
       {
         "id": "receive",
-        "run": {
-          "state": "receive",
-          "summary": "Take in the request and record what is being asked for, unedited."
-        }
+        "nodes": [
+          {
+            "id": "receive-1",
+            "run": {
+              "state": "receive",
+              "summary": "Take in the request and record what is being asked for, unedited."
+            }
+          }
+        ]
       },
       {
         "id": "specify",
         "needs": [
           "receive"
         ],
-        "run": {
-          "state": "specify",
-          "summary": "State the required behaviour. Anything left only in the prompt cannot be checked later, so this is where an objective becomes something a verifier can disagree with."
-        }
+        "nodes": [
+          {
+            "id": "specify-1",
+            "run": {
+              "state": "specify",
+              "summary": "State the required behaviour. Anything left only in the prompt cannot be checked later, so this is where an objective becomes something a verifier can disagree with."
+            }
+          }
+        ]
       },
       {
         "id": "decompose",
         "needs": [
           "specify"
         ],
-        "run": {
-          "state": "decompose",
-          "summary": "Break the specification into units that can each be implemented and verified on their own."
-        }
+        "nodes": [
+          {
+            "id": "decompose-1",
+            "run": {
+              "state": "decompose",
+              "summary": "Break the specification into units that can each be implemented and verified on their own."
+            }
+          }
+        ]
       },
       {
         "id": "establish_verifiers",
         "needs": [
           "decompose"
         ],
-        "run": {
-          "state": "establish_verifiers",
-          "summary": "Write the tests, contracts and checks that will decide whether the work is done — before there is an implementation for them to be shaped around."
-        }
+        "nodes": [
+          {
+            "id": "establish_verifiers-1",
+            "run": {
+              "state": "establish_verifiers",
+              "summary": "Write the tests, contracts and checks that will decide whether the work is done — before there is an implementation for them to be shaped around."
+            }
+          }
+        ]
       },
       {
         "id": "implement-to-review",
@@ -52,40 +72,60 @@
         "nodes": [
           {
             "id": "implement",
-            "run": {
-              "state": "implement",
-              "summary": "Make the smallest change that satisfies the decomposed unit and its verifiers."
-            }
+            "nodes": [
+              {
+                "id": "implement-1",
+                "run": {
+                  "state": "implement",
+                  "summary": "Make the smallest change that satisfies the decomposed unit and its verifiers."
+                }
+              }
+            ]
           },
           {
             "id": "verify",
             "needs": [
               "implement"
             ],
-            "run": {
-              "state": "verify",
-              "summary": "Run the verifiers established earlier against the change."
-            }
+            "nodes": [
+              {
+                "id": "verify-1",
+                "run": {
+                  "state": "verify",
+                  "summary": "Run the verifiers established earlier against the change."
+                }
+              }
+            ]
           },
           {
             "id": "adversarial_verify",
             "needs": [
               "verify"
             ],
-            "run": {
-              "state": "adversarial_verify",
-              "summary": "Try to break what the previous state just declared working: mutants, edge cases, property violations, contract drift."
-            }
+            "nodes": [
+              {
+                "id": "adversarial_verify-1",
+                "run": {
+                  "state": "adversarial_verify",
+                  "summary": "Try to break what the previous state just declared working: mutants, edge cases, property violations, contract drift."
+                }
+              }
+            ]
           },
           {
             "id": "review",
             "needs": [
               "adversarial_verify"
             ],
-            "run": {
-              "state": "review",
-              "summary": "Judge the change as a whole — intent, fit and risk, not just green checks."
-            }
+            "nodes": [
+              {
+                "id": "review-1",
+                "run": {
+                  "state": "review",
+                  "summary": "Judge the change as a whole — intent, fit and risk, not just green checks."
+                }
+              }
+            ]
           }
         ]
       }

@@ -185,6 +185,27 @@ root:
             summary: \"Make the smallest change that satisfies the units.\"
 ";
 
+/// One section holding a turn and then a verifier: the shape `protocol workflow flow --map` gives
+/// a state whose map says *ask the model, then run the suite*.
+const COMMANDED: &str = "\
+id: commanded
+root:
+  id: root
+  nodes:
+    - id: verify
+      nodes:
+        - id: verify-1
+          run:
+            state: verify
+            prompt: \"Say what you would run.\"
+        - id: verify-2
+          needs: [verify-1]
+          run:
+            state: verify
+            kind: command
+            command: [sh, -c, \"exit 0\"]
+";
+
 /// One section, two steps, the second needing the first — the shortest document that can show a
 /// ceiling binding *between* steps rather than inside one.
 const TWO_STEPS: &str = "\
@@ -1143,16 +1164,16 @@ fn the_projected_adp_workflow_walks_end_to_end() {
         assert_eq!(
             steps_started(&events),
             vec![
-                "root.receive",
-                "root.specify",
-                "root.decompose",
-                "root.establish_verifiers",
-                "root.implement-to-review.implement",
-                "root.implement-to-review.verify",
-                "root.implement-to-review.adversarial_verify",
-                "root.implement-to-review.review",
+                "root.receive.receive-1",
+                "root.specify.specify-1",
+                "root.decompose.decompose-1",
+                "root.establish_verifiers.establish_verifiers-1",
+                "root.implement-to-review.implement.implement-1",
+                "root.implement-to-review.verify.verify-1",
+                "root.implement-to-review.adversarial_verify.adversarial_verify-1",
+                "root.implement-to-review.review.review-1",
             ],
-            "{wire:?}: the projection's own order, retreat section included"
+            "{wire:?}: the projection's own order, every state a section, retreat included"
         );
         let last = events.last().expect("a terminal event");
         assert_eq!(last["kind"], "flow-finished", "{wire:?}: {last}");
@@ -1163,16 +1184,25 @@ fn the_projected_adp_workflow_walks_end_to_end() {
         let names: Vec<&str> = filed.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(
             filed.len(),
-            2,
-            "{wire:?}: one per section that ran, and the root is one of them: {names:?}"
+            8,
+            "{wire:?}: one per section that ran a step — every state is one, and neither the \
+             root nor the retreat holds a step of its own any more: {names:?}"
         );
-        assert!(
-            names.iter().any(|id| id.ends_with(".root.1"))
-                && names
-                    .iter()
-                    .any(|id| id.ends_with(".root.implement-to-review.1")),
-            "{wire:?}: {names:?}"
-        );
+        for section in [
+            ".root.receive.1",
+            ".root.specify.1",
+            ".root.decompose.1",
+            ".root.establish_verifiers.1",
+            ".root.implement-to-review.implement.1",
+            ".root.implement-to-review.verify.1",
+            ".root.implement-to-review.adversarial_verify.1",
+            ".root.implement-to-review.review.1",
+        ] {
+            assert!(
+                names.iter().any(|id| id.ends_with(section)),
+                "{wire:?}: no session for `{section}`: {names:?}"
+            );
+        }
     }
 }
 
@@ -1739,4 +1769,109 @@ fn a_step_payload_that_is_not_an_object_is_refused_before_anything_runs() {
     let reason = refused["reason"].as_str().expect("a reason");
     assert!(reason.contains("`root.one`"), "{reason}");
     assert!(reason.contains("a string"), "{reason}");
+}
+
+#[test]
+fn a_command_step_is_one_call_through_the_gate_and_no_turn_of_the_model() {
+    // Design 0003 § 6, M2: a `command` step runs its argv through the tool port and no model is
+    // asked. Without a substrate this run publishes no `run`, so the call meets the gate's first
+    // stage and is refused **by name** — which is the proof that it went through the gate at all:
+    // a runner that spawned the argv itself would have run `sh` here and reported a passed step.
+    // The provider's own record says the walk bought exactly one turn for a two-step document.
+    for wire in WIRES {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let record = dir.path().join("requests.jsonl");
+        let fixture = wire.recording("flow-passes", Some(&record));
+        let workspace = workspace();
+        let flow = flow_file(dir.path(), "flow.yaml", COMMANDED);
+        let sessions = tempfile::tempdir().expect("a temporary directory");
+
+        let output = walk(
+            &fixture,
+            wire,
+            &flow,
+            workspace.path(),
+            sessions.path(),
+            &["--json"],
+        );
+
+        assert_eq!(output.status, Some(2), "{wire:?}: {}", output.stderr);
+        let events = events(&output);
+        assert_eq!(
+            steps_started(&events),
+            vec!["root.verify.verify-1", "root.verify.verify-2"],
+            "{wire:?}"
+        );
+        assert_eq!(
+            requests(&record),
+            1,
+            "{wire:?}: the model was asked once, for the turn, and never for the command"
+        );
+
+        // The call is in the record under the events a model's call leaves, naming the tool and
+        // carrying the argv the document wrote.
+        // Beside the turn's own `answer` call, which is the loop's and not the document's.
+        let requested: Vec<&Value> = of_kind(&events, "tool-requested")
+            .into_iter()
+            .filter(|event| event["name"] == "run")
+            .collect();
+        assert_eq!(requested.len(), 1, "{wire:?}: {requested:?}");
+        assert_eq!(
+            requested[0]["arguments"]["argv"],
+            serde_json::json!(["sh", "-c", "exit 0"]),
+            "{wire:?}: {}",
+            requested[0]
+        );
+        let completed: Vec<&Value> = of_kind(&events, "tool-completed")
+            .into_iter()
+            .filter(|event| event["call_id"] == "flow-command-1")
+            .collect();
+        assert_eq!(completed.len(), 1, "{wire:?}: {completed:?}");
+        assert_eq!(completed[0]["failed"], true, "{wire:?}: {}", completed[0]);
+        assert!(
+            of_kind(&events, "warning").iter().any(|warning| {
+                warning["code"] == "unpublished-tool"
+                    && warning["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("run"))
+            }),
+            "{wire:?}: the gate's own refusal, by name: {:?}",
+            of_kind(&events, "warning")
+        );
+        let finished = of_kind(&events, "step-finished");
+        let command = finished
+            .iter()
+            .find(|event| event["path"] == "root.verify.verify-2")
+            .expect("the command step finished");
+        assert_eq!(command["failed"], true, "{wire:?}: {command}");
+        assert!(
+            of_kind(&events, "warning").iter().any(|warning| {
+                warning["code"] == "step-command"
+                    && warning["message"].as_str().is_some_and(|message| {
+                        message.contains("`root.verify.verify-2` ran `sh -c exit 0`")
+                    })
+            }),
+            "{wire:?}: and the step says what it ran: {:?}",
+            of_kind(&events, "warning")
+        );
+
+        // Filed into the section's conversation as a call and its result, after the turn.
+        let filed = sessions_in(sessions.path());
+        let (_, session) = filed
+            .iter()
+            .find(|(id, _)| id.ends_with(".root.verify.1"))
+            .expect("the section's session");
+        let items = session["items"].as_array().expect("items");
+        let call = items
+            .iter()
+            .find(|item| item["kind"] == "tool-call" && item["name"] == "run")
+            .unwrap_or_else(|| panic!("{wire:?}: the command is in the conversation: {items:?}"));
+        assert_eq!(call["call_id"], "flow-command-1", "{wire:?}: {call}");
+        assert!(
+            items.iter().any(|item| item["kind"] == "tool-result"
+                && item["call_id"] == "flow-command-1"
+                && item["failed"] == true),
+            "{wire:?}: with its result beside it: {items:?}"
+        );
+    }
 }

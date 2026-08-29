@@ -5056,3 +5056,111 @@ fn a_delegate_run_as_a_named_agent_is_narrowed_to_what_its_author_declared() {
         "and naming it anyway does not reach the port"
     );
 }
+
+// --- a call outside a turn ------------------------------------------------------------------------
+
+/// A `command` step of a workflow (`harness-cli` design 0003 § 6) is one call the document made and
+/// no turn: the model is never asked, and everything a model's call meets — the approver, the
+/// operator's `before-call` hook, the tool, `after-call` — is met in the same order and recorded
+/// under the same events.
+#[test]
+fn a_call_outside_a_turn_meets_the_gate_a_model_call_meets_and_asks_no_model() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![]),
+        ScriptedTools::new(vec![spec("run", Approval::Required)])
+            .answering("run", ToolOutcome::ok(json!({"exit": 0}))),
+    )
+    .approving(Box::new(ApproveAll));
+    let mut hooks = ScriptedHooks::default();
+    let mut sink = VecLoopSink::new();
+    let call = ToolCall {
+        call_id: call_id("flow-command-1"),
+        name: tool_name("run"),
+        arguments: json!({"argv": ["cargo", "test"]}),
+    };
+
+    let outcome = AgentLoop::new(
+        &mut harness.model,
+        &mut harness.tools,
+        harness.approvals.as_mut(),
+        harness.config.clone(),
+    )
+    .with_hooks(&mut hooks)
+    .call(&call, &mut sink);
+
+    assert!(!outcome.failed, "{outcome:?}");
+    assert_eq!(outcome.output, json!({"exit": 0}));
+    assert_eq!(harness.tools.calls.len(), 1, "the tool ran once");
+    assert!(
+        harness.model.seen.is_empty(),
+        "and no request was ever made: {:?}",
+        harness.model.seen
+    );
+    assert_eq!(
+        approvals(&sink),
+        vec!["asked flow-command-1", "flow-command-1 approved=true"]
+    );
+    assert_eq!(hooks.asked_at(HookPoint::BeforeCall), vec![("run", "run")]);
+    assert_eq!(hooks.asked_at(HookPoint::AfterCall), vec![("run", "run")]);
+    let kinds: Vec<&str> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::ToolRequested(requested) => Some(requested.name.as_str()),
+            LoopEvent::ToolCompleted { failed: false, .. } => Some("completed"),
+            LoopEvent::ToolCompleted { failed: true, .. } => Some("completed-failed"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        ["run", "completed"],
+        "the record a model's call leaves"
+    );
+}
+
+/// The same call under the default approver is refused before the hook and before the tool — a
+/// person's no is not something a document gets around by not asking a model.
+#[test]
+fn a_call_outside_a_turn_is_refused_by_the_same_approver_and_reaches_nothing_past_it() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![]),
+        ScriptedTools::new(vec![spec("run", Approval::Required)])
+            .answering("run", ToolOutcome::ok(json!({"exit": 0}))),
+    );
+    let mut hooks = ScriptedHooks::default();
+    let mut sink = VecLoopSink::new();
+    let call = ToolCall {
+        call_id: call_id("flow-command-1"),
+        name: tool_name("run"),
+        arguments: json!({"argv": ["cargo", "test"]}),
+    };
+
+    let outcome = AgentLoop::new(
+        &mut harness.model,
+        &mut harness.tools,
+        harness.approvals.as_mut(),
+        harness.config.clone(),
+    )
+    .with_hooks(&mut hooks)
+    .call(&call, &mut sink);
+
+    assert!(outcome.failed, "{outcome:?}");
+    assert!(
+        outcome
+            .output
+            .as_str()
+            .is_some_and(|text| text.contains("was not approved")),
+        "{outcome:?}"
+    );
+    assert!(harness.tools.calls.is_empty(), "the tool never ran");
+    assert!(
+        hooks.seen.is_empty(),
+        "and no hook was asked about a call a person refused"
+    );
+    assert!(harness.model.seen.is_empty(), "and no request was made");
+    assert_eq!(
+        approvals(&sink),
+        vec!["asked flow-command-1", "flow-command-1 approved=false"]
+    );
+}

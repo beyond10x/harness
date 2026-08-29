@@ -654,8 +654,10 @@ fn a_real_workflow_projected_by_another_component_plans_here() {
     // that one and a change on either side shows up as a diff rather than as a surprise at runtime.
     //
     // What it pins is the contract between the two notations: a state graph with three back-edges
-    // arrives here as a chain with one repeating sub-tree, and this crate plans it without
-    // complaint.
+    // arrives here as a chain of sections with one repeating sub-tree of sections, and this crate
+    // plans it without complaint. **Every state is a section** — a group of one when the state has
+    // one step — because the runner asks its governor at group boundaries and nowhere else, and a
+    // state that were a bare step would be a state nobody is asked about.
     let flow = Flow::from_yaml(&fixture("adp-default.projected.yaml")).expect("a flow");
     let plan = flow.plan().expect("it plans");
 
@@ -676,17 +678,32 @@ fn a_real_workflow_projected_by_another_component_plans_here() {
         4,
         "implement, verify, adversarial_verify, review - in that order"
     );
+    for state in ["receive", "specify", "decompose", "establish_verifiers"] {
+        let section = plan
+            .groups
+            .get(state)
+            .unwrap_or_else(|| panic!("`{state}` is a section"));
+        assert_eq!(section.attempts, 1, "`{state}`: only the retreat repeats");
+    }
+    for state in ["implement", "verify", "adversarial_verify", "review"] {
+        let section = retreat
+            .groups
+            .get(state)
+            .unwrap_or_else(|| panic!("`{state}` is a section inside the retreat"));
+        assert_eq!(section.attempts, 1, "`{state}`: only the retreat repeats");
+        assert_eq!(section.path, format!("root.implement-to-review.{state}"));
+    }
     assert_eq!(
         flow.steps(),
         vec![
-            "root.receive",
-            "root.specify",
-            "root.decompose",
-            "root.establish_verifiers",
-            "root.implement-to-review.implement",
-            "root.implement-to-review.verify",
-            "root.implement-to-review.adversarial_verify",
-            "root.implement-to-review.review",
+            "root.receive.receive-1",
+            "root.specify.specify-1",
+            "root.decompose.decompose-1",
+            "root.establish_verifiers.establish_verifiers-1",
+            "root.implement-to-review.implement.implement-1",
+            "root.implement-to-review.verify.verify-1",
+            "root.implement-to-review.adversarial_verify.adversarial_verify-1",
+            "root.implement-to-review.review.review-1",
         ]
     );
 }
@@ -701,7 +718,7 @@ fn the_projected_workflow_retreats_when_verification_fails() {
     let report = flow
         .run(
             &mut HealsAfter {
-                step: "verify",
+                step: "verify-1",
                 heal_after: 2,
                 seen: 0,
             },
@@ -713,13 +730,15 @@ fn the_projected_workflow_retreats_when_verification_fails() {
     assert_eq!(
         started
             .iter()
-            .filter(|path| path.ends_with("implement"))
+            .filter(|path| path.ends_with("implement-1"))
             .count(),
         2,
         "implement ran twice: {started:?}"
     );
     assert!(
-        started.last().is_some_and(|path| path.ends_with("review")),
+        started
+            .last()
+            .is_some_and(|path| path.ends_with("review-1")),
         "and the run reached review in the end: {started:?}"
     );
     assert!(

@@ -295,14 +295,18 @@ extension), `--input <TEXT>` (the task, given to every step beside its own promp
 `--max-attempts <N>`, which overrides every `repeat.max` — the root's included — for a document
 that carries none.
 
-**A step is one turn.** Every step runs under an output schema the runner derives — the model never
-sees a schema file — and finishes by calling `answer` with `outcome: passed` or `outcome: failed`,
+**A step is one turn — or one call.** Every model step runs under an output schema the runner
+derives — the model never sees a schema file — and finishes by calling `answer` with
+`outcome: passed` or `outcome: failed`,
 an optional `note`, and `gives` when its enclosing group promised names. `gives` is the only thing
 that crosses a group boundary, so a group that promised `specification_id` and never answered with
 one fails by the notation's own rule rather than by a new one — once, and without a retreat, since
 a section that came out clean and still did not produce it buys the same answer again. A budget stop, or prose after the
 nudge, is a failed step. A wire failure is nobody's failed step: it aborts the flow, because a walk
-that recorded a network blip as `failed` would misreport the plan.
+that recorded a network blip as `failed` would misreport the plan. A step whose `run` says
+`kind: command` is not a turn at all: its argv is one `run` call through the same gate a model's
+call meets — published, approver, `before-call`, tool, `after-call` — filed into the section's
+conversation, exit `0` passed and everything else failed by name.
 
 **A group is a conversation.** Steps sharing a scope continue the same items; a step in another
 group starts from the handoffs of the siblings that came out **clean** — rendered as *"Earlier

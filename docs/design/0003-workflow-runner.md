@@ -233,9 +233,12 @@ beside the group — or, under `--json`, the `Plan` itself; exit `0` valid, `1` 
 - **Parallel layers.** `Plan` says what may run beside what; the walk is sequential over
   `&mut dyn StepRunner`, and the loop holds one client. M3, after a measurement says it is worth
   a client per thread.
-- **Command steps.** The projection's `command` steps (a verifier the driver runs, `producer:
-  verifier`) are model steps here. M2 runs a `run.command` argv through the tool port as a confined
-  program, without a model turn, and reports it as the step's outcome.
+- ~~**Command steps.**~~ **Done (M2, 2026-08-30).** A `run.command` argv is one `run` call made
+  through `AgentLoop::call` — the gate a model's call meets, in its order — without a model turn,
+  filed into the section's conversation as the call and its result, and read as the step's
+  outcome: exit `0` passed, anything else failed by name (`workflow.rs`, *A `command` step is a
+  call, not a turn*). What is still open is a toolset per step: a command runs under the run's own
+  `--allow-program`, so a verifier the run does not publish is a refused step.
 - **The metaharness projection of `flow.*`** into `trace-ir/1` families, or their listing under
   `CONTROL_PLANE_EVENTS`. Only when an eval asks for a native-flow record.
 - **Live evidence.** Everything below is `provider_emulated` until one authorized run walks the

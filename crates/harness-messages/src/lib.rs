@@ -932,6 +932,40 @@ mod tests {
     }
 
     #[test]
+    fn streamed_arguments_are_bounded_and_the_bound_refuses_by_name() {
+        // The bound exists because the far side decides how many fragments to send, and each one
+        // is appended to a buffer this process owns. It is checked *while* accumulating rather
+        // than at the end — a check after the loop is a check the peer has already outgrown.
+        let mut events = vec![
+            message_start(&json!({"input_tokens": 1, "output_tokens": 1})),
+            json!({"type": "content_block_start", "index": 0, "content_block": {
+                "type": "tool_use", "id": "toolu_1", "name": "t", "input": {},
+            }}),
+        ];
+        // Sixteen fragments of 8 kB: individually unremarkable, and over the bound together.
+        let fragment = "x".repeat(MAX_TOOL_ARGUMENT_BYTES / 16);
+        for _ in 0..=16 {
+            events.push(json!({"type": "content_block_delta", "index": 0, "delta": {
+                "type": "input_json_delta", "partial_json": fragment,
+            }}));
+        }
+        let (outcome, _) = drive(&events);
+        let error = outcome.expect_err("oversized streamed arguments refuse");
+        assert_eq!(error.code, WireErrorCode::TooLarge);
+        // Named, so a reader knows which bound bit and where.
+        assert!(
+            error.message.contains("content block 0"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains(&MAX_TOOL_ARGUMENT_BYTES.to_string()),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
     fn a_thinking_block_is_assembled_and_kept_opaque_without_being_streamed_to_a_reader() {
         let (outcome, sink) = drive(&[
             message_start(&json!({"input_tokens": 1, "output_tokens": 1})),
@@ -1041,6 +1075,78 @@ mod tests {
             status_error(reqwest::StatusCode::BAD_REQUEST, "").code,
             WireErrorCode::Refused
         );
+    }
+
+    /// A client pointed at an address nothing answers on.
+    ///
+    /// Every case below refuses **before** a byte goes out, which is the property under test: if a
+    /// pre-flight check stops being called, the request escapes and the failure is a transport
+    /// error instead of the named refusal.
+    fn unreachable_client() -> MessagesClient {
+        let endpoint = Endpoint::new("http://127.0.0.1:1/v1", "m", 8192).expect("valid");
+        MessagesClient::new(endpoint, Arc::new(StaticBearer::new("synthetic-secret")))
+            .expect("the client builds")
+    }
+
+    fn request_of(items: Vec<Item>, tools: Vec<harness_wire::ToolSpec>) -> TurnRequest {
+        TurnRequest {
+            model: "m".to_owned(),
+            instructions: String::new(),
+            items,
+            tools,
+            max_output_tokens: None,
+            sampling: harness_wire::Sampling::default(),
+        }
+    }
+
+    #[test]
+    fn every_pre_flight_check_is_actually_reached_before_a_request_goes_out() {
+        // The checks are unit-tested one layer down; this is the wiring. A `turn` that stopped
+        // calling one of them would still pass every one of those tests, and would fail at the far
+        // side with a vendor error naming its own field names instead of the caller's item.
+        let spec = |name: &str| harness_wire::ToolSpec {
+            name: harness_wire::ToolName::new(name).expect("a printable identifier"),
+            description: "d".to_owned(),
+            input_schema: json!({"type": "object"}),
+            approval: harness_wire::Approval::NotRequired,
+            envelope: harness_wire::Envelope::default(),
+        };
+        let cases: Vec<(&str, TurnRequest, &str)> = vec![
+            (
+                "a conversation that opens with the model",
+                request_of(vec![Item::assistant("hi")], Vec::new()),
+                "item 0",
+            ),
+            (
+                "a tool name this wire cannot publish",
+                request_of(vec![Item::user("hi")], vec![spec("workspace.read")]),
+                "workspace.read",
+            ),
+            (
+                "a temperature outside this wire's range",
+                TurnRequest {
+                    sampling: harness_wire::Sampling {
+                        temperature: Some(1.5),
+                        ..harness_wire::Sampling::default()
+                    },
+                    ..request_of(vec![Item::user("hi")], Vec::new())
+                },
+                "temperature",
+            ),
+        ];
+        for (name, request, expected) in cases {
+            let mut client = unreachable_client();
+            let mut sink = VecSink::new();
+            let Err(error) = client.turn(&request, &mut sink) else {
+                panic!("{name} must refuse before anything is sent");
+            };
+            assert_eq!(
+                error.code,
+                WireErrorCode::Protocol,
+                "{name} reached the network instead of being refused here: {error}"
+            );
+            assert!(error.message.contains(expected), "{name}: {error}");
+        }
     }
 
     #[test]

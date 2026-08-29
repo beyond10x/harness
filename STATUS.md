@@ -32,14 +32,14 @@ Observed on 2026-08-29, after the second wire. The previous observation was 2026
 
 ## Test counts
 
-410 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29):
+412 tests pass across the workspace and 1 is ignored (`bash scripts/gate.sh`, 2026-08-29):
 
 | Crate | Unit | Integration |
 | --- | --- | --- |
 | `harness-wire` | 37 | — |
 | `harness-credential` | 7 | — |
 | `harness-responses` | 39 | 18 provider-emulated, 4 contract |
-| `harness-messages` | 43 | 20 provider-emulated, 6 contract |
+| `harness-messages` | 45 | 20 provider-emulated, 6 contract |
 | `harness-loop` | 57 | — |
 | `harness-flow` | 27 | — |
 | `harness-substrate` | 29 | 4 embedded-live; `live` ignored, it needs a daemon |

@@ -30,6 +30,13 @@
 //! `skills`, no `agents`, no `mcp_servers`, no `permission_mode`. `hermetic.installed_plugins` is
 //! `[]` and that is a fact rather than an absence: this loop installs no plugins because there is
 //! no plugin mechanism for one to be installed into.
+//!
+//! `withheld` is `[]` on the same footing, and for a reason worth stating once: the loop skips its
+//! own `withheld` when empty, so an absent key on the input could be *nothing was withheld* or a
+//! record from before the field existed. This converter has already decided that question by
+//! stamping `harness_version` with its **own** `CARGO_PKG_VERSION` — it claims the record as this
+//! build's — and this build writes the field whenever the loop reports one. So `[]` is the answer
+//! this build would give, and `null` would say *nobody looked* about a converter that did.
 
 use std::io::{BufRead, Write};
 
@@ -211,6 +218,22 @@ fn started(value: &Value, version: &str) -> Value {
         // answered that there was none - which reads as a defect and is a vocabulary mismatch.
         // Stated either way, so a reader needs no rule about which surface produced the record.
         "available_operations": value.get("operations").cloned().unwrap_or(Value::Null),
+        // **What the run asked for and this machine would not admit**, beside what it has. The
+        // two lists above both describe something *present*, so a tool the publication gate
+        // dropped is missing from each of them exactly as a tool nobody wanted is — and on
+        // 2026-08-29 that identity cost weeks: a session whose only legal route was running a
+        // program was published six catalogue entries instead of seven, hand-wrote files instead,
+        // and the failure read as the model's.
+        //
+        // `[]` when the record names none, and that is a fact rather than a guess. The loop skips
+        // the field when nothing was withheld, so an absent key on the input is either *nothing
+        // was withheld* or *a record written before the field existed* — and this converter has
+        // already resolved that question in the reader's favour one line up, where it stamps
+        // `harness_version` with **its own** `CARGO_PKG_VERSION` rather than with anything the
+        // record said. Having claimed the record as this build's, it must answer as this build
+        // would: this build writes the field whenever the loop reports one, so nothing reported is
+        // nothing withheld. A `null` here would say *nobody looked* about a converter that did.
+        "withheld": value.get("withheld").cloned().unwrap_or_else(|| json!([])),
         "slash_commands": Value::Null,
         "skills": Value::Null,
         "agents": Value::Null,
@@ -468,6 +491,48 @@ mod tests {
             json!(["tool_search", "tool_describe", "tool_invoke"]),
             "what the *model* was offered, which on this loop is three verbs whatever the \
              catalogue behind them holds"
+        );
+    }
+
+    #[test]
+    fn a_tool_the_machine_would_not_admit_crosses_by_name_and_carries_the_predicate() {
+        // The silence this closes. Publication works by absence, so a tool the machine cannot
+        // confine is missing from `published_tools` and from `operations` exactly as a tool
+        // nobody wanted is. On 2026-08-29 a session whose only legal route was running a program
+        // was published six catalogue entries instead of seven and the failure read as the
+        // model's; the record now says which it was.
+        let events = convert_all(
+            r#"{"kind":"started","model":"m","published_tools":["tool_invoke"],"operations":["file.read"],"withheld":[{"tool":"run","reason":"`exec.argv-only` must be true and this machine says nothing."}]}"#,
+        );
+        let withheld = &events[0]["withheld"];
+        assert_eq!(withheld[0]["tool"], "run");
+        assert!(
+            withheld[0]["reason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("`exec.argv-only`"),
+            "the machine's own predicate, passed through rather than paraphrased: {withheld}"
+        );
+        // Beside the two lists and not instead of them, which is the point: `run` is in neither.
+        assert_eq!(events[0]["offered_tools"], json!(["tool_invoke"]));
+        assert_eq!(events[0]["available_operations"], json!(["file.read"]));
+    }
+
+    #[test]
+    fn a_record_that_withheld_nothing_says_so_rather_than_saying_nobody_looked() {
+        // The loop skips the field when it is empty, so the input carries no key. `[]` is the
+        // honest answer *for this converter*: it has already claimed the record as this build's by
+        // stamping its own version, and this build writes the field whenever the loop reports one.
+        // `null` would report that nobody looked, about a converter that did.
+        let events = convert_all(RUN);
+        assert_eq!(
+            events[0]["withheld"],
+            json!([]),
+            "nothing was withheld, which is a fact and not an absence"
+        );
+        assert_eq!(
+            events[0]["harness_version"], "0.1.0",
+            "the claim `[]` rests on"
         );
     }
 

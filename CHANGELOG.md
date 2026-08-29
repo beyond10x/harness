@@ -480,6 +480,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   programs states nothing**, because absence stays absence and a read-only run is owed no sentence
   about a tool it never wanted.
 
+- **And it now survives the crossing into `metaharness.event/1`, where it was dying one line
+  later.** The fact reached the `--json` record and stopped there: `b10x-harness events` writes the
+  stream every arm of the evaluation is judged from, and its `session.started` carried
+  `offered_tools` and `available_operations` and nothing that could say a tool had been *denied* —
+  so the matrix, which is the thing the record exists to feed, saw the same six-of-seven silence
+  the terminal had. `session.started` now carries **`withheld`**, the same `{tool, reason}` pairs
+  under the same names. **`[]` when the record names none, never `null`:** the loop skips its own
+  field when empty, so an absent key is either *nothing was withheld* or *a record older than the
+  field* — and this converter has already answered that question one line up, where it stamps
+  `harness_version` with its **own** `CARGO_PKG_VERSION` rather than with anything the record said.
+  Having claimed the record as this build's it must answer as this build would, and this build
+  writes the field whenever the loop reports one. A `null` would report that nobody looked, about a
+  converter that did. The argv contract does not move — `--json` is a shape, not a flag — and the
+  consumer's half is `metaharness`' own change under its `[Unreleased]`.
+
 - **A run that failed now files what it spent, not only what it said.** A wire failure on turn
   twenty handed the shell its nineteen turns of conversation and none of their figures: the usage
   and cost of every turn that did happen scrolled past on stderr and then died with the process,

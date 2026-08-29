@@ -69,6 +69,20 @@ b10x-harness run \
   --input "Map this repository. Name the evidence behind each claim."
 ```
 
+:::tip Typing this once is enough
+
+The endpoint, wire, model and credential do not vary between runs against the same provider. Put
+them in `~/.config/b10x/harness.toml` and every later run drops them:
+
+```bash
+b10x-harness profiles init     # writes a starter config, prints its path
+b10x-harness run --workspace . --input "Map this repository."
+```
+
+See [Profiles and providers](guides/profiles.md).
+
+:::
+
 `--base-url` is the endpoint origin plus API prefix. With the default `openai-responses` wire,
 Harness sends turns to `POST {base-url}/responses`.
 

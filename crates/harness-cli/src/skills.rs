@@ -271,9 +271,13 @@ mod tests {
     fn the_real_plugin_this_repository_ships_against_reads() {
         // The one that would have caught a parser written to a format nobody uses. Skipped where
         // the sibling checkout is not present, because this repository does not own that file.
-        let planning = Path::new(
-            "/home/timo/beyond10x/engineering-protocols/integrations/claude-code/skills/planning/SKILL.md",
+        // Relative to this crate, never an absolute path from whoever wrote the test: an
+        // absolute one is a personal directory published in a public repository, and it makes the
+        // test pass on exactly one machine.
+        let planning = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../engineering-protocols/integrations/claude-code/skills/planning/SKILL.md",
         );
+        let planning = planning.as_path();
         if !planning.is_file() {
             return;
         }

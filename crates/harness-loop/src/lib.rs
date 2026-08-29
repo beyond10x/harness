@@ -80,7 +80,7 @@ pub use delegate::{
     DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_TURNS, DELEGATE_PREAMBLE, Delegation,
     MAX_DELEGATION_DEPTH,
 };
-pub use event::{LoopEvent, LoopSink, NullLoopSink, VecLoopSink, Withheld};
+pub use event::{LoopEvent, LoopSink, NullLoopSink, ProfileRef, VecLoopSink, Withheld};
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
@@ -312,6 +312,13 @@ pub struct LoopConfig {
     /// [`None`] publishes no `delegate`, which is what every run did before this existed.
     pub delegation: Option<Delegation>,
 
+    /// The profiles that configured this run, for its record. Acted on nowhere: what they set was
+    /// already applied by the caller, and this is the sentence saying which file said it.
+    pub profiles: Vec<ProfileRef>,
+
+    /// Where this run's credential came from, for the record: `named`, or `provider:<name>`.
+    pub credential_source: String,
+
     /// The named agents a delegate may be run as, or [`None`] for the generic delegate only.
     ///
     /// Loaded by the caller from the vendor's `agents/<name>.md` format. Each carries its own
@@ -368,6 +375,8 @@ impl LoopConfig {
             output_schema: None,
             delegation: None,
             agents: None,
+            profiles: Vec::new(),
+            credential_source: "named".to_owned(),
             admits: None,
             skills: None,
             withheld: Vec::new(),
@@ -395,6 +404,20 @@ impl LoopConfig {
     #[must_use]
     pub fn with_delegation(mut self, delegation: Option<Delegation>) -> Self {
         self.delegation = delegation;
+        self
+    }
+
+    /// Names the profiles this run was configured by, for the record.
+    #[must_use]
+    pub fn with_profiles(mut self, profiles: Vec<ProfileRef>) -> Self {
+        self.profiles = profiles;
+        self
+    }
+
+    /// Says a provider's default supplied the credential, rather than the operator naming one.
+    #[must_use]
+    pub fn with_credential_source(mut self, source: String) -> Self {
+        self.credential_source = source;
         self
     }
 
@@ -1717,6 +1740,8 @@ impl<'a> AgentLoop<'a> {
                 .as_ref()
                 .map(Agents::names)
                 .unwrap_or_default(),
+            profiles: self.config.profiles.clone(),
+            credential_source: self.config.credential_source.clone(),
         });
         self.announce_prices(priced, sink);
 

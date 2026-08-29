@@ -12,6 +12,8 @@ pub mod contract;
 pub mod environment;
 pub mod hooks;
 mod metaharness;
+pub mod profile;
+pub mod provider;
 mod render;
 pub mod skills;
 pub mod transcript;
@@ -314,6 +316,31 @@ pub struct Cli {
     command: Command,
 }
 
+/// `profiles <verb>`.
+#[derive(Debug, Subcommand)]
+enum ProfilesCommand {
+    /// Every profile, and the file it came from.
+    List,
+    /// One profile's effective table.
+    Show { name: String },
+    /// What a `-p` expands to, and who set each key.
+    Explain {
+        #[arg(short = 'p', long = "profile", value_name = "NAME")]
+        profile: Vec<String>,
+    },
+    /// Write a starter config, and print where it went.
+    Init,
+}
+
+/// `providers <verb>`.
+#[derive(Debug, Subcommand)]
+enum ProvidersCommand {
+    /// Every provider this build ships, and which the config overrides.
+    List,
+    /// One provider's effective endpoint, wire, model and credential.
+    Show { name: String },
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run one request to completion.
@@ -329,6 +356,16 @@ enum Command {
     Sessions(SessionsOptions),
     /// Print the tools this harness publishes, without contacting an endpoint.
     Tools(Box<ToolsOptions>),
+    /// Read the profiles this machine is configured with, without running one.
+    ///
+    /// A profile decides what a run may do, so it has to be readable before it does it — that is
+    /// the condition on which one is allowed to carry a permission at all. `explain` is the verb
+    /// that matters: it prints the argv a `-p` expands to, and who set each key, for nothing.
+    #[command(subcommand)]
+    Profiles(ProfilesCommand),
+    /// Read the providers this build ships, and any the config overrides.
+    #[command(subcommand)]
+    Providers(ProvidersCommand),
     /// Serve one connection over the pinned Codex app-server JSON-RPC format, on stdio.
     ///
     /// Tools arrive from the client on `thread/start`; the workspace toolset is not published
@@ -419,15 +456,36 @@ struct AppServerOptions {
 
 // A command line is a struct of switches; counting them says nothing about the type.
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 #[command(group = clap::ArgGroup::new("oauth_source").args(["oauth_token_file", "oauth_token_env"]))]
 struct RunOptions {
+    /// Profiles to apply, in order. Later wins a contested key; a typed flag beats them all.
+    ///
+    /// Read from `$XDG_CONFIG_HOME/b10x/harness.toml`. A profile decides what a run may **do**, so
+    /// `b10x-harness profiles explain -p <name>` prints the argv it expands to before a token is
+    /// spent, and `session.started` names every profile that contributed with a digest of what it
+    /// said. That record is the condition on which a file is allowed to carry a permission at all.
+    #[arg(short = 'p', long = "profile", value_name = "NAME")]
+    profile: Vec<String>,
+    /// The provider whose default supplied the credential, when one did.
+    ///
+    /// Not a flag: nothing sets it but [`apply_profiles`]. It exists so the run's record can say
+    /// `credential_source: "provider:<name>"` rather than the flat `"named"` — which is the audit
+    /// that pays for a defaulted credential path at all.
+    #[arg(skip)]
+    credential_from_provider: Option<String>,
+    /// The profiles that configured this run, for its record. Set by [`apply_profiles`] alone.
+    #[arg(skip)]
+    applied_profiles: Vec<profile::ProfileRef>,
     /// Endpoint origin plus API prefix, for example `https://llmgw.example/v1`.
+    ///
+    /// Optional only because a provider can supply it — `[default] provider = "claude"`. A run with
+    /// neither is refused by name rather than aimed at a default endpoint nobody chose.
     #[arg(long)]
-    base_url: String,
-    /// Exact model identifier the endpoint serves.
+    base_url: Option<String>,
+    /// Exact model identifier the endpoint serves. As `--base-url`: a provider may supply it.
     #[arg(long)]
-    model: String,
+    model: Option<String>,
     /// Context window the endpoint serves for that model.
     ///
     /// It bounds the request the wire will build, and it is also what makes compaction
@@ -461,8 +519,8 @@ struct RunOptions {
     #[arg(long, value_name = "POINTER", requires = "oauth_source")]
     oauth_token_pointer: Option<String>,
     /// Which model API to speak. Both reach `--base-url`; they are different endpoints under it.
-    #[arg(long, value_name = "WIRE", default_value = "openai-responses")]
-    wire: Wire,
+    #[arg(long, value_enum)]
+    wire: Option<Wire>,
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
@@ -775,7 +833,7 @@ struct RunOptions {
 /// Split from [`RunOptions`] rather than made optional, so that `run` without `--input` is a parse
 /// error and `chat` never carries a flag it would ignore. A flag that exists and does nothing is
 /// how `--substrate-embedded` came to demand a value it threw away.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 struct RunCommand {
     #[command(flatten)]
     options: RunOptions,
@@ -903,6 +961,220 @@ struct ToolsOptions {
 /// the run sends no `authorization` header, which is right for a gateway on this machine that
 /// authenticates nobody, and for a run deliberately started with no credential whose first request
 /// is meant to be refused by the far end.
+impl RunOptions {
+    /// The endpoint, after profiles and providers have been applied.
+    ///
+    /// # Panics
+    ///
+    /// Never after [`apply_profiles`], which fills it or refuses the run. Reached before that only
+    /// by a caller that skipped resolution, which is a programming error rather than an operator's.
+    fn base_url(&self) -> &str {
+        self.base_url
+            .as_deref()
+            .expect("`apply_profiles` fills the endpoint or refuses the run")
+    }
+
+    /// The model, after profiles and providers have been applied.
+    ///
+    /// # Panics
+    ///
+    /// As [`RunOptions::base_url`].
+    fn model(&self) -> &str {
+        self.model
+            .as_deref()
+            .expect("`apply_profiles` fills the model or refuses the run")
+    }
+
+    /// The wire, defaulted last so a provider can set it and a typed flag can beat it.
+    fn wire(&self) -> Wire {
+        self.wire.unwrap_or_default()
+    }
+}
+
+/// What the record will say about where this run's credential came from.
+///
+/// `provider:<name>` where a provider defaulted it, `named` where the operator pointed at it. The
+/// distinction is the whole of what makes a defaulted vendor path acceptable rather than the
+/// ambient fallback `resolve_credential` refuses.
+fn credential_source(options: &RunOptions) -> String {
+    options
+        .credential_from_provider
+        .as_ref()
+        .map_or_else(|| "named".to_owned(), |name| format!("provider:{name}"))
+}
+
+/// The profiles that configured this run, in the loop's own shape.
+fn applied_profiles(options: &RunOptions) -> Vec<harness_loop::ProfileRef> {
+    options
+        .applied_profiles
+        .iter()
+        .map(|used| harness_loop::ProfileRef {
+            name: used.name.clone(),
+            source: used.source.clone(),
+            sha256: used.sha256.clone(),
+        })
+        .collect()
+}
+
+/// Fills the endpoint, wire, model and credential from the provider a profile named.
+///
+/// Split out of [`apply_profiles`] because it is the one part that talks about *who the run is
+/// talking to* rather than what it may do, and because that function was one field from a lint.
+///
+/// # Errors
+///
+/// Names a provider that does not exist, a wire this build does not speak, or a credential file
+/// that is not there.
+fn apply_provider(
+    options: &mut RunOptions,
+    provider_name: Option<&str>,
+    overrides: &std::collections::BTreeMap<String, provider::ProviderOverride>,
+) -> Result<(), String> {
+    let Some(name) = provider_name else {
+        return Ok(());
+    };
+
+    // Guarded by the caller: a typed `--base-url` means the bundle is not consulted at all.
+    if options.base_url.is_some() {
+        return Ok(());
+    }
+    let provider = provider::resolve(name, overrides)?;
+    if options.base_url.is_none() {
+        options
+            .base_url
+            .clone_from(&Some(provider.base_url.clone()));
+    }
+    // **The alias is expanded whether the model was typed or defaulted.** `--model haiku` is the
+    // point of having aliases at all, and a name the table does not know passes through, so a
+    // model released after this binary is still reachable.
+    options.model = Some(options.model.as_deref().map_or_else(
+        || provider.model.clone(),
+        |wanted| provider.exact_model(wanted),
+    ));
+    if options.wire.is_none() {
+        options.wire = Some(match provider.wire.as_str() {
+            "anthropic-messages" => Wire::AnthropicMessages,
+            "openai-responses" => Wire::OpenaiResponses,
+            other => {
+                return Err(format!(
+                    "provider `{name}` names the wire `{other}`, which this build does not                          speak. It speaks `anthropic-messages` and `openai-responses`."
+                ));
+            }
+        });
+    }
+    // **Only when the operator named no credential themselves.** A provider's is a default,
+    // and a default that overrode something typed would be the ambient fallback this harness
+    // refuses outright rather than the accountable one it now allows.
+    let named_already = options.api_key_file.is_some()
+        || options.api_key_env.is_some()
+        || options.oauth_token_file.is_some()
+        || options.oauth_token_env.is_some();
+    if !named_already {
+        match provider.credential {
+            provider::Credential::OauthFile { path, pointer } => {
+                let path = provider::expand_home(&path);
+                if !std::path::Path::new(&path).is_file() {
+                    return Err(format!(
+                        "provider `{name}` reads its credential from `{path}`, which is not                              there. Log in to that vendor, or name another source with                              `--oauth-token-file` or `[providers.{name}]`."
+                    ));
+                }
+                options.oauth_token_file = Some(std::path::PathBuf::from(path));
+                if options.oauth_token_pointer.is_none() {
+                    options.oauth_token_pointer = Some(pointer);
+                }
+            }
+            provider::Credential::ApiKeyEnv { name } => options.api_key_env = Some(name),
+        }
+        // What the record will say. Not `named`: the operator chose the provider, and the
+        // provider chose the path, and a reader is entitled to know which.
+        options.credential_from_provider = Some(name.to_owned());
+    }
+    Ok(())
+}
+
+/// Fills whatever the operator did not type, from the profiles they named.
+///
+/// **Precedence is the shape of the data, not a rule applied on top.** A flag clap did not see is
+/// `None`, an empty `Vec` or a `false` bool; this only ever fills those. So a typed flag wins
+/// because there is nothing left to fill, and no `ValueSource` bookkeeping can drift from it.
+///
+/// Returns the profiles that contributed, for `session.started` — the record that makes a file
+/// carrying a permission accountable.
+///
+/// # Errors
+///
+/// Names the missing endpoint or model, the profile that is not in the file, the provider that
+/// does not exist, or a configuration that declares programs without `write`.
+fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, String> {
+    let Some(path) = profile::config_path() else {
+        return Ok(Vec::new());
+    };
+    let source = path.display().to_string();
+    let config = profile::load(&path)?;
+    let resolved = profile::resolve(&config, &options.profile, &source)?;
+    let wanted = resolved.profile;
+
+    // **A typed `--base-url` means the provider is not consulted at all.**
+    //
+    // A provider is a bundle whose parts belong together: an endpoint, the wire that endpoint
+    // speaks, and the credential it accepts. Half-applying one over somebody else's endpoint
+    // points anthropic's dialect at a server that has never heard of it — which is exactly what
+    // happened the first time this ran, against a test's own fake server: `--base-url` was typed,
+    // `--wire` was not, and the config supplied `anthropic-messages` for a 404.
+    //
+    // So naming the endpoint yourself opts out of the whole bundle, rather than a piece of it
+    // arriving to keep you company. The profile's *permission* keys below still apply: those are
+    // about what the run may do, not about who it is talking to.
+    apply_provider(options, wanted.provider.as_deref(), &config.providers)?;
+
+    if let Some(model) = wanted.model
+        && options.model.is_none()
+    {
+        options.model = Some(model);
+    }
+    if wanted.write == Some(true) {
+        options.substrate_embedded = true;
+        if options.write_scope.is_empty() {
+            options.write_scope = wanted
+                .write_scope
+                .unwrap_or_else(profile::default_write_scope);
+        }
+        if options.allow_program.is_empty() {
+            options.allow_program = wanted.allow_program.unwrap_or_default();
+        }
+    }
+    if options.approve_up_to.is_none()
+        && let Some(ceiling) = wanted.approve_up_to
+    {
+        options.approve_up_to = Some(
+            <ApproveUpTo as clap::ValueEnum>::from_str(&ceiling, false).map_err(|_| {
+                format!(
+                    "`{ceiling}` is not a risk this build knows. It knows the values \
+                     `--approve-up-to` takes."
+                )
+            })?,
+        );
+    }
+    if options.plugin_dir.is_empty() {
+        options.plugin_dir = wanted
+            .plugin_dir
+            .unwrap_or_default()
+            .into_iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+    }
+    if options.max_turns.is_none() {
+        options.max_turns = wanted.max_turns;
+    }
+
+    if options.base_url.is_none() || options.model.is_none() {
+        return Err(format!(
+            "no endpoint or model: type `--base-url` and `--model`, or name a provider in              `{source}` with `[default] provider = \"claude\"`.              `b10x-harness providers list` shows the ones this build ships, and              `b10x-harness profiles init` writes a starter config."
+        ));
+    }
+    Ok(resolved.used)
+}
+
 fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
     if let Some(token) = subscription_token(
         options.oauth_token_file.as_ref(),
@@ -1241,9 +1513,9 @@ fn prepare(
     let credential = resolve_credential(options)?;
     let cancel = LoopCancel::new();
     let client = model_client(
-        options.wire,
-        &options.base_url,
-        &options.model,
+        options.wire(),
+        options.base_url(),
+        options.model(),
         options.context_window,
         options.max_output_tokens_per_turn,
         credential,
@@ -1282,7 +1554,7 @@ fn prepare(
         agents: agents.as_ref(),
     };
     let config = LoopConfig::new(
-        &options.model,
+        options.model(),
         instructions(
             options,
             tools.catalogue(),
@@ -1302,6 +1574,8 @@ fn prepare(
     .with_agents(agents)
     // Reported in the record and acted on nowhere: what the machine would not admit was already
     // decided when the catalogue was built, and this is the sentence saying so.
+    .with_credential_source(credential_source(options))
+    .with_profiles(applied_profiles(options))
     .with_withheld(withheld_events(&withheld));
     // A hook is unconfined — it is the operator's own program — but it is not handed this run's
     // credential. The child would otherwise inherit the whole environment, including whichever
@@ -1540,9 +1814,9 @@ fn open_session(
         .unwrap_or_else(|_| options.workspace.clone());
     let Some(which) = options.resume.as_deref() else {
         return Ok(transcript::Session::new(
-            options.wire.id(),
-            &options.model,
-            &options.base_url,
+            options.wire().id(),
+            options.model(),
+            options.base_url(),
             workspace,
         ));
     };
@@ -1563,14 +1837,14 @@ fn open_session(
     } else {
         transcript::Session::load(dir, which)?
     };
-    if session.wire.as_str() != options.wire.id().as_str() {
+    if session.wire.as_str() != options.wire().id().as_str() {
         return Err(format!(
             "session `{}` was recorded on the `{}` wire and this run speaks `{}`; a provider's \
              own reasoning items are replayed verbatim and may not cross wires, so resume it with \
              `--wire {}` or start a new session",
             session.id,
             session.wire.as_str(),
-            options.wire.id().as_str(),
+            options.wire().id().as_str(),
             session.wire.as_str()
         ));
     }
@@ -2214,6 +2488,135 @@ fn adopted(
     })
 }
 
+/// Reads the config, or says where it should be.
+fn read_config() -> Result<(profile::Config, String), String> {
+    let path = profile::config_path().ok_or_else(|| {
+        "no `XDG_CONFIG_HOME` and no `HOME`, so there is nowhere a config could be".to_owned()
+    })?;
+    let config = profile::load(&path)?;
+    Ok((config, path.display().to_string()))
+}
+
+/// `profiles list|show|explain|init`.
+fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
+    if let ProfilesCommand::Init = verb {
+        let path = profile::config_path().ok_or_else(|| "nowhere to write a config".to_owned())?;
+        if path.exists() {
+            // Never overwritten: a config is the operator's, and one silently replaced is a set of
+            // rules they thought they had.
+            return Err(format!(
+                "`{}` is already there. Read it, or move it aside first.",
+                path.display()
+            ));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("creating `{}`: {error}", parent.display()))?;
+        }
+        std::fs::write(&path, profile::starter())
+            .map_err(|error| format!("writing `{}`: {error}", path.display()))?;
+        println!("{}", path.display());
+        return Ok(());
+    }
+    let (config, source) = read_config()?;
+    match verb {
+        ProfilesCommand::Init => unreachable!("handled above"),
+        ProfilesCommand::List => {
+            println!("default    {source}");
+            for profile in &config.profiles {
+                if let Some(name) = &profile.name {
+                    println!("{name:<10} {source}");
+                }
+            }
+        }
+        ProfilesCommand::Show { name } => {
+            let resolved = profile::resolve(&config, std::slice::from_ref(name), &source)?;
+            println!("{:#?}", resolved.profile);
+        }
+        ProfilesCommand::Explain { profile: wanted } => {
+            let resolved = profile::resolve(&config, wanted, &source)?;
+            // The point of the verb: what this will actually run as, before a token is spent.
+            for used in &resolved.used {
+                println!(
+                    "profile {} <- {} ({})",
+                    used.name,
+                    used.source,
+                    &used.sha256[..12]
+                );
+            }
+            if let Some(name) = &resolved.profile.provider {
+                let provider = provider::resolve(name, &config.providers)?;
+                println!("--base-url {}", provider.base_url);
+                println!("--wire {}", provider.wire);
+                println!(
+                    "--model {}",
+                    resolved.profile.model.as_ref().unwrap_or(&provider.model)
+                );
+                match &provider.credential {
+                    provider::Credential::OauthFile { path, pointer } => {
+                        println!("--oauth-token-file {}", provider::expand_home(path));
+                        println!("--oauth-token-pointer {pointer}");
+                    }
+                    provider::Credential::ApiKeyEnv { name } => println!("--api-key-env {name}"),
+                }
+            }
+            if resolved.profile.write == Some(true) {
+                println!("--substrate-embedded");
+                for rule in resolved
+                    .profile
+                    .write_scope
+                    .clone()
+                    .unwrap_or_else(profile::default_write_scope)
+                {
+                    println!("--write-scope {rule}");
+                }
+            } else {
+                println!("(no --substrate-embedded: `write` is not true, so four read-only tools)");
+            }
+            if let Some(ceiling) = &resolved.profile.approve_up_to {
+                println!("--approve-up-to {ceiling}");
+            }
+            for program in resolved.profile.allow_program.iter().flatten() {
+                println!("--allow-program {program}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `providers list|show`.
+fn providers_command(verb: &ProvidersCommand) -> Result<(), String> {
+    let (config, source) = read_config()?;
+    match verb {
+        ProvidersCommand::List => {
+            for built in provider::built_in() {
+                let note = if config.providers.contains_key(&built.name) {
+                    format!("built-in, overridden in {source}")
+                } else {
+                    "built-in".to_owned()
+                };
+                println!("{:<8} {note}", built.name);
+            }
+        }
+        ProvidersCommand::Show { name } => {
+            let provider = provider::resolve(name, &config.providers)?;
+            println!("base-url  {}", provider.base_url);
+            println!("wire      {}", provider.wire);
+            println!("model     {}", provider.model);
+            match &provider.credential {
+                provider::Credential::OauthFile { path, pointer } => {
+                    // Printed before a token is spent: a defaulted credential path is only
+                    // acceptable because it is readable without running anything.
+                    println!("oauth-token-file     {}", provider::expand_home(path));
+                    println!("oauth-token-pointer  {pointer}");
+                }
+                provider::Credential::ApiKeyEnv { name } => println!("api-key-env  {name}"),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools_skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
     let tools_agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
@@ -2305,10 +2708,32 @@ fn tools_specs(tools: &dyn harness_wire::ToolPort) -> serde_json::Value {
 /// the run stopped for a named reason, or the harness could not run at all.
 pub fn dispatch(cli: &Cli) -> ExitCode {
     match &cli.command {
-        Command::Run(command) => stopped(run_command(command), command.options.json),
-        Command::Chat(options) => stopped(chat_command(options), options.json),
+        Command::Run(command) => {
+            let mut command = command.clone();
+            // Resolved once, here, before anything reads an option: `run_command` and everything
+            // under it sees a fully-filled `RunOptions` and never has to know a profile existed.
+            match apply_profiles(&mut command.options) {
+                Err(refusal) => reported(Err(refusal)),
+                Ok(profiles) => {
+                    command.options.applied_profiles = profiles;
+                    stopped(run_command(&command), command.options.json)
+                }
+            }
+        }
+        Command::Chat(options) => {
+            let mut options = options.clone();
+            match apply_profiles(&mut options) {
+                Err(refusal) => reported(Err(refusal)),
+                Ok(profiles) => {
+                    options.applied_profiles = profiles;
+                    stopped(chat_command(&options), options.json)
+                }
+            }
+        }
         Command::Sessions(options) => reported(sessions_command(options)),
         Command::Tools(options) => reported(tools_command(options)),
+        Command::Profiles(verb) => reported(profiles_command(verb)),
+        Command::Providers(verb) => reported(providers_command(verb)),
         Command::AppServer(options) => reported(app_server_command(options)),
         Command::Events(options) => reported(events_command(options)),
         Command::Workflow(command) => workflow::dispatch(command),
@@ -2593,9 +3018,18 @@ mod tests {
     #[test]
     fn the_wire_defaults_to_the_one_this_harness_shipped_with() {
         // Every invocation written before the second wire existed must still mean what it did.
-        assert_eq!(options(&[]).wire, Wire::OpenaiResponses);
+        //
+        // The flag is `Option<Wire>` now, and `None` is what makes a profile able to set it: a
+        // clap `default_value` would have beaten the file, so the default moved to
+        // `RunOptions::wire()` where it is applied last.
         assert_eq!(
-            options(&["--wire", "anthropic-messages"]).wire,
+            options(&[]).wire,
+            None,
+            "untyped, so a provider may still speak"
+        );
+        assert_eq!(options(&[]).wire(), Wire::OpenaiResponses);
+        assert_eq!(
+            options(&["--wire", "anthropic-messages"]).wire(),
             Wire::AnthropicMessages
         );
         assert!(

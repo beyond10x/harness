@@ -28,15 +28,29 @@ than copying every help paragraph.
 | `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
 | `tools` | Print the catalogue, skills and agents this machine would publish, without a model call |
+| `profiles list\|show\|explain\|init` | Read the configured profiles, or write a starter config |
+| `providers list\|show` | Read the providers this build ships, and any the config overrides |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
 | `events` | Convert a Harness JSONL record into `metaharness.event/1` |
+
+## Profiles
+
+| Option | Meaning |
+|---|---|
+| `-p`, `--profile NAME` | Apply a profile from `~/.config/b10x/harness.toml`; repeatable, later wins |
+
+A **provider** carries the endpoint, wire, model and credential source and grants nothing, so the
+collection ships built in. A **profile** carries `write`, the approval ceiling, the allow-list and
+the write scope, and nothing of that shape is compiled in. A typed flag beats both, and typing
+`--base-url` opts out of the provider bundle entirely. `session.started` names every profile that
+contributed with a digest of what it said. See [Profiles and providers](../guides/profiles.md).
 
 ## Endpoint and wire
 
 | Option | Meaning |
 |---|---|
-| `--base-url URL` | Endpoint origin plus API prefix |
-| `--model ID` | Exact identifier served by the endpoint |
+| `--base-url URL` | Endpoint origin plus API prefix. Optional where a provider supplies one |
+| `--model ID` | Exact identifier served by the endpoint. Optional where a provider supplies one |
 | `--wire openai-responses\|anthropic-messages` | Provider API projection; defaults to `openai-responses` |
 | `--context-window TOKENS` | Request bound and compaction input; defaults to `128000` |
 | `--temperature`, `--top-p`, `--reasoning-effort` | Optional sampling values; omitted from the request when unset |
@@ -53,7 +67,10 @@ API-key and OAuth sources are mutually exclusive.
 | `--oauth-token-env NAME` | Read the subscription token from the named variable |
 | `--oauth-token-pointer POINTER` | Select a token inside a JSON OAuth source |
 
-Harness has no ambient credential fallback.
+Harness searches no ambient default. A **provider** may default a credential path — that is what
+makes `provider = "claude"` enough on its own — and a run that took one reports
+`credential_source: "provider:<name>"` rather than `"named"`, so the default is visible in the
+record rather than silent. A credential you name yourself always wins.
 
 ## Workspace and tools
 

@@ -24,6 +24,28 @@ pub struct Withheld {
     pub reason: String,
 }
 
+/// One profile that contributed to how this run was configured.
+///
+/// **The condition on which a file is allowed to carry a permission.** A profile can set an
+/// approval ceiling, an allow-list and a write scope — the things a person would otherwise type
+/// and review — so a run whose limits came out of a file must name the file, or the record has
+/// stopped explaining the run. The digest is over the profile's own table, so the attribution
+/// survives somebody editing an unrelated profile beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileRef {
+    /// What it was called: `default`, or a `[[profiles]]` name.
+    pub name: String,
+    /// Where it was read from.
+    pub source: String,
+    /// SHA-256 of what it said, hex.
+    pub sha256: String,
+}
+
+/// What `credential_source` says when nothing named a provider.
+fn named_credential() -> String {
+    "named".to_owned()
+}
+
 /// Everything a person or a shell can observe while the loop runs.
 ///
 /// Deliberately closed and vendor-neutral: the terminal renderer, the bridge shell and the test
@@ -81,6 +103,23 @@ pub enum LoopEvent {
         skills: Vec<String>,
         #[serde(default)]
         agents: Vec<String>,
+        /// The profiles that configured this run, in the order they were applied.
+        ///
+        /// Always written, empty included, for the reason `withheld` is: skip-when-empty makes
+        /// *no profile* and *this build does not say* the same bytes to a reader outside the
+        /// process, and one of those is a run configured entirely by typed flags.
+        #[serde(default)]
+        profiles: Vec<ProfileRef>,
+        /// Where this run's credential came from — `named`, or `provider:<name>`.
+        ///
+        /// **This field is what pays for a provider being allowed to default a credential path at
+        /// all.** `resolve_credential`'s own doc refuses an ambient fallback on the grounds that a
+        /// harness which quietly picks up a key is one whose runs cannot be explained afterwards.
+        /// A built-in provider naming a vendor directory is a default, and the difference between
+        /// a default and an ambient fallback is entirely this: the record says which. If it ever
+        /// stops being written, the default is no longer accountable and should go with it.
+        #[serde(default = "named_credential")]
+        credential_source: String,
     },
     TurnStarted {
         turn: u64,
@@ -317,6 +356,8 @@ mod tests {
             }],
             skills: Vec::new(),
             agents: Vec::new(),
+            profiles: Vec::new(),
+            credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_value(&event).expect("serializes");
         assert_eq!(encoded["withheld"][0]["tool"], serde_json::json!("run"));
@@ -346,13 +387,15 @@ mod tests {
             withheld: Vec::new(),
             skills: Vec::new(),
             agents: Vec::new(),
+            profiles: Vec::new(),
+            credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
             encoded,
-            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[]}"#,
-            "a run that was refused nothing, offered no skill and published no agent says `[]` to \
-             each; only a build older than the field is silent"
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"credential_source":"named"}"#,
+            "a run refused nothing, offered no skill, published no agent and read no profile says \
+             `[]` to each; only a build older than the field is silent"
         );
 
         // And a record written before the field existed still reads, as a run that withheld

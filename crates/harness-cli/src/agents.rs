@@ -465,8 +465,12 @@ mod tests {
     fn the_real_agents_this_repository_ships_against_read() {
         // The one that would have caught a parser written to a format nobody uses. Skipped where
         // the sibling checkout is not present, because this repository does not own those files.
-        let shipped =
-            Path::new("/home/timo/beyond10x/engineering-protocols/integrations/claude-code/agents");
+        // Relative to this crate, never an absolute path from whoever wrote the test: an
+        // absolute one is a personal directory published in a public repository, and it makes the
+        // test pass on exactly one machine.
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../engineering-protocols/integrations/claude-code/agents");
+        let shipped = shipped.as_path();
         if !shipped.is_dir() {
             return;
         }

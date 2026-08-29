@@ -149,6 +149,8 @@ impl<O: Write, E: Write> Renderer<O, E> {
             // Not rendered: this loop publishes none yet, and a `agents: []` line every run would
             // be noise. It is in the record, which is where a comparison reads it.
             agents: _,
+            profiles,
+            credential_source: _,
         } = event
         else {
             return;
@@ -166,6 +168,18 @@ impl<O: Write, E: Write> Renderer<O, E> {
         // of thing a person comparing two runs afterwards has no other way to see.
         if !skills.is_empty() {
             self.note(&format!("  skills: {}", skills.join(", ")));
+        }
+        // **Shown, because a run configured by a file and one configured by flags are different
+        // runs and only one of them is reproducible from the command line you can see.**
+        if !profiles.is_empty() {
+            self.note(&format!(
+                "  profiles: {}",
+                profiles
+                    .iter()
+                    .map(|used| used.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         self.withheld(withheld);
     }
@@ -511,6 +525,8 @@ mod tests {
                     withheld: Vec::new(),
                     skills: Vec::new(),
                     agents: Vec::new(),
+                    profiles: Vec::new(),
+                    credential_source: "named".to_owned(),
                 },
                 LoopEvent::TextDelta {
                     text: "the ".to_owned(),
@@ -847,6 +863,8 @@ mod tests {
             }],
             skills: Vec::new(),
             agents: Vec::new(),
+            profiles: Vec::new(),
+            credential_source: "named".to_owned(),
         };
 
         let (out, err) = render(vec![started()], false);
@@ -1034,6 +1052,8 @@ mod tests {
                 withheld: Vec::new(),
                 skills: Vec::new(),
                 agents: Vec::new(),
+                profiles: Vec::new(),
+                credential_source: "named".to_owned(),
             }],
             false,
         );

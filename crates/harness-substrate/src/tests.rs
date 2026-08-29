@@ -97,6 +97,163 @@ fn a_fact_that_is_false_is_as_unmet_as_one_that_is_missing() {
     assert_eq!(unmet.found, "false");
 }
 
+/// The declared program set of a run that wants to build.
+fn declared() -> Vec<String> {
+    vec!["cargo".to_owned()]
+}
+
+#[test]
+fn a_declared_program_a_machine_cannot_confine_is_recorded_by_the_predicate_that_failed() {
+    // The defect this exists for: on a machine whose exec facts are absent the `run` entry simply
+    // vanishes, and six entries where seven were asked for reads exactly like six that were asked
+    // for. Verified on a real run: `b10x-harness tools` from a login shell against the same daemon
+    // that answers seven under `systemd-run --user --scope`.
+    let withheld = unconfined().withheld(&declared(), true);
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    assert_eq!(withheld[0].tool, "run");
+    assert!(
+        withheld[0]
+            .reason
+            .starts_with("`exec.argv-only` must be true and this machine says nothing."),
+        "the predicate is named as the machine stated it: {}",
+        withheld[0].reason
+    );
+    // And the hint, because the fact is absent for a reason that is about how the harness was
+    // started rather than about how substrate was configured.
+    assert!(
+        withheld[0]
+            .reason
+            .contains("user.slice/user-N.slice/session-M.scope")
+            && withheld[0].reason.contains("systemd-run --user --scope"),
+        "the cgroup hint sends a reader at the right thing: {}",
+        withheld[0].reason
+    );
+}
+
+#[test]
+fn a_fact_the_machine_stated_false_is_quoted_back_rather_than_called_absent() {
+    let mut facts = confined();
+    facts
+        .facts
+        .insert("exec.argv-only".to_owned(), Value::Bool(false));
+    let withheld = facts.withheld(&declared(), true);
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    assert!(
+        withheld[0]
+            .reason
+            .starts_with("`exec.argv-only` must be true and this machine says false."),
+        "{}",
+        withheld[0].reason
+    );
+}
+
+#[test]
+fn a_cgroup_root_missing_two_controllers_is_named_by_the_two_it_is_missing() {
+    let mut facts = confined();
+    facts.facts.insert(
+        "exec.cgroup-limits".to_owned(),
+        json!({"cpu": true, "memory": false}),
+    );
+    let withheld = facts.withheld(&declared(), true);
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    let reason = &withheld[0].reason;
+    assert!(
+        reason.starts_with(
+            "`exec.cgroup-limits` must state `cpu`, `memory` and `processes` true and this \
+             machine says {\"cpu\":true,\"memory\":false} — no `memory`, no `processes`."
+        ),
+        "the machine's own answer and exactly what is short of it: {reason}"
+    );
+    assert!(reason.contains("systemd-run --user --scope"), "{reason}");
+}
+
+#[test]
+fn a_machine_with_no_facts_at_all_says_so_and_blames_no_cgroup() {
+    // `Facts::none()` is a harness nobody pointed at substrate, and one pointed at a daemon that
+    // is not there. Neither probed a cgroup, so a sentence about cgroups would send a reader
+    // looking in the wrong place.
+    let withheld = Facts::none().withheld(&declared(), true);
+    assert_eq!(
+        withheld.iter().map(|w| w.tool.as_str()).collect::<Vec<_>>(),
+        vec!["run", "file_write", "file_edit"],
+        "{withheld:?}"
+    );
+    for entry in &withheld {
+        assert!(
+            entry
+                .reason
+                .starts_with("this machine states no capability facts at all"),
+            "{}",
+            entry.reason
+        );
+        assert!(
+            !entry.reason.contains("cgroup root"),
+            "no cgroup was probed, so none is blamed: {}",
+            entry.reason
+        );
+    }
+}
+
+#[test]
+fn a_workspace_the_machine_does_not_guard_takes_both_writing_entries_with_it() {
+    let mut facts = confined();
+    facts.facts.remove("workspace.guarded-io");
+    let withheld = facts.withheld(&[], true);
+    assert_eq!(
+        withheld.iter().map(|w| w.tool.as_str()).collect::<Vec<_>>(),
+        vec!["file_write", "file_edit"],
+        "{withheld:?}"
+    );
+    assert_eq!(
+        withheld[0].reason, "`workspace.guarded-io` must be true and this machine says nothing.",
+        "{withheld:?}"
+    );
+}
+
+#[test]
+fn a_run_that_declared_nothing_withholds_nothing() {
+    // Absence stays absence (AGENTS.md invariant 7). A machine that cannot confine a process owes
+    // no sentence to a run that never wanted to start one, and inventing the want here would put a
+    // line about `run` in front of every read-only run there has ever been.
+    assert!(unconfined().withheld(&[], true).is_empty());
+    assert!(Facts::none().withheld(&[], false).is_empty());
+    // Nor does a machine that admits everything that was asked of it.
+    assert!(confined().withheld(&declared(), true).is_empty());
+}
+
+#[test]
+fn the_provider_carries_the_record_of_what_it_was_not_given() {
+    // The catalogue built from this provider cannot answer the question any more — an entry that
+    // was never published and one nobody wanted are the same absence downstream — so the provider
+    // is where the two halves were last both known.
+    let withheld = provider(&unconfined(), Scripted::new(vec![]), &["cargo"])
+        .withheld()
+        .to_vec();
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    assert_eq!(withheld[0].tool, "run");
+    assert!(
+        provider(&confined(), Scripted::new(vec![]), &["cargo"])
+            .withheld()
+            .is_empty()
+    );
+    assert!(
+        provider(&unconfined(), Scripted::new(vec![]), &[])
+            .withheld()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_withheld_record_round_trips_as_the_two_strings_it_is() {
+    let withheld = unconfined().withheld(&declared(), true);
+    let encoded = serde_json::to_value(&withheld).expect("serializes");
+    assert_eq!(encoded[0]["tool"], json!("run"));
+    assert_eq!(
+        serde_json::from_value::<Vec<Withheld>>(encoded).expect("deserializes"),
+        withheld
+    );
+}
+
 #[test]
 fn a_ceiling_is_checked_against_the_number_the_request_actually_asks_for() {
     let ceiling: Vec<Predicate> = serde_json::from_value(json!([

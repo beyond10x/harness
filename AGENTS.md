@@ -201,6 +201,14 @@ and nothing is built. They are provisioned from the atlas checkout —
 **A green local gate does not guarantee a green CI.** The script is the same; the toolchain is not —
 CI installs whatever `stable` is that day, and a newer clippy can fail a commit that passed locally.
 Run `rustup update` before pushing, and read the gate's own exit status, never a pipeline's
+**Two worktrees must not share a `CARGO_TARGET_DIR`, and a worktree's build must not land in
+`main`'s.** Test binaries bake `env!("CARGO_MANIFEST_DIR")` at build time, so a binary built from a
+worktree reads that worktree's fixtures — and when the worktree is gone, `harness-flow`'s fixture
+read fails with `NotFound` in a tree where the file plainly exists (2026-08-29, twice in one day:
+first as four `run_in` compile errors served across trees, then as two red tests after a merge).
+Each worktree builds into its own `target/`; when a shared build cannot be avoided, `cargo clean -p`
+every crate the other tree touched before trusting the result.
+
 (`gate.sh 2>&1 | tail` reports `tail`'s status, not the gate's).
 
 ## Releases

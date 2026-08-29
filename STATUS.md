@@ -20,7 +20,7 @@ wave (`docs/reviews/2026-08-29-sota-comparison.md`). The previous observation wa
 | Subscription auth | **a `BearerSource` exists; it does not renew.** `harness_credential::SubscriptionToken` reads a token from a file or an environment variable the caller **names**, optionally at a caller-named JSON pointer, and re-reads it on **every** call — so a token an owner outside this process renews is followed without restarting the run. It declares `CredentialKind::Oauth`, and the Messages wire presents that as `authorization: Bearer` **plus** `anthropic-beta: oauth-2025-04-20`, while a key issued to a program goes to `x-api-key`. There is still no default path and no vendor directory anything here looks in, and no fallback when the named source is missing. The ChatGPT/Codex finding stands: that route takes its access token as a plain bearer and needs no per-route header | **renewal, and one authorized run on the ChatGPT/Codex route.** Nothing here holds a refresh token or calls an authorization server, so a token nobody renews expires and the run fails by name. The **Anthropic** route is no longer only `provider_emulated`: on 2026-08-29 `b10x-harness run --wire anthropic-messages` completed a three-turn tool-using run against `https://api.anthropic.com/v1` on `claude-haiku-4-5-20251001`, reading a subscription token from a named file at a named JSON pointer. The header shapes are what that run sent, and the discrimination is checked against the route itself: a deliberately invalid token to the same endpoint answers `401 authentication_error`, so the 200 is the credential's and not the endpoint's indifference. The ChatGPT/Codex route still has not been contacted |
 | Live provider | **first live run: 2026-08-23**, against `https://chatgpt.com/backend-api/codex` under the operator's own ChatGPT subscription credential, model `gpt-5.6-sol`. Two turns, two tool round trips, usage reported, `finished{completed}`. It found a real defect on turn 1 — the whole workspace toolset was named illegally for this wire (see the changelog) — which is exactly what the emulator could not find | pin a `2026-08-23` contract from live bytes rather than emulated ones; the current pin is still emulator-derived |
 | Embedding | **not started.** Nothing embeds this component yet | a `runtime/agent` direct-provider adapter binding `ToolPort` to its capability compiler |
-| Substrate confinement | **working, embedded, including execution.** `Backend` has two implementations and the tools cannot tell them apart: `Embedded` holds substrate's `HostDriver` in this process, `Client` reaches a daemon over a socket. Workspace adoption means the tree a run reads is the tree it writes. With a delegated cgroup the toolset is seven entries — `file_read`, `dir_list`, `search`, `find`, `file_write`, `file_edit`, `run`; without one it is six; with no backend at all it is the four read-only ones | exec has been *exercised* over the socket (2026-08-29: `/bin/echo` and a 12 s `/bin/sleep` through `run`, cgroup-confined); the embedded driver's exec is still unexercised on this machine, which needs the same delegated scope |
+| Substrate confinement | **working, embedded, including execution.** `Backend` has two implementations and the tools cannot tell them apart: `Embedded` holds substrate's `HostDriver` in this process, `Client` reaches a daemon over a socket. Workspace adoption means the tree a run reads is the tree it writes. With a delegated cgroup the toolset is seven entries — `file_read`, `dir_list`, `search`, `find`, `file_write`, `file_edit`, `run`; without one it is six; with no backend at all it is the four read-only ones. **A tool that was declared and could not be admitted is now stated rather than only dropped**: `Facts::withheld` names the predicate that failed as the machine stated it — `exec.argv-only` absent or false, `exec.cgroup-limits` short of `cpu`/`memory`/`processes`, or no facts at all — with a line saying the probe reads the probing process's own cgroup, which is why a login shell and a `systemd-run --user --scope` get different answers from one machine. It reaches `LoopEvent::Started { withheld }`, one `note:` line on stderr, and `b10x-harness tools`; a run that declared no programs states nothing | exec has been *exercised* over the socket (2026-08-29: `/bin/echo` and a 12 s `/bin/sleep` through `run`, cgroup-confined); the embedded driver's exec is still unexercised on this machine, which needs the same delegated scope |
 | Substrate over a socket | **working, verified live 2026-08-29.** Against a daemon built from `beyond10x/substrate` at the pinned revision `f1cfc1c`, started in a delegated user scope (`systemd-run --user --scope -p "Delegate=cpu memory pids"`, the daemon moved into a child cgroup so the root is process-free): `workspace_create`, `file_write`, `file_read`, a confined `/bin/echo` and a 12 s `/bin/sleep` through `run`, and `b10x-harness tools --substrate` publishes seven entries. What had blocked it was the client, not the daemon — no `op` (a caller-minted operation id, not the operation's name), no read query, the exec's output never fetched, a 10 s read timeout on a call that waits for the exit; see `CHANGELOG.md`. The daemon installed on this machine on 2026-08-16 (wire 0.4.0) was not re-tried | `tests/live.rs` is the standing probe (`B10X_SUBSTRATE_SOCKET`); an integrated deployment that runs a daemon as a service |
 
 ## What this component does not claim
@@ -40,10 +40,9 @@ wave (`docs/reviews/2026-08-29-sota-comparison.md`). The previous observation wa
 
 ## Test counts
 
-711 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
-the follow-up wave — failed-run spend handed back and persisted, now proved end to end against a
-`fails-after-turn` scenario both emulators serve, and the transport extraction into
-`harness-http`):
+728 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
+the follow-up wave — failed-run spend handed back, persisted and proved end to end; the transport
+extraction into `harness-http`; and a withheld tool reported by name):
 
 | Crate | Unit | Integration |
 | --- | --- | --- |
@@ -52,14 +51,14 @@ the follow-up wave — failed-run spend handed back and persisted, now proved en
 | `harness-http` | 22 | — |
 | `harness-responses` | 39 | 18 provider-emulated, 4 contract, 2 summary-request |
 | `harness-messages` | 43 | 21 provider-emulated, 7 contract, 2 summary-request, 3 transport |
-| `harness-loop` | 148 | — |
+| `harness-loop` | 152 | — |
 | `harness-flow` | 27 | — |
-| `harness-substrate` | 42 | 4 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
+| `harness-substrate` | 50 | 4 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
 | `harness-tools` | 78 | — |
 | `harness-app-server` | 19 | 5 contract |
-| `harness-cli` | 125 | 41 end-to-end, 17 bridge-mode |
+| `harness-cli` | 127 | 41 end-to-end, 17 bridge-mode, 3 withheld-tools |
 
-The provider-emulated, end-to-end and bridge-mode suites drive real processes: a local HTTP endpoint
+The provider-emulated, end-to-end, bridge-mode and withheld-tools suites drive real processes: a local HTTP endpoint
 over a socket, and the built binary over pipes — including `chat` driven down a pipe, a session
 written and resumed, and a command line clap refuses. The two provider-emulated suites are the **same**
 suite pointed at two wires — same case names, same scenario names — and

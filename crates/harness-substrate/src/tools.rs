@@ -28,7 +28,7 @@ use std::time::Duration;
 use harness_tools::{Operations, ReadWindow, SearchOptions};
 use serde_json::{Value, json};
 
-use crate::{Backend, Facts};
+use crate::{Backend, Facts, Withheld};
 
 /// What a confined workspace can do on this machine.
 pub struct ConfinedOperations {
@@ -42,6 +42,13 @@ pub struct ConfinedOperations {
     workspace: String,
     programs: Vec<String>,
     writes: bool,
+    /// What was declared here and this machine did not admit, with the predicate that decided.
+    ///
+    /// Held on the provider because the provider is the one place that saw both halves — what the
+    /// caller declared and what the machine said — and because the catalogue built from it can no
+    /// longer tell: an entry that was never published and one that was never wanted are the same
+    /// absence downstream. Empty on a machine that admits what it was asked for.
+    withheld: Vec<Withheld>,
     /// How many bytes the read route answers with before it stops — the machine's own
     /// `workspace.read-limit-bytes` where it states one, and [`substrate_wire::MAX_IO_BYTES`]
     /// otherwise.
@@ -60,6 +67,7 @@ impl std::fmt::Debug for ConfinedOperations {
             .field("workspace", &self.workspace)
             .field("programs", &self.programs)
             .field("writes", &self.writes)
+            .field("withheld", &self.withheld)
             .finish_non_exhaustive()
     }
 }
@@ -71,6 +79,10 @@ impl ConfinedOperations {
     /// machine that could confine it: a workflow that named no commands wants none, and a tool that
     /// admitted everything because nobody listed anything is the failure this design exists to
     /// prevent.
+    ///
+    /// **A declared program set this machine cannot confine is recorded, not only dropped**
+    /// ([`Self::withheld`]). Constructing this at all is asking for a confined workspace, so the
+    /// writing entries count as declared too and their absence is recorded the same way.
     pub fn new(
         backend: impl Backend + Send + Sync + 'static,
         facts: &Facts,
@@ -81,6 +93,7 @@ impl ConfinedOperations {
         Self {
             backend: Box::new(backend),
             workspace: workspace.into(),
+            withheld: facts.withheld(&programs, true),
             // A machine that cannot confine a process offers none, whatever was declared.
             programs: if confines_execution {
                 programs
@@ -93,6 +106,17 @@ impl ConfinedOperations {
                 .and_then(Value::as_u64)
                 .unwrap_or(substrate_wire::MAX_IO_BYTES),
         }
+    }
+
+    /// What this run declared that the machine would not admit.
+    ///
+    /// The counterpart to [`Operations::programs`] and [`Operations::writes`]: those say what the
+    /// catalogue publishes, and this says what it does **not**, for a caller that has to put the
+    /// run's shape in front of a person. Empty is the ordinary answer and means exactly nothing was
+    /// withheld — never that nobody looked.
+    #[must_use]
+    pub fn withheld(&self) -> &[Withheld] {
+        &self.withheld
     }
 }
 

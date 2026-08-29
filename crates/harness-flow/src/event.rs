@@ -8,6 +8,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::NodeId;
 
+/// Which side of a section boundary a run was standing on when it was told no.
+///
+/// Two words rather than a boolean, because a reader of a record has to tell *it was not allowed to
+/// start* from *it was not allowed to finish* at a glance, and `refused: true` says neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Moment {
+    /// Before the section ran anything.
+    Enter,
+    /// After the section said what it hands over.
+    Leave,
+}
+
 /// One thing that happened during a walk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -59,6 +72,22 @@ pub enum FlowEvent {
     /// The group fails. `gives` is a contract the document wrote down, and letting siblings run on
     /// after a broken one hands them a hole they cannot see.
     HandoffIncomplete { path: String, missing: Vec<NodeId> },
+    /// A caller refused a section boundary.
+    ///
+    /// Emitted **before** the consequence, at either moment, so a record reads *why* ahead of
+    /// *what happened next*: an enter refusal is followed by the section's steps as
+    /// [`FlowEvent::NodeSkipped`] and a failed [`FlowEvent::GroupLeft`]; a leave refusal by a
+    /// [`FlowEvent::GroupRepeating`] when the document still allows an attempt, and by a failed
+    /// `GroupLeft` when it does not.
+    ///
+    /// `reason` is the caller's own words, carried and never read — this crate evaluates no gate.
+    TransitionRefused {
+        path: String,
+        moment: Moment,
+        /// The attempt the refusal was asked about, from 1.
+        attempt: u32,
+        reason: String,
+    },
     /// A sub-tree was left.
     GroupLeft {
         path: String,

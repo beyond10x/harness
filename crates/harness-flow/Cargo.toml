@@ -15,7 +15,5 @@ workspace = true
 harness-wire = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-serde_yaml_ng = "0.10"

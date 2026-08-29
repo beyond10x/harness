@@ -43,26 +43,40 @@
 //! root:
 //!   id: root
 //!   nodes:
-//!     - step: receive
-//!     - group: shape
+//!     - id: receive
+//!     - id: shape
 //!       needs: [receive]
 //!       nodes:
-//!         - step: specify
-//!         - step: decompose
+//!         - id: specify
+//!         - id: decompose
 //!           needs: [specify]
-//!     - step: implement
+//!     - id: implement
 //!       needs: [shape]
 //! ```
+//!
+//! **A node that carries `nodes:` is a group; one that does not is a step.** The document's shape
+//! says which, so nothing has to declare it twice and no keyword can disagree with the structure
+//! underneath it.
 //!
 //! `implement` needs the whole `shape` sub-tree, not one of its steps: a group is opaque to its
 //! siblings, which is what makes it substitutable.
 //!
+//! # A boundary is where a run can be told no
+//!
+//! A section is the only place a workflow can be governed without the scheduler growing opinions:
+//! [`StepRunner::entering`] is asked before a group runs anything and [`StepRunner::leaving`] after
+//! it has said what it hands over. Both may answer [`Gate::Refused`], and the walk turns that into
+//! the two things it already knows how to do — skip a section as failed, or re-enter it. **The
+//! reason is the caller's and this crate evaluates none of it**: what a governor is, and whether
+//! there is one at all, stays outside.
+//!
 //! # What this crate does not do
 //!
-//! It does not run a model, hold a credential or know what a tool is. [`Flow::plan`] answers *what
-//! runs, in what order, and what may run beside it*; [`Flow::run`] walks that plan against a
-//! [`StepRunner`] the caller supplies. Binding a step to an actual turn of the loop is the caller's
-//! business, which is what lets the whole scheduler be tested without a provider.
+//! It does not run a model, hold a credential or know what a tool is. [`Flow::from_yaml`] and
+//! [`Flow::from_json`] read a document without validating it; [`Flow::plan`] answers *what runs, in
+//! what order, and what may run beside it*; [`Flow::run`] walks that plan against a [`StepRunner`]
+//! the caller supplies. Binding a step to an actual turn of the loop is the caller's business,
+//! which is what lets the whole scheduler be tested without a provider.
 
 use std::collections::BTreeMap;
 
@@ -72,9 +86,9 @@ mod event;
 mod plan;
 mod run;
 
-pub use event::{FlowEvent, FlowSink, VecFlowSink};
+pub use event::{FlowEvent, FlowSink, Moment, VecFlowSink};
 pub use plan::{Layer, Plan};
-pub use run::{Handoff, StepContext, StepOutcome, StepRunner};
+pub use run::{Gate, Handoff, Report, StepContext, StepOutcome, StepRunner};
 
 /// Names one node. Unique among its siblings, and a path from the root names it globally.
 pub type NodeId = String;
@@ -200,6 +214,28 @@ impl Node {
     }
 }
 
+/// A document that could not be read at all.
+///
+/// # Reading and validating are two different refusals
+///
+/// This one is *these bytes are not a document*: a tab where YAML wanted a space, a trailing comma
+/// in JSON, `nodes` given as a string. [`FlowError`] is *this document is not a workflow*: a cycle,
+/// an edge that reaches into a group, a section that runs nothing. Parsing does not validate —
+/// [`Flow::plan`] does — because a caller that wants to hold a document before deciding to run it
+/// (a `plan` verb, a linter, an editor) should not have to catch the second error to discover the
+/// first.
+///
+/// It names the format because the same bytes are refused differently by each reader, and carries
+/// the parser's own message because that message knows the line and column and this crate does not.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("this is not a workflow document in {format}: {message}")]
+pub struct ParseError {
+    /// What it was read as — `YAML` or `JSON`.
+    pub format: &'static str,
+    /// The reader's own words, unedited.
+    pub message: String,
+}
+
 /// Every way a document can fail to be a workflow.
 ///
 /// Each names a path — `root.shape.specify` — because a message that says only *cycle detected* in
@@ -234,6 +270,38 @@ pub enum FlowError {
 }
 
 impl Flow {
+    /// Reads a document written in YAML. **Does not validate it** — [`Flow::plan`] does.
+    ///
+    /// This lives here rather than in whatever runs the flow, so that every caller reads the same
+    /// notation the same way. A CLI that parsed a document itself would be a second description of
+    /// the format, and the two would drift the first time a field was added.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError`] naming YAML and carrying the reader's own message, line and column.
+    pub fn from_yaml(text: &str) -> Result<Self, ParseError> {
+        serde_yaml_ng::from_str(text).map_err(|error| ParseError {
+            format: "YAML",
+            message: error.to_string(),
+        })
+    }
+
+    /// Reads a document written in JSON. **Does not validate it** — [`Flow::plan`] does.
+    ///
+    /// The same notation, read by the other reader: YAML is what a person writes and JSON is what
+    /// another program emits, and a workflow that could only arrive one way would push whoever
+    /// generates one into writing a YAML serialiser.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError`] naming JSON and carrying the reader's own message, line and column.
+    pub fn from_json(text: &str) -> Result<Self, ParseError> {
+        serde_json::from_str(text).map_err(|error| ParseError {
+            format: "JSON",
+            message: error.to_string(),
+        })
+    }
+
     /// Validates the document and answers what runs when.
     ///
     /// # Errors
@@ -261,7 +329,7 @@ impl Flow {
         &self,
         runner: &mut dyn StepRunner,
         sink: &mut dyn FlowSink,
-    ) -> Result<run::Report, FlowError> {
+    ) -> Result<Report, FlowError> {
         let plan = self.plan()?;
         Ok(run::walk(&self.root, &plan, runner, sink))
     }

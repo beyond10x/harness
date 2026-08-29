@@ -40,9 +40,11 @@ wave (`docs/reviews/2026-08-29-sota-comparison.md`). The previous observation wa
 
 ## Test counts
 
-728 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
-the follow-up wave — failed-run spend handed back, persisted and proved end to end; the transport
-extraction into `harness-http`; and a withheld tool reported by name):
+792 tests passed across the workspace and 1 was ignored (`bash scripts/gate.sh`, 2026-08-29, after
+the workflow-runner wave and its review fixes — design 0003: `workflow plan|run`, the `transition`
+hook point, and `harness-flow` bound by the shipped binary). Every row below is read off that run.
+Three of them — `harness-loop`, `harness-substrate`, `harness-tools` — had already drifted from the
+gate they claimed before this wave, and are corrected here rather than carried forward.
 
 | Crate | Unit | Integration |
 | --- | --- | --- |
@@ -51,12 +53,12 @@ extraction into `harness-http`; and a withheld tool reported by name):
 | `harness-http` | 22 | — |
 | `harness-responses` | 39 | 18 provider-emulated, 4 contract, 2 summary-request |
 | `harness-messages` | 43 | 21 provider-emulated, 7 contract, 2 summary-request, 3 transport |
-| `harness-loop` | 152 | — |
-| `harness-flow` | 27 | — |
-| `harness-substrate` | 50 | 4 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
-| `harness-tools` | 78 | — |
+| `harness-loop` | 155 | — |
+| `harness-flow` | 37 | — |
+| `harness-substrate` | 51 | 5 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
+| `harness-tools` | 80 | — |
 | `harness-app-server` | 19 | 5 contract |
-| `harness-cli` | 127 | 41 end-to-end, 17 bridge-mode, 3 withheld-tools |
+| `harness-cli` | 151 | 41 end-to-end, 20 workflow, 17 bridge-mode, 3 withheld-tools, 3 context |
 
 The provider-emulated, end-to-end, bridge-mode and withheld-tools suites drive real processes: a local HTTP endpoint
 over a socket, and the built binary over pipes — including `chat` driven down a pipe, a session

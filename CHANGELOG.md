@@ -9,6 +9,63 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`b10x-harness workflow` — the loop walks a workflow itself, and the governor stays a program
+  outside it.** `crates/harness-flow` could plan and walk a graph and nothing bound it: every
+  `StepRunner` lived in its own `tests.rs`, and the only way a workflow reached this loop was an
+  external driver spawning the binary once per step. The loop never saw the graph, every step
+  started cold, and a retreat paid for its context again. `workflow plan --flow <FILE>` validates a
+  document and prints what runs in what order while contacting nothing — no endpoint, no credential,
+  like `tools`. `workflow run --flow <FILE> --input <TEXT>` walks it, flattening the same options
+  `run` and `chat` take, plus `--max-attempts <N>` for a document that carries no bounds of its own.
+  The document format is `harness-flow`'s own `Flow`, deserialised as it is: nothing was added to
+  the notation for the verb, and YAML and JSON reading landed there as `Flow::from_yaml` and
+  `Flow::from_json` so the command line never parses a document itself.
+
+  **A step is one turn, and it reports through `answer`.** The runner derives that step's output
+  schema — `outcome` of `passed` or `failed`, an optional `note`, and `gives` keyed by the names the
+  enclosing group promised — so the model never sees a schema file, and `--output-schema` is **not a
+  flag of `workflow run`**: there is nothing for a file to shape, so it is not declared rather than
+  accepted and overridden. `gives` is what the walk already checks a handoff against, so a group
+  that promised `specification_id` and never answered with it fails by the notation's own rule —
+  once, without a retreat, because a section that came out clean and still did not produce what its
+  document declared buys the same answer again on a second attempt. Only a section that came out
+  clean hands anything to its siblings: a result nobody accepted must not be what the rest of the
+  walk is built on. `--max-attempts` overrides every `repeat.max` in the document, the root's
+  included. A budget stop or a second prose ending is a failed step; a `LoopError` is
+  nobody's failed step and aborts the flow, because a walk that filed a network blip as `failed`
+  would misreport the plan.
+
+  **One session per `(scope, attempt)`**, id `<flow-run-id>.<path>.<attempt>`, filed with what that
+  scope cost as it closes. A group is the context scope: its steps continue one conversation, and a
+  step in another group starts from the finished siblings' handoffs and nothing else — a sibling
+  cannot depend on a step inside a group, so it must not see that step's transcript either. A
+  retreat re-enters the whole section from those handoffs. `--resume` is refused: a flow names its
+  own sessions, and resuming a *flow* has no cursor yet.
+
+  **A fourth hook point, `transition`.** `--hooks` learns `on: "transition"`, asked before a section
+  is entered and again after it leaves, under the three existing rules — declared and never
+  discovered, narrowing only, an argv and never a shell. In the notation this is
+  `StepRunner::entering` and `StepRunner::leaving` returning `Gate::Proceed` or `Gate::Refused`,
+  defaulted so the walk can be told *no* at a boundary without knowing what a hook is: a refused
+  entry skips the section as failed, a refused exit from a clean attempt forces a retreat until the
+  document's bound, and a refused exit from a failed one changes nothing. Both emit
+  `FlowEvent::TransitionRefused` before the consequence. A hook that cannot answer is read as a
+  refusal at both moments — a governor that could not answer did not say yes, exactly as
+  `before-call`. The governor itself stays outside: guards and evidence are the protocol engine's,
+  this component embeds nothing above it, and a run whose transitions nobody answered is ordered
+  rather than governed and its record says so.
+
+  The argv pin is cut as a new version, **2026-08-29.2** (`contracts/cli/b10x-harness/`), strictly
+  additive over `.1` — `workflow plan|run`, `--flow`, `--input`, `--max-attempts`, nothing renamed
+  or removed; `.1` stays as released (invariant 13). It is regenerated from clap, and it is
+  the only contract this touches: `harness-wire` and the app server are unchanged, and `harness-loop`
+  gains one word and no behaviour — `HookPoint::Transition`, so a boundary consultation files the
+  same `HookRan` event every other point files. There is no port method for it, nothing in the loop
+  asks at it, and no new wire item: the loop still does not know it is inside a flow. Every claim
+  above is `provider_emulated`; the design is `docs/design/0003-workflow-runner.md`, and what it
+  leaves for a later milestone — resuming a flow, a toolset per group, parallel layers, command
+  steps — is listed there and in the workflows guide.
+
 - **A program the run may not start is a named refusal in the record, not an error like any other.**
   The `run` tool refusing a program outside the declared set was a failed tool result whose only
   distinguishing mark was its sentence — on the record it read as `tool-completed`, `failed: true`,

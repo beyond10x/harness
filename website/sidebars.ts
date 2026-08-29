@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'guides/sessions-and-events', label: 'Sessions and events'},
         {type: 'doc', id: 'guides/confinement', label: 'Confined workspaces'},
         {type: 'doc', id: 'guides/structured-runs', label: 'Structured runs, delegates and hooks'},
+        {type: 'doc', id: 'guides/workflows', label: 'Workflows'},
       ],
     },
     {

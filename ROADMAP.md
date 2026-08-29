@@ -214,7 +214,7 @@ neutral value on both wires that nothing measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 
-**Status: the notation exists and nothing binds it.**
+**Status: in progress — design 0003; M1 under `Unreleased`.**
 
 `crates/harness-flow` is 1,891 lines and 27 tests: a DAG of sub-trees, a group as a context scope,
 `Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and
@@ -270,8 +270,9 @@ Steps, each its own story:
 
 1. `StepRunner` bound to a turn: a group's steps share one session, a step in a new group starts
    from `available` and nothing else, `handoff` reads the structured `answer`. Both emulators.
-2. `run --flow <FILE> [--max-attempts N]`, and `flow-started`, `group-entered{attempt}`,
-   `step-completed`, `group-exhausted`, `flow-completed` on `--json`, rendered on stderr like
+2. `workflow run --flow <FILE> [--max-attempts N]`, and `flow-started`, `group-entered`,
+   `step-started`, `step-finished`, `group-repeating`, `group-left`, `transition-refused`,
+   `flow-finished` on `--json`, rendered on stderr like
    everything else.
 3. The `transition` hook point, with the same *declared, never discovered; narrowing only* rules.
 4. The metaharness projection of `flow.*`, only when an eval asks for it.

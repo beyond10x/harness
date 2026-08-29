@@ -22,6 +22,8 @@ the options by task rather than copying every help paragraph.
 |---|---|
 | `run` | Run one request to completion |
 | `chat` | Read one line at a time over the same local session |
+| `workflow plan` | Validate a workflow document and print what runs in what order, without an endpoint |
+| `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
 | `tools` | Print the catalogue this machine would publish, without a model call |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
@@ -105,8 +107,8 @@ See [Confined workspaces](../guides/confinement.md) for prerequisites.
 | `--quiet` | Hide progress from stderr; warnings remain |
 | `--output-schema FILE` | Make `run` finish with one structured object |
 
-`--output-schema` belongs only to `run`; an open-ended `chat` conversation has no single final
-object.
+`--output-schema` belongs only to `run`: an open-ended `chat` conversation has no single final
+object, and `workflow run` derives one schema per step for itself.
 
 ## Advanced loop features
 
@@ -115,6 +117,25 @@ object.
 | `--delegate` | Publish one fresh-context sub-agent tool |
 | `--delegate-turns N` | Cap one delegate; default `20`, minimum `1` |
 | `--hooks FILE` | Load explicitly named operator hook programs |
+
+Under `workflow run`, `--hooks` also accepts `on: "transition"`, asked before a section is entered
+and after it leaves. See [Workflows](../guides/workflows.md).
+
+## Workflows
+
+| Option | Meaning |
+|---|---|
+| `--flow FILE` | The workflow document; YAML or JSON, decided by extension |
+| `--input TEXT` | The task, given to every step beside its own prompt — the same word `run` uses |
+| `--max-attempts N` | Override every `repeat.max` in the document, the root's included; absent means the document's own bounds |
+
+`workflow plan` accepts `--flow` and `--max-attempts` only, and contacts no endpoint. `workflow run`
+takes the option groups above — endpoint, credentials, workspace, confinement, approvals, budgets,
+sessions — and refuses `--resume` by name, because a flow names its own sessions. `--output-schema`
+is not a flag of `workflow run` at all: the runner derives the schema each step answers under, so
+typing it is an unrecognised argument rather than a refusal. Step budgets
+(`--max-turns`, `--max-output-tokens`, `--max-output-tokens-per-turn`) bound one step;
+`--max-cost-microunits` and `--max-duration-ms` bound the whole flow.
 
 ## Standard streams
 
@@ -129,11 +150,13 @@ and exit status 1.
 
 ## Exit status
 
-| Status | Caller action |
-|---|---|
-| `0` | Consume the completed answer |
-| `2` | Inspect the named stop: a budget, cancellation, or unstructured result bound the run |
-| `1` | Treat it as a configuration, credential, confinement, transport, or protocol failure |
+| Status | Caller action | Under `workflow run` |
+|---|---|---|
+| `0` | Consume the completed answer | The flow came out clean |
+| `2` | Inspect the named stop: a budget, cancellation, or unstructured result bound the run | The flow finished and did not come out clean: a failed step, a skipped or exhausted section, or a cancelled run. Inspect `flow-finished` |
+| `1` | Treat it as a configuration, credential, confinement, transport, or protocol failure | Refused before the flow started, or aborted mid-step on a loop error |
+
+`workflow plan` exits `0` when the document validates and `1` when it does not.
 
 Clap parse errors are normalized to status 1 by this command because status 2 already means a run
 that started and stopped.

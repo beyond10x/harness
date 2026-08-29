@@ -1,0 +1,273 @@
+---
+title: Workflows
+description: Walk a workflow document in one loop — a step is a turn, a group is a conversation, and a hook guards every section boundary.
+---
+
+# Workflows
+
+`workflow` walks a document instead of answering one request. The loop holds the whole graph, so the
+steps of a section share one conversation, a section that did not come out clean is re-entered from
+what crossed into it, and an operator program can refuse either side of a section boundary. No
+vendor harness and no external sequencer is involved.
+
+The notation is the one `harness-flow` already carries. A node is a **step** (one thing that runs)
+or a **group** (a sub-tree with its own nodes and its own edges), an edge may only join siblings,
+and a group is the unit of scope, of reuse and of reporting.
+
+## The document
+
+```yaml
+id: development
+root:
+  id: root
+  nodes:
+    - id: receive
+    - id: shape
+      needs: [receive]
+      nodes:
+        - id: specify
+        - id: decompose
+          needs: [specify]
+    - id: implement
+      needs: [shape]
+```
+
+`implement` needs the whole `shape` sub-tree, not one of its steps: a group is opaque to its
+siblings, which is what makes it substitutable.
+
+A group may add `repeat: {max: N}` — run this section again while it does not come out clean — and
+`gives`, the list of names it promises to hand its siblings when it leaves. Nothing else crosses a
+group boundary.
+
+Each step carries a `run` payload the notation never reads. Harness reads four keys of it, all
+optional:
+
+| Key | Used as |
+|---|---|
+| `state` | The step's name in prose and in the record |
+| `summary` | The step's prompt when `prompt` is absent |
+| `prompt` | The step's prompt |
+| `context` | File paths **inside** the workspace, read like `--context` and named in the step input. A name that is absolute, that resolves outside the workspace, or that is not there fails the step by name — a `warning` with `code: "context-refused"` naming the path and the workspace, no model call — and the walk skips what needed it |
+
+Documents are read as YAML (`.yaml`, `.yml`) or JSON (`.json`), decided by the extension. Any other
+extension is refused by name.
+
+## Plan a document without an endpoint
+
+```bash
+b10x-harness workflow plan --flow flow.yaml
+```
+
+`plan` takes `--flow` and `--max-attempts` and nothing else: no base URL, no credential, no model,
+no socket. It answers *does this document validate, and what runs in what order* — one line per
+layer, indented per group, with the repeat bound beside the group. Under `--json` it prints the plan
+itself. Exit `0` when the document validates, `1` when it does not.
+
+## Run one
+
+```bash
+b10x-harness workflow run \
+  --flow flow.yaml \
+  --input "Add a --since flag to the report command" \
+  --base-url https://gateway.example/v1 \
+  --model model-alias \
+  --api-key-env MY_MODEL_TOKEN \
+  --workspace .
+```
+
+| Option | Meaning |
+|---|---|
+| `--flow FILE` | The document. Refused by name when it does not validate, before any session is written |
+| `--input TEXT` | The task, given to every step beside its own prompt |
+| `--max-attempts N` | Overrides every `repeat.max` in the document, the root's included, for a document that carries none. Absent means the document's own bounds |
+
+`workflow run` takes the same option groups `run` and `chat` take — endpoint, credentials,
+workspace, confinement, approvals, budgets, sessions. `--resume` is refused by name, because a flow
+names its own sessions (see [Sessions](#sessions-and-ids)).
+
+`--output-schema` is **not a flag of `workflow run`**: the runner derives the schema each step
+answers under (see below), so there is nothing for a file to shape. Typing it is an unrecognised
+argument, answered by the command line parser before the run starts, not a refusal worded here.
+
+Budgets divide the way they already do elsewhere: `--max-turns`, `--max-output-tokens` and
+`--max-output-tokens-per-turn` bound **each step**, while `--max-cost-microunits` and
+`--max-duration-ms` bound the **whole flow**: the runner keeps the cumulative spend and the flow's
+start instant, and hands each step a budget derived from what remains. A step that would start
+with nothing left does not call the model — it fails with a `warning` (`code: "flow-budget"`)
+naming the ceiling and the spend, and the walk skips what needed it.
+
+Tools, write scope and approvals are the run's, built once for every step. Narrowing one section is
+the `before-call` hook's job today; a published toolset per group is not in this milestone.
+
+### What one step sees
+
+A step is one turn of the loop. Its input is one user message, composed in this order:
+
+1. the flow's `--input`;
+2. *"You are in step `<path>`, attempt `<n>` of section `<scope>`"*;
+3. the handoffs available to this scope, as *"Earlier sections established:"* and one `name: value`
+   line each;
+4. the step's own prompt.
+
+Nothing else crosses. Steps in the same group and the same attempt continue one conversation and
+stay warm; a step in another group starts from the handoffs above and nothing else, because a
+sibling cannot depend on a step inside a group and therefore must not see that step's transcript
+either. A retreat — `Repeat` — re-enters the whole section from the same handoffs, which is what
+*the whole scope re-runs* means.
+
+### How a step reports: the derived schema
+
+Every step runs under an output schema the runner derives. The model never sees a schema file, and
+`workflow run` has no `--output-schema` for one to compete with it:
+
+```json
+{ "type": "object", "required": ["outcome"],
+  "properties": {
+    "outcome": { "enum": ["passed", "failed"] },
+    "note":    { "type": "string" },
+    "gives":   { "type": "object", "properties": { "<each name the enclosing group gives>": {} } } } }
+```
+
+The step finishes by calling `answer`, exactly as a structured run does — the standing instruction
+names the tool, as it does for `run --output-schema`. `gives` is collected per scope, last write
+wins, and handed over when the group leaves; a group that promised a name and never answered with
+it fails as `handoff-incomplete`, by the notation's own rule, and fails **once**: a broken promise
+is not retried whatever `repeat.max` says, because a second attempt buys the same answer again. A
+step whose group gives nothing still answers `outcome`.
+
+**Only a section that came out clean hands anything on.** What a failed one produced is in its own
+record — `group-left` says what it had — but it is a result nobody accepted, whether its own steps
+failed or a governor declined its leave, so the sections after it start without it.
+
+| The loop said | The step is |
+|---|---|
+| `completed`, with an `answer` of `outcome: passed` | Passed |
+| `completed` with `outcome: failed`, or `unstructured` | Failed |
+| A budget stop — turns, output tokens, input tokens, cost, deadline, or an incomplete provider turn | Failed, with the reason in the record |
+| `cancelled` | The flow stops. What ran is filed, no `flow-finished` is emitted, status 2 |
+| A loop error — a wire, credential, or protocol failure | The flow aborts, status 1. A broken wire is nobody's failed step, and a walk that recorded a network blip as a failure would misreport the plan |
+
+## Gate a section boundary: the `transition` hook
+
+`--hooks FILE` learns a fourth point beside `before-call`, `after-call` and `stop`. It is asked
+twice per section attempt: before the group is entered, and after it leaves. The rules are the
+other three points' rules — declared in the named file, never discovered in the workspace, an argv
+and never a shell, the credential removed from the environment, the same timeout and output bound.
+
+```json
+{
+  "version": 1,
+  "hooks": [
+    {"on": "transition", "command": ["/opt/policy/protocol-transition"]}
+  ]
+}
+```
+
+The program receives one JSON document on stdin:
+
+```json
+{ "hook": "transition", "flow": "adp/default", "path": "root.implement-to-review",
+  "moment": "enter" | "leave", "attempt": 2, "of": 3,
+  "failed": false,                  // leave only
+  "handoff": { "specification_id": "…" },   // leave only
+  "workspace": "/abs/path" }
+```
+
+Exit `0` proceeds. Exit `2` refuses, with `{"reason":"..."}` on stdout, or stderr if there is no
+JSON. Any other status, a startup failure, a timeout or oversized output is a failed hook and is
+**read as a refusal at both moments** — a governor that could not answer did not say yes, exactly
+as `before-call` fails closed.
+
+| Moment | A refusal means | What the walk does |
+|---|---|---|
+| `enter` a group | This section may not run now | The group is skipped as failed: `node-skipped` for every step inside it, `group-left` with `failed`, and whatever needed the group is skipped too |
+| `leave` a group that came out clean | The governor does not accept the section's result | The attempt is marked failed. With attempts left the group is re-entered — this is how a governor forces a retreat. At the bound, `group-left` reports it exhausted |
+| `leave` a group that already failed | Nothing changes | It has failed already. The refusal is recorded and that is all |
+
+`leave` is asked after the handoff is collected, once per attempt, so the governor sees what the
+section is handing over. On an attempt that **failed and still has one left**, `handoff` is `{}`:
+the section is going round again and is never asked what it hands over, so a governor must not read
+that empty object as *the section produced nothing*. The last attempt is asked either way. The root is a group and is gated like one: a refused `enter` of the root
+runs nothing and exits 2.
+
+A file naming `transition` is refused by a build that does not know the point, rather than being
+ignored — an older binary says so instead of running unguarded.
+
+:::warning Hooks are not confined
+
+A transition program runs on the operator's host, outside substrate confinement, like every other
+hook. See [Security boundary](../concepts/security-boundary.md).
+
+:::
+
+## Events
+
+Under `--json`, flow events share the stdout stream with the loop's events, one JSON object per
+line, each with a kebab-case `kind`:
+
+| Kind | Emitted when |
+|---|---|
+| `flow-started` | The walk began; carries the document id and how many steps it holds |
+| `group-entered` | A section started; carries its path, its layers, and `attempt` of `of` |
+| `layer-ready` | A set of siblings became runnable together |
+| `step-started`, `step-finished` | One step; a step's own loop events appear between the two |
+| `node-skipped` | A node did not run: something it needs failed, or a governor refused the `enter` of the section holding it — `because` says which |
+| `group-repeating` | A section did not come out clean and is being re-entered |
+| `handoff-incomplete` | A group promised names in `gives` and did not hand them over |
+| `group-left` | A section ended; carries `failed`, what it gave, attempts used, and `exhausted` |
+| `transition-refused` | A `transition` hook refused, with `path`, `moment`, `attempt` and `reason`. Emitted before the consequence |
+| `flow-finished` | The walk ended; carries `ran`, `failed`, `skipped`, `retreats` and `clean` |
+
+A `hook-ran` event records each transition hook with `point: "transition"`, as it does for the other
+points. On stderr the same events render one line each in the run's own style:
+
+```text
+flow ▸ root.shape (attempt 1 of 3)
+step ✓ root.shape.specify
+step ✗ root.implement-to-review.verify
+retreat ↺ root.implement-to-review (2 of 3): <reason>
+```
+
+`b10x-harness events` does not yet project these into `metaharness.event/1` families; a kind it does
+not know crosses as `opaque`.
+
+## Sessions and ids
+
+One session is filed per `(scope, attempt)` — per section, per attempt — with the id
+`<flow-run-id>.<path>.<attempt>`, where the flow-run id is allocated once for the walk. Each is
+saved as its scope closes, with what that scope cost, in the usual directory; `--session-dir` is
+honoured and `--no-session` writes nothing at all.
+
+Under `--json` a `{"kind":"session", …}` line is emitted as each scope's session is filed — the same
+shape `run` prints last — and `flow-finished` is the last line of a finished flow.
+
+`--resume` is refused. A crashed flow leaves its per-scope sessions and its record on disk, but
+nothing turns them back into a cursor yet.
+
+## Exit status
+
+| Status | Meaning |
+|---|---|
+| `0` | The flow came out clean |
+| `2` | It finished and did not: a step failed, a section was skipped or exhausted, or the run was cancelled. Inspect `flow-finished` |
+| `1` | Refused before it started — a document that does not validate, a refused flag, a credential — or aborted mid-step on a loop error |
+
+`workflow plan` exits `0` when the document validates and `1` when it does not.
+
+## Not yet
+
+The first milestone deliberately leaves these out. They are named in
+[design 0003](https://github.com/beyond10x/harness/blob/main/docs/design/0003-workflow-runner.md),
+each with the condition that would bring it in.
+
+- **Resuming a flow.** The per-scope sessions and the record survive a crash; there is no flow
+  cursor to restart from, and `workflow run --resume` is refused rather than approximated.
+- **A published toolset per group.** The catalogue is built once for the run. Narrowing one section
+  is the `before-call` hook's job today.
+- **Parallel layers.** `plan` says what may run beside what; the walk is sequential, and the loop
+  holds one client. A measurement comes before a client per thread.
+- **Command steps.** A step that is a verifier the runner executes, rather than a model turn, is not
+  bound yet: every step is a turn.
+- **The `metaharness.event/1` projection** of flow events, and their listing as control-plane events.
+- **Live evidence.** Everything here is `provider_emulated`: the walk, the retreat and the refused
+  transitions are proved against the local deterministic endpoint, never against a real provider.

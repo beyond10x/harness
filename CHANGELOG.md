@@ -157,6 +157,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   refused a pinned consumer at clap. Version order is compared numerically on the `.N` suffix, so a
   tenth cut in one day does not sort before the ninth.
 
+- **A named agent now narrows what a run can reach under `--surface verbs`, not only what it names
+  directly.** `0.2.0` recorded the opposite — "an entry reached through a verb" was *not* narrowed,
+  and "named agents are a flat-surface feature until that is answered". That was true then and this
+  is the answer; the `0.2.0` entry stands as the record of what shipped that day.
+
+  The narrowing is written in the names of what a run can **reach**, not of what it publishes.
+  Behind three verbs the call names `tool_invoke` and the entry is an argument, so the gate asks
+  the port what the call *invokes* and refuses `file_write` by the entry's own name, with the same
+  message a flat surface gives. The verbs are routes and not capabilities and are not narrowed away
+  — an agent granted `Read` and refused `tool_invoke` would have been granted nothing at all — but
+  a grant that is *empty* admits nothing, routes included, because a route to no granted entry
+  leads nowhere and can only enumerate a catalogue the child was admitted none of.
+
+  It is enforced at every site a call can reach the port, which is more than one. A turn's
+  neighbouring pure reads are handed to the port as a batch, and a batched call does not pass the
+  single-call gate: checked in one place, that surface let an agent granted `Grep` read any file by
+  asking for the read beside a search. `batchable`, `run_batch` and `invoke` now ask one predicate,
+  and so does publication.
+
+  A delegate is also always given its parent's admitted set. An agentless child used to be handed
+  the whole port, so a narrowed run could climb back out by delegating again and naming nobody —
+  unreachable from the command line, where depth is never above one, and reachable by any library
+  consumer.
+
+  `ToolPort::reachable` is a new defaulted trait method, and the direction of its failure is now
+  the one its documentation claims: a grant is an intersection with what the port reports, so a
+  port that under-reports costs a run reach and never boundary. It was subtraction before, which
+  grew the exempt set as a port said less — the inverse — and a port answering with nothing turned
+  every tool it published into a route.
+
 ## [0.3.0] — 2026-08-30
 
 *Three of the entries below — providers and profiles, workspace adoption, and the default model —

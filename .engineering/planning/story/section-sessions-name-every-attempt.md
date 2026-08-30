@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: story:section-sessions-name-every-attempt
 kind: story
-status: active
+status: implemented
 title: A section's session names every attempt above it, so a re-entered ancestor overwrites nothing
 summary: session_for names a session <flow-run>.<path>.<attempt> with the section's own attempt; when the root or a retreat re-enters, the section's attempt 1 runs again under the same id and overwrites the first file — walk 7 lost the transcript with the red validator
 owner: harness
@@ -11,7 +11,7 @@ tags:
 - workflow
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 ---
 # Story: a section's session names every attempt above it
 

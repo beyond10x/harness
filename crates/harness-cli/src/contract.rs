@@ -317,19 +317,11 @@ mod tests {
     /// `main` and consumers pin it; it stays, unchanged, beside `.2`.
     #[test]
     fn every_released_argv_version_is_still_pinned_beside_the_current_one() {
-        let versions = pinned()
-            .parent()
-            .expect("the version directory")
-            .parent()
-            .expect("the product directory")
-            .to_path_buf();
-        let mut present: Vec<String> = std::fs::read_dir(&versions)
-            .unwrap_or_else(|error| panic!("reading `{}`: {error}", versions.display()))
-            .filter_map(std::result::Result::ok)
-            .filter(|entry| entry.path().is_dir())
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
-        present.sort();
+        let versions = versions_directory();
+        // Ordered by the day and the cut within it, not as strings: `2026-08-29.10` is the
+        // eleventh cut of that day and belongs after `.9`, where a plain sort puts it after `.1`
+        // and makes `last()` name a version that is not the one in force.
+        let present = in_cut_order(&versions_present());
         assert_eq!(
             present,
             vec![
@@ -359,6 +351,714 @@ mod tests {
                 "`{version}` names itself: {manifest:?}"
             );
         }
+    }
+
+    /// Where the version directories live.
+    fn versions_directory() -> std::path::PathBuf {
+        pinned()
+            .parent()
+            .expect("the version directory")
+            .parent()
+            .expect("the product directory")
+            .to_path_buf()
+    }
+
+    /// Every pinned version, in whatever order the filesystem hands them over.
+    fn versions_present() -> Vec<String> {
+        let directory = versions_directory();
+        std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", directory.display()))
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// Where a version sits in time: the day it was cut, and which cut of that day it was.
+    ///
+    /// Split rather than compared as a string. `Vec::sort` puts `2026-08-30.10` between `.1` and
+    /// `.2`, and invariant 13's scheme has no ceiling on `.N` — this repository already cut four
+    /// versions of this contract in one day. At the tenth a lexicographic order names the wrong
+    /// version in force, diffs one pair backwards, and never diffs the pair that really is
+    /// consecutive, all without saying anything.
+    fn cut_order(version: &str) -> (&str, u32) {
+        version
+            .rsplit_once('.')
+            .and_then(|(day, nth)| nth.parse::<u32>().ok().map(|nth| (day, nth)))
+            .unwrap_or((version, 0))
+    }
+
+    /// Pinned versions oldest first — chronologically, which is not lexicographically.
+    fn in_cut_order(versions: &[String]) -> Vec<String> {
+        let mut ordered = versions.to_vec();
+        ordered.sort_by(|left, right| cut_order(left).cmp(&cut_order(right)));
+        ordered
+    }
+
+    /// One pinned version's argv document.
+    fn argv_of(version: &str) -> Value {
+        let path = versions_directory().join(version).join("argv.json");
+        serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display())),
+        )
+        .unwrap_or_else(|error| panic!("`{}` is not JSON: {error}", path.display()))
+    }
+
+    /// One pinned version's prose.
+    fn readme_of(version: &str) -> String {
+        let path = versions_directory().join(version).join("README.md");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display()))
+    }
+
+    /// Every flag of a pinned document, keyed by the command it is typed after and its long name.
+    fn flags_of(document: &Value) -> std::collections::BTreeMap<(String, String), Value> {
+        let mut rows = std::collections::BTreeMap::new();
+        for (subcommand, listed) in document["arguments"].as_object().expect("an object") {
+            for row in listed.as_array().expect("a list of arguments") {
+                let long = row["long"].as_str().expect("a long flag").to_owned();
+                rows.insert((subcommand.clone(), long), row.clone());
+            }
+        }
+        rows
+    }
+
+    /// Every command a document records flags for: the root and every nested verb.
+    fn described_by(document: &Value) -> std::collections::BTreeSet<String> {
+        document["arguments"]
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Every command a document's `subcommands` list says exists.
+    ///
+    /// Held apart from [`described_by`] rather than unioned with it, because the two lists answer
+    /// different questions and a name can leave one without leaving the other. Dropping `tools`
+    /// from `subcommands` while its flag rows stay behind makes the document say the command does
+    /// not exist — `subcommands` is what a driver enumerates — and a union would go on seeing it.
+    fn declared_by(document: &Value) -> std::collections::BTreeSet<String> {
+        document["subcommands"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|name| name.as_str().expect("a name").to_owned())
+            .collect()
+    }
+
+    /// One thing about the command line that is not what it was, in the words a README must use.
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct Moved {
+        subcommand: String,
+        long: String,
+        field: String,
+        before: String,
+        after: String,
+    }
+
+    impl Moved {
+        /// The five cells a README row has to carry, in the order it has to carry them.
+        fn cells(&self) -> [String; 5] {
+            [
+                format!("`{}`", self.subcommand),
+                format!("`{}`", self.long),
+                format!("`{}`", self.field),
+                format!("`{}`", self.before),
+                format!("`{}`", self.after),
+            ]
+        }
+    }
+
+    impl std::fmt::Display for Moved {
+        /// The row itself, so a failure prints the line that answers it.
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let cells = self.cells();
+            write!(formatter, "| {} |", cells.join(" | "))
+        }
+    }
+
+    /// The name a vanished flag or command is recorded under, and the values that say it vanished.
+    const GONE: (&str, &str, &str) = ("present", "true", "false");
+
+    /// Everything that moved between two argv documents, oldest first.
+    ///
+    /// The key set is a **union** and absence is a value. Comparing only what both documents hold
+    /// makes a renamed flag, a removed flag and a dropped command invisible, and those are exactly
+    /// the changes a pinned consumer cannot survive: `--substrate-embedded` changed shape and clap
+    /// refused the whole command line before any harness code ran (`AGENTS.md:84-86`).
+    ///
+    /// Arrivals are not returned. A flag or a command that did not exist before cannot break an
+    /// invocation that already worked — that is what "strictly additive" means, and why the phrase
+    /// is worth checking rather than banning. A departure always can. Recording an arrival is the
+    /// *what is new* prose's job; demanding a row for each would put seventy of them in this
+    /// chain's documents and bury the nine that matter.
+    ///
+    /// A command that is gone takes its flags with it and is reported once, not once per flag.
+    fn moves_between(before: &Value, after: &Value) -> Vec<Moved> {
+        const PINNED_FIELDS: [&str; 6] = [
+            "conflicts_with",
+            "default",
+            "required",
+            "requires",
+            "takes_value",
+            "value_name",
+        ];
+        let (was_described, now_described) = (described_by(before), described_by(after));
+        let undescribed: std::collections::BTreeSet<&String> =
+            was_described.difference(&now_described).collect();
+        let (was_declared, now_declared) = (declared_by(before), declared_by(after));
+        let mut departed: std::collections::BTreeSet<&String> = undescribed.clone();
+        departed.extend(was_declared.difference(&now_declared));
+        let mut moved: Vec<Moved> = departed
+            .iter()
+            .map(|command| Moved {
+                subcommand: (*command).clone(),
+                long: "the command itself".to_owned(),
+                field: GONE.0.to_owned(),
+                before: GONE.1.to_owned(),
+                after: GONE.2.to_owned(),
+            })
+            .collect();
+
+        let (was, now) = (flags_of(before), flags_of(after));
+        for (key, row) in &was {
+            let (subcommand, long) = key;
+            if undescribed.contains(subcommand) {
+                continue;
+            }
+            let Some(now_row) = now.get(key) else {
+                moved.push(Moved {
+                    subcommand: subcommand.clone(),
+                    long: long.clone(),
+                    field: GONE.0.to_owned(),
+                    before: GONE.1.to_owned(),
+                    after: GONE.2.to_owned(),
+                });
+                continue;
+            };
+            for field in PINNED_FIELDS {
+                if row[field] != now_row[field] {
+                    moved.push(Moved {
+                        subcommand: subcommand.clone(),
+                        long: long.clone(),
+                        field: field.to_owned(),
+                        before: row[field].to_string(),
+                        after: now_row[field].to_string(),
+                    });
+                }
+            }
+        }
+        moved.sort();
+        moved
+    }
+
+    /// Every span between a pair of backticks, in order.
+    ///
+    /// A version is matched as a whole backticked token and never as a substring: `2026-08-30` is
+    /// a prefix of `2026-08-30.1`, so a heading naming the first would otherwise read as naming
+    /// the second, and `2026-08-30.99` would pass as either.
+    fn backticked(text: &str) -> impl Iterator<Item = &str> {
+        text.split('`').skip(1).step_by(2)
+    }
+
+    /// The body under every `##` heading that names all of `must_name`, and nothing else.
+    ///
+    /// Scoped rather than searched whole, because evidence has to be about the pair it is filed
+    /// under. `2026-08-30`'s defect was attributing a diff to versions it was not between, and a
+    /// table that absolves a move it does not claim to be about repeats that defect exactly.
+    fn section_naming(readme: &str, must_name: &[&str]) -> String {
+        let mut inside = false;
+        let mut body: Vec<&str> = Vec::new();
+        for line in readme.lines() {
+            if let Some(heading) = line.strip_prefix("## ") {
+                inside = must_name
+                    .iter()
+                    .all(|name| backticked(heading).any(|token| token == *name));
+                continue;
+            }
+            if inside {
+                body.push(line);
+            }
+        }
+        body.join("\n")
+    }
+
+    /// The trimmed cells of one markdown table row, or nothing where the line is not a row.
+    fn row_cells(line: &str) -> Option<Vec<&str>> {
+        let trimmed = line.trim();
+        if trimmed.len() < 2 || !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+            return None;
+        }
+        Some(
+            trimmed
+                .trim_matches('|')
+                .split('|')
+                .map(str::trim)
+                .collect(),
+        )
+    }
+
+    /// Whether one line is a table row carrying exactly this move's five cells, side by side.
+    ///
+    /// Cells rather than substrings, and equality rather than containment, because three separate
+    /// lies passed a bag-of-substrings test on one line:
+    ///
+    /// - the nine rows written **backwards** — `false` then `true`, so the flags became *more*
+    ///   required rather than less, the opposite of what happened;
+    /// - a sentence **denying** the move in the very words that describe it: *"Strictly additive
+    ///   after all. No change to `run` `--model` `required`: it is `true` and was never
+    ///   `false`."*;
+    /// - **one** junk line carrying every token at once, which absolved all nine moves together.
+    ///
+    /// A cell in the right column kills the first, being a table cell at all kills the second, and
+    /// [`unstated`]'s one-line-per-move kills the third.
+    fn row_states(line: &str, moved: &Moved) -> bool {
+        let Some(cells) = row_cells(line) else {
+            return false;
+        };
+        let wanted = moved.cells();
+        cells.windows(wanted.len()).any(|window| {
+            window
+                .iter()
+                .zip(wanted.iter())
+                .all(|(cell, want)| *cell == want.as_str())
+        })
+    }
+
+    /// The moves this section does not state, each having had to claim a line of its own.
+    ///
+    /// A line is consumed by the first move it answers. Without that, one row wide enough to hold
+    /// every token stands in for every move at once, and the document says nine things by saying
+    /// one.
+    fn unstated(section: &str, moves: &[Moved]) -> Vec<Moved> {
+        let lines: Vec<&str> = section.lines().collect();
+        let mut claimed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        let mut missing = Vec::new();
+        for moved in moves {
+            let answer = lines
+                .iter()
+                .enumerate()
+                .find(|(number, line)| !claimed.contains(number) && row_states(line, moved));
+            match answer {
+                Some((number, _)) => {
+                    claimed.insert(number);
+                }
+                None => missing.push(moved.clone()),
+            }
+        }
+        missing
+    }
+
+    /// The version in force accounts for everything that moved, measured against what preceded it.
+    ///
+    /// A *what changed* section is the part of a contract a consumer reads before deciding to
+    /// change nothing, so it is the part that has to be true. `2026-08-30` measured itself against
+    /// `2026-08-29.1` while `.2` and `.3` stood between them, and concluded "strictly additive"
+    /// for a diff in which `--model` and `--base-url` stopped being required and `--wire` lost its
+    /// default on three commands. Nobody reading that document could have found out.
+    ///
+    /// So the claim is read out of the bytes. Every move between two consecutive pinned versions
+    /// must be stated as a **table row of its own** — the command, the flag, the field, the value
+    /// before and the value after, five cells side by side in that order — inside a `##` section
+    /// whose heading names the versions it is about. Either the README of the version it moved in,
+    /// under a heading naming the older one, or the README of the version in force, under a
+    /// heading naming **both**.
+    ///
+    /// The second alternative exists because a released version is immutable (`AGENTS.md`
+    /// invariant 13): a wrong one cannot be corrected in place, so the correction has to live
+    /// where a consumer of the current pin will actually find it. That means every later cut
+    /// carries the correction forward, which is the cost of having published the wrong thing once.
+    ///
+    /// Everything this rests on — the order, the diff, the section, the row — takes its inputs as
+    /// values and is exercised on documents written for the purpose in the tests below. A guard
+    /// that can only ever run against the six directories that happen to exist is the same class
+    /// of thing as the document nobody checked.
+    #[test]
+    fn the_version_in_force_names_every_field_that_moved_between_pinned_versions() {
+        let present = in_cut_order(&versions_present());
+        let (current, earlier) = present.split_last().expect("a version in force");
+        assert_eq!(
+            current.as_str(),
+            ARGV_CONTRACT_VERSION,
+            "this build pins the newest one"
+        );
+        let previous = earlier.last().expect("a version before the one in force");
+        let in_force = readme_of(current);
+
+        let headings: Vec<&str> = in_force
+            .lines()
+            .filter_map(|line| line.strip_prefix("## What changed since "))
+            .collect();
+        assert_eq!(
+            headings.len(),
+            1,
+            "`{current}/README.md` says what changed exactly once: {headings:?}"
+        );
+        assert_eq!(
+            backticked(headings[0]).next(),
+            Some(previous.as_str()),
+            "`{current}/README.md` must measure itself against `{previous}`, the version \
+             immediately before it — backticked, so a heading naming a longer version that starts \
+             with the same characters is not read as naming this one"
+        );
+
+        let mut unnamed: Vec<String> = Vec::new();
+        for pair in present.windows(2) {
+            let (older, newer) = (&pair[0], &pair[1]);
+            let moves = moves_between(&argv_of(older), &argv_of(newer));
+            if moves.is_empty() {
+                continue;
+            }
+            let stated_where_it_moved = section_naming(&readme_of(newer), &[older.as_str()]);
+            let missing = unstated(&stated_where_it_moved, &moves);
+            let carried = if newer == current {
+                String::new()
+            } else {
+                section_naming(&in_force, &[older.as_str(), newer.as_str()])
+            };
+            for moved in unstated(&carried, &missing) {
+                unnamed.push(format!("  `{older}` -> `{newer}`: {moved}"));
+            }
+        }
+        assert!(
+            unnamed.is_empty(),
+            "something moved and no document a consumer of `{ARGV_CONTRACT_VERSION}` reads states \
+             it. Put each row below in the README of the version it moved in, under a `##` heading \
+             naming the older version — or, when that version is released and therefore immutable \
+             (`AGENTS.md` invariant 13), in `{ARGV_CONTRACT_VERSION}/README.md` under a `##` \
+             heading naming both. One row per move, cells exactly as printed:\n{}",
+            unnamed.join("\n")
+        );
+    }
+
+    /// A synthetic argv document, so the diff can be exercised on something other than the six
+    /// directories that happen to exist.
+    fn document(rows: &[(&str, &str, Value)]) -> Value {
+        let mut arguments = Map::new();
+        for (subcommand, long, row) in rows {
+            let mut row = row.clone();
+            row["long"] = json!(long);
+            arguments
+                .entry((*subcommand).to_owned())
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .expect("a list")
+                .push(row);
+        }
+        let mut subcommands: Vec<String> = arguments.keys().cloned().collect();
+        subcommands.sort();
+        json!({ "product": "b10x-harness", "subcommands": subcommands, "arguments": arguments })
+    }
+
+    /// A flag row with every pinned field at its quietest value.
+    fn flag() -> Value {
+        json!({
+            "long": "--placeholder",
+            "takes_value": true,
+            "value_name": "VALUE",
+            "default": Value::Null,
+            "required": false,
+            "conflicts_with": [],
+            "requires": [],
+        })
+    }
+
+    /// A section that would answer these moves honestly, one row each.
+    fn honest(moves: &[Moved]) -> String {
+        let rows: Vec<String> = moves.iter().map(ToString::to_string).collect();
+        format!(
+            "| command | flag | field | before | after |\n| --- | --- | --- | --- | --- |\n{}",
+            rows.join("\n")
+        )
+    }
+
+    /// The order the pair diff rests on stops being chronological at the tenth cut of one day.
+    ///
+    /// Invariant 13's scheme is `2026-08-29`, then `.1`, then `.2`, and nothing in it stops at
+    /// `.9` — this repository already cut four versions of this contract in one day. At the tenth,
+    /// lexicographic order puts `.10` between `.1` and `.2`, and three things follow at once:
+    /// `split_last` names `.9` as the version in force and the run fails against a correct cut,
+    /// `windows(2)` pairs a newer document with an older one and diffs it **backwards**, and the
+    /// pair that really is consecutive is never diffed at all.
+    ///
+    /// [`in_cut_order`] is called rather than reproduced, and it takes the sequence as an
+    /// argument, so the rule the guard actually uses is the rule under test here.
+    #[test]
+    fn the_version_order_is_still_chronological_at_the_tenth_cut_of_one_day() {
+        let cut_in_this_order = [
+            "2026-08-30",
+            "2026-08-30.1",
+            "2026-08-30.2",
+            "2026-08-30.9",
+            "2026-08-30.10",
+        ];
+        let mut arrived: Vec<String> = cut_in_this_order
+            .iter()
+            .map(|version| (*version).to_owned())
+            .collect();
+        // `read_dir` promises no order, and a plain sort puts `.10` between `.1` and `.2`.
+        arrived.sort();
+        assert_eq!(
+            in_cut_order(&arrived),
+            cut_in_this_order,
+            "the tenth cut of a day is the newest one, not the second"
+        );
+    }
+
+    /// One move, in the words the nine real ones are written in.
+    fn one_move() -> Moved {
+        Moved {
+            subcommand: "run".to_owned(),
+            long: "--model".to_owned(),
+            field: "required".to_owned(),
+            before: "true".to_owned(),
+            after: "false".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_move_written_the_wrong_way_round_does_not_state_it() {
+        let moves = vec![one_move()];
+        let backwards = "| `run` | `--model` | `required` | `false` | `true` |";
+        assert_eq!(
+            unstated(backwards, &moves),
+            moves,
+            "`false` -> `true` is the opposite claim: the flag became more required, not less"
+        );
+        assert!(unstated(&honest(&moves), &moves).is_empty());
+    }
+
+    #[test]
+    fn a_sentence_denying_a_move_in_its_own_words_does_not_state_it() {
+        let moves = vec![one_move()];
+        let denial = "Strictly additive after all. No change to `run` `--model` `required`: it \
+                      is `true` and was never `false`.";
+        assert_eq!(
+            unstated(denial, &moves),
+            moves,
+            "a denial carries every word the statement carries, in the same order"
+        );
+    }
+
+    #[test]
+    fn one_line_carrying_every_token_states_at_most_one_move() {
+        let moves: Vec<Moved> = ["chat", "run", "workflow run"]
+            .iter()
+            .map(|subcommand| Moved {
+                subcommand: (*subcommand).to_owned(),
+                long: "--model".to_owned(),
+                field: "required".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            })
+            .collect();
+        let junk = "| `chat` | `--model` | `required` | `true` | `false` | `run` | `--model` | \
+                    `required` | `true` | `false` | `workflow run` | `--model` | `required` | \
+                    `true` | `false` |";
+        assert_eq!(
+            unstated(junk, &moves).len(),
+            2,
+            "one line answers one move; the document has to say the other two out loud"
+        );
+        assert!(unstated(&honest(&moves), &moves).is_empty());
+    }
+
+    #[test]
+    fn evidence_filed_under_the_wrong_pair_absolves_nothing() {
+        let moves = vec![one_move()];
+        let table = honest(&moves);
+        let wrong_pair =
+            format!("## What `2026-08-29.1` got wrong, and `2026-08-29.2` with it\n\n{table}\n");
+        let right_pair =
+            format!("## What `2026-08-29.3` got wrong, and `2026-08-30` with it\n\n{table}\n");
+        let about = ["2026-08-29.3", "2026-08-30"];
+        assert_eq!(
+            unstated(&section_naming(&wrong_pair, &about), &moves),
+            moves,
+            "a table headed for one pair states nothing about another"
+        );
+        assert!(
+            unstated(&section_naming(&right_pair, &about), &moves).is_empty(),
+            "the same table, filed under the pair it is about, states it"
+        );
+    }
+
+    #[test]
+    fn a_renamed_flag_is_a_move_even_though_no_field_of_it_changed() {
+        let before = document(&[("run", "--substrate-embedded", flag())]);
+        let after = document(&[("run", "--substrate", flag())]);
+        assert_eq!(
+            moves_between(&before, &after),
+            vec![Moved {
+                subcommand: "run".to_owned(),
+                long: "--substrate-embedded".to_owned(),
+                field: "present".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            }],
+            "the flag a consumer types is gone, and no field of any surviving flag says so"
+        );
+    }
+
+    #[test]
+    fn a_dropped_command_is_one_move_and_does_not_drag_its_flags_in_with_it() {
+        let before = document(&[
+            ("run", "--input", flag()),
+            ("workflow run", "--flow", flag()),
+            ("workflow run", "--input", flag()),
+        ]);
+        let after = document(&[("run", "--input", flag())]);
+        assert_eq!(
+            moves_between(&before, &after),
+            vec![Moved {
+                subcommand: "workflow run".to_owned(),
+                long: "the command itself".to_owned(),
+                field: "present".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            }],
+            "a command that is gone is said once, not once for each flag it took with it"
+        );
+    }
+
+    #[test]
+    fn a_command_struck_from_the_subcommand_list_is_gone_even_with_its_flags_left_behind() {
+        let before = document(&[("run", "--input", flag()), ("tools", "--driver", flag())]);
+        let mut after = before.clone();
+        after["subcommands"] = json!(["run"]);
+        assert_eq!(
+            moves_between(&before, &after),
+            vec![Moved {
+                subcommand: "tools".to_owned(),
+                long: "the command itself".to_owned(),
+                field: "present".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            }],
+            "`subcommands` is the list a driver enumerates: a name struck from it is a command \
+             the document says does not exist, whatever rows are left under `arguments`"
+        );
+    }
+
+    #[test]
+    fn an_arriving_flag_is_not_a_move_and_a_changed_one_is() {
+        let before = document(&[("run", "--model", flag())]);
+        let mut arrived = flag();
+        arrived["required"] = json!(true);
+        let after = document(&[("run", "--model", flag()), ("run", "--profile", arrived)]);
+        assert!(
+            moves_between(&before, &after).is_empty(),
+            "an arrival cannot break an invocation that already worked"
+        );
+        let mut changed = flag();
+        changed["takes_value"] = json!(false);
+        let reshaped = document(&[("run", "--model", changed)]);
+        assert_eq!(
+            moves_between(&before, &reshaped),
+            vec![Moved {
+                subcommand: "run".to_owned(),
+                long: "--model".to_owned(),
+                field: "takes_value".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            }]
+        );
+    }
+
+    /// A flag that eats no word records no placeholder for one.
+    ///
+    /// `2026-08-30.1/README.md` says `value_name` holds "the placeholder in the usage line, or
+    /// `null`", and clap prints no placeholder for a bare flag: `b10x-harness run --help` renders
+    /// `--substrate-embedded` and `--delegate` with nothing after them, beside
+    /// `-p, --profile <NAME>` which has one. The document nonetheless records
+    /// `"value_name": "SUBSTRATE_EMBEDDED"` against `"takes_value": false` on 23 rows — including
+    /// the one flag this whole contract exists because of. A driver that generates a command line
+    /// from `value_name` emits `--substrate-embedded SUBSTRATE_EMBEDDED`, which is the exact word
+    /// clap refused from the consumer pinned to `0.1.0`.
+    ///
+    /// `a_flag_that_eats_the_next_word_is_distinguished_from_one_that_does_not` asserts
+    /// `takes_value` on that flag and never looks at the placeholder beside it.
+    // Red today, on purpose. 23 bare flags record a `value_name` the pinned document defines as
+    // the usage-line placeholder — `--substrate-embedded` among them, at
+    // `contracts/cli/b10x-harness/2026-08-30.1/argv.json`. Making it green re-pins `argv.json`,
+    // which is a new cut: `story:argv-pin-misdescribes-the-command-line`.
+    #[test]
+    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` cuts a new argv.json"]
+    fn a_flag_that_eats_no_word_records_no_placeholder_for_one() {
+        let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
+        let mut contradictory: Vec<String> = Vec::new();
+        for ((subcommand, long), row) in flags_of(&document) {
+            if row["takes_value"] == false && !row["value_name"].is_null() {
+                contradictory.push(format!(
+                    "  `{subcommand}` `{long}`: takes_value `false`, value_name {}",
+                    row["value_name"]
+                ));
+            }
+        }
+        assert!(
+            contradictory.is_empty(),
+            "the pinned document names a placeholder for a flag that eats no word, and its own \
+             README says a placeholder is what appears in the usage line:\n{}",
+            contradictory.join("\n")
+        );
+    }
+
+    /// Every short flag a consumer can type is pinned, or the document says it is not pinned.
+    ///
+    /// `-p` is a short flag on `--profile`, on the root command and on every command that takes a
+    /// run's options (`crates/harness-cli/src/lib.rs:340` and `:480`), and clap prints it:
+    /// `-p, --profile <NAME>`. The pinned document has no field for it — every row is keyed by
+    /// `long` alone — and `2026-08-30.1/README.md` names it in neither direction: "What is pinned"
+    /// says "one row per long flag" and "What is not pinned" lists the help text, the summaries,
+    /// clap's print order and the exit statuses. The word "short" does not appear in the file.
+    ///
+    /// So `-p` is a piece of the argv surface that can be renamed, repointed at another flag or
+    /// dropped with both halves of the check green — which is the failure this contract was cut to
+    /// prevent, on a flag a consumer can already type today.
+    // Red today, on purpose. `-p` on `--profile` (`crates/harness-cli/src/lib.rs:340` and `:480`)
+    // is a short flag a consumer can already type that the pinned document does not record. The
+    // honest fix is pinning it, which re-pins `argv.json` and so is a new cut:
+    // `story:argv-pin-misdescribes-the-command-line`. This test's `readme.contains("short")` hatch
+    // would also go green on a README sentence disclaiming short flags — that is moving the
+    // goalpost, not fixing it, and is why it is not taken here.
+    #[test]
+    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` pins `-p`"]
+    fn a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned() {
+        let command = Cli::command();
+        let mut nested: Vec<(String, &clap::Command)> = Vec::new();
+        reachable(&command, "", &mut nested);
+        let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
+        let rows = flags_of(&document);
+        let readme = readme_of(ARGV_CONTRACT_VERSION);
+        let disclosed = readme.to_lowercase().contains("short");
+
+        let mut unpinned: Vec<String> = Vec::new();
+        for (path, subcommand) in std::iter::once((command.get_name().to_owned(), &command)).chain(
+            nested
+                .iter()
+                .map(|(path, subcommand)| (path.clone(), *subcommand)),
+        ) {
+            for argument in subcommand.get_arguments() {
+                let (Some(short), Some(long)) = (argument.get_short(), argument.get_long()) else {
+                    continue;
+                };
+                let recorded = rows
+                    .get(&(path.clone(), format!("--{long}")))
+                    .is_some_and(|row| row["short"] == format!("-{short}"));
+                if !recorded && !disclosed {
+                    unpinned.push(format!("  `{path}`: `-{short}` on `--{long}`"));
+                }
+            }
+        }
+        assert!(
+            unpinned.is_empty(),
+            "a short flag clap accepts is in neither the pinned document nor its README, so it \
+             can move without either half of the check noticing:\n{}",
+            unpinned.join("\n")
+        );
     }
 
     #[test]

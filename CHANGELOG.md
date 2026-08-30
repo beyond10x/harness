@@ -48,6 +48,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **The workspace-name rule `--help` states is the one the code enforces.** `run --help`, `chat --help`,
+  `tools --help` and `workflow run --help` told the operator the directory "must therefore be named
+  `ws_something` — substrate's guarded filesystem will not represent any other name". Substrate `0.2.2`
+  dropped that prefix, which was its resource-id scheme and never its containment. All five sites — both
+  help copies, the `--substrate-embedded` refusal, `harness-substrate`'s `workspace_adopt` rustdoc and
+  its refusal — now state the enforced rule: one path component of **ASCII** alphanumerics, `_` and `-`,
+  not empty, `.` or `..`, and not beginning with `-`. Help text is pinned nowhere, so neither half of the
+  CLI contract check could see any of it; `argv.json` does not move.
+
+- **`contracts/cli/b10x-harness/2026-08-30.2` now says what is decided after clap.** `--wire` recorded
+  `"default": null` on `run`, `chat` and `workflow run` while the binary applies `openai-responses` once
+  clap has parsed; `--session-dir` recorded the same on four commands while a run files a transcript
+  under `$XDG_STATE_HOME/b10x-harness/sessions`, at a path no field names; and `--base-url` and `--model`
+  recorded `"required": false` while a run with neither them nor a configured provider is refused by
+  name. A consumer building an invocation from the document alone got a command line that did not run,
+  and could not say which model API it would speak or where a transcript would land.
+
+  None of these can sit in a row generated from clap's own definition — they are settled outside it, and
+  recording them would be the second description of the command line invariant 14 forbids. Two tables in
+  *What is not pinned* carry them instead, checked cell by cell rather than by the words they contain,
+  and a consumer suite builds invocations from those rows and runs them. `workflow run`'s exit `101` is
+  disclosed there rather than fixed (`story:workflow-run-panics-and-drops-its-profile`).
+
+  The state-directory refusal now names only flags the command it fired on accepts: `sessions` is told
+  `--session-dir`, a run is told `--session-dir` or `--no-session`.
+
+  **The version was corrected in place, not cut again**: `2026-08-30.2` is not reachable on `origin/main`,
+  so invariant 13 does not hold it immutable yet. No pinned field moved — `argv.json` and `manifest.json`
+  are byte-identical, and the checker still reports seven pinned versions.
+
 - **`contracts/cli/b10x-harness/2026-08-30.2`: the argv pin no longer describes a command line this
   binary does not serve.** Four things in `2026-08-30.1` were wrong in the one direction a driver
   acts on. 23 flags with `"takes_value": false` recorded a `value_name`, which that document's own

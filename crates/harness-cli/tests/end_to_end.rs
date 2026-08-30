@@ -470,6 +470,232 @@ fn an_embedded_workspace_with_the_wrong_name_refuses_the_run_by_name() {
     );
 }
 
+/// The workspace-name rule every page states admits exactly the names this binary adopts.
+///
+/// Both pages once told the operator the directory "must therefore be named `ws_something` —
+/// substrate's guarded filesystem will not represent any other name". `0c31438` shipped workspace
+/// adoption and left the sentence standing; substrate `0.2.2`'s `validate_root_name` asks for one
+/// path component of ASCII alphanumerics, `_` and `-` that is not empty, `.` or `..` and does not
+/// begin with `-`, and the `ws_` prefix it used to demand was the id scheme rather than the
+/// containment.
+///
+/// # Why this reads the sentence instead of looking for it
+///
+/// Asserting that a page does not say `ws_` and does say "one path component" is satisfied by a
+/// page that names the wrong characters. Two mutants proved it: both copies changed to
+/// "alphanumerics, `_` and `.`" left the suite green while telling the operator that `my.project`
+/// is fine — it is refused — and that `my-project` is not — it is adopted; and the whole rule left
+/// as plain "alphanumerics" left `café` refused by a binary whose page says it is a legal name.
+///
+/// So the **alphabet the sentence names** is decoded out of it — whether it says `ASCII`, and which
+/// characters it lists beside the alphanumerics — and used to classify a set of probe names, each
+/// of which is separately handed to the binary. Page and behaviour must agree on every one. A page
+/// whose rule this cannot find at all fails rather than passing: a rule stated in some other words
+/// is one this case has to be re-derived from, not one it may skip.
+///
+/// # And on every page, not on the two that share a struct
+///
+/// `RunOptions` is flattened by `run`, `chat` and `workflow run`; `ToolsOptions` carries a second
+/// copy of the same paragraph for `tools`. Four pages, two sources — so a case that asserted on
+/// `run` and `chat` left the whole `ToolsOptions` copy unpinned, and reverting it alone put
+/// `ws_something` back on `tools --help` with everything green. The pages are enumerated from the
+/// pinned argv document instead: every command that records a `--substrate-embedded` row.
+///
+/// The binary's own refusal is held to the same standard, because it is the sentence an operator
+/// reads *after* being refused, and a rule they cannot act on is the failure this story was opened
+/// about rather than one it fixed.
+#[test]
+fn the_workspace_rule_each_page_states_admits_exactly_the_names_this_binary_adopts() {
+    // Names chosen to separate the clauses: a hyphen, an underscore, a digit, a dot, three scripts
+    // whose letters are not ASCII, and a name that would read as an option.
+    const PROBES: [&str; 8] = [
+        "my-project",
+        "my_project",
+        "project9",
+        "my.project",
+        "café",
+        "Projekt-Übung",
+        "日本語",
+        "-rf",
+    ];
+
+    let mut adopts: std::collections::BTreeMap<&str, bool> = std::collections::BTreeMap::new();
+    let mut a_refusal = String::new();
+    for name in PROBES {
+        let (_root, workspace) = adoptable_workspace(name);
+        let output = run(&["tools", "--substrate-embedded"], &workspace);
+        let adopted = output.status == Some(0);
+        if !adopted {
+            a_refusal = output.stderr.clone();
+        }
+        adopts.insert(name, adopted);
+    }
+    assert!(
+        adopts.values().any(|held| *held) && adopts.values().any(|held| !*held),
+        "the probes have to fall on both sides of the rule or they measure nothing: {adopts:?}"
+    );
+
+    let mut pages: Vec<Vec<String>> = commands_rendering(&["--substrate-embedded"])
+        .into_iter()
+        .map(|path| {
+            let mut words: Vec<String> = path.split_whitespace().map(str::to_owned).collect();
+            words.push("--help".to_owned());
+            words
+        })
+        .collect();
+    assert!(
+        pages.len() >= 2,
+        "the pinned document records `--substrate-embedded` on {} command(s); this case is about \
+         every page that renders it",
+        pages.len()
+    );
+    pages.sort();
+
+    let mut wrong: Vec<String> = Vec::new();
+    let mut stated: Vec<(String, String)> = pages
+        .iter()
+        .map(|page| {
+            let words: Vec<&str> = page.iter().map(String::as_str).collect();
+            let help = raw(&words);
+            assert_eq!(
+                help.status,
+                Some(0),
+                "`{}`: {}",
+                page.join(" "),
+                help.stderr
+            );
+            (page.join(" "), flowed(&help.stdout))
+        })
+        .collect();
+    stated.push(("the refusal itself".to_owned(), flowed(&a_refusal)));
+
+    for (named, text) in &stated {
+        if text.contains("ws_") {
+            wrong.push(format!(
+                "  `{named}` still requires a `ws_` workspace name, which this binary dropped at \
+                 substrate 0.2.2"
+            ));
+            continue;
+        }
+        let Some(rule) = alphabet_stated_by(text) else {
+            wrong.push(format!(
+                "  `{named}` states no rule this case can read — it has to say `one path component \
+                 of …, and may not …` — so it cannot be compared with what the binary does"
+            ));
+            continue;
+        };
+        for (name, adopted) in &adopts {
+            let says = rule.admits(name);
+            if says != *adopted {
+                wrong.push(format!(
+                    "  `{named}` says `{name}` is {}, and this binary {} it",
+                    if says { "a legal name" } else { "illegal" },
+                    if *adopted { "adopts" } else { "refuses" }
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "the workspace-name rule an operator is shown and the one this binary keeps:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// The character rule a sentence states, decoded from the sentence's own words.
+struct StatedRule {
+    /// Whether it says the alphanumerics are `ASCII`, which is what the code checks.
+    ascii_only: bool,
+    /// The single characters it lists beside them.
+    beside: std::collections::BTreeSet<char>,
+    /// Whether it refuses a name that would read as an option.
+    leading_dash_refused: bool,
+}
+
+impl StatedRule {
+    /// Whether the rule, as stated, admits this name.
+    fn admits(&self, name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        if self.leading_dash_refused && name.starts_with('-') {
+            return false;
+        }
+        name.chars().all(|character| {
+            (character.is_alphanumeric() && (!self.ascii_only || character.is_ascii()))
+                || self.beside.contains(&character)
+        })
+    }
+}
+
+/// The alphabet clause of a stated rule: everything between `path component of` and the
+/// `, and may not` that begins the shape rule.
+///
+/// Scoped to that clause on purpose. `` `-` `` appears again in "may not … begin with `-`", and a
+/// reader that took every backticked character in the sentence would count the hyphen as admitted
+/// however the alphabet clause was rewritten — which is the mutant this exists to kill.
+fn alphabet_stated_by(text: &str) -> Option<StatedRule> {
+    let clause = text
+        .split_once("path component of")?
+        .1
+        .split_once(", and may not")?
+        .0;
+    Some(StatedRule {
+        ascii_only: clause.contains("ASCII"),
+        beside: clause
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter_map(|token| {
+                let mut characters = token.chars();
+                let single = characters.next()?;
+                characters.next().is_none().then_some(single)
+            })
+            .collect(),
+        leading_dash_refused: text.contains("begin with `-`"),
+    })
+}
+
+/// clap wraps long help to the terminal's width, so a phrase is looked for in flowed text.
+fn flowed(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Every command the pinned argv document records all of these flags on.
+///
+/// Read from the pin rather than listed here, so a flag that arrives on a fifth command brings its
+/// page into this case without anybody remembering to add it.
+fn commands_rendering(flags: &[&str]) -> Vec<String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("contracts")
+        .join("cli")
+        .join("b10x-harness")
+        .join(b10x_harness_cli::contract::ARGV_CONTRACT_VERSION)
+        .join("argv.json");
+    let document: Value = serde_json::from_str(
+        &fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display())),
+    )
+    .expect("the pinned document is JSON");
+    let mut found: Vec<String> = document["arguments"]
+        .as_object()
+        .expect("an object")
+        .iter()
+        .filter(|(_, rows)| {
+            let listed = rows.as_array().expect("a list of arguments");
+            flags
+                .iter()
+                .all(|flag| listed.iter().any(|row| row["long"] == *flag))
+        })
+        .map(|(command, _)| command.clone())
+        .collect();
+    found.sort();
+    found
+}
+
 #[test]
 fn a_named_socket_with_no_daemon_refuses_rather_than_going_read_only() {
     let (root, workspace) = adoptable_workspace("ws_probe");

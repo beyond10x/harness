@@ -1968,7 +1968,7 @@ fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
     }
     match &options.session_dir {
         Some(path) => Ok(Some(path.clone())),
-        None => transcript::default_dir().map(Some),
+        None => transcript::default_dir(transcript::Instead::NameOneOrFileNothing).map(Some),
     }
 }
 
@@ -2242,7 +2242,7 @@ fn chat_command(options: &RunOptions) -> Result<LoopStop, RunFailure> {
 fn sessions_command(options: &SessionsOptions) -> Result<(), String> {
     let dir = match &options.session_dir {
         Some(path) => path.clone(),
-        None => transcript::default_dir()?,
+        None => transcript::default_dir(transcript::Instead::NameOne)?,
     };
     let rows = transcript::Session::list(&dir)?;
     if rows.is_empty() {

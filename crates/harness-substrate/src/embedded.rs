@@ -204,11 +204,12 @@ impl Embedded {
     ///
     /// Returns [`SubstrateError::Refused`] when the name is not one the driver can represent — it
     /// must be one path component of ASCII alphanumerics, `_` and `-`, and may not be empty, `.`,
-    /// `..`
-    /// or begin with `-` — or when no such directory is there. The prefix this used to demand was
-    /// substrate's resource-id scheme and never its containment, and it went at `0.2.2`; the
-    /// charset is checked here as well as in the driver, so a name that will not do is refused
-    /// with a sentence a caller can act on rather than with a flat path-escape.
+    /// `..`, or begin with `-` — or when no such directory is there.
+    ///
+    /// The prefix this used to demand was substrate's resource-id scheme and never its
+    /// containment, and it went at `0.2.2`. The charset is checked here as well as in the driver,
+    /// so a name that will not do is refused with a sentence a caller can act on rather than with
+    /// a flat path-escape.
     pub fn workspace_adopt(&self, name: &str) -> Result<String, SubstrateError> {
         self.driver
             .workspace_root_identity(name)
@@ -274,15 +275,18 @@ impl Backend for Embedded {
     fn workspace_create(&self, lease_ttl_ms: u64) -> Result<String, SubstrateError> {
         // **`ws_` is this crate's id scheme and not a rule anything below enforces.** The id is
         // ours to choose here, where over the wire the daemon minted one, and at the pinned tag
-        // `0.2.2` (`43c5a10`) the driver's two checks agree about the alphabet:
+        // `0.2.2` (`43c5a10`) the driver's two checks agree about the alphabet.
         // `HostDriver::workspace_path` (`lib.rs:463`) and `validate_root_name` inside the guarded
-        // filesystem (`fs.rs:1317`) both admit any run of ASCII alphanumerics, `_` and `-`, and
-        // the second additionally refuses the empty name, `.`, `..` and a leading `-`. So a
-        // hyphenated, unprefixed name is represented — which is what
-        // [`Embedded::workspace_adopt`] above is for, and what
-        // `crates/harness-substrate/tests/embedded_create_comment.rs` measures rather than
-        // reads. The prefix stays on a **minted** id because a directory name is a resource id
-        // here, and one that says what made it is one an operator can recognise in a listing.
+        // filesystem (`fs.rs:1317`) both admit any run of ASCII alphanumerics, `_` and `-`; `.`
+        // and `..` fail that charset in both, since the dot is not in it. What the second adds is
+        // the **empty name and a leading `-`**, which pass the first vacuously and by charset
+        // respectively — and that is the whole of the difference between them.
+        //
+        // So a hyphenated, unprefixed name is represented, which is what
+        // [`Embedded::workspace_adopt`] above is for and what
+        // `crates/harness-substrate/tests/embedded_create_comment.rs` measures rather than reads.
+        // The prefix stays on a **minted** id because a directory name is a resource id here, and
+        // one that says what made it is one an operator can recognise in a listing.
         //
         // The sequence is what makes it *this* workspace: the lease and the pid are properties of
         // the run, not of the directory, so two creates with one lease minted one id and the second

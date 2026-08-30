@@ -517,3 +517,335 @@ fn workflow_run_built_from_the_document_alone_is_refused_by_name_as_the_document
         output.stderr
     );
 }
+
+/// Every command line this document says is enough exits with one of the three statuses it names.
+///
+/// **This is the assertion that was in this file at `1acad51` and is not in it now.** The case it
+/// stood in — `workflow_run_built_from_the_document_alone_is_refused_by_name_as_the_document_says`
+/// — carried two independent claims: that the escape section and the binary agree about
+/// `workflow run`, and that the exit status is one of `0`, `1`, `2`. `2a045c3` rewrote the first
+/// into a biconditional, which is a fair answer to a scope decision that had moved under it, and
+/// dropped the second, which had not moved: `README.md:232` still says *"the exit statuses … are
+/// `0` answered, `2` stopped for a named reason, `1` could not run"*, and it says it in the same
+/// section that now also says `workflow run` exits `101`.
+///
+/// A document that states three statuses and then discloses a fourth is not thereby correct about
+/// the three; it is contradicting itself in two subsections of *What is not pinned*. A driver that
+/// wrote `if code not in (0, 1, 2): raise` — which is exactly what a pinned status list is for —
+/// breaks on the first `workflow run` it launches.
+///
+/// **This case does not require the binary to be fixed**, and so does not reopen the scope
+/// decision. It is satisfied the moment the statuses sentence stops claiming three, or the moment
+/// `workflow run` stops panicking; either is in this unit's reach, and one of them has to happen
+/// before a consumer can trust either sentence.
+///
+/// # The list is read out of the document, not written here
+///
+/// It was written with `matches!(status, Some(0..=2))`, which is the sentence's claim copied into
+/// this file — so the only thing that could satisfy it was fixing the binary, which is the one
+/// resolution its own paragraph above rules out, and amending the sentence would have left it red
+/// with nothing to do. So the statuses are parsed from the section that states them: every
+/// backticked integer in `## What is not pinned` before its first subsection. Amending the sentence
+/// satisfies this; producing a status the sentence does not name still fails it, and so does
+/// deleting the sentence, because then the list is empty and every status is unnamed.
+///
+/// No endpoint is contacted: every invocation here stops before the first request.
+#[test]
+fn the_exit_status_of_a_command_line_the_document_describes_is_one_the_document_names() {
+    let document = pinned_document();
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let state = tempfile::tempdir().expect("a temporary state directory");
+    let workspace = tempfile::tempdir().expect("a temporary workspace");
+    let flow = workspace.path().join("one-step.yaml");
+    std::fs::write(&flow, ONE_STEP).expect("a flow document");
+
+    let mut values = BTreeMap::new();
+    values.insert("--input", "do the thing".to_owned());
+    values.insert("--flow", flow.display().to_string());
+
+    let named = statuses_the_document_names(&pinned_readme());
+    assert!(
+        !named.is_empty(),
+        "`## What is not pinned` names no exit status at all, so a driver has nothing to check a \
+         status against and this case has nothing to hold the binary to"
+    );
+
+    let mut undocumented: Vec<String> = Vec::new();
+    for command in ["run", "chat", "workflow run"] {
+        let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+        for listed in document["arguments"][command]
+            .as_array()
+            .unwrap_or_else(|| panic!("`{command}` has a flag list"))
+        {
+            if listed["required"] != true {
+                continue;
+            }
+            let long = listed["long"].as_str().expect("a long flag");
+            argv.push(long.to_owned());
+            argv.push(values[long].clone());
+        }
+        argv.push("--workspace".to_owned());
+        argv.push(workspace.path().display().to_string());
+
+        let output = Command::new(BINARY)
+            .args(&argv)
+            .env("XDG_CONFIG_HOME", config.path())
+            .env("XDG_STATE_HOME", state.path())
+            .stdin(Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let status = output.status.code();
+        if status.is_some_and(|code| named.contains(&code)) {
+            continue;
+        }
+        undocumented.push(format!(
+            "  `b10x-harness {}` exited {status:?}\n    stderr: {}",
+            argv.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    assert!(
+        undocumented.is_empty(),
+        "`{ARGV_CONTRACT_VERSION}`'s `## What is not pinned` names the exit statuses {named:?}. \
+         These command lines are built from that same document's `\"required\": true` rows and \
+         nothing else, and they exited otherwise:\n{}",
+        undocumented.join("\n")
+    );
+}
+
+/// Every exit status the document names, read from the section that names them.
+///
+/// Scoped to `## What is not pinned` above its first subsection, which is where the sentence is;
+/// the tables below it carry backticked values of their own that are not statuses.
+fn statuses_the_document_names(readme: &str) -> std::collections::BTreeSet<i32> {
+    let mut inside = false;
+    let mut found = std::collections::BTreeSet::new();
+    for line in readme.lines() {
+        if line.starts_with("## ") {
+            inside = line.trim_start_matches('#').trim() == "What is not pinned";
+            continue;
+        }
+        if line.starts_with("### ") && inside {
+            break;
+        }
+        if inside {
+            found.extend(
+                line.split('`')
+                    .skip(1)
+                    .step_by(2)
+                    .filter_map(|token| token.parse::<i32>().ok()),
+            );
+        }
+    }
+    found
+}
+
+/// A refusal names flags the command it fired on actually takes.
+///
+/// `2a045c3` changed a production message to make M1 measurable: `transcript.rs:342` now ends
+/// *"name one with `--session-dir`, or run with `--no-session` and file nothing"*. That function
+/// has **two** production callers — `session_dir()` at `crates/harness-cli/src/lib.rs:1971`, for
+/// `run`, `chat` and `workflow run`, where `--no-session` exists; and `sessions_command()` at
+/// `:2245`, where it does not. The pinned document records exactly two flags on `sessions`,
+/// `--help` and `--session-dir`.
+///
+/// So `b10x-harness sessions` on a machine with neither `XDG_STATE_HOME` nor `HOME` is refused with
+/// an instruction that does not parse: `b10x-harness sessions --no-session` answers *"unexpected
+/// argument '--no-session' found"*. An operator who follows the message is refused a second time,
+/// by a different mechanism, and this is the defect class both stories in this unit were opened
+/// about — a message stating a rule the code does not have — introduced by the fix for one of them.
+///
+/// Measured against the pin rather than against a list: every backticked long flag a refusal names
+/// has to be a row the document records on the command that produced it.
+#[test]
+fn a_refusal_names_only_flags_the_command_it_fired_on_takes() {
+    let document = pinned_document();
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let workspace = tempfile::tempdir().expect("a temporary workspace");
+
+    let mut values = BTreeMap::new();
+    values.insert("--input", "say hello".to_owned());
+    values.insert("--base-url", "http://127.0.0.1:1/v1".to_owned());
+    values.insert("--model", "b10x-emulated".to_owned());
+
+    let mut invented: Vec<String> = Vec::new();
+    let mut measured = 0_usize;
+    for command in commands_recording(&document, "--session-dir") {
+        let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+        for listed in document["arguments"][&command]
+            .as_array()
+            .expect("a flag list")
+        {
+            let long = listed["long"].as_str().expect("a long flag");
+            let wanted = listed["required"] == true
+                || (["--base-url", "--model"].contains(&long) && command != "sessions");
+            if !wanted || long == "--session-dir" {
+                continue;
+            }
+            let Some(value) = values.get(long) else {
+                continue;
+            };
+            argv.push(long.to_owned());
+            argv.push(value.clone());
+        }
+        if row(&document, &command, "--workspace").is_some() {
+            argv.push("--workspace".to_owned());
+            argv.push(workspace.path().display().to_string());
+        }
+
+        let output = Command::new(BINARY)
+            .args(&argv)
+            .env_clear()
+            .env("XDG_CONFIG_HOME", config.path())
+            .env(
+                "PATH",
+                std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
+            )
+            .stdin(Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if !stderr.contains("state directory to keep sessions in") {
+            continue;
+        }
+        measured += 1;
+        for named in stderr
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|token| token.starts_with("--"))
+        {
+            if row(&document, &command, named).is_none() {
+                invented.push(format!(
+                    "  `b10x-harness {}` is refused and told to use `{named}`, which \
+                     `{ARGV_CONTRACT_VERSION}` does not record on `{command}`",
+                    argv.join(" ")
+                ));
+            }
+        }
+    }
+
+    assert!(
+        measured > 0,
+        "no command reached the session-directory refusal, so this case is asserting nothing"
+    );
+    assert!(
+        invented.is_empty(),
+        "a refusal that names a flag the command does not take cannot be acted on — the operator \
+         who follows it is refused again, by the parser:\n{}",
+        invented.join("\n")
+    );
+}
+
+/// Every command the session directory is demanded on is a row of the escape table.
+///
+/// The table gained `--session-dir` rows for `chat` and `run`. It did not gain one for `sessions`,
+/// and `b10x-harness sessions` — a complete command line under this document, no required flag and
+/// no positional — is refused by name with exit `1` on a machine with neither `XDG_STATE_HOME` nor
+/// `HOME`, by the same `transcript::default_dir()` refusal and for the same reason.
+///
+/// **The unit's own case structurally cannot see it.** `the_escape_table_names_the_flags_this_
+/// binary_demands_and_clap_does_not` measures `commands_deferring_the_endpoint`, which is every
+/// command recording *both* `--base-url` and `--model` as optional. `sessions` records neither, so
+/// it is not measured, and the generalisation that found the fourth `--session-dir` row for the
+/// *defaults* table — every command whose row is byte-identical to `run`'s — was not applied to
+/// the demands table. `sessions` is in one and not the other, on the same flag, for the same
+/// environment.
+///
+/// Read with the document's own checker, `contract::rows_missing`, so a row stated as prose is not
+/// an answer here either.
+#[test]
+fn every_command_the_session_directory_is_demanded_on_is_a_row_of_the_escape_table() {
+    let document = pinned_document();
+    let demanded = section(&pinned_readme(), DEMANDED);
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let workspace = tempfile::tempdir().expect("a temporary workspace");
+
+    let mut values = BTreeMap::new();
+    values.insert("--input", "say hello".to_owned());
+    values.insert("--base-url", "http://127.0.0.1:1/v1".to_owned());
+    values.insert("--model", "b10x-emulated".to_owned());
+
+    let mut wanted: Vec<Vec<String>> = Vec::new();
+    for command in commands_recording(&document, "--session-dir") {
+        let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
+        for listed in document["arguments"][&command]
+            .as_array()
+            .expect("a flag list")
+        {
+            let long = listed["long"].as_str().expect("a long flag");
+            let needed = listed["required"] == true
+                || (["--base-url", "--model"].contains(&long) && command != "sessions");
+            if !needed || long == "--session-dir" {
+                continue;
+            }
+            let Some(value) = values.get(long) else {
+                continue;
+            };
+            argv.push(long.to_owned());
+            argv.push(value.clone());
+        }
+        if row(&document, &command, "--workspace").is_some() {
+            argv.push("--workspace".to_owned());
+            argv.push(workspace.path().display().to_string());
+        }
+
+        let output = Command::new(BINARY)
+            .args(&argv)
+            .env_clear()
+            .env("XDG_CONFIG_HOME", config.path())
+            .env(
+                "PATH",
+                std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
+            )
+            .stdin(Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        // Refused by name for the session directory, and nothing else: exit `1`, and the message
+        // is the one `transcript::default_dir()` produces.
+        if output.status.code() != Some(1)
+            || !stderr.contains("state directory to keep sessions in")
+        {
+            continue;
+        }
+        wanted.push(vec![
+            format!("`{command}`"),
+            "`--session-dir`".to_owned(),
+            "`refused by name`".to_owned(),
+        ]);
+    }
+
+    assert!(
+        !wanted.is_empty(),
+        "no command was measured as demanding a session directory, so this case is asserting \
+         nothing and has to be re-derived from what the refusals say now"
+    );
+    let missing = b10x_harness_cli::contract::rows_missing(&demanded, &wanted);
+    assert!(
+        missing.is_empty(),
+        "`{ARGV_CONTRACT_VERSION}`'s `### {DEMANDED}` has to carry one row per command and flag, \
+         and this binary refuses these command lines by name without \
+         `--session-dir`:\n{}\nrows measured in all: {:?}",
+        missing
+            .iter()
+            .map(|cells| format!("  | {} |", cells.join(" | ")))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        wanted
+    );
+}
+
+/// Every command the pinned document records this flag on.
+fn commands_recording(document: &Value, long: &str) -> Vec<String> {
+    let mut found: Vec<String> = document["arguments"]
+        .as_object()
+        .expect("an object")
+        .keys()
+        .filter(|command| row(document, command, long).is_some())
+        .cloned()
+        .collect();
+    found.sort();
+    found
+}

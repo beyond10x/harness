@@ -2,13 +2,13 @@
 format: aep.planning-md/1
 id: story:help-text-names-a-rule-the-code-dropped
 kind: story
-status: active
+status: implemented
 title: The operator's --help still requires a ws_ workspace name
 summary: run --help and chat --help tell the operator to rename their directory; 0c31438 removed that requirement and nothing pins help text.
 relations:
 - derived_from: epic:pinned-interfaces-honest
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 ---
 ## Evidence
 

@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: story:changelog-in-the-same-change
 kind: story
-status: active
+status: implemented
 title: Three shipped changes enter the changelog they skipped
 relations:
 - derived_from: epic:tracking-documents-current
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 ---
 ## Evidence
 

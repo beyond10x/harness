@@ -202,6 +202,20 @@ impl Catalogue {
         &self.entries
     }
 
+    /// Every entry's own name, which is what a call names and what a narrowing names.
+    ///
+    /// # Panics
+    ///
+    /// As [`Entry::spec`]: only if a constant entry name stops being a legal tool name.
+    pub fn names(&self) -> Vec<ToolName> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                ToolName::new(entry.name).expect("a constant entry name is a legal tool name")
+            })
+            .collect()
+    }
+
     /// One entry by name.
     pub fn get(&self, name: &str) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.name == name)

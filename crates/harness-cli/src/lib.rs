@@ -2430,8 +2430,9 @@ impl Published {
 /// Every method delegated, none defaulted.
 ///
 /// Taking the trait's defaults here would silently drop the surface's own answers — `invoked`,
-/// which is what the approval gate reads, and `call_batch`, which is what makes six reads cost one
-/// round trip. Both are overridden by at least one of the two surfaces.
+/// which is what the approval gate reads, `reachable`, which is what a named agent's narrowing is
+/// written in, and `call_batch`, which is what makes six reads cost one round trip. All three are
+/// overridden by at least one of the two surfaces.
 impl harness_wire::ToolPort for Published {
     fn specs(&self) -> &[harness_wire::ToolSpec] {
         self.as_port().specs()
@@ -2447,6 +2448,10 @@ impl harness_wire::ToolPort for Published {
 
     fn operations(&self) -> Vec<&'static str> {
         self.as_port().operations()
+    }
+
+    fn reachable(&self) -> Vec<harness_wire::ToolName> {
+        self.as_port().reachable()
     }
 
     fn call(&mut self, call: &harness_wire::ToolCall) -> harness_wire::ToolOutcome {

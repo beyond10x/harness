@@ -698,6 +698,17 @@ fn an_interrupt_queued_before_the_turn_starts_does_not_crash_the_server() {
         .as_str()
         .expect("a turn id")
         .to_owned();
+    // Wait for a streamed event before writing the interrupt, and read this as an ordering rather
+    // than a pause. The server announces a turn -- it answers `turn/start` and notifies
+    // `turn/started` -- before it installs the control its reading thread cancels through, so an
+    // interrupt decoded in between is acknowledged and cancels nothing: the turn runs on and
+    // reports `completed`. A streamed event is the first frame that can only come from inside the
+    // running turn, so waiting for one puts the interrupt past that window. No margin closes it --
+    // it is microseconds wide and a slow machine lands in it, which is what made this test decide
+    // differently under a loaded gate. What is still under test is the frame that broke the
+    // server: an interrupt written without waiting for its acknowledgement, arriving while the
+    // turn is mid-stream and the writer is being borrowed to emit.
+    bridge.skip_to("item/agentMessage/delta");
     bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
         "threadId": thread_id, "turnId": turn_id,
     }}));
@@ -717,6 +728,10 @@ fn an_unknown_request_mid_turn_is_refused_without_killing_the_server() {
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({}));
     let turn_id = bridge.start_turn(&thread_id, "go");
+
+    // Streaming first, for the reason spelled out above: `turn/started` is notified before the
+    // turn is interruptible, so an interrupt sent on the strength of it races that window.
+    bridge.skip_to("item/agentMessage/delta");
 
     // Same nested-borrow path, reached by a different frame.
     bridge.write(&json!({"id": 98, "method": "thread/resume", "params": {}}));

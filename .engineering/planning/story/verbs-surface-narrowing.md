@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: story:verbs-surface-narrowing
 kind: story
-status: active
+status: implemented
 title: A named agent narrows entries reached through a verb, not only tools named directly
 relations:
 - derived_from: epic:adoption-follow-ups
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 ---
 ## What is missing
 

@@ -59,6 +59,7 @@ The gate is **`bash scripts/gate.sh`**. Green here is the bar for main.
 | provider-wire pins | `python3 scripts/check-provider-wires.py` |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
 | command-line argv pin | `python3 scripts/check-cli-contract.py` |
+| absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
 | brand | org-wide, from the atlas checkout: `bash ../atlas/scripts/check-org-brand.sh harness` |
 
 Rust 1.97, edition 2024. The binary is `b10x-harness`.

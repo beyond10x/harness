@@ -65,6 +65,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   this binary. `2026-08-30` is released and reachable on `main`, so it was cut beside rather than
   edited (`AGENTS.md` invariant 13), and a second cut on the same date takes the `.1` suffix.
 
+- **A tracked file carrying an absolute home directory now fails the gate.**
+  `scripts/check-no-home-paths.py` judges the **index**, read with `git cat-file --batch` over
+  `git ls-files -s`, because a commit records the index and not the working copy — content staged
+  with a leak and tidied afterwards would otherwise be committed by a green check; the worktree copy
+  is judged too, because `git commit -a` stages it. Every file is searched **as bytes**, with a
+  second pass over the same bytes with NULs removed, so a path inside a committed `.pyc` or UTF-16
+  text is visible: that `.pyc` was the one file of twenty the cross-repository audit found that no
+  text grep would have caught.
+
+  A home directory needs **no trailing separator** — `HOME=/home/<name>` publishes the account
+  exactly as a subpath does — and the account class admits non-ASCII, so a contributor named
+  `müller` is protected like the author; a candidate is then trimmed to the name at its head, so an
+  elided path in a doc comment names nobody. One account, `you`, is a documentation placeholder in
+  every file type; `user` and `username` are not, because real machines have them. Two
+  planning-store paths are exempt with the reason in the script: the journal is append-only and
+  committed, and editing it would forge the record. `--self-test` (52 cases) is a gate step of its
+  own, because a check that passed everything would look exactly like a green one.
+
 ### Changed
 
 - **A `delegate` call that names an agent this run does not have no longer emits a
@@ -117,7 +135,64 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   here rather than buried in a constant, and it is the operator's decision to send it, taken on
   2026-08-30 against their own subscription credential.
 
+- **The CLI contract version in force, `2026-08-30.1`, now says what actually moved, and a test
+  holds it to that.** `2026-08-30` claimed "strictly additive" while measuring itself against
+  `2026-08-29.1` — two cuts back — and nine fields had moved against its real predecessor
+  `2026-08-29.3`: `--model` and `--base-url` stopped being `required` and `--wire` lost its
+  `"openai-responses"` default, on `run`, `chat` and `workflow run`. That directory is released and
+  immutable (`AGENTS.md` invariant 13), so the correction is carried in `2026-08-30.1/README.md`,
+  which a consumer of the current pin reads. `2026-08-30` was also dated the day after the commit
+  that cut it (`719f6e3`, 2026-08-29 23:08); `2026-08-30.1` was cut on 2026-08-30. No flag,
+  `takes_value` or default moved in this change — `ARGV_CONTRACT_VERSION` is unchanged and the
+  command line is untouched.
+
+  `the_version_in_force_names_every_field_that_moved_between_pinned_versions` diffs every
+  consecutive pair of pinned `argv.json` files and fails when a moved field is named by no README a
+  consumer of the version in force reads. It matches an **ordered** sequence scoped to the section
+  naming that pair, so a document cannot satisfy it by reversing the direction of every row, by
+  denying the change in so many words, by listing the tokens on one junk line, or by attributing the
+  moves to a different pair — all four passed the first version of the guard. It iterates the
+  **union** of flag names, so a renamed or removed flag is a departure rather than a silent skip:
+  that is the failure the CLI contract exists for, `--substrate-embedded` having changed shape and
+  refused a pinned consumer at clap. Version order is compared numerically on the `.N` suffix, so a
+  tenth cut in one day does not sort before the ninth.
+
+- **A named agent now narrows what a run can reach under `--surface verbs`, not only what it names
+  directly.** `0.2.0` recorded the opposite — "an entry reached through a verb" was *not* narrowed,
+  and "named agents are a flat-surface feature until that is answered". That was true then and this
+  is the answer; the `0.2.0` entry stands as the record of what shipped that day.
+
+  The narrowing is written in the names of what a run can **reach**, not of what it publishes.
+  Behind three verbs the call names `tool_invoke` and the entry is an argument, so the gate asks
+  the port what the call *invokes* and refuses `file_write` by the entry's own name, with the same
+  message a flat surface gives. The verbs are routes and not capabilities and are not narrowed away
+  — an agent granted `Read` and refused `tool_invoke` would have been granted nothing at all — but
+  a grant that is *empty* admits nothing, routes included, because a route to no granted entry
+  leads nowhere and can only enumerate a catalogue the child was admitted none of.
+
+  It is enforced at every site a call can reach the port, which is more than one. A turn's
+  neighbouring pure reads are handed to the port as a batch, and a batched call does not pass the
+  single-call gate: checked in one place, that surface let an agent granted `Grep` read any file by
+  asking for the read beside a search. `batchable`, `run_batch` and `invoke` now ask one predicate,
+  and so does publication.
+
+  A delegate is also always given its parent's admitted set. An agentless child used to be handed
+  the whole port, so a narrowed run could climb back out by delegating again and naming nobody —
+  unreachable from the command line, where depth is never above one, and reachable by any library
+  consumer.
+
+  `ToolPort::reachable` is a new defaulted trait method, and the direction of its failure is now
+  the one its documentation claims: a grant is an intersection with what the port reports, so a
+  port that under-reports costs a run reach and never boundary. It was subtraction before, which
+  grew the exempt set as a port said less — the inverse — and a port answering with nothing turned
+  every tool it published into a route.
+
 ## [0.3.0] — 2026-08-30
+
+*Three of the entries below — providers and profiles, workspace adoption, and the default model —
+were written after this tag was cut, from `719f6e3`, `0c31438` and `f701e2e`. Each of those changes
+shipped in this release without entering the changelog, against `AGENTS.md` § *Releases*. The
+entries are new; nothing already recorded in this section was altered.*
 
 ### Added
 
@@ -193,6 +268,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `anthropic-messages/2026-08-30` and `openai-responses/2026-08-30`; the versions before them stay
   pinned as released, and neither stream fixture changed.
 
+- **Providers and profiles, so the flags that never vary live in a file.** `run` takes about fifty
+  options; a useful invocation was twelve of them and a confined one sixteen, and most never varied
+  — the endpoint, wire, model and credential are the same for every run against a provider, and the
+  confinement flags are the same for every run of a kind of work. With `~/.config/b10x/harness.toml`
+  holding `[default] provider = "claude"`, twelve becomes none:
+  `b10x-harness run --workspace . --input "…"`.
+
+  **The line between the two mechanisms is permission.** A *provider* says where to talk — endpoint,
+  wire, default model, where the credential is read from — and none of it grants a run anything, so
+  the collection ships compiled in, `claude` and `openai`, overridable field by field. A *profile*
+  says what may happen — `write`, an approval ceiling, an allow-list of programs, a write scope —
+  and **nothing of that shape is compiled in**: there is no permission bundle inside the binary, and
+  every rule a run obeys sits in a file that can be read, diffed and versioned. `--profile <NAME>`
+  applies one, repeatably, in the order given.
+
+  **`write` is one key, and it is off.** Absent or false, the run gets four read-only tools whatever
+  else the table says, and a profile declaring programs without `write` is refused at startup rather
+  than left for the model to discover by being refused mid-run. Turning writing on does not turn the
+  approval gate off: `write = true` with no ceiling still meets `DenyAll` (invariant 12).
+  `write-scope` defaults to denying `.git/**` — running against a real checkout is what this makes
+  ordinary, and a model rewriting history there must not depend on a key somebody remembered.
+
+  Precedence is the shape of the data rather than a rule on top: built-in provider, then
+  `[providers.x]` **merged field by field**, then `[default]`, then each `-p` in order **replacing
+  whole keys**, then a typed flag — which wins because resolution only ever fills what clap left
+  empty, so no `ValueSource` bookkeeping can drift from it. A provider merges because changing the
+  model must not drop the endpoint; a profile replaces because one profile's allow-list beside
+  another's ceiling is a set of rules nobody wrote. A typed `--base-url` opts out of the provider
+  entirely, since half-applying a bundle points one vendor's dialect at a server that never heard
+  of it.
+
+  **The condition is in the record, not only in the file.** `session.started` gains `profiles` —
+  name, source and a digest of each table — and `credential_source`, both always serialised on the
+  `withheld` rule. That matters most for the credential: a provider naming
+  `~/.claude/.credentials.json` is still refused outright by `resolve_credential`, on the grounds
+  that a harness quietly picking up a key is one whose runs cannot be explained afterwards, so the
+  purpose is met by the record instead. A run reports `credential_source: "provider:claude"` rather
+  than `"named"`, and `providers show` prints the path before a token is spent. Something is
+  defaulted; nothing is silent. Read any of it without running it: `providers list|show` and
+  `profiles list|show|explain|init`, where `explain` prints the argv a `-p` expands to and which
+  profile set each key.
+
+- **`contracts/cli/b10x-harness/2026-08-30`**, cut for `--profile` and the `providers` and
+  `profiles` verbs. Strictly additive: `--base-url`, `--model` and `--wire` become optional, which
+  is what lets a provider supply them, and every existing invocation means what it did.
+
 ### Changed
 
 - **A workflow step runs under the write scope its own node declares.** `protocol workflow flow
@@ -228,6 +349,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   The tool list and `--allow-program` are still the run's for every step; a published toolset per
   group remains open (design 0003 § 6).
 
+- **`--substrate-embedded` adopts a directory the operator named, so a confined run can be pointed
+  at a real project.** Adoption refused any workspace whose directory was not named `ws_…`, so
+  writing meant pointing a run at a scratch copy of a project rather than the project itself: edits
+  landed somewhere that then had to be synchronised back, and the confined half of this harness was
+  unusable against a checkout somebody actually works in. Now:
+
+  ```
+  cd ~/src/my-project
+  b10x-harness run -p write --input "…"
+  ```
+
+  **The prefix was never the containment**, which is why this is a change and not a boundary being
+  relaxed. `ws_` belongs to substrate's resource-**id** scheme — a workspace's directory name *is*
+  its id, so the two cannot disagree. What stops a name escaping is `openat2` beneath the pinned
+  root descriptor with symlinks refused, plus the name being a single path component; neither moved.
+  The rule lived in three places rather than one — `substrate-host`'s `validate_root_name`,
+  `harness-substrate`'s `workspace_adopt` and `harness-cli`'s pre-flight, the last two carrying
+  their own copy so a refusal names the flag instead of surfacing a driver's flat `path-escape` from
+  inside — and all three now accept one path component of alphanumerics, `_` and `-`, refusing `.`,
+  `..`, anything with a separator, and a leading `-`, which would read as a flag where the name
+  reaches an argv. The hyphen is new: `engineering-protocols` was not previously a legal name.
+
+  **Capsules move to `$XDG_STATE_HOME/b10x-harness/capsules`, and that is not a tidiness fix.**
+  `HostConfig::minimum` put the capsule directory beside the workspaces it serves, which was right
+  while the root was a scratch directory this process made. Now that the root is the parent of
+  somebody's checkout, a run in `~/src/my-project` would have created `~/src/.substrate-capsules` —
+  writing into an operator's own tree, uninvited, to hold something that is this harness's business
+  and not the project's.
+
+  The substrate pin moves `tag = "0.2.1"` to `tag = "0.2.2"`, which is the revision that drops the
+  requirement from adoption. **Half of adoption, and the other half is named rather than left to be
+  found:** substrate still gates `exec.start` on a `ws_` prefix over the **socket** path, so a
+  directory adopted through `--substrate <socket>` can be read and written but cannot run an exec.
+  The embedded driver does not import that crate, so the path `--substrate-embedded` uses is whole.
+
+- **`claude`'s default model is `opus`, and the default is written as an alias.** The capable model
+  rather than the cheapest one, chosen knowing it costs materially more per run than `haiku`; anyone
+  wanting the other trade has `[providers.claude] model = "haiku"` — one line — or `--model haiku`,
+  which is none. The field holds `opus` rather than `claude-opus-5` because a dated identifier goes
+  stale on the vendor's next release and takes every run that never named a model with it, as a
+  `404` from the far side that nothing here can explain. `haiku`, `sonnet`, `opus` and `fable`
+  resolve through the provider, so the alias table is the single place that answers which one is
+  current; a name the table does not know passes through untouched, so a model released after this
+  binary is still reachable by its exact identifier. `session.started.model` records what it
+  resolved to, because an alias is a convenience at the command line and never in the evidence.
+
 ### Fixed
 
 - **A section's session now names every attempt above it, so a re-entered ancestor overwrites
@@ -251,6 +418,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   name holding one made two different sections read as the same path, and would have made two
   different attempt chains read as one session file. It was never legal in spirit and was never
   checked.
+
+- **A model alias now resolves wherever a model is named, not only where one was typed.**
+  `[providers.claude] model = "sonnet"` — the shape `website/docs/guides/profiles.md` documents —
+  reached the endpoint as the literal string `sonnet`, and the provider's own default had the same
+  hole, which is why writing that default as an alias would have shipped broken had the defect not
+  been found with it. There is one expansion point now, and every position goes through it: a typed
+  `--model`, `[default] model`, a profile's, a `[providers.x]` override's, and the provider's own
+  default. `providers show` and `profiles explain` print the resolved identifier too, so what a
+  reader sees is what the request will carry.
 
 ## [0.2.0] — 2026-08-30
 

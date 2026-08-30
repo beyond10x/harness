@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: story:status-page-contradicts-the-code
 kind: story
-status: active
+status: implemented
 title: The status page agrees with the tree and with itself
 relations:
 - derived_from: epic:tracking-documents-current
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 ---
 ## Evidence
 

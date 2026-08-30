@@ -11,14 +11,24 @@ and this fails here rather than at a driver.
 
 The Rust side proves the other half -- that clap's own definition still produces exactly these
 bytes. Neither check is sufficient alone.
+
+`--self-test` runs this checker against planted version directories -- a row missing `short`, a
+`short` that is not a one-letter flag, a bare flag naming a placeholder, a digest that does not
+match, a list naming a flag of another command, and the same documents under a version cut before
+those rules existed. It is a gate step of its own, because the failure this check must never have
+-- passing everything -- is invisible in a green run, and every rule here is a branch that fires
+against no directory in the tree.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CONTRACTS = ROOT / "contracts" / "cli"
@@ -265,7 +275,233 @@ def check_short_and_placeholder(
         )
 
 
-def main() -> int:
+def planted_row(long: str, **overrides: object) -> dict:
+    """One flag row of a planted document, every pinned key at its quietest value."""
+    row = {
+        "long": long,
+        "short": None,
+        "takes_value": True,
+        "value_name": "VALUE",
+        "default": None,
+        "required": False,
+        "conflicts_with": [],
+        "requires": [],
+    }
+    row.update(overrides)
+    return row
+
+
+def plant(
+    root: pathlib.Path,
+    version: str,
+    arguments: dict,
+    *,
+    sha256: str | None = None,
+) -> pathlib.Path:
+    """A version directory written from scratch, manifest and digests included.
+
+    The product directory is named `b10x-harness` because a manifest names the directory it sits
+    in, and a planted tree that could not satisfy that would be testing the planting rather than
+    the check.
+    """
+    directory = root / "b10x-harness" / version
+    directory.mkdir(parents=True)
+    subcommands = sorted(arguments)
+    argv = {
+        "product": "b10x-harness",
+        "subcommands": subcommands,
+        "arguments": arguments,
+    }
+    body = (json.dumps(argv, indent=2, sort_keys=True) + "\n").encode()
+    (directory / "argv.json").write_bytes(body)
+    manifest = {
+        "product": "b10x-harness",
+        "version": version,
+        "interface": "argv",
+        "generated_from": "clap::CommandFactory::command()",
+        "subcommands": subcommands,
+        "files": [
+            {
+                "path": "argv.json",
+                "bytes": len(body),
+                "sha256": sha256 or hashlib.sha256(body).hexdigest(),
+            }
+        ],
+    }
+    (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return directory
+
+
+def self_test() -> int:
+    """Every rule this checker holds, run against a document that breaks it and one that does not.
+
+    Both halves for each rule. A check that reported everything would pass a suite that only ever
+    planted defects, and that is the same class of failure as one that reported nothing -- which is
+    what the two rules added for `short` and the usage-line placeholder were until this existed:
+    turning either off left all seven pinned versions verifying, and the gate green.
+    """
+    results: list[tuple[str, bool, str]] = []
+
+    def case(name: str, held: bool, detail: str = "") -> None:
+        results.append((name, held, detail))
+
+    with contextlib.ExitStack() as stack:
+
+        def failures_for(version: str, arguments: dict, **planting: object) -> list[str]:
+            root = pathlib.Path(
+                stack.enter_context(tempfile.TemporaryDirectory(prefix="cli-contract-self-test-"))
+            )
+            found: list[str] = []
+            check_version(plant(root, version, arguments, **planting), found)
+            return found
+
+        current = FIRST_VERSION_DESCRIBING_SHORT_FLAGS
+        earlier = "2026-08-30.1"
+
+        # -- the version gate, which decides whether the two newer rules are asked at all --------
+        for version in (current, "2026-08-30.3", "2026-08-30.10", "2026-09-01.4", "2027-01-01"):
+            case(
+                f"`{version}` is cut with `short` and the placeholder rule",
+                describes_short_flags(version),
+            )
+        for version in ("2026-08-29", "2026-08-29.10", "2026-08-30", "2026-08-30.1"):
+            case(
+                f"`{version}` was cut before them and is not asked for either",
+                not describes_short_flags(version),
+            )
+        case(
+            "the tenth cut of a day is later than the second, not earlier",
+            cut_order("2026-08-30.10") > cut_order("2026-08-30.2"),
+            repr((cut_order("2026-08-30.10"), cut_order("2026-08-30.2"))),
+        )
+
+        # -- a document that breaks no rule is reported as breaking no rule ----------------------
+        clean = {
+            "run": [
+                planted_row("--bare", takes_value=False, value_name=None),
+                planted_row("--profile", short="-p"),
+            ]
+        }
+        found = failures_for(current, clean)
+        case("a document that breaks no rule is reported clean", found == [], repr(found))
+
+        # -- `short` is required of a version cut with it, and of no version cut before ----------
+        without_short = {"run": [{key: value for key, value in planted_row("--profile").items()
+                                 if key != "short"}]}
+        found = failures_for(current, without_short)
+        case(
+            "a row with no `short` key fails the version that was cut with it",
+            len(found) == 1 and "is missing ['short']" in found[0],
+            repr(found),
+        )
+        found = failures_for(earlier, without_short)
+        case(
+            "the same row passes a version cut before the key existed",
+            found == [],
+            repr(found),
+        )
+
+        for spelling in ("--p", "p", "-pp", ""):
+            found = failures_for(current, {"run": [planted_row("--profile", short=spelling)]})
+            case(
+                f"`short` of {spelling!r} is not a one-letter flag",
+                len(found) == 1 and "not a one-letter flag" in found[0],
+                repr(found),
+            )
+        found = failures_for(current, {"run": [planted_row("--profile", short="-p")]})
+        case("`-p` is", found == [], repr(found))
+
+        # -- a flag that eats no word names no placeholder ---------------------------------------
+        bare_with_placeholder = {
+            "run": [planted_row("--substrate-embedded", takes_value=False, value_name="SUBSTRATE")]
+        }
+        found = failures_for(current, bare_with_placeholder)
+        case(
+            "a bare flag naming a placeholder fails the version cut with the rule",
+            len(found) == 1 and "prints for no bare flag" in found[0],
+            repr(found),
+        )
+        found = failures_for(earlier, bare_with_placeholder)
+        case(
+            "the same row passes the six versions cut before the rule",
+            found == [],
+            repr(found),
+        )
+        found = failures_for(
+            current, {"run": [planted_row("--model", takes_value=True, value_name="MODEL")]}
+        )
+        case("a flag that does eat a word may name one", found == [], repr(found))
+
+        # -- the rules that predate this change, which no directory in the tree exercises either --
+        found = failures_for(current, clean, sha256="0" * 64)
+        case(
+            "a digest that does not match the file is reported",
+            any("sha256" in failure for failure in found),
+            repr(found),
+        )
+        found = failures_for(
+            current, {"run": [planted_row("--json", takes_value=False, value_name=None,
+                                          default="false")]}
+        )
+        case(
+            "a flag that takes no value and declares a default is reported",
+            len(found) == 1 and "declares a default" in found[0],
+            repr(found),
+        )
+        found = failures_for(
+            current, {"run": [planted_row("--a", conflicts_with=["--absent"])]}
+        )
+        case(
+            "a conflict naming a flag of no such command is reported",
+            len(found) == 1 and "not a flag of that command" in found[0],
+            repr(found),
+        )
+        found = failures_for(
+            current, {"run": [planted_row("--b"), planted_row("--a")]}
+        )
+        case(
+            "arguments out of name order are reported",
+            len(found) == 1 and "not in name order" in found[0],
+            repr(found),
+        )
+        found = failures_for(current, {"run": [planted_row("-p")]})
+        case(
+            "a row whose `long` is not a long flag is reported",
+            len(found) == 1 and "is not a long flag" in found[0],
+            repr(found),
+        )
+
+        # -- and the entry point itself, on the tree it is pointed at ----------------------------
+        proc = subprocess.run(
+            [sys.executable, str(pathlib.Path(__file__).resolve())],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        case(
+            "the command-line entry point exits zero on this repository's own contracts",
+            proc.returncode == 0,
+            f"exit={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        )
+
+    failures = [result for result in results if not result[1]]
+    for name, held, detail in results:
+        if not held:
+            print(f"self-test: {name}" + (f": {detail}" if detail else ""), file=sys.stderr)
+    if failures:
+        print(f"{len(failures)} of {len(results)} self-test case(s) failed", file=sys.stderr)
+        return 1
+    print(f"command line: self-test green, {len(results)} case(s)")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if argv[1:] == ["--self-test"]:
+        return self_test()
+    if argv[1:]:
+        print(f"usage: {argv[0]} [--self-test]", file=sys.stderr)
+        return 2
+
     if not CONTRACTS.is_dir():
         print(f"no command-line contracts under {CONTRACTS}", file=sys.stderr)
         return 1
@@ -291,4 +527,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))

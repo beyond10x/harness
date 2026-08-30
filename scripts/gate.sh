@@ -8,8 +8,9 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 python3 scripts/check-provider-wires.py
 python3 scripts/check-app-server-profile.py
+# Two steps each, because a check that passed everything would look exactly like a green one.
+python3 scripts/check-cli-contract.py --self-test
 python3 scripts/check-cli-contract.py
-# Two steps, because a check that passed everything would look exactly like a green one.
 python3 scripts/check-no-home-paths.py --self-test
 python3 scripts/check-no-home-paths.py
 printf 'gate: green\n'

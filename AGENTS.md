@@ -222,7 +222,9 @@ bash scripts/gate.sh
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,
 `python3 scripts/check-provider-wires.py`, `python3 scripts/check-app-server-profile.py`,
 `python3 scripts/check-cli-contract.py` — the contract checkers, one per pinned interface — and
-`python3 scripts/check-no-home-paths.py`. Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
+`python3 scripts/check-no-home-paths.py`. Two of them, `check-cli-contract.py` and
+`check-no-home-paths.py`, run **twice**: `--self-test` first, on planted fixtures, then the tree.
+Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
 
 **The home-path check judges the index and the worktree, and only a literal POSIX path.** It reads
 what `git cat-file` returns for every entry in `git ls-files -s`, because a commit records the index

@@ -52,6 +52,16 @@
       {
         "conflicts_with": [],
         "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
         "long": "--max-output-tokens",
         "required": false,
         "requires": [],
@@ -131,7 +141,28 @@
         "value_name": "WIRE"
       }
     ],
-    "b10x-harness": [],
+    "b10x-harness": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--version",
+        "required": false,
+        "requires": [],
+        "short": "-V",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
     "chat": [
       {
         "conflicts_with": [],
@@ -286,6 +317,16 @@
         "short": null,
         "takes_value": true,
         "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
       },
       {
         "conflicts_with": [],
@@ -653,6 +694,16 @@
       {
         "conflicts_with": [],
         "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
         "long": "--in",
         "required": false,
         "requires": [],
@@ -671,8 +722,29 @@
         "value_name": "OUT"
       }
     ],
-    "profiles": [],
+    "profiles": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
     "profiles explain": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
       {
         "conflicts_with": [],
         "default": null,
@@ -684,12 +756,78 @@
         "value_name": "NAME"
       }
     ],
-    "profiles init": [],
-    "profiles list": [],
-    "profiles show": [],
-    "providers": [],
-    "providers list": [],
-    "providers show": [],
+    "profiles init": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "profiles list": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "profiles show": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers list": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers show": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
     "run": [
       {
         "conflicts_with": [],
@@ -844,6 +982,16 @@
         "short": null,
         "takes_value": true,
         "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
       },
       {
         "conflicts_with": [],
@@ -1231,6 +1379,16 @@
       {
         "conflicts_with": [],
         "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
         "long": "--session-dir",
         "required": false,
         "requires": [],
@@ -1279,6 +1437,16 @@
         "short": null,
         "takes_value": true,
         "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
       },
       {
         "conflicts_with": [],
@@ -1375,7 +1543,18 @@
         "value_name": "GLOB=SCOPE"
       }
     ],
-    "workflow": [],
+    "workflow": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
     "workflow plan": [
       {
         "conflicts_with": [],
@@ -1386,6 +1565,16 @@
         "short": null,
         "takes_value": true,
         "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
       },
       {
         "conflicts_with": [],
@@ -1572,6 +1761,16 @@
         "short": null,
         "takes_value": true,
         "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
       },
       {
         "conflicts_with": [],

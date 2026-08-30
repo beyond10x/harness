@@ -13,7 +13,7 @@ same commands. Every one of the 27 rows below is this document being corrected t
 binary was already doing, so nothing here can break an invocation that already worked. What they
 change is what a driver **generating** an invocation from this document will emit.
 
-Two things were wrong.
+Three things were wrong.
 
 **23 flags that eat no word named a placeholder for one.** `value_name` is defined below as the
 placeholder in the usage line, and clap prints none for a bare flag: `b10x-harness run --help`
@@ -32,6 +32,15 @@ so a consumer building an invocation from the pin could not know `-p` existed an
 have caught it being repointed or dropped. Rows now carry `short`, and it is pinned like any other
 field: `null` where a flag has only its long spelling, and a change to it is a table row in the cut
 that changes it, exactly as a change to `takes_value` is.
+
+**clap's own `--help` and `--version` were in no row either.** The document was read off the command
+definition **before clap builds it**, and clap inserts `-h, --help` on every command and
+`-V, --version` on the root during that build. `b10x-harness -V` prints `b10x-harness 0.4.0` and
+exits `0`; nothing here said so, and `--version` is what a driver reads to know which binary it
+drove. The definition is now built before it is read, and 19 rows arrive with it: `--help` on the
+root and on each of the seventeen commands, and `--version` on the root. They are arrivals — no
+invocation that worked before can break on a flag that was always accepted and is only now written
+down — so they take no row in the table below.
 
 | command | flag | field | in `2026-08-30.1` | in `2026-08-30.2` |
 | --- | --- | --- | --- | --- |
@@ -149,6 +158,12 @@ launches this binary and reads its `--json` record.
 | `arguments[…][].conflicts_with` | every flag it may not appear beside, **both directions** |
 | `arguments[…][].requires` | every flag it may not appear **without** |
 
+**clap's own arguments are rows like any other**, because they are command lines a consumer types:
+every command carries `-h, --help`, the root carries `-V, --version`, and a driver reads
+`b10x-harness --version` to record which binary it drove. They are read off the command line clap
+has **built** — an unbuilt definition holds neither, which is how six versions of this document
+came to omit them.
+
 `short` and `value_name` are the two halves of what a driver may **type**. `-p` is `--profile` on
 `run`, `chat`, `workflow run` and `profiles explain` — a command line a consumer can type today, so
 it is pinned here and losing it is a change this document has to record rather than one a consumer
@@ -188,6 +203,13 @@ which is what makes an invocation in a driver's source readable three months lat
 The help text, the summaries, the order clap prints things in, and the exit statuses — those last
 are stated in `README.md` and are `0` answered, `2` stopped for a named reason, `1` could not run.
 
+**clap's generated `help` subcommand, and every path under it** — `help`, `help run`,
+`profiles help explain`, and even `help help` — is not pinned either, and appears in neither
+`subcommands` nor `arguments`. Typing `help <command>` prints the same help text the flag does,
+and that text is the first thing this section declines to pin; enumerating the tree clap generates
+for it would put `help help help` in the list a driver reads. The flags clap generates are a different
+question and are pinned, in a row each — see *What is pinned* above.
+
 ## Checked from both directions
 
 | half | where |
@@ -195,8 +217,10 @@ are stated in `README.md` and are `0` answered, `2` stopped for a named reason, 
 | the manifest digest matches the file | `scripts/check-cli-contract.py` |
 | this binary's clap definition produces exactly these bytes | `crates/harness-cli/src/contract.rs`, `the_pinned_argv_contract_is_what_this_binary_defines` |
 | what this README says moved is what actually moved | `crates/harness-cli/src/contract.rs`, `the_version_in_force_names_every_field_that_moved_between_pinned_versions` |
-| a flag that eats no word names no placeholder | `crates/harness-cli/src/contract.rs`, `a_flag_that_eats_no_word_records_no_placeholder_for_one` |
-| every short flag clap accepts is recorded here | `crates/harness-cli/src/contract.rs`, `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` |
+| a flag that eats no word names no placeholder | `crates/harness-cli/src/contract.rs`, `a_flag_that_eats_no_word_records_no_placeholder_for_one`, and `scripts/check-cli-contract.py` |
+| every short flag clap accepts, on the **built** command line, is a row here or is named in *What is not pinned* | `crates/harness-cli/src/contract.rs`, `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` |
+| a flag that loses its short spelling is a move a README has to state | `crates/harness-cli/src/contract.rs`, `a_flag_that_loses_its_short_spelling_is_a_move` |
+| every rule the checker holds fires on a document that breaks it | `scripts/check-cli-contract.py --self-test`, its own gate step |
 
 Neither is sufficient alone: a checker alone pins a document nothing produces, and a Rust test
 alone pins a document nothing else can verify was not quietly edited alongside the code

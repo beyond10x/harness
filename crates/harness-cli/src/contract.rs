@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.1";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.2";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -43,32 +43,60 @@ pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.1";
 /// # Panics
 ///
 /// Only if this document — strings, booleans and nulls — stops being encodable as JSON, which
-/// `Cli::command().debug_assert()` already rules out for every field it reads.
+/// `Cli::command().debug_assert()` already rules out for every field it reads, or if a command
+/// this program defines is missing from the same command line after clap has built it.
 #[must_use]
 pub fn argv() -> String {
-    let command = Cli::command();
-    let mut subcommands: Vec<(String, &clap::Command)> = Vec::new();
-    reachable(&command, "", &mut subcommands);
-    subcommands.sort_by(|left, right| left.0.cmp(&right.0));
+    // Two views of one command line. The paths come from the tree **this program defines**; the
+    // arguments are read off the **built** tree, which is the only place clap's own `--help` and
+    // `--version` exist. The build also grows a `help` subcommand carrying a copy of every path
+    // beneath it — 33 paths, `help run` and `profiles help explain` and `help help` among them —
+    // and those are not recorded: each of them prints the help text and does nothing else, and the
+    // help text is what this contract explicitly does not pin. The flags are a different question,
+    // because `b10x-harness -V` is what a driver reads to know which binary it drove.
+    let declared = Cli::command();
+    let built = definition();
+    let mut paths: Vec<String> = Vec::new();
+    reachable(&declared, "", &mut paths);
+    paths.sort();
 
     let mut arguments = Map::new();
-    arguments.insert(command.get_name().to_owned(), flags(&command));
-    for (path, subcommand) in &subcommands {
-        arguments.insert(path.clone(), flags(subcommand));
+    let mut positional_arguments = Map::new();
+    for path in std::iter::once(built.get_name().to_owned()).chain(paths.iter().cloned()) {
+        let command = if path == built.get_name() {
+            &built
+        } else {
+            at_path(&built, &path)
+                .unwrap_or_else(|| panic!("`{path}` is defined but is not in the built tree"))
+        };
+        arguments.insert(path.clone(), flags(command));
+        positional_arguments.insert(path, positionals(command));
     }
 
     let document = json!({
-        "product": command.get_name(),
-        "subcommands": subcommands
-            .iter()
-            .map(|(path, _)| path.clone())
-            .collect::<Vec<_>>(),
+        "product": built.get_name(),
+        "subcommands": paths.clone(),
         "arguments": Value::Object(arguments),
+        "positionals": Value::Object(positional_arguments),
     });
     let mut text = serde_json::to_string_pretty(&document)
         .expect("a document of strings and booleans encodes");
     text.push('\n');
     text
+}
+
+/// This binary's clap definition, **built**.
+///
+/// Built, because clap does not insert its own arguments until it is. `-h, --help` on every
+/// command and `-V, --version` on the root are added during the build, and `b10x-harness -V`
+/// prints the version and exits `0` — so a document read off the unbuilt definition describes a
+/// command line the shell does not serve, and silently omits two of the three short flags a
+/// consumer can type. `Command::build` is the getter clap documents for exactly this: *"call this
+/// on the top-level `Command` when done building and before reading state"*.
+fn definition() -> clap::Command {
+    let mut command = Cli::command();
+    command.build();
+    command
 }
 
 /// Every command a caller can type, named by the words that reach it.
@@ -78,11 +106,13 @@ pub fn argv() -> String {
 /// would say `workflow` accepts no flags at all: true of the word, false of every verb under it,
 /// and the second is what would break a driver. The word itself is recorded too, with the empty
 /// flag list it really has, so `subcommands` still names everything that exists.
-fn reachable<'a>(
-    command: &'a clap::Command,
-    prefix: &str,
-    into: &mut Vec<(String, &'a clap::Command)>,
-) {
+///
+/// Read from the **unbuilt** definition, so what it names is what this program declares. clap
+/// generates a `help` subcommand carrying a copy of every path beneath it — 33 of them, `help
+/// help` included — and enumerating those would put clap's help machinery in the list a driver
+/// enumerates as this product's verbs. Every one of them prints the help text and does nothing
+/// else, and the help text is not pinned.
+fn reachable(command: &clap::Command, prefix: &str, into: &mut Vec<String>) {
     for subcommand in command.get_subcommands() {
         let path = if prefix.is_empty() {
             subcommand.get_name().to_owned()
@@ -90,33 +120,65 @@ fn reachable<'a>(
             format!("{prefix} {}", subcommand.get_name())
         };
         reachable(subcommand, &path, into);
-        into.push((path, subcommand));
+        into.push(path);
     }
+}
+
+/// The command reached by typing these words, or nothing where no such command exists.
+fn at_path<'a>(root: &'a clap::Command, path: &str) -> Option<&'a clap::Command> {
+    let mut command = root;
+    for word in path.split_whitespace() {
+        command = command
+            .get_subcommands()
+            .find(|candidate| candidate.get_name() == word)?;
+    }
+    Some(command)
 }
 
 /// One command's long flags, in name order.
 ///
-/// Positional arguments are not recorded because this command line has none: every value is named,
-/// which is what makes an invocation readable in a driver's source three months later. One added
-/// later would need its own field here rather than being folded into this one.
+/// Positional arguments are **not** here — [`positionals`] holds them, in the order they are
+/// typed rather than in name order, because a positional is identified by where it sits and a flag
+/// by what it is called. For six versions this function's filter was the whole story and the
+/// document said the command line had none, which was false of `profiles show <NAME>` and
+/// `providers show <NAME>` the day it was written.
+///
+/// A row is keyed by its long flag and carries the short spelling beside it, because `-p` is a
+/// command line a consumer can type today and a document that recorded only `--profile` could lose
+/// it without either half of the check noticing.
 fn flags(command: &clap::Command) -> Value {
     let mut rows: Vec<Value> = command
         .get_arguments()
         .filter(|argument| !argument.is_positional())
         .filter_map(|argument| {
             let long = argument.get_long()?;
+            // The one that broke a consumer: whether the flag eats the next word. It decides the
+            // placeholder and the default too — clap holds a value name for every argument
+            // including the bare ones, and gives a bare flag the built-in default `"false"` when
+            // the command is built. Neither is a word a consumer may type after this flag, and a
+            // document that recorded either would be describing an argument clap refuses.
+            let takes_value = argument.get_action().takes_values();
             Some(json!({
                 "long": format!("--{long}"),
-                // The one that broke a consumer: whether the flag eats the next word.
-                "takes_value": argument.get_action().takes_values(),
-                "value_name": argument
-                    .get_value_names()
-                    .and_then(|names| names.first())
-                    .map(std::string::ToString::to_string),
-                "default": argument
-                    .get_default_values()
-                    .first()
-                    .map(|value| value.to_string_lossy().into_owned()),
+                // The other spelling of the same flag, or null where there is only one.
+                "short": argument.get_short().map(|short| format!("-{short}")),
+                "takes_value": takes_value,
+                "value_name": takes_value
+                    .then(|| {
+                        argument
+                            .get_value_names()
+                            .and_then(|names| names.first())
+                            .map(std::string::ToString::to_string)
+                    })
+                    .flatten(),
+                "default": takes_value
+                    .then(|| {
+                        argument
+                            .get_default_values()
+                            .first()
+                            .map(|value| value.to_string_lossy().into_owned())
+                    })
+                    .flatten(),
                 "required": argument.is_required_set(),
                 "conflicts_with": conflicts(command, argument),
                 "requires": requires(command, argument),
@@ -125,6 +187,126 @@ fn flags(command: &clap::Command) -> Value {
         .collect();
     rows.sort_by(|left, right| left["long"].as_str().cmp(&right["long"].as_str()));
     Value::Array(rows)
+}
+
+/// Every short flag this binary accepts that the pinned document neither records nor gives up on.
+///
+/// Empty is the only acceptable answer, and both halves of the check call **this** rather than a
+/// copy of it — the in-crate guard and the adversarial suite in
+/// `crates/harness-cli/tests/argv_pin_adversary.rs` — because a test carrying its own copy of a
+/// decision pins the copy. Measured: while the adversarial case reproduced this logic locally,
+/// reverting the escape here to a whole-file search left every test in the crate green.
+///
+/// # The escape, and why it is this narrow
+///
+/// A short flag may be given up on instead of pinned, but only in the `## What is not pinned`
+/// section and only by naming **both** the command and the flag, each as a backticked token:
+/// `` `run` `` and `` `-p` ``. Two narrowings, each paid for by a defect:
+///
+/// - **the section, not the file.** This asked `readme.to_lowercase().contains("short")`, which a
+///   document that names a field `short` opens for good. Measured: every `"short"` in `argv.json`
+///   could be `null` with the guard still green.
+/// - **the pair, not the name.** A bare `` `--profile` `` would give up `-p` on all four commands
+///   that take it and a bare `` `--help` `` all eighteen — and a sentence in that section saying
+///   these flags *are* pinned would read as giving them up. That sentence was written once, in
+///   this very document, and removed before it was pushed.
+///
+/// # Panics
+///
+/// Only if a command this program defines is missing from the same command line after clap has
+/// built it, which is the same condition [`argv`] panics on.
+#[must_use]
+pub fn unpinned_short_flags(document: &Value, readme: &str) -> Vec<String> {
+    let declared = Cli::command();
+    let built = definition();
+    let mut paths: Vec<String> = Vec::new();
+    reachable(&declared, "", &mut paths);
+    let disclaimed = what_is_not_pinned(readme);
+
+    let recorded_short = |path: &str, long: &str| -> Option<String> {
+        document["arguments"][path]
+            .as_array()?
+            .iter()
+            .find(|row| row["long"] == long)?["short"]
+            .as_str()
+            .map(str::to_owned)
+    };
+
+    let mut unpinned: Vec<String> = Vec::new();
+    let commands =
+        std::iter::once((built.get_name().to_owned(), &built)).chain(paths.iter().map(|path| {
+            let reached = at_path(&built, path).expect("a declared command is in the built tree");
+            (path.clone(), reached)
+        }));
+    for (path, subcommand) in commands {
+        for argument in subcommand.get_arguments() {
+            let (Some(short), Some(long)) = (argument.get_short(), argument.get_long()) else {
+                continue;
+            };
+            let (short, long) = (format!("-{short}"), format!("--{long}"));
+            if recorded_short(&path, &long).as_deref() == Some(short.as_str()) {
+                continue;
+            }
+            let named_as_unpinned = disclaimed.contains(&format!("`{path}`"))
+                && (disclaimed.contains(&format!("`{short}`"))
+                    || disclaimed.contains(&format!("`{long}`")));
+            if !named_as_unpinned {
+                unpinned.push(format!("  `{path}`: `{short}` on `{long}`"));
+            }
+        }
+    }
+    unpinned
+}
+
+/// The body under `## What is not pinned`, and nothing else.
+fn what_is_not_pinned(readme: &str) -> String {
+    let mut inside = false;
+    let mut body: Vec<&str> = Vec::new();
+    for line in readme.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            inside = heading.trim() == "What is not pinned";
+            continue;
+        }
+        if inside {
+            body.push(line);
+        }
+    }
+    body.join("\n")
+}
+
+/// One command's positional arguments, **in the order they are typed**.
+///
+/// Not sorted, and that is the difference between this and [`flags`]: a flag is found by its name
+/// and a positional by its place, so sorting would describe a command line nobody can type. clap
+/// holds them in index order and this keeps it.
+///
+/// Recorded because leaving them out was a false statement about the binary, in the exact
+/// direction this contract exists to catch: `b10x-harness profiles show` exits `1` with *"the
+/// following required arguments were not provided: `<NAME>`"*, and a driver reading a document
+/// with no `required` row for that command has no way to find that out before clap refuses it.
+///
+/// `name` is the placeholder clap prints — `NAME`, which the usage line renders `<NAME>` when it
+/// is required and `[NAME]` when it is not — so `required` says which of the two a reader will
+/// see. `multiple` is whether more than one word lands in it.
+fn positionals(command: &clap::Command) -> Value {
+    Value::Array(
+        command
+            .get_arguments()
+            .filter(|argument| argument.is_positional())
+            .map(|argument| {
+                json!({
+                    "name": argument
+                        .get_value_names()
+                        .and_then(|names| names.first())
+                        .map_or_else(|| argument.get_id().to_string(), ToString::to_string),
+                    "required": argument.is_required_set(),
+                    "multiple": argument
+                        .get_num_args()
+                        .is_some_and(|count| count.max_values() > 1),
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Every flag this one may not appear beside, in name order.
@@ -330,7 +512,8 @@ mod tests {
                 "2026-08-29.2",
                 "2026-08-29.3",
                 "2026-08-30",
-                "2026-08-30.1"
+                "2026-08-30.1",
+                "2026-08-30.2"
             ],
             "a released version may be superseded and never removed"
         );
@@ -498,11 +681,16 @@ mod tests {
     ///
     /// A command that is gone takes its flags with it and is reported once, not once per flag.
     fn moves_between(before: &Value, after: &Value) -> Vec<Moved> {
-        const PINNED_FIELDS: [&str; 6] = [
+        // `short` is one of them: `-p` is a command line a consumer can type, and a flag that
+        // loses its short spelling breaks an invocation that already worked exactly as a renamed
+        // long flag does. A document cut before the key existed holds no `short` on either side of
+        // a pair, so absence never reads as a move.
+        const PINNED_FIELDS: [&str; 7] = [
             "conflicts_with",
             "default",
             "required",
             "requires",
+            "short",
             "takes_value",
             "value_name",
         ];
@@ -522,6 +710,8 @@ mod tests {
                 after: GONE.2.to_owned(),
             })
             .collect();
+
+        moved.extend(positional_moves(before, after, &undescribed));
 
         let (was, now) = (flags_of(before), flags_of(after));
         for (key, row) in &was {
@@ -552,6 +742,66 @@ mod tests {
             }
         }
         moved.sort();
+        moved
+    }
+
+    /// Everything that moved about a command's positional arguments, oldest first.
+    ///
+    /// Compared **by place**, because that is what a positional is: the first word after
+    /// `profiles show` is the first positional whatever it is called, and a document that matched
+    /// them by name would read a renamed one as a departure and an arrival at the same index.
+    ///
+    /// A positional the older document did not have is an **arrival** and takes no row, exactly as
+    /// an arriving flag does — every version before `2026-08-30.2` holds no `positionals` at all,
+    /// and reading those as nineteen arrivals is the truth: the binary always had them and the
+    /// document did not say so.
+    fn positional_moves(
+        before: &Value,
+        after: &Value,
+        undescribed: &std::collections::BTreeSet<&String>,
+    ) -> Vec<Moved> {
+        const PINNED_FIELDS: [&str; 3] = ["multiple", "name", "required"];
+        let listed = |document: &Value, command: &str| -> Vec<Value> {
+            document["positionals"][command]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        };
+        let mut moved = Vec::new();
+        let commands: std::collections::BTreeSet<String> = before["positionals"]
+            .as_object()
+            .map(|held| held.keys().cloned().collect())
+            .unwrap_or_default();
+        for command in commands {
+            if undescribed.contains(&command) {
+                continue;
+            }
+            let (was, now) = (listed(before, &command), listed(after, &command));
+            for (place, row) in was.iter().enumerate() {
+                let named = format!("<{}>", row["name"].as_str().unwrap_or("?"));
+                let Some(now_row) = now.get(place) else {
+                    moved.push(Moved {
+                        subcommand: command.clone(),
+                        long: named,
+                        field: GONE.0.to_owned(),
+                        before: GONE.1.to_owned(),
+                        after: GONE.2.to_owned(),
+                    });
+                    continue;
+                };
+                for field in PINNED_FIELDS {
+                    if row[field] != now_row[field] {
+                        moved.push(Moved {
+                            subcommand: command.clone(),
+                            long: named.clone(),
+                            field: field.to_owned(),
+                            before: row[field].to_string(),
+                            after: now_row[field].to_string(),
+                        });
+                    }
+                }
+            }
+        }
         moved
     }
 
@@ -757,6 +1007,7 @@ mod tests {
     fn flag() -> Value {
         json!({
             "long": "--placeholder",
+            "short": Value::Null,
             "takes_value": true,
             "value_name": "VALUE",
             "default": Value::Null,
@@ -968,25 +1219,199 @@ mod tests {
         );
     }
 
+    /// A flag that loses its short spelling is a move, like a flag that loses its name.
+    ///
+    /// `-p` is a command line a consumer types, so `run -p fast` breaking is the same event as
+    /// `run --profile fast` breaking, and the *what changed* section has to carry a row for it.
+    /// Without this, `short` could be struck from `PINNED_FIELDS` and every test in this file
+    /// still passed — measured, and the reason this case exists.
+    #[test]
+    fn a_flag_that_loses_its_short_spelling_is_a_move() {
+        let mut spelled = flag();
+        spelled["short"] = json!("-m");
+        let before = document(&[("run", "--model", spelled.clone())]);
+        let mut unspelled = spelled.clone();
+        unspelled["short"] = Value::Null;
+        assert_eq!(
+            moves_between(&before, &document(&[("run", "--model", unspelled)])),
+            vec![Moved {
+                subcommand: "run".to_owned(),
+                long: "--model".to_owned(),
+                field: "short".to_owned(),
+                before: "\"-m\"".to_owned(),
+                after: "null".to_owned(),
+            }],
+            "`run -m gpt` stops parsing and no other field of the row says so"
+        );
+        let mut repointed = spelled.clone();
+        repointed["short"] = json!("-M");
+        assert_eq!(
+            moves_between(&before, &document(&[("run", "--model", repointed)])).len(),
+            1,
+            "a short flag repointed at another letter is a move too"
+        );
+        assert!(
+            moves_between(&before, &document(&[("run", "--model", spelled)])).is_empty(),
+            "and an unchanged one is not"
+        );
+    }
+
+    /// A positional the binary requires is pinned, and one it does not have is not invented.
+    ///
+    /// `b10x-harness profiles show` exits `1` with *"the following required arguments were not
+    /// provided: `<NAME>`"*, and for six versions this document said the command line had no
+    /// positional arguments at all. A driver reading it saw two rows for `profiles show` — clap's
+    /// `--help`, and nothing `required` — generated `b10x-harness profiles show`, and was refused
+    /// before any harness code ran. That is the `--substrate-embedded` failure on another axis.
+    #[test]
+    fn a_positional_the_binary_requires_is_pinned() {
+        let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
+        let of = |command: &str| -> Vec<Value> {
+            document["positionals"][command]
+                .as_array()
+                .unwrap_or_else(|| panic!("`{command}` has a positional list"))
+                .clone()
+        };
+        for command in ["profiles show", "providers show"] {
+            assert_eq!(
+                of(command),
+                vec![json!({ "name": "NAME", "required": true, "multiple": false })],
+                "`b10x-harness {command}` takes one word and refuses to run without it"
+            );
+        }
+        // Empty rather than absent, exactly as `conflicts_with` is: a key that appeared only
+        // sometimes reads as a document that forgot.
+        for command in [
+            "b10x-harness",
+            "run",
+            "profiles",
+            "profiles list",
+            "workflow run",
+        ] {
+            assert_eq!(
+                of(command),
+                Vec::<Value>::new(),
+                "`{command}` takes no word"
+            );
+        }
+        let described: std::collections::BTreeSet<String> = document["positionals"]
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(
+            described,
+            described_by(&document),
+            "every command `arguments` describes has a positional list, and no other"
+        );
+    }
+
+    /// A positional that becomes required, or vanishes, is a move a README has to state.
+    ///
+    /// `profiles show <NAME>` becoming optional cannot break a caller; the reverse refuses an
+    /// invocation that worked yesterday, and nothing about the flag rows says so. Compared by
+    /// **place**, because the first word after the verb is the first positional whatever it is
+    /// called.
+    #[test]
+    fn a_positional_that_becomes_required_or_vanishes_is_a_move() {
+        let with = |rows: Value| -> Value {
+            let mut document = document(&[("profiles show", "--help", flag())]);
+            document["positionals"] = json!({ "profiles show": rows });
+            document
+        };
+        let optional = with(json!([{ "name": "NAME", "required": false, "multiple": false }]));
+        let required = with(json!([{ "name": "NAME", "required": true, "multiple": false }]));
+        assert_eq!(
+            moves_between(&optional, &required),
+            vec![Moved {
+                subcommand: "profiles show".to_owned(),
+                long: "<NAME>".to_owned(),
+                field: "required".to_owned(),
+                before: "false".to_owned(),
+                after: "true".to_owned(),
+            }],
+            "a word that was optional and is now demanded refuses an invocation that worked"
+        );
+        assert_eq!(
+            moves_between(&required, &with(json!([]))),
+            vec![Moved {
+                subcommand: "profiles show".to_owned(),
+                long: "<NAME>".to_owned(),
+                field: "present".to_owned(),
+                before: "true".to_owned(),
+                after: "false".to_owned(),
+            }],
+            "and a word that is gone takes the invocation that passed it with it"
+        );
+        assert!(
+            moves_between(&with(json!([])), &required).is_empty(),
+            "an arriving positional is an arrival, which is why the nineteen this version records \
+             against six that recorded none need no row"
+        );
+        assert!(moves_between(&required, &required).is_empty());
+    }
+
+    /// A flag that eats no word holds no default but the one clap gives every bare flag.
+    ///
+    /// [`flags`] drops a bare flag's default because a built `ArgAction::SetTrue` carries the
+    /// built-in `"false"`, which is not a word a consumer may type after it — and the Python half
+    /// refuses a bare flag that declares one. `ArgAction::SetFalse` would carry a real default of
+    /// `"true"` that a driver needs, and the row would say `null` **silently**, because `default`
+    /// is a field the move diff compares. Nothing in this build sets it; this is the guard that
+    /// fails the day something does, rather than the document quietly losing it.
+    #[test]
+    fn a_flag_that_eats_no_word_holds_no_default_but_claps_own() {
+        let built = definition();
+        let mut paths: Vec<String> = Vec::new();
+        reachable(&Cli::command(), "", &mut paths);
+        let mut surprising: Vec<String> = Vec::new();
+        for path in std::iter::once(String::new()).chain(paths) {
+            let command = at_path(&built, &path).expect("a declared command");
+            for argument in command.get_arguments() {
+                if argument.get_action().takes_values() {
+                    continue;
+                }
+                let defaults: Vec<String> = argument
+                    .get_default_values()
+                    .iter()
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .collect();
+                if !defaults.is_empty() && defaults != vec!["false".to_owned()] {
+                    surprising.push(format!(
+                        "  `{path}` `--{}`: {defaults:?}",
+                        argument.get_long().unwrap_or_default()
+                    ));
+                }
+            }
+        }
+        assert!(
+            surprising.is_empty(),
+            "a flag that eats no word holds a default this document drops on the floor. Record it \
+             instead of dropping it — a driver reading `default` to know what it gets by leaving \
+             the flag out would be told `null`, and the move diff would never say it changed:\n{}",
+            surprising.join("\n")
+        );
+    }
+
     /// A flag that eats no word records no placeholder for one.
     ///
-    /// `2026-08-30.1/README.md` says `value_name` holds "the placeholder in the usage line, or
-    /// `null`", and clap prints no placeholder for a bare flag: `b10x-harness run --help` renders
-    /// `--substrate-embedded` and `--delegate` with nothing after them, beside
-    /// `-p, --profile <NAME>` which has one. The document nonetheless records
+    /// Every pinned README says `value_name` holds "the placeholder in the usage line", and clap
+    /// prints no placeholder for a bare flag: `b10x-harness run --help` renders
+    /// `--substrate-embedded` and `--delegate` with nothing after them, beside a
+    /// `-p, --profile <NAME>` that has one. Up to `2026-08-30.1` the document recorded
     /// `"value_name": "SUBSTRATE_EMBEDDED"` against `"takes_value": false` on 23 rows — including
-    /// the one flag this whole contract exists because of. A driver that generates a command line
-    /// from `value_name` emits `--substrate-embedded SUBSTRATE_EMBEDDED`, which is the exact word
+    /// the one flag this whole contract exists because of. A driver that generated a command line
+    /// from `value_name` emitted `--substrate-embedded SUBSTRATE_EMBEDDED`, which is the exact word
     /// clap refused from the consumer pinned to `0.1.0`.
     ///
     /// `a_flag_that_eats_the_next_word_is_distinguished_from_one_that_does_not` asserts
     /// `takes_value` on that flag and never looks at the placeholder beside it.
-    // Red today, on purpose. 23 bare flags record a `value_name` the pinned document defines as
-    // the usage-line placeholder — `--substrate-embedded` among them, at
-    // `contracts/cli/b10x-harness/2026-08-30.1/argv.json`. Making it green re-pins `argv.json`,
-    // which is a new cut: `story:argv-pin-misdescribes-the-command-line`.
+    // Red from the day it was written until `2026-08-30.2`, on purpose, and carrying `#[ignore]`
+    // with the story that would close it named in the attribute: making it green re-pins
+    // `argv.json`, and a released version is immutable, so it took a new cut
+    // (`story:argv-pin-misdescribes-the-command-line`).
     #[test]
-    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` cuts a new argv.json"]
     fn a_flag_that_eats_no_word_records_no_placeholder_for_one() {
         let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
         let mut contradictory: Vec<String> = Vec::new();
@@ -1008,55 +1433,32 @@ mod tests {
 
     /// Every short flag a consumer can type is pinned, or the document says it is not pinned.
     ///
-    /// `-p` is a short flag on `--profile`, on the root command and on every command that takes a
-    /// run's options (`crates/harness-cli/src/lib.rs:340` and `:480`), and clap prints it:
-    /// `-p, --profile <NAME>`. The pinned document has no field for it — every row is keyed by
-    /// `long` alone — and `2026-08-30.1/README.md` names it in neither direction: "What is pinned"
-    /// says "one row per long flag" and "What is not pinned" lists the help text, the summaries,
-    /// clap's print order and the exit statuses. The word "short" does not appear in the file.
+    /// `-p` is a short flag on `--profile`, on every command that takes a run's options and on
+    /// `profiles explain` (`crates/harness-cli/src/lib.rs:340` and `:480`), and clap prints it:
+    /// `-p, --profile <NAME>`. Up to `2026-08-30.1` the pinned document had no field for it —
+    /// every row was keyed by `long` alone — and that README named it in neither direction: "What
+    /// is pinned" said "one row per long flag" and "What is not pinned" listed the help text, the
+    /// summaries, clap's print order and the exit statuses. The word "short" appeared nowhere in
+    /// the file.
     ///
-    /// So `-p` is a piece of the argv surface that can be renamed, repointed at another flag or
-    /// dropped with both halves of the check green — which is the failure this contract was cut to
-    /// prevent, on a flag a consumer can already type today.
-    // Red today, on purpose. `-p` on `--profile` (`crates/harness-cli/src/lib.rs:340` and `:480`)
-    // is a short flag a consumer can already type that the pinned document does not record. The
-    // honest fix is pinning it, which re-pins `argv.json` and so is a new cut:
-    // `story:argv-pin-misdescribes-the-command-line`. This test's `readme.contains("short")` hatch
-    // would also go green on a README sentence disclaiming short flags — that is moving the
-    // goalpost, not fixing it, and is why it is not taken here.
+    /// So `-p` was a piece of the argv surface that could be renamed, repointed at another flag or
+    /// dropped with both halves of the check green — the failure this contract was cut to prevent,
+    /// on a flag a consumer can already type today. `2026-08-30.2` pins it: every row carries
+    /// `short`, and `short` is a field [`moves_between`] diffs, so losing it is a move the README
+    /// of the cut that loses it has to state.
+    // Red from the day it was written until `2026-08-30.2`, on purpose, and carrying `#[ignore]`
+    // with the story that would close it named in the attribute. The `readme.contains("short")`
+    // hatch below would also have gone green on a README sentence disclaiming short flags — that
+    // is moving the goalpost rather than closing the gap, and it is not the route that was taken:
+    // `-p` is in `argv.json`, where the byte-for-byte pin above holds it.
     #[test]
-    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` pins `-p`"]
     fn a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned() {
-        let command = Cli::command();
-        let mut nested: Vec<(String, &clap::Command)> = Vec::new();
-        reachable(&command, "", &mut nested);
         let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
-        let rows = flags_of(&document);
-        let readme = readme_of(ARGV_CONTRACT_VERSION);
-        let disclosed = readme.to_lowercase().contains("short");
-
-        let mut unpinned: Vec<String> = Vec::new();
-        for (path, subcommand) in std::iter::once((command.get_name().to_owned(), &command)).chain(
-            nested
-                .iter()
-                .map(|(path, subcommand)| (path.clone(), *subcommand)),
-        ) {
-            for argument in subcommand.get_arguments() {
-                let (Some(short), Some(long)) = (argument.get_short(), argument.get_long()) else {
-                    continue;
-                };
-                let recorded = rows
-                    .get(&(path.clone(), format!("--{long}")))
-                    .is_some_and(|row| row["short"] == format!("-{short}"));
-                if !recorded && !disclosed {
-                    unpinned.push(format!("  `{path}`: `-{short}` on `--{long}`"));
-                }
-            }
-        }
+        let unpinned = unpinned_short_flags(&document, &readme_of(ARGV_CONTRACT_VERSION));
         assert!(
             unpinned.is_empty(),
-            "a short flag clap accepts is in neither the pinned document nor its README, so it \
-             can move without either half of the check noticing:\n{}",
+            "a short flag clap accepts is in neither the pinned document nor its README's `What \
+             is not pinned` section, so it can move without either half of the check noticing:\n{}",
             unpinned.join("\n")
         );
     }
@@ -1136,12 +1538,19 @@ mod tests {
         // `plan` contacts nothing, and the pinned document is where a consumer reads that.
         assert!(flag("workflow plan", "--base-url").is_none());
         assert!(flag("workflow plan", "--flow").is_some());
-        assert!(
-            value["arguments"]["workflow"]
-                .as_array()
-                .expect("a list")
-                .is_empty(),
-            "the word itself takes no flags"
+        // The word itself takes no flag of its own — only the `--help` clap gives every command,
+        // which is a row here because `-h` is a short flag a consumer can type. An empty row set
+        // would now be the document forgetting one, not the word having none.
+        let word: Vec<&str> = value["arguments"]["workflow"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|row| row["long"].as_str().expect("a long flag"))
+            .collect();
+        assert_eq!(
+            word,
+            vec!["--help"],
+            "the word itself takes no flag of its own, and carries the one clap gives every command"
         );
     }
 

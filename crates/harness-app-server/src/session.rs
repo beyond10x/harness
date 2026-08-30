@@ -10,10 +10,11 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use harness_loop::{LoopCancel, LoopEvent, LoopSink};
+use harness_loop::{LoopEvent, LoopSink};
 use harness_wire::{ToolCall, ToolOutcome, ToolPort, ToolSpec};
 use serde_json::{Value, json};
 
+use crate::TurnControl;
 use crate::inventory::{DYNAMIC_TOOL_ITEM, MAX_TOOL_RESPONSE_BYTES};
 use crate::transport::{
     INVALID_PARAMS, Incoming, METHOD_NOT_FOUND, Reader, TransportError, Writer,
@@ -24,6 +25,14 @@ use crate::transport::{
 /// Generous, because a client may be asking a person. Bounded, because a client that never answers
 /// would otherwise hold a turn open forever with nothing to show for it.
 const TOOL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// How long a finished turn waits for an interrupt frame the reading thread already decoded.
+///
+/// Not a pacing margin, and nothing to do with how fast the client is: the frame was handed to the
+/// queue by the reading thread in the same breath as the cancellation the turn is ending on, so
+/// the wait is over before it starts. The bound exists so that a frame which somehow never arrives
+/// costs one turn its terminal frame rather than holding the connection open forever.
+const INTERRUPT_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Shared access to the one connection.
 #[derive(Clone)]
@@ -43,7 +52,7 @@ impl Wire {
         }
     }
 
-    /// Answers control frames that arrived while a turn was in flight.
+    /// Answers control frames that arrived while a turn was in flight, and acts on them.
     ///
     /// Called between streamed events, which is the only moment a running turn is at the wire at
     /// all. Without it an interrupt is acknowledged only once the turn it was meant to stop has
@@ -52,23 +61,68 @@ impl Wire {
     /// # Errors
     ///
     /// Returns [`TransportError`] when the connection is gone.
-    pub fn drain_control(&self) -> Result<(), TransportError> {
+    pub fn drain_control(&self, control: &TurnControl) -> Result<(), TransportError> {
         while let Some(message) = self.reader.try_next()? {
-            match message {
-                Incoming::Request { id, method, .. } if method == "turn/interrupt" => {
-                    self.writer.borrow_mut().respond(&id, &json!({}))?;
-                }
-                Incoming::Request { id, method, .. } => {
-                    self.writer.borrow_mut().respond_error(
-                        &id,
-                        METHOD_NOT_FOUND,
-                        format!("`{method}` cannot be served while a turn is running"),
-                    )?;
-                }
-                // Not ours to answer. Hand it back rather than swallowing it, or whoever is
-                // waiting for it waits forever.
-                other => self.stash.borrow_mut().push_back(other),
+            self.serve_control(message, control)?;
+        }
+        Ok(())
+    }
+
+    /// Answers every interrupt this turn was cancelled by, waiting for the ones still in flight.
+    ///
+    /// The reading thread cancels the instant a frame is decoded — that is what reaches a turn
+    /// blocked on the model — but it may not write, so the frame is still owed an answer by the
+    /// main thread. [`drain_control`](Self::drain_control) collects that debt between streamed
+    /// events, and a turn cancelled before it emitted one has no between: a client that pipelines
+    /// `turn/start` and `turn/interrupt` cancels its turn before a single delta exists.
+    ///
+    /// Called once the turn's loop has ended and before its terminal frame, so the client is never
+    /// told a turn ended while an interrupt it sent for that turn is unanswered — an
+    /// acknowledgement read after `turn/completed` is a receipt, not an acknowledgement.
+    ///
+    /// The wait terminates because every count came from the reading thread, in the statement
+    /// before it queued that very frame — whether it raised the turn's own count or the connection
+    /// one this turn took over at its start. A frame counted is a frame already on its way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError`] when the connection is gone or the frame never arrives.
+    pub fn settle_interrupts(&self, control: &TurnControl) -> Result<(), TransportError> {
+        while control.owes() {
+            let message = self.next_frame_within(INTERRUPT_SETTLE_TIMEOUT)?;
+            self.serve_control(message, control)?;
+        }
+        Ok(())
+    }
+
+    /// One control frame, answered and acted on together.
+    ///
+    /// Together on purpose. The reading thread cancels what it can reach, and an interrupt decoded
+    /// before its turn was installed reaches nothing, so acting on it falls to whoever answers it.
+    /// Acknowledging without acting is the whole defect — the client is told the turn stopped and
+    /// then handed the answer it cancelled — so the two are one statement apart, here and in
+    /// [`BridgeTools::await_response`](crate::session::BridgeTools), which is the only other place
+    /// a control frame is dequeued while a turn is running.
+    fn serve_control(
+        &self,
+        message: Incoming,
+        control: &TurnControl,
+    ) -> Result<(), TransportError> {
+        match message {
+            Incoming::Request { id, method, .. } if method == "turn/interrupt" => {
+                control.answered();
+                self.writer.borrow_mut().respond(&id, &json!({}))?;
             }
+            Incoming::Request { id, method, .. } => {
+                self.writer.borrow_mut().respond_error(
+                    &id,
+                    METHOD_NOT_FOUND,
+                    format!("`{method}` cannot be served while a turn is running"),
+                )?;
+            }
+            // Not ours to answer. Hand it back rather than swallowing it, or whoever is
+            // waiting for it waits forever.
+            other => self.stash.borrow_mut().push_back(other),
         }
         Ok(())
     }
@@ -116,7 +170,7 @@ pub struct BridgeSink {
     thread_id: String,
     turn_id: String,
     message_item_id: String,
-    cancel: LoopCancel,
+    control: TurnControl,
     /// Set once writing fails, so the turn ends instead of looping against a closed pipe.
     pub broken: Option<TransportError>,
 }
@@ -127,14 +181,14 @@ impl BridgeSink {
         thread_id: &str,
         turn_id: &str,
         message_item_id: &str,
-        cancel: LoopCancel,
+        control: TurnControl,
     ) -> Self {
         Self {
             wire,
             thread_id: thread_id.to_owned(),
             turn_id: turn_id.to_owned(),
             message_item_id: message_item_id.to_owned(),
-            cancel,
+            control,
             broken: None,
         }
     }
@@ -147,7 +201,7 @@ impl BridgeSink {
         // writer to answer control frames, and holding both borrows across one statement aborts
         // the process the moment a client sends anything while a turn is running.
         let written = self.wire.writer.borrow_mut().notify(method, params);
-        if let Err(error) = written.and_then(|()| self.wire.drain_control()) {
+        if let Err(error) = written.and_then(|()| self.wire.drain_control(&self.control)) {
             self.fail(error);
         }
     }
@@ -157,7 +211,9 @@ impl BridgeSink {
     /// Cancelling matters as much as recording: without it the loop keeps calling the model for a
     /// reader that will never see the answer, spending inference on nobody.
     fn fail(&mut self, error: TransportError) {
-        self.cancel.cancel();
+        // Cancelled, not interrupted: a pipe that broke is not a person who asked, and the
+        // terminal frame has to keep the two apart.
+        self.control.cancel.cancel();
         self.broken = Some(error);
     }
 }
@@ -249,7 +305,7 @@ pub struct BridgeTools {
     thread_id: String,
     turn_id: String,
     specs: Vec<ToolSpec>,
-    cancel: LoopCancel,
+    control: TurnControl,
     /// Set once the connection fails, so the loop stops rather than retrying into a closed pipe.
     pub broken: Option<TransportError>,
 }
@@ -260,14 +316,14 @@ impl BridgeTools {
         thread_id: &str,
         turn_id: &str,
         specs: Vec<ToolSpec>,
-        cancel: LoopCancel,
+        control: TurnControl,
     ) -> Self {
         Self {
             wire,
             thread_id: thread_id.to_owned(),
             turn_id: turn_id.to_owned(),
             specs,
-            cancel,
+            control,
             broken: None,
         }
     }
@@ -342,7 +398,9 @@ impl BridgeTools {
                     return Ok(decode_tool_result(result.as_ref()));
                 }
                 Incoming::Request { id, method, .. } if method == "turn/interrupt" => {
-                    self.cancel.cancel();
+                    // The same debt `Wire::settle_interrupts` waits on: answering it here is what
+                    // says the turn need not wait for this frame before its terminal one.
+                    self.control.answered();
                     self.wire.writer.borrow_mut().respond(&id, &json!({}))?;
                 }
                 Incoming::Request { id, method, .. } => {
@@ -424,7 +482,8 @@ impl ToolPort for BridgeTools {
                 let message = format!("the tool call could not be delivered: {error}");
                 self.broken = Some(error);
                 // Cancel so the loop stops rather than issuing more calls into a dead connection.
-                self.cancel.cancel();
+                // Not `answered`: a dead connection is not a person interrupting.
+                self.control.cancel.cancel();
                 ToolOutcome::failed(message)
             }
         }

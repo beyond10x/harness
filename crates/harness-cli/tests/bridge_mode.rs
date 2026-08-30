@@ -698,17 +698,12 @@ fn an_interrupt_queued_before_the_turn_starts_does_not_crash_the_server() {
         .as_str()
         .expect("a turn id")
         .to_owned();
-    // Wait for a streamed event before writing the interrupt, and read this as an ordering rather
-    // than a pause. The server announces a turn -- it answers `turn/start` and notifies
-    // `turn/started` -- before it installs the control its reading thread cancels through, so an
-    // interrupt decoded in between is acknowledged and cancels nothing: the turn runs on and
-    // reports `completed`. A streamed event is the first frame that can only come from inside the
-    // running turn, so waiting for one puts the interrupt past that window. No margin closes it --
-    // it is microseconds wide and a slow machine lands in it, which is what made this test decide
-    // differently under a loaded gate. What is still under test is the frame that broke the
-    // server: an interrupt written without waiting for its acknowledgement, arriving while the
-    // turn is mid-stream and the writer is being borrowed to emit.
-    bridge.skip_to("item/agentMessage/delta");
+    // Written the instant `turn/start` is answered, with no wait for a streamed event first. That
+    // wait used to be here, because the server announced a turn before it installed the control
+    // its reading thread cancels through and an interrupt decoded in between was acknowledged and
+    // cancelled nothing -- a window microseconds wide that a loaded machine landed in. The control
+    // is installed before the announcement now, and an interrupt the reading thread could not
+    // reach is counted rather than dropped, so the ordering the client has to keep is gone.
     bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
         "threadId": thread_id, "turnId": turn_id,
     }}));
@@ -729,11 +724,9 @@ fn an_unknown_request_mid_turn_is_refused_without_killing_the_server() {
     let thread_id = bridge.start_thread(&json!({}));
     let turn_id = bridge.start_turn(&thread_id, "go");
 
-    // Streaming first, for the reason spelled out above: `turn/started` is notified before the
-    // turn is interruptible, so an interrupt sent on the strength of it races that window.
-    bridge.skip_to("item/agentMessage/delta");
-
-    // Same nested-borrow path, reached by a different frame.
+    // Same nested-borrow path, reached by a different frame, and sent on the strength of
+    // `turn/started` alone -- which is now a promise that the turn is interruptible, not one that
+    // it is about to be.
     bridge.write(&json!({"id": 98, "method": "thread/resume", "params": {}}));
     bridge.write(&json!({"id": 97, "method": "turn/interrupt", "params": {
         "threadId": thread_id, "turnId": turn_id,
@@ -743,5 +736,148 @@ fn an_unknown_request_mid_turn_is_refused_without_killing_the_server() {
     assert_eq!(
         frames.last().expect("terminal")["params"]["turn"]["status"],
         json!("interrupted")
+    );
+}
+
+#[test]
+fn an_acknowledged_interrupt_never_also_delivers_the_answer() {
+    // A client that pipelines `turn/start` and `turn/interrupt` — the shape
+    // `an_interrupt_queued_before_the_turn_starts_does_not_crash_the_server` names in its own
+    // first comment, and the one no test performs since that test began waiting for a streamed
+    // delta first.
+    //
+    // The server answers `turn/start` and notifies `turn/started` before it installs the control
+    // its reading thread cancels through (`crates/harness-app-server/src/lib.rs:321-340`). An
+    // interrupt decoded in that window is answered `{"result":{}}` — a success — and cancels
+    // nothing. Whichever way that window is closed, these two cannot both be true of one turn:
+    // the interrupt was acknowledged, and the answer it was meant to stop was delivered anyway.
+    // `an_interrupt_stops_a_turn_that_is_blocked_on_the_model` already says so for a turn that is
+    // mid-stream; nothing said it for a turn that was only just announced.
+    let endpoint = Endpoint::start("slow");
+    let mut bridge = Bridge::start(&endpoint, &[]);
+    bridge.handshake();
+    let thread_id = bridge.start_thread(&json!({}));
+
+    // Both frames written before either answer is read. A pipelining client cannot name the turn
+    // it is cancelling — it has not been told the id yet — and this server reads no `turnId` on
+    // `turn/interrupt`: the reading thread cancels whichever turn is active.
+    bridge.write(&json!({"id": 50, "method": "turn/start", "params": {
+        "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+    }}));
+    bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
+        "threadId": thread_id,
+    }}));
+
+    let mut acknowledgement = None;
+    let mut frames = Vec::new();
+    loop {
+        let frame = bridge.next_frame();
+        if frame.get("id") == Some(&json!(99)) && frame.get("method").is_none() {
+            acknowledgement = Some(frame);
+            continue;
+        }
+        let terminal = frame.get("method").and_then(Value::as_str) == Some("turn/completed");
+        frames.push(frame);
+        if terminal {
+            break;
+        }
+    }
+    let acknowledgement = acknowledgement.expect("the interrupt is answered at all");
+    assert!(
+        acknowledgement["error"].is_null(),
+        "the server acknowledged the interrupt: {acknowledgement}"
+    );
+    assert!(
+        !methods(&frames).contains(&"item/completed"),
+        "an acknowledged interrupt must not also deliver the answer it was stopped from giving: \
+         {frames:?}"
+    );
+    assert_eq!(
+        frames.last().expect("a terminal frame")["params"]["turn"]["status"],
+        json!("interrupted"),
+        "an interrupt the server answered with a success must have been acted on"
+    );
+}
+
+#[test]
+fn a_request_arriving_mid_stream_is_refused_before_the_turn_ends() {
+    // The path `an_unknown_request_mid_turn_is_refused_without_killing_the_server` is named for:
+    // `Wire::drain_control`, which answers control frames *between streamed events* — the only
+    // moment a running turn is at the wire (`STATUS.md:17`, "acknowledged between streamed
+    // events"). Reaching it needs a frame that does not itself end the turn; an interrupt cancels
+    // the stream, so nothing is emitted afterwards and the answer necessarily comes from the main
+    // loop once the turn is over, by the other code path and with the other message.
+    //
+    // Without this case the whole `drain_control` request arm is unreached: re-nesting the two
+    // `writer.borrow_mut()` calls in `BridgeSink::notify` — the exact regression its comment
+    // warns about — leaves every test in this workspace green.
+    let endpoint = Endpoint::start("slow");
+    let mut bridge = Bridge::start(&endpoint, &[]);
+    bridge.handshake();
+    let thread_id = bridge.start_thread(&json!({}));
+    let turn_id = bridge.start_turn(&thread_id, "go");
+    bridge.skip_to("item/agentMessage/delta");
+
+    bridge.write(&json!({"id": 98, "method": "thread/resume", "params": {}}));
+
+    let mut refusal = None;
+    let mut frames = Vec::new();
+    loop {
+        let frame = bridge.next_frame();
+        if frame.get("id") == Some(&json!(98)) && frame.get("method").is_none() {
+            refusal = Some(frame);
+            continue;
+        }
+        let terminal = frame.get("method").and_then(Value::as_str) == Some("turn/completed");
+        frames.push(frame);
+        if terminal {
+            break;
+        }
+    }
+    let refusal = refusal.expect("the refusal arrives before the turn ends, not after it");
+    assert_eq!(refusal["error"]["code"], json!(-32601), "{refusal}");
+    assert!(
+        refusal["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("while a turn is running"),
+        "the refusal came from the mid-turn path, not from the main loop after the turn: {refusal}"
+    );
+    assert_eq!(
+        frames.last().expect("a terminal frame")["params"]["turn"]["id"],
+        json!(turn_id)
+    );
+    assert_eq!(
+        frames.last().expect("a terminal frame")["params"]["turn"]["status"],
+        json!("completed"),
+        "a refused control frame must not end the turn it arrived during"
+    );
+}
+
+#[test]
+fn an_interrupt_sent_between_turns_does_not_cancel_the_next_one() {
+    // The other half of closing the start-of-turn window, and the one that can be closed wrongly.
+    // An interrupt the reading thread cannot cancel with is not discarded any more, so what stops
+    // it reaching the *next* turn has to be said out loud: the main loop answers it first, because
+    // frames leave the queue in the order the client sent them, and an interrupt sent before
+    // `turn/start` is dequeued before `turn/start` is. `Watch`'s own comment calls the alternative
+    // arming a trap for the next turn, and nothing in this file caught it being armed.
+    let endpoint = Endpoint::start("text");
+    let mut bridge = Bridge::start(&endpoint, &[]);
+    bridge.handshake();
+    let thread_id = bridge.start_thread(&json!({}));
+
+    let acknowledgement = bridge.request("turn/interrupt", &json!({"threadId": thread_id}));
+    assert!(
+        acknowledgement["error"].is_null(),
+        "an interrupt with no turn to stop is still answered: {acknowledgement}"
+    );
+
+    bridge.start_turn(&thread_id, "say something");
+    let frames = bridge.collect_until("turn/completed");
+    assert_eq!(
+        frames.last().expect("a terminal frame")["params"]["turn"]["status"],
+        json!("completed"),
+        "an interrupt that was over before this turn was asked for must not end it"
     );
 }

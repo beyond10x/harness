@@ -16,7 +16,7 @@ mod session;
 mod transport;
 
 use std::io::{BufRead, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use harness_loop::{AgentLoop, ApproveAll, Budget, LoopCancel, LoopConfig, LoopStop};
@@ -87,13 +87,13 @@ where
 {
     // The token belongs to whichever turn is running, so the reader can cancel the right one and
     // an interrupt that arrives between turns cancels nothing rather than the next turn.
-    let active: Arc<Mutex<Option<TurnControl>>> = Arc::new(Mutex::new(None));
-    let reader = Reader::spawn(input, Box::new(Watch(Arc::clone(&active))));
+    let interrupts: Arc<Mutex<Interrupts>> = Arc::new(Mutex::new(Interrupts::default()));
+    let reader = Reader::spawn(input, Box::new(Watch(Arc::clone(&interrupts))));
     let wire = Wire::new(Writer::new(Box::new(output)), reader);
     Server {
         config,
         wire,
-        active,
+        interrupts,
         experimental: false,
         state: State::New,
         thread: None,
@@ -104,29 +104,106 @@ where
 
 /// Cancels the running turn the instant an interrupt frame is decoded.
 ///
-/// Firing on the reading thread is what makes the cancel reach a turn blocked on the model. If no
-/// turn is running the slot is empty and nothing is cancelled, which is correct: interrupting when
-/// there is nothing to interrupt must not arm a trap for the next turn.
-struct Watch(Arc<Mutex<Option<TurnControl>>>);
+/// Firing on the reading thread is what makes the cancel reach a turn blocked on the model. What
+/// it cannot do is reach a turn that does not exist yet, and it may not answer the frame either —
+/// only the main thread writes, or the order of frames on the wire stops being the order of
+/// events. So when there is no turn to cancel it leaves a count behind rather than dropping the
+/// fact that a frame arrived at all.
+struct Watch(Arc<Mutex<Interrupts>>);
 
 impl InterruptWatch for Watch {
     fn interrupted(&self) {
-        if let Ok(active) = self.0.lock()
-            && let Some(control) = active.as_ref()
-        {
-            // Recorded as well as cancelled. Both a person interrupting and a client vanishing end
-            // the turn, and the terminal frame has to say which one happened.
-            control.requested.store(true, Ordering::SeqCst);
-            control.cancel.cancel();
+        if let Ok(mut interrupts) = self.0.lock() {
+            match interrupts.active.as_ref() {
+                Some(control) => control.decoded(),
+                None => interrupts.stray += 1,
+            }
         }
     }
 }
 
+/// This connection's interrupt state, read and written under one lock.
+///
+/// One lock rather than two independent cells: whether an interrupt cancels the running turn or is
+/// left for the next one to answer has to be decided against a single instant, or an interrupt
+/// decoded exactly as a turn is installed is counted as both and acted on as neither.
+#[derive(Default)]
+struct Interrupts {
+    /// The running turn's controls. `None` between turns.
+    active: Option<TurnControl>,
+    /// `turn/interrupt` frames decoded with no turn to cancel, still queued for the main thread.
+    ///
+    /// Which turn — if any — a count belongs to is settled by the order frames leave the queue,
+    /// and that is the order the client sent them. An interrupt sent *before* `turn/start` is
+    /// dequeued and answered by the main loop before `turn/start` is, taking the count back down,
+    /// so it cannot arm a trap for the next turn. One still standing when `turn/start` is handled
+    /// was sent after it, and belongs to the turn it asks for.
+    stray: usize,
+}
+
 /// What the reading thread may do to the turn that is currently running.
 #[derive(Clone)]
-struct TurnControl {
-    cancel: LoopCancel,
+pub(crate) struct TurnControl {
+    pub(crate) cancel: LoopCancel,
     requested: Arc<AtomicBool>,
+    /// Interrupt frames this turn was cancelled by that the client has not been answered yet.
+    owed: Arc<AtomicUsize>,
+}
+
+impl TurnControl {
+    /// A fresh token per turn. Reusing one and clearing it would race the reading thread: an
+    /// interrupt decoded just before the clear would be erased, and the turn it was meant to stop
+    /// would run to completion while the client held an acknowledgement.
+    fn new() -> Self {
+        Self {
+            cancel: LoopCancel::new(),
+            requested: Arc::new(AtomicBool::new(false)),
+            owed: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// `frames` interrupts were decoded for this turn and are on their way to the main thread.
+    ///
+    /// Recorded as well as cancelled, and counted as well as recorded. The record says *why* the
+    /// turn ended, because both a person interrupting and a client vanishing end one and the
+    /// terminal frame has to say which. The count says the client is still owed an answer to a
+    /// frame it sent — and until it has one, this turn's terminal frame must not go out.
+    fn decoded_n(&self, frames: usize) {
+        if frames == 0 {
+            return;
+        }
+        self.requested.store(true, Ordering::SeqCst);
+        self.owed.fetch_add(frames, Ordering::SeqCst);
+        self.cancel.cancel();
+    }
+
+    /// One was decoded by the reading thread while this turn was running.
+    fn decoded(&self) {
+        self.decoded_n(1);
+    }
+
+    /// The main thread answered one of them.
+    ///
+    /// It cancels too, and that is not decoration. An interrupt decoded before this turn was
+    /// installed found no turn to cancel, so the only place it can be *acted on* is the place it
+    /// is answered. Acknowledging without acting is the whole defect: a client told its interrupt
+    /// succeeded, and handed the answer it cancelled.
+    pub(crate) fn answered(&self) {
+        self.requested.store(true, Ordering::SeqCst);
+        // Saturating: an interrupt the reading thread never counted — one it could not attribute
+        // to any turn — must still be answerable without taking the count below zero.
+        let _ = self
+            .owed
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |owed| {
+                Some(owed.saturating_sub(1))
+            });
+        self.cancel.cancel();
+    }
+
+    /// Whether a frame this turn was cancelled by is still unanswered.
+    pub(crate) fn owes(&self) -> bool {
+        self.owed.load(Ordering::SeqCst) > 0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,8 +222,8 @@ struct Thread {
 struct Server<'a> {
     config: &'a ServerConfig,
     wire: Wire,
-    /// The running turn's controls, shared with the reading thread. `None` between turns.
-    active: Arc<Mutex<Option<TurnControl>>>,
+    /// The running turn's controls and the interrupts no turn could take, shared with the reader.
+    interrupts: Arc<Mutex<Interrupts>>,
     /// Whether the client negotiated the capability its own tool-calling profile requires.
     experimental: bool,
     state: State,
@@ -213,7 +290,14 @@ impl Server<'_> {
             "thread/start" => self.start_thread(id, params),
             "turn/start" => self.start_turn(id, params, new_model),
             "turn/interrupt" => {
-                // The reader already set the token; this only acknowledges it.
+                // Reached only between turns — a running turn is inside `drive_turn`, not here —
+                // so there is nothing to cancel and the reading thread left a count rather than a
+                // cancellation. Taking it back down here is what keeps it off the next turn: the
+                // client sent this frame before it asked for that turn, and the queue's order is
+                // what says so.
+                if let Ok(mut interrupts) = self.interrupts.lock() {
+                    interrupts.stray = interrupts.stray.saturating_sub(1);
+                }
                 Ok(self.wire.writer.borrow_mut().respond(id, &json!({}))?)
             }
             other => Ok(self.wire.writer.borrow_mut().respond_error(
@@ -318,6 +402,27 @@ impl Server<'_> {
 
         let turn_id = self.mint("turn");
         let message_item_id = self.mint("msg");
+        let control = TurnControl::new();
+        // Installed before the client is told the turn exists, not after. The gap between the two
+        // was a window in which the reading thread found no turn to cancel, and installing early
+        // cannot cancel the wrong one: this connection runs a single turn at a time and
+        // `turn/interrupt` names no turn, so from here on there is exactly one turn an interrupt
+        // could mean. What the client has not been told yet is the id — which it never needed to
+        // send this frame, and which no code path reads.
+        let carried = match self.interrupts.lock() {
+            Ok(mut interrupts) => {
+                let carried = std::mem::take(&mut interrupts.stray);
+                interrupts.active = Some(control.clone());
+                carried
+            }
+            Err(_) => 0,
+        };
+        // Interrupts decoded before this turn could be installed. They are this turn's, by the
+        // queue's order: one sent before `turn/start` would have left the queue before it and the
+        // count would be zero. A client that pipelines the two frames hits this every time rather
+        // than by luck, and it used to be acknowledged and dropped.
+        control.decoded_n(carried);
+
         {
             let mut writer = self.wire.writer.borrow_mut();
             writer.respond(id, &json!({"turn": {"id": turn_id}}))?;
@@ -329,17 +434,6 @@ impl Server<'_> {
                 }),
             )?;
         }
-
-        // A fresh token per turn. Reusing one and clearing it would race the reading thread: an
-        // interrupt decoded just before the clear would be erased, and the turn it was meant to
-        // stop would run to completion while the client held an acknowledgement.
-        let control = TurnControl {
-            cancel: LoopCancel::new(),
-            requested: Arc::new(AtomicBool::new(false)),
-        };
-        if let Ok(mut active) = self.active.lock() {
-            *active = Some(control.clone());
-        }
         let outcome = self.drive_turn(
             &thread_id,
             &turn_id,
@@ -348,8 +442,8 @@ impl Server<'_> {
             &control,
             new_model,
         );
-        if let Ok(mut active) = self.active.lock() {
-            *active = None;
+        if let Ok(mut interrupts) = self.interrupts.lock() {
+            interrupts.active = None;
         }
 
         let mut writer = self.wire.writer.borrow_mut();
@@ -414,7 +508,7 @@ impl Server<'_> {
             thread_id,
             turn_id,
             thread.tools.clone(),
-            control.cancel.clone(),
+            control.clone(),
         );
         // Approval belongs to the client here: it registered these tools and mediates each
         // callback, so a second gate on this side would be a decision nobody asked for.
@@ -424,13 +518,23 @@ impl Server<'_> {
             thread_id,
             turn_id,
             message_item_id,
-            control.cancel.clone(),
+            control.clone(),
         );
 
         let outcome = AgentLoop::new(&mut *model, &mut tools, &mut approvals, config)
             .with_cancel(control.cancel.clone())
             .run(input, &mut sink)
             .map_err(|error| error.to_string())?;
+
+        // Every interrupt this turn was cancelled by is a frame the client is still waiting on an
+        // answer to, and it has to have one *before* the frame that says the turn ended. An
+        // acknowledgement read after `turn/completed` is not an acknowledgement, it is a receipt.
+        // `BridgeSink` drains between streamed events, which covers a turn that streamed anything;
+        // a turn cancelled before its first event never reaches that drain, and one cancelled
+        // before it began never starts a stream to drain between.
+        if let Err(error) = self.wire.settle_interrupts(control) {
+            sink.broken.get_or_insert(error);
+        }
 
         // An interrupt that was actually asked for is the reason this turn ended, even if the
         // connection then dropped. Letting a later write failure overwrite it would report a

@@ -187,8 +187,11 @@ provider it was handed and publishes what that admits, with no branch on which o
 publication gate lives in `Catalogue::of` alone; and `ToolPort` has one implementation,
 `harness_tools::Verbs`. The third implementation — substrate over a socket — exists as
 `harness-substrate::Client` behind the same `ConfinedOperations`, so it is a deployment choice and
-not a different set of things the model may do. What is **not** done is the shared conformance
-suite: each provider has its own tests, and nothing runs one suite against all three.
+not a different set of things the model may do. The shared conformance suite is
+`crates/harness-substrate/tests/conformance.rs`: 34 cases asked of all three implementations, run
+from `scripts/gate.sh` as its own named step. **All three exit conditions are now met** — with two
+differences it found and pinned rather than closed,
+`story:a-confined-write-makes-its-own-parents` and `story:one-spelling-of-a-path-in-every-workspace`.
 
 The original text follows, since it is what the shape was argued from.
 

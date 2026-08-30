@@ -7,6 +7,83 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **An interrupt sent promptly after `turn/start` now stops the turn instead of being acknowledged
+  and ignored** (bridge mode). The server answered `turn/start` and notified `turn/started` before
+  it installed the control its reading thread cancels through, so an interrupt decoded in that
+  window found no turn to cancel, was answered `{"result":{}}` — a success — and cancelled nothing:
+  the client held an acknowledgement saying the turn had stopped and then received the completed
+  answer it had cancelled. A client that pipelines the two frames, as a real bridge does, hit this
+  by construction rather than by luck.
+
+  The control is installed before the client is told the turn exists, and — because the reading
+  thread may not write, and cannot reach a turn that does not exist yet — an interrupt it could not
+  cancel with is now **counted** rather than dropped, and taken over by the turn the queue's order
+  says it belongs to. Which turn that is, if any, is settled by the order frames leave the queue: an
+  interrupt sent *before* `turn/start` is answered before it and cannot arm a trap for the next
+  turn. `Wire::drain_control` cancels where it answers instead of assuming the reading thread
+  already did, and a turn answers every interrupt it was cancelled by **before** its terminal frame
+  — an acknowledgement read after `turn/completed` is a receipt, not an acknowledgement.
+
+  A turn that could not run at all — an unusable budget, a model client that would not build —
+  settles the interrupt that stopped it before its terminal frame, instead of reporting `failed` for
+  a turn a person stopped.
+
+  No wire bytes, method inventory or pinned contract changed. `STATUS.md`'s claim that an interrupt
+  "is acted on when its frame is decoded" now holds.
+
+- A confined read refused for an `offset` past the end of a file no longer blames the route's byte
+  ceiling when nothing reached it. The sentence is now the unconfined provider's, and the ceiling is
+  named only where it cut.
+
+- A `max_bytes` a caller names reaches the same line of a CRLF file through every workspace.
+  `ConfinedOperations` split with `str::lines`, which had dropped the `\r` before the byte ceiling
+  was charged, where the unconfined reader charges it.
+
+- `ConfinedOperations::file_write` and `file_edit` refuse by name on a workspace that answers
+  `Operations::writes() == false`, as `LocalOperations` already did. Unreachable through the
+  catalogue, which publishes on that same question; reachable by an embedder holding the public
+  trait.
+
+### Changed
+
+- **`contracts/cli/b10x-harness/2026-08-30.2`: the argv pin no longer describes a command line this
+  binary does not serve.** Four things in `2026-08-30.1` were wrong in the one direction a driver
+  acts on. 23 flags with `"takes_value": false` recorded a `value_name`, which that document's own
+  field table defines as *the placeholder in the usage line* — and clap prints none for a bare flag.
+  `--substrate-embedded` was among them, the flag this whole contract exists because of: anything
+  generating an invocation from `value_name` emitted `--substrate-embedded SUBSTRATE_EMBEDDED`, the
+  exact word clap refused from the consumer pinned to `0.1.0`. `-p` — `--profile` on `run`, `chat`,
+  `workflow run` and `profiles explain` — was pinned nowhere. clap's own `-h, --help` on every
+  command and `-V, --version` on the root were absent, because the document was read off the
+  definition **before clap built it**, which is how six versions came to omit them. And the document
+  said this command line has no positional arguments while `profiles show <NAME>` and
+  `providers show <NAME>` each require one — so a driver reading it emitted a command clap refused
+  before any harness code ran.
+
+  `2026-08-30.2` cuts a new version rather than editing a released one (`AGENTS.md` invariant 13):
+  `takes_value: false` implies `value_name: null`, every row carries `short`, and `positionals` is a
+  field of its own, per command, in typed order. All are read off clap's own definition, like every
+  other field, and all are compared by the move diff — so a flag that loses its short spelling, or a
+  word that becomes required, is a row a future README has to state.
+
+  **Nothing about the command line moved.** clap accepts exactly what it accepted under
+  `2026-08-30.1`; the new rows are the document being corrected, not the binary.
+
+### Added
+
+- **One conformance suite asks `LocalOperations`, `ConfinedOperations` and `Split` the same
+  questions**, over three real trees, and `scripts/gate.sh` runs it as its own step. 34 cases; a
+  failure names the implementation that answered differently. Three of the three differences it
+  found are fixed above; two it could not close are pinned to today's behaviour, each naming the
+  story filed for it.
+
+- `scripts/check-cli-contract.py --self-test`, 37 planted cases, a gate step of its own — on the
+  argument `check-no-home-paths.py --self-test` already made: a checker that passed everything would
+  look exactly like a green one. Five mutations of the checker that a plain run reports as
+  `7 pinned version(s) verified` all fail it.
+
 ## [0.4.0] — 2026-08-30
 
 ### Added

@@ -52,9 +52,9 @@ The previous observation was 2026-08-30, at `5b8d21a` — `0.2.0` plus the tool-
 
 ## Test counts
 
-1001 tests passed across the workspace and 1 was ignored — 2026-08-30, at `2b57f82`, the wave-3
+1015 tests passed across the workspace and 1 was ignored — 2026-08-30, at `2851fdc`, the wave-4
 integration merge and the commit these counts were read at, `cargo test --workspace --locked
---no-fail-fast`, exit `0`, 0 failed over 40 test binaries. Every row below is read off that one run.
+--no-fail-fast`, exit `0`, 0 failed over 43 test binaries. Every row below is read off that one run.
 The rest of the gate is green in the same tree and produces no test count: `cargo fmt`, `clippy`, and
 the three contract checkers over 7 pinned provider-wire versions, 1 app-server profile and **7**
 command-line versions — two of them, `check-cli-contract.py` and `check-no-home-paths.py`, now run
@@ -71,10 +71,10 @@ the previous page counted are gone, closed by the story they named.
 | `harness-messages` | 44 | 21 provider-emulated, 9 contract, 2 summary-request, 3 transport |
 | `harness-loop` | 195 | — |
 | `harness-flow` | 38 | — |
-| `harness-substrate` | 52 | 34 conformance, 5 embedded-live; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
+| `harness-substrate` | 52 | 34 conformance, 7 embedded-live, 1 create-comment; `live` ignored, it needs a daemon — run green on 2026-08-29 against one |
 | `harness-tools` | 83 | — |
 | `harness-app-server` | 19 | 5 contract |
-| `harness-cli` | 234 | 48 end-to-end, 28 bridge-mode, 24 workflow, 5 argv-pin, 3 withheld-tools, 3 context |
+| `harness-cli` | 234 | 51 end-to-end, 28 bridge-mode, 24 workflow, 9 argv-pin (3 consumer, 6 adversary), 3 withheld-tools, 3 context, 2 help-text |
 
 The provider-emulated, end-to-end, bridge-mode and withheld-tools suites drive real processes: a local HTTP endpoint
 over a socket, and the built binary over pipes — including `chat` driven down a pipe, a session

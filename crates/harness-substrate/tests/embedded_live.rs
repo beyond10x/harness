@@ -159,25 +159,67 @@ fn a_project_directory_is_adopted_under_its_own_name_and_a_bad_one_says_what_to_
     assert!(error.contains("is not a directory to adopt"), "{error}");
 }
 
-/// `workspace_adopt`'s own documentation states the rule the case above measures.
+/// `workspace_adopt`'s documentation admits exactly the names its body adopts.
 ///
 /// Its `# Errors` section said the name "must begin `ws_` and hold only alphanumerics and
 /// underscores" while the body seventeen lines below adopted `work-native`. Same commit as the
 /// help-text defect (`0c31438`), same class, smaller surface: the prefix went at substrate `0.2.2`
 /// and the sentence describing it did not.
 ///
-/// Read out of this crate's own source, because a doc comment is reachable from nowhere else — and
-/// a doc comment nothing reads is exactly how this one survived the commit that falsified it. What
-/// is asserted is the pair the case above proves: the dropped rule is not named, and the rule that
-/// is enforced is, in the words the refusal uses.
+/// The doc comment is read out of this crate's own source, because it is reachable from nowhere
+/// else — and a doc comment nothing reads is exactly how this one survived the commit that
+/// falsified it.
+///
+/// # Decoded, not searched for
+///
+/// Asserting that the sentence does not say `ws_` and does say "one path component" is satisfied by
+/// a sentence naming the wrong characters: a rustdoc mutated to "alphanumerics and `_`" passed one
+/// line below a case that adopts `work-native`. So the **alphabet the sentence names** is decoded
+/// out of it and used to classify probe names, each of which is separately handed to the driver.
+/// Sentence and body must agree on every one, and the refusal the body produces is held to the same
+/// standard — it is what a caller reads when the name is wrong, and a rule they cannot act on is no
+/// better than the one this story was opened about.
 #[test]
-fn the_documentation_on_workspace_adopt_states_the_rule_its_body_enforces() {
+fn the_documentation_on_workspace_adopt_admits_the_names_its_body_adopts() {
+    // A hyphen, an underscore, a digit, a dot, three scripts whose letters are not ASCII, and a
+    // name that would read as an option wherever it reaches an argv.
+    const PROBES: [&str; 8] = [
+        "my-project",
+        "my_project",
+        "project9",
+        "my.project",
+        "café",
+        "Projekt-Übung",
+        "日本語",
+        "-rf",
+    ];
+
+    let root = tempfile::tempdir().expect("a temporary root");
+    let embedded = Embedded::open(root.path(), None).expect("the driver opens");
+    let mut adopts: std::collections::BTreeMap<&str, bool> = std::collections::BTreeMap::new();
+    let mut a_refusal = String::new();
+    for name in PROBES {
+        std::fs::create_dir(root.path().join(name)).expect("a directory to offer");
+        match embedded.workspace_adopt(name) {
+            Ok(_) => {
+                adopts.insert(name, true);
+            }
+            Err(error) => {
+                a_refusal = error.to_string();
+                adopts.insert(name, false);
+            }
+        }
+    }
+    assert!(
+        adopts.values().any(|held| *held) && adopts.values().any(|held| !*held),
+        "the probes have to fall on both sides of the rule or they measure nothing: {adopts:?}"
+    );
+
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("embedded.rs");
     let text = std::fs::read_to_string(&source)
         .unwrap_or_else(|error| panic!("reading `{}`: {error}", source.display()));
-
     let signature = "pub fn workspace_adopt(";
     let lines: Vec<&str> = text.lines().collect();
     let declared = lines
@@ -194,16 +236,106 @@ fn the_documentation_on_workspace_adopt_states_the_rule_its_body_enforces() {
         !doc.is_empty(),
         "`workspace_adopt` carries a doc comment, or there is nothing here to check"
     );
-    let doc = doc.join("\n");
+    let doc = flowed(&doc.join(" "));
+
+    let mut wrong: Vec<String> = Vec::new();
+    for (named, text) in [
+        ("its documentation", &doc),
+        ("its refusal", &flowed(&a_refusal)),
+    ] {
+        if text.contains("ws_") {
+            wrong.push(format!(
+                "  {named} still demands a `ws_` prefix, which the body dropped at substrate 0.2.2"
+            ));
+            continue;
+        }
+        let Some(rule) = alphabet_stated_by(text) else {
+            wrong.push(format!(
+                "  {named} states no rule this case can read — it has to say `one path component \
+                 of …, and may not …` — so it cannot be compared with what the body does"
+            ));
+            continue;
+        };
+        for (name, adopted) in &adopts {
+            let says = rule.admits(name);
+            if says != *adopted {
+                wrong.push(format!(
+                    "  {named} says `{name}` is {}, and the body {} it",
+                    if says { "a legal name" } else { "illegal" },
+                    if *adopted { "adopts" } else { "refuses" }
+                ));
+            }
+        }
+    }
 
     assert!(
-        !doc.contains("ws_"),
-        "the documentation on `workspace_adopt` still demands a `ws_` prefix its body dropped at          substrate 0.2.2 — the case above adopts `work-native`:\n{doc}"
+        wrong.is_empty(),
+        "the workspace-name rule `workspace_adopt` states and the one it keeps:\n{}",
+        wrong.join("\n")
     );
-    assert!(
-        doc.contains("one path component"),
-        "and it has to state the rule the body does enforce, in the words the refusal uses:\n{doc}"
-    );
+}
+
+/// The character rule a sentence states, decoded from the sentence's own words.
+struct StatedRule {
+    /// Whether it says the alphanumerics are `ASCII`, which is what the code checks.
+    ascii_only: bool,
+    /// The single characters it lists beside them.
+    beside: std::collections::BTreeSet<char>,
+    /// Whether it refuses a name that would read as an option.
+    leading_dash_refused: bool,
+}
+
+impl StatedRule {
+    /// Whether the rule, as stated, admits this name.
+    fn admits(&self, name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        if self.leading_dash_refused && name.starts_with('-') {
+            return false;
+        }
+        name.chars().all(|character| {
+            (character.is_alphanumeric() && (!self.ascii_only || character.is_ascii()))
+                || self.beside.contains(&character)
+        })
+    }
+}
+
+/// The alphabet clause of a stated rule: everything between `path component of` and the
+/// `, and may not` that begins the shape rule.
+///
+/// Scoped to that clause on purpose. `` `-` `` appears again in "may not … begin with `-`", and a
+/// reader that took every backticked character in the sentence would count the hyphen as admitted
+/// however the alphabet clause was rewritten.
+fn alphabet_stated_by(text: &str) -> Option<StatedRule> {
+    let clause = text
+        .split_once("path component of")?
+        .1
+        .split_once(", and may not")?
+        .0;
+    Some(StatedRule {
+        ascii_only: clause.contains("ASCII"),
+        beside: clause
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter_map(|token| {
+                let mut characters = token.chars();
+                let single = characters.next()?;
+                characters.next().is_none().then_some(single)
+            })
+            .collect(),
+        leading_dash_refused: text.contains("begin with `-`"),
+    })
+}
+
+/// A doc comment's `///` markers stripped and its lines run together, so a rule wrapped across
+/// three lines is one sentence to read.
+fn flowed(text: &str) -> String {
+    text.replace("///", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[test]

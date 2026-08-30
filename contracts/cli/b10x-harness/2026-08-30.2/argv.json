@@ -2155,6 +2155,38 @@
       }
     ]
   },
+  "positionals": {
+    "app-server": [],
+    "b10x-harness": [],
+    "chat": [],
+    "events": [],
+    "profiles": [],
+    "profiles explain": [],
+    "profiles init": [],
+    "profiles list": [],
+    "profiles show": [
+      {
+        "multiple": false,
+        "name": "NAME",
+        "required": true
+      }
+    ],
+    "providers": [],
+    "providers list": [],
+    "providers show": [
+      {
+        "multiple": false,
+        "name": "NAME",
+        "required": true
+      }
+    ],
+    "run": [],
+    "sessions": [],
+    "tools": [],
+    "workflow": [],
+    "workflow plan": [],
+    "workflow run": []
+  },
   "product": "b10x-harness",
   "subcommands": [
     "app-server",

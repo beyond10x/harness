@@ -13,7 +13,7 @@ same commands. Every one of the 27 rows below is this document being corrected t
 binary was already doing, so nothing here can break an invocation that already worked. What they
 change is what a driver **generating** an invocation from this document will emit.
 
-Three things were wrong.
+Four things were wrong.
 
 **23 flags that eat no word named a placeholder for one.** `value_name` is defined below as the
 placeholder in the usage line, and clap prints none for a bare flag: `b10x-harness run --help`
@@ -41,6 +41,16 @@ drove. The definition is now built before it is read, and 19 rows arrive with it
 root and on each of the seventeen commands, and `--version` on the root. They are arrivals — no
 invocation that worked before can break on a flag that was always accepted and is only now written
 down — so they take no row in the table below.
+
+**And this document said the command line had no positional arguments.** It said it as a fact about
+the binary — *"positional arguments are not recorded because this command line has none: every value
+is named"* — and `b10x-harness profiles show` exits `1` with *"the following required arguments were
+not provided: `<NAME>`"*. `providers show` is the same. A driver reading `2026-08-30.1` saw two rows
+for `profiles show` — clap's `--help`, and nothing `required` — generated
+`b10x-harness profiles show`, and was refused by clap before any harness code ran: the
+`--substrate-embedded` failure on another axis, and it survived all six earlier cuts because the
+document had no field to hold a positional. There is one now, `positionals`, and what it records is
+an arrival like the flags above.
 
 | command | flag | field | in `2026-08-30.1` | in `2026-08-30.2` |
 | --- | --- | --- | --- | --- |
@@ -157,6 +167,10 @@ launches this binary and reads its `--json` record.
 | `arguments[…][].required` | whether omitting it is a parse error |
 | `arguments[…][].conflicts_with` | every flag it may not appear beside, **both directions** |
 | `arguments[…][].requires` | every flag it may not appear **without** |
+| `positionals` | per command, the same command set `arguments` names — the words typed after the verb, **in the order they are typed** |
+| `positionals[…][].name` | the placeholder, as the usage line spells it inside `<>` or `[]` |
+| `positionals[…][].required` | whether omitting the word is a parse error — `<NAME>` in the usage line, against `[NAME]` |
+| `positionals[…][].multiple` | whether more than one word lands in it |
 
 **clap's own arguments are rows like any other**, because they are command lines a consumer types:
 every command carries `-h, --help`, the root carries `-V, --version`, and a driver reads
@@ -195,8 +209,12 @@ would say `workflow` accepts no flags at all: true of the word, false of every v
 the second is the half that breaks a driver. The word itself is listed too, with the empty flag row
 set it really has, so `subcommands` still names everything that exists.
 
-Positional arguments are not recorded because this command line has none: every value is named,
-which is what makes an invocation in a driver's source readable three months later.
+Positional arguments are in `positionals` and not in `arguments`, because the two are found
+differently: a flag by its name, a positional by its place. So that list is **not** sorted — it is
+in the order the words are typed, and sorting it would describe a command line nobody can type —
+and it is keyed by command exactly as `arguments` is, empty for the sixteen commands that take no
+word. Two take one, and both refuse to run without it: `profiles show <NAME>` and
+`providers show <NAME>`.
 
 ## What is not pinned
 
@@ -205,10 +223,11 @@ are stated in `README.md` and are `0` answered, `2` stopped for a named reason, 
 
 **clap's generated `help` subcommand, and every path under it** — `help`, `help run`,
 `profiles help explain`, and even `help help` — is not pinned either, and appears in neither
-`subcommands` nor `arguments`. Typing `help <command>` prints the same help text the flag does,
-and that text is the first thing this section declines to pin; enumerating the tree clap generates
-for it would put `help help help` in the list a driver reads. The flags clap generates are a different
-question and are pinned, in a row each — see *What is pinned* above.
+`subcommands`, `arguments` nor `positionals`. Typing `help <command>` prints the same help text
+the flag does and does nothing else, and that text is the first thing this section declines to pin;
+enumerating the tree would put 33 more paths in the list a driver enumerates as this product's
+verbs, `help help` among them. The flags clap generates are a different question and **are**
+pinned, in a row each — see *What is pinned* above.
 
 ## Checked from both directions
 
@@ -220,6 +239,8 @@ question and are pinned, in a row each — see *What is pinned* above.
 | a flag that eats no word names no placeholder | `crates/harness-cli/src/contract.rs`, `a_flag_that_eats_no_word_records_no_placeholder_for_one`, and `scripts/check-cli-contract.py` |
 | every short flag clap accepts, on the **built** command line, is a row here or is named in *What is not pinned* | `crates/harness-cli/src/contract.rs`, `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` |
 | a flag that loses its short spelling is a move a README has to state | `crates/harness-cli/src/contract.rs`, `a_flag_that_loses_its_short_spelling_is_a_move` |
+| a positional the binary requires is recorded, and one that becomes required is a move | `crates/harness-cli/src/contract.rs`, `a_positional_the_binary_requires_is_pinned` and `a_positional_that_becomes_required_or_vanishes_is_a_move`, and `scripts/check-cli-contract.py` |
+| a bare flag holds no default this document silently drops | `crates/harness-cli/src/contract.rs`, `a_flag_that_eats_no_word_holds_no_default_but_claps_own` |
 | every rule the checker holds fires on a document that breaks it | `scripts/check-cli-contract.py --self-test`, its own gate step |
 
 Neither is sufficient alone: a checker alone pins a document nothing produces, and a Rust test

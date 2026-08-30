@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use b10x_harness_cli::contract::ARGV_CONTRACT_VERSION;
+use b10x_harness_cli::contract::{ARGV_CONTRACT_VERSION, unpinned_short_flags};
 use serde_json::Value;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
@@ -239,28 +239,20 @@ fn the_short_flag_guard_still_fails_when_a_short_flag_leaves_the_document() {
     assert_eq!(profile["short"], "-p", "the cut pinned `-p` on `run`");
     profile["short"] = Value::Null;
 
-    // `crates/harness-cli/src/contract.rs`, the decision of
-    // `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned`, reproduced.
-    let disclaimed = what_is_not_pinned(&pinned_readme());
-    let reports = |document: &Value| -> bool {
-        let recorded = document["arguments"]["run"]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .any(|row| row["long"] == "--profile" && row["short"] == "-p");
-        let named_as_unpinned = disclaimed.contains("`-p`") || disclaimed.contains("`--profile`");
-        !recorded && !named_as_unpinned
-    };
-
+    // The guard itself, not a copy of it: `unpinned_short_flags` is the function
+    // `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` calls, so reverting its
+    // escape to a whole-file search fails here too. While this case reproduced the decision
+    // locally, that revert left every test in the crate green.
+    let readme = pinned_readme();
     assert!(
-        reports(&document),
+        !unpinned_short_flags(&document, &readme).is_empty(),
         "`-p` was taken off `run --profile` and the guard \
          `a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` reports nothing: its \
          hatch is open on a README that merely uses the word, and the guard is unconditionally \
          green and pins nothing."
     );
     assert!(
-        !reports(&pinned_document()),
+        unpinned_short_flags(&pinned_document(), &readme).is_empty(),
         "and it reports nothing about the document as pinned, where `-p` is on the row"
     );
 }
@@ -301,5 +293,142 @@ fn the_status_page_names_the_argv_contract_version_this_build_pins() {
         "`STATUS.md` describes the command line against a superseded contract version; this build \
          pins `{ARGV_CONTRACT_VERSION}`:\n{}",
         superseded.join("\n")
+    );
+}
+
+/// The positional arguments the pinned document says this command line does not have.
+///
+/// `2026-08-30.2/README.md:198` states it as a fact about the binary, not as a scope decision:
+/// *"Positional arguments are not recorded because this command line has none: every value is
+/// named"*. Two commands take a **required** one — `b10x-harness profiles show <NAME>` and
+/// `b10x-harness providers show <NAME>` — and `profiles show` with no word after it exits `1`
+/// with `error: the following required arguments were not provided: <NAME>`.
+///
+/// This is the failure the contract was cut for, in the direction it was cut for. A driver
+/// generating an invocation from the document reads two rows for `profiles show` — `--help`, and
+/// nothing `required` — emits `b10x-harness profiles show`, and is refused by clap before any
+/// harness code runs, with nothing in the pin that could have told it otherwise. `required: true`
+/// never appears for `<NAME>` because `flags()` filters positionals out
+/// (`crates/harness-cli/src/contract.rs:141`) and no field of the document has anywhere to put it.
+///
+/// Of the two fixes — record positionals in a field of their own, or say plainly that they exist
+/// and are unpinned — the first was taken, so this asserts the stronger thing: what the binary
+/// prints under `Arguments:` is what `positionals` records, placeholder for placeholder and in the
+/// order the words are typed. What may not stand is the claim that the command line has none.
+#[test]
+fn a_command_line_the_document_says_has_no_positionals_has_two() {
+    let document = pinned_document();
+    let mut unaccounted: Vec<String> = Vec::new();
+    for path in commands(&document) {
+        let named = if path.is_empty() {
+            "b10x-harness".to_owned()
+        } else {
+            path.clone()
+        };
+        // What the help page shows, as a driver would read it: `<NAME>` is demanded, `[NAME]` may
+        // be left out.
+        let shown: Vec<(String, bool)> = positionals_in(&help_of(&path))
+            .iter()
+            .map(|placeholder| {
+                (
+                    placeholder.trim_matches(['<', '>', '[', ']']).to_owned(),
+                    placeholder.starts_with('<'),
+                )
+            })
+            .collect();
+        let recorded: Vec<(String, bool)> = document["positionals"][&named]
+            .as_array()
+            .unwrap_or_else(|| panic!("`{named}` has a positional list in the pinned document"))
+            .iter()
+            .map(|row| {
+                (
+                    row["name"].as_str().expect("a placeholder").to_owned(),
+                    row["required"].as_bool().expect("a boolean"),
+                )
+            })
+            .collect();
+        if shown != recorded {
+            unaccounted.push(format!(
+                "  `{named}`: prints {shown:?}, records {recorded:?}"
+            ));
+        }
+    }
+    assert!(
+        unaccounted.is_empty(),
+        "the words this binary takes after a verb, and what `{ARGV_CONTRACT_VERSION}` says it \
+         takes, in the order they are typed:\n{}",
+        unaccounted.join("\n")
+    );
+}
+
+/// The placeholders one help page lists under `Arguments:`.
+///
+/// clap prints that heading only for a command that takes a positional, and prints one indented
+/// line per placeholder under it.
+fn positionals_in(help: &str) -> Vec<String> {
+    let mut inside = false;
+    let mut found = Vec::new();
+    for line in help.lines() {
+        if !line.starts_with(char::is_whitespace) && line.trim_end().ends_with(':') {
+            inside = line.trim() == "Arguments:";
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('<') || trimmed.starts_with('[') {
+            found.push(
+                trimmed
+                    .split_whitespace()
+                    .next()
+                    .expect("a placeholder")
+                    .to_owned(),
+            );
+        }
+    }
+    found
+}
+
+/// Every command line the *What is not pinned* section names as one clap generates is one the
+/// binary accepts.
+///
+/// That section justifies leaving the generated `help` tree out by saying *"enumerating the tree
+/// clap generates for it would put `help help help` in the list a driver reads"*, and
+/// `crates/harness-cli/src/contract.rs` repeats it. `b10x-harness help help help` exits `1` with
+/// `error: unrecognized subcommand 'help'`: the generated tree is finite at 33 paths, three words
+/// at most, and `help help help` is not one of them.
+///
+/// The decision to leave the tree unpinned is not what this case disputes — the help text is
+/// unpinned and `help <command>` prints it. What it disputes is a **pinned, immutable** document
+/// stating something about this binary that is not true, which is the defect the whole chain of
+/// these READMEs exists to stop repeating. The fix is a sentence, and the document has not been
+/// pushed yet.
+#[test]
+fn the_help_tree_the_readme_names_as_generated_is_one_the_binary_accepts() {
+    let section = what_is_not_pinned(&pinned_readme());
+    let mut refused: Vec<String> = Vec::new();
+    for token in section.split('`').skip(1).step_by(2) {
+        let words: Vec<&str> = token.split_whitespace().collect();
+        if words.first() != Some(&"help") || token.contains('<') {
+            continue;
+        }
+        let status = Command::new(BINARY)
+            .args(&words)
+            .output()
+            .unwrap_or_else(|error| panic!("running `{BINARY} {token}`: {error}"))
+            .status;
+        if !status.success() {
+            refused.push(format!(
+                "  `b10x-harness {token}` exits {:?}",
+                status.code()
+            ));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "`{ARGV_CONTRACT_VERSION}/README.md`'s `What is not pinned` section names these as paths \
+         clap generates, and the binary refuses them:\n{}",
+        refused.join("\n")
     );
 }

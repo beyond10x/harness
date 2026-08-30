@@ -40,8 +40,15 @@
 //! no daemon, no socket and no credential, so every case below runs on every machine. Execution is
 //! the one thing a host without a delegated cgroup subtree cannot confine, and that is **asserted
 //! rather than skipped** — see
-//! `execution_is_offered_by_exactly_the_workspaces_this_machine_lets_confine_one`. There is no
-//! early return anywhere in this file.
+//! `execution_is_offered_by_exactly_the_workspaces_this_machine_lets_confine_one`.
+//!
+//! **No branch in this file reports a pass without asserting something.** That is the property, and
+//! it is not the same as having no `return`: where a workspace cannot offer an operation on this
+//! machine, the branch asserts that it does not offer it. The sentence here used to claim there was
+//! no early return anywhere, and there was one — `the_declared_set_is_what_run_accepts` returned
+//! `Ok(())` for every workspace with an empty `programs()`, which on a host with no delegated
+//! cgroup subtree is two of the three. That is the `embedded_live.rs` shape this file exists not to
+//! repeat, and it was in it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -588,7 +595,15 @@ fn a_workspace_that_says_it_cannot_write_does_not_in_any_implementation() {
 /// Only the plain case: the trait's default answers the path as written and argues for it, so a
 /// symlink or an escape is where the implementations are *allowed* to differ and this suite says
 /// nothing about them.
+///
+/// **`sub/` is seeded first, and that is load-bearing.** Asked about `sub/new.txt` in a tree with
+/// no `sub/`, all three agree on *where* the write would land for exactly the case where they
+/// disagree on *whether* it lands at all — see
+/// `a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_workspace`, which
+/// pins that split. Agreement about the address of a write that only one of them performs is
+/// agreement about nothing.
 fn a_plain_path_lands_under_its_own_name(workspace: &Workspace) -> Result<(), String> {
+    workspace.seed("sub/already.txt", FIVE_LINES);
     match workspace.operations.lands("sub/new.txt") {
         Ok(landed) if landed == "sub/new.txt" => Ok(()),
         Ok(landed) => Err(format!("a new file under `sub/` lands at `{landed}`")),
@@ -719,17 +734,32 @@ fn an_empty_argv_is_refused_without_naming_a_program_in_every_workspace() {
     );
 }
 
-/// A program the workspace *does* declare is not refused for not being declared.
+/// `run` accepts exactly the set `programs()` names — both halves of that, on every machine.
 ///
-/// Where `programs()` is empty the assertion is the other half of the same rule — every program is
-/// refused — so this asserts something on every machine and skips nothing.
+/// Where the set is empty the statement is *this workspace starts nothing*, and that half is
+/// asserted here rather than left to `an_undeclared_program_is_refused_by_name`. The two overlap on
+/// purpose: a branch that returned `Ok` because there was nothing to try would report a pass for a
+/// workspace nothing had been asked of, which is exactly what this file claims not to do. On a host
+/// with no delegated cgroup subtree that branch is the one two of the three workspaces take.
 fn the_declared_set_is_what_run_accepts(workspace: &Workspace) -> Result<(), String> {
     let declared = workspace.operations.programs().to_vec();
     let Some(program) = declared.first() else {
-        // Nothing declared: the rule is that nothing starts, which
-        // `an_undeclared_program_is_refused_by_name` has already asked of this same workspace with
-        // an empty `declared`. Asserting it again here would be the same assertion twice.
-        return Ok(());
+        let argv = [DECLARED[0].to_owned()];
+        return match workspace.operations.run(&argv) {
+            Ok(answer) => Err(format!(
+                "declared no program and started `{}` anyway: {answer}",
+                DECLARED[0]
+            )),
+            Err(refused) => match refused.refusal() {
+                Some(Refusal::ProgramNotDeclared { declared, .. }) if declared.is_empty() => Ok(()),
+                Some(Refusal::ProgramNotDeclared { declared, .. }) => Err(format!(
+                    "`programs()` is empty and the refusal names {declared:?} as the declared set"
+                )),
+                None => Err(format!(
+                    "declared no program and refused without naming the rule: {refused}"
+                )),
+            },
+        };
     };
     let argv = [program.clone(), "conformance".to_owned()];
     match workspace
@@ -931,4 +961,242 @@ fn a_workspace_that_breaks_the_read_contract_is_named_by_this_suite() {
             "{behaviour}: and must not blame the one that kept it: {named}"
         );
     }
+}
+
+// --- added by adversarial verification: questions this suite does not yet ask --------------------
+//
+// Every case below is asked through the runners above, so a failure names the implementation that
+// answers differently — the property the story's acceptance statement turns on. Three of them are
+// **red against `e8d9f6b`**: three behaviours differ between the implementations and the suite as
+// committed is green.
+
+/// The same five lines with CRLF endings, which is what a file written on the other platform holds.
+const FIVE_CRLF_LINES: &str = "alpha\r\nbeta\r\ngamma\r\ndelta\r\nepsilon\r\n";
+
+/// A byte ceiling the **caller named** answers the same lines everywhere.
+///
+/// Not the carve-out the module header makes. That one is about each provider's *own* default
+/// ceiling, "at figures each names". This is `max_bytes`, which the caller states and
+/// `Catalogue::of`'s `file_read` schema publishes to the model
+/// (`harness-tools/src/catalogue.rs:646`), so a model can and does name it. `ReadWindow::max_bytes`
+/// is documented as "How many bytes of the file this read may take" — one number, one meaning.
+///
+/// It has two meanings on a CRLF file. `LocalOperations` charges the `\r` to the ceiling by name
+/// (`harness-tools/src/local.rs`, `Line::length`: "separator excluded, `\r` included. What the byte
+/// ceiling is charged"); `ConfinedOperations` splits with `str::lines`, which dropped the `\r`
+/// before the weight was taken (`harness-substrate/src/tools.rs:194,216`). One byte a line, so the
+/// two answer a different number of lines of the same file under the same stated ceiling.
+#[test]
+fn a_caller_named_byte_ceiling_answers_the_same_lines_of_a_crlf_file_in_every_workspace() {
+    all_agree(
+        "`max_bytes` is a number the caller states and the model can send; the same number over the \
+         same bytes must reach the same line:",
+        |workspace| {
+            workspace.seed("crlf.txt", FIVE_CRLF_LINES);
+            answered(workspace.operations.file_read(
+                "crlf.txt",
+                ReadWindow {
+                    offset: None,
+                    limit: None,
+                    max_bytes: Some(12),
+                },
+            ))
+        },
+    );
+}
+
+/// A write to a path whose parent directory does not exist yet is **not** one answer today.
+///
+/// # This case pins a difference instead of asserting the contract, on purpose
+///
+/// The one write a model makes constantly — a new module, a new test, a new document under a
+/// directory the tree does not have yet. `LocalOperations` creates the parents and has its own test
+/// saying so (`harness-tools/src/local.rs`,
+/// `a_new_file_under_directories_that_do_not_exist_yet_still_writes`); the confined route answers
+/// `resource.not-found` and writes nothing. `Split` executes through its confined half, and `Split`
+/// is what `harness-cli` composes, so this is a live difference a run sees between
+/// `--substrate-embedded` and without it — not a latent one.
+///
+/// It is pinned rather than closed because closing it is not this unit's change and neither
+/// direction is small. Making the confined route create its parents needs a directory route on
+/// `Backend`, which carries five operations and has two implementations and a wire contract behind
+/// it. Making the unconfined provider stop creating them removes documented, tested behaviour that
+/// real runs use. **Story: `story:a-confined-write-makes-its-own-parents`.**
+///
+/// **When this case goes red, do not widen it.** Red here means one of the two sides moved. If the
+/// confined route learned to create parents, delete this case and let
+/// `a_write_puts_exactly_those_bytes_there_in_every_workspace` be asked of `deep/down/new.txt`
+/// instead — the contract is then assertable and this pin is in the way. If the unconfined provider
+/// stopped creating them, the same. Anything else is a regression in whichever side changed.
+fn a_write_under_a_directory_that_does_not_exist_yet(workspace: &Workspace) -> Result<(), String> {
+    let outcome = workspace
+        .operations
+        .file_write("deep/down/new.txt", FIVE_LINES);
+    let landed = workspace.on_disk("deep/down/new.txt").as_deref() == Some(FIVE_LINES);
+    // What each does **today**, read off the implementations and not off the trait.
+    let creates_parents = workspace.name == "LocalOperations";
+    if landed == creates_parents && outcome.is_ok() == creates_parents {
+        return Ok(());
+    }
+    Err(format!(
+        "this workspace {} create the parents of a new file, and now it {} — see \
+         `story:a-confined-write-makes-its-own-parents` and this case's own note before changing \
+         anything here (outcome {outcome:?}, on disk: {landed})",
+        if creates_parents { "did" } else { "did not" },
+        if landed { "did" } else { "did not" },
+    ))
+}
+
+#[test]
+fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_workspace() {
+    every_workspace(
+        "a new file under a new directory is the commonest write there is, and today one workspace \
+         does it where two refuse — this case holds that split still and exactly:",
+        a_write_under_a_directory_that_does_not_exist_yet,
+    );
+}
+
+/// `./notes.txt` and `notes.txt` do **not** name one file in every workspace today.
+///
+/// # A second difference pinned rather than closed, and why the pin is where it is
+///
+/// A leading `./` names the same file by every reading of the trait — it is not what `# Errors`
+/// means by "outside the workspace". `LocalOperations` reads it, because `Path::join` and
+/// `canonicalize` resolve it; the confined route hands the path to substrate, which answers
+/// `workspace.path-escape`. `Split` reads through its local half, so the same spelling is a file
+/// through two of the three and a boundary violation through one.
+///
+/// **The fix does not belong in this crate.** `harness-substrate/src/backend.rs` says it in its own
+/// words: "A path that leaves the workspace is refused by substrate and never by this crate:
+/// re-implementing containment here would make two answers to one question, and the wrong one would
+/// be the one nobody was looking at." Normalising `./` here is the first half of exactly that. The
+/// two places it could live are substrate's own path handling and
+/// `harness_tools::Catalogue`, which is the one gate every provider is reached through — and that
+/// second one changes what every entry receives, for every embedder, which is a design change with
+/// its own blast radius. Smaller than the parent-directory split above: nothing published tells a
+/// model that `./` is legal for `file_read`, so this is habit rather than a documented workflow.
+/// **Story: `story:one-spelling-of-a-path-in-every-workspace`.**
+///
+/// **When this case goes red**, whichever side moved, delete it and fold `./notes.txt` into
+/// `every_workspace_answers_the_same_whole_small_file` — the contract is assertable at that point
+/// and this pin only hides it.
+fn a_path_spelled_with_a_leading_dot(workspace: &Workspace) -> Result<(), String> {
+    workspace.seed("notes.txt", FIVE_LINES);
+    let read = workspace
+        .operations
+        .file_read("./notes.txt", ReadWindow::whole());
+    // What each does **today**: only the provider that hands the path to substrate refuses it.
+    let refuses_the_spelling = workspace.name == "ConfinedOperations";
+    match (&read, refuses_the_spelling) {
+        (Ok(answer), false) if answer["lines"]["total"] == json!(5) => Ok(()),
+        (Err(why), true) if why.contains("path-escape") => Ok(()),
+        _ => Err(format!(
+            "this workspace {} read `./notes.txt` today, and now the answer is {read:?} — see \
+             `story:one-spelling-of-a-path-in-every-workspace` and this case's own note before \
+             changing anything here",
+            if refuses_the_spelling {
+                "refused to"
+            } else {
+                "did"
+            },
+        )),
+    }
+}
+
+#[test]
+fn a_path_spelled_with_a_leading_dot_names_the_same_file_in_every_workspace() {
+    every_workspace(
+        "`./notes.txt` is inside the workspace by every reading of the trait, and today one \
+         workspace answers it as an escape — this case holds that split still and exactly:",
+        a_path_spelled_with_a_leading_dot,
+    );
+}
+
+/// A write that leaves the workspace is refused, and the file outside is untouched.
+///
+/// The module header says this is asserted — "the *write* refuses either way, and that is what is
+/// asserted". Nothing above asked it: every `file_write` in this file names a path inside the tree,
+/// and `a_path_outside_the_workspace_is_refused_by_every_workspace` asks it of `file_read` alone.
+/// The trait states it for the write in its own `# Errors` ("or is outside the workspace"), so it
+/// is a rule of the contract rather than an implementation's choice.
+fn a_write_outside_the_workspace_is_refused(workspace: &Workspace) -> Result<(), String> {
+    let outside = workspace.tree.parent().expect("the tree has a parent");
+    let victim = outside.join("victim.txt");
+    std::fs::write(&victim, "original\n").expect("a file outside the tree");
+    let outcome = workspace.operations.file_write("../victim.txt", "owned\n");
+    if std::fs::read_to_string(&victim).unwrap_or_default() != "original\n" {
+        return Err(format!(
+            "the write left the workspace and overwrote a file outside it: {outcome:?}"
+        ));
+    }
+    match outcome {
+        Ok(answer) => Err(format!(
+            "reported a write to a path outside the workspace: {answer}"
+        )),
+        Err(why) if why.is_empty() => Err("refused with an empty sentence".to_owned()),
+        Err(_) => Ok(()),
+    }
+}
+
+#[test]
+fn a_write_outside_the_workspace_is_refused_by_every_workspace() {
+    every_workspace(
+        "the workspace bounds the effects as well as the reads, and the file outside stays as it \
+         was:",
+        a_write_outside_the_workspace_is_refused,
+    );
+}
+
+/// The same, for the other effecting operation on a file.
+fn an_edit_outside_the_workspace_is_refused(workspace: &Workspace) -> Result<(), String> {
+    let outside = workspace.tree.parent().expect("the tree has a parent");
+    let victim = outside.join("edited.txt");
+    std::fs::write(&victim, FIVE_LINES).expect("a file outside the tree");
+    let outcome = workspace
+        .operations
+        .file_edit("../edited.txt", "gamma", "GAMMA");
+    if std::fs::read_to_string(&victim).unwrap_or_default() != FIVE_LINES {
+        return Err(format!(
+            "the edit left the workspace and changed a file outside it: {outcome:?}"
+        ));
+    }
+    match outcome {
+        Ok(answer) => Err(format!(
+            "reported an edit to a path outside the workspace: {answer}"
+        )),
+        Err(why) if why.is_empty() => Err("refused with an empty sentence".to_owned()),
+        Err(_) => Ok(()),
+    }
+}
+
+#[test]
+fn an_edit_outside_the_workspace_is_refused_by_every_workspace() {
+    every_workspace(
+        "an edit reads and then writes, and both halves stop at the same boundary:",
+        an_edit_outside_the_workspace_is_refused,
+    );
+}
+
+/// A line longer than one reply may carry is cut at the same place in every workspace.
+///
+/// The longest line this suite otherwise reads is `epsilon`, seven characters. Both providers cut a
+/// line at 2,000 characters and both say which lines they cut in `truncated_lines`, and
+/// `harness-substrate/src/tools.rs:132` calls that figure "the same figure the unconfined provider
+/// uses … so a run's replies must not change shape when it is confined" — a stated agreement with
+/// nothing asking either side about it. Setting the confined provider's figure to `7` leaves the
+/// committed suite 22/22 green; this case is what notices.
+#[test]
+fn a_line_longer_than_one_reply_may_carry_is_cut_the_same_way_in_every_workspace() {
+    all_agree(
+        "the per-line ceiling and `truncated_lines` are a stated agreement between the two \
+         providers, and a run's replies must not change shape when it is confined:",
+        |workspace| {
+            workspace.seed("wide.txt", &format!("{}\n", "x".repeat(2_500)));
+            answered(
+                workspace
+                    .operations
+                    .file_read("wide.txt", ReadWindow::whole()),
+            )
+        },
+    );
 }

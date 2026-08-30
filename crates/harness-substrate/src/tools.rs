@@ -191,8 +191,30 @@ impl Operations for ConfinedOperations {
         // — or a file of exactly that size, which is answered the same way for want of the route's
         // own `eof`. Anything shorter is the file.
         let ceiling_cut = bytes >= self.read_ceiling_bytes;
-        let lines: Vec<&str> = whole.lines().collect();
-        let total = lines.len() as u64;
+        // `split_inclusive` and not `lines`, so the separator each line actually carries is still
+        // in view when the byte ceiling is charged.
+        //
+        // **`max_bytes` is a number the caller states**, published to the model in `file_read`'s
+        // own schema, so it has to mean one thing through every workspace. Under `lines()` the
+        // `\r` of a CRLF file was gone before the weight was taken, and the unconfined reader
+        // charges it by name — `Line::length` there is "separator excluded, `\r` included. What
+        // the byte ceiling is charged". One byte a line is enough: the same file at the same
+        // stated ceiling answered one line through this provider and two through that one.
+        //
+        // The element count is `lines()`'s: an empty string yields nothing, and a trailing newline
+        // yields no extra empty line. What is *shown* keeps `lines()`'s own rule as well — a `\r`
+        // is a line ending only when a newline follows it — because that is the text a model
+        // quotes back to `file_edit`.
+        let rows: Vec<(&str, u64)> = whole
+            .split_inclusive('\n')
+            .map(|row| {
+                let body = row.strip_suffix('\n');
+                let weight = body.unwrap_or(row).len() as u64 + 1;
+                let shown = body.map_or(row, |line| line.strip_suffix('\r').unwrap_or(line));
+                (shown, weight)
+            })
+            .collect();
+        let total = rows.len() as u64;
         if offset > 1 && offset > total {
             return Err(format!(
                 "this confined read of `{path}` reaches line {total} — the route answers from the \
@@ -207,13 +229,12 @@ impl Operations for ConfinedOperations {
         let mut answered_bytes: u64 = 0;
         let mut kept: u64 = 0;
         let mut last: u64 = 0;
-        for (index, line) in lines.iter().enumerate().skip(
+        for (index, &(line, weight)) in rows.iter().enumerate().skip(
             usize::try_from(offset - 1)
                 .unwrap_or(usize::MAX)
-                .min(lines.len()),
+                .min(rows.len()),
         ) {
             let number = index as u64 + 1;
-            let weight = line.len() as u64 + 1;
             let within_limit = window.limit.is_none_or(|count| kept < count);
             let within_ceiling = kept == 0 || answered_bytes + weight <= ceiling;
             if !(within_limit && within_ceiling) {

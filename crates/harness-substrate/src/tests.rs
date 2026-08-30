@@ -676,13 +676,43 @@ fn a_confined_window_past_what_the_read_route_reached_is_refused_by_the_line_it_
     // The route answers from byte 0 up to a ceiling and hands back a `String`, so there is no
     // offset to seek with. A window past the last line those bytes hold cannot be answered - and
     // answering nothing would look exactly like a file that has no such lines.
+    //
+    // **The fixture is a file the ceiling really cut** - 4,096 lines of 64 bytes is the fixture
+    // ceiling exactly - because that is the case this sentence is true of. It used to be a six-byte
+    // file, and the assertion that the refusal blames a byte ceiling passed on a read nothing had
+    // stopped; the case below is the other half, and the two together are what that assertion was
+    // for.
+    let refusal = provider(&confined(), a_file_of_lines(4_096, 63), &["cargo"])
+        .file_read("big.txt", ReadWindow::lines(5_000, 10))
+        .expect_err("refused");
+
+    assert!(refusal.contains("reaches line 4096"), "{refusal}");
+    assert!(refusal.contains("line 5000"), "{refusal}");
+    assert!(refusal.contains("byte ceiling"), "and why: {refusal}");
+}
+
+#[test]
+fn a_confined_window_past_the_end_of_a_short_file_does_not_blame_a_ceiling_nothing_reached() {
+    // `ceiling_cut` is computed once and consulted for `bytes`, `truncated`, `lines.total` and the
+    // note - and, until this case existed, not for the refusal. So a three-line file under a
+    // 256 KiB route ceiling was refused with "the route answers ... up to a byte ceiling of 262144
+    // bytes, and that is where it stopped", which nothing had done, beside a note saying the lines
+    // past it "cannot be reached on this path at any `offset`".
+    //
+    // It is invariant 8 seen from the other side: a whole answer reported as a cut one. The move it
+    // invites is a model giving up on a file it has entirely seen, and the sentence below is the
+    // unconfined provider's own, word for word, because there is one true thing to say here.
     let refusal = provider(&confined(), a_file_holding("a\nb\nc\n"), &["cargo"])
         .file_read("three.txt", ReadWindow::lines(40, 10))
         .expect_err("refused");
 
-    assert!(refusal.contains("reaches line 3"), "{refusal}");
+    assert!(refusal.contains("has 3 lines"), "{refusal}");
     assert!(refusal.contains("line 40"), "{refusal}");
-    assert!(refusal.contains("byte ceiling"), "and why: {refusal}");
+    assert!(refusal.contains("past the end"), "{refusal}");
+    assert!(
+        !refusal.contains("byte ceiling") && !refusal.contains("cannot be reached"),
+        "nothing cut this file, and a refusal that says one did is one the model acts on: {refusal}"
+    );
 }
 
 #[test]

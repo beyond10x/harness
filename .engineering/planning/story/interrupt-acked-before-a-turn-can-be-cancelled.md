@@ -2,13 +2,14 @@
 format: aep.planning-md/1
 id: story:interrupt-acked-before-a-turn-can-be-cancelled
 kind: story
-status: draft
+status: implemented
 title: An interrupt acknowledged before the turn is cancellable stops nothing
 summary: 'turn/started is notified before TurnControl is installed: an interrupt decoded in that window is acked, cancels nothing, and the client receives the answer it cancelled.'
 relations:
 - derived_from: epic:bridge-mode-proof
 - informed_by: story:bridge-interrupt-race-pinned
-revision: 3
+- serves: vision:b10x-owns-its-loop
+revision: 6
 ---
 ## Evidence
 

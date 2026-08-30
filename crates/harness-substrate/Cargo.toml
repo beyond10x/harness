@@ -22,10 +22,11 @@ harness-wire = { workspace = true }
 #
 # **Pinned by revision, never by path.** A `path` into a sibling checkout builds against whatever
 # happens to be checked out there, and `--locked` cannot lock it — the gate was green against a tree
-# no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.2.1` (2026-08-29): the first
-# tag after the brand sweep — `0.2.0` still carried the former brand in a wire hash domain
-# (`EXECUTION_CAPSULE_HASH_DOMAIN`) — and identical to the previously pinned revision `f1cfc1c` in
-# `substrate-host` and `substrate-wire`; the release added the website and the version.
+# no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.2.2` (2026-08-29, the revision
+# `43c5a10` the lockfile resolved it to): the release whose workspace adoption drops the `ws_`
+# root-name requirement, which is what lets a run be pointed at a directory the operator already
+# owns rather than at a `ws_`-named scratch copy of it (`0c31438`). Not below `0.2.1`: `0.2.0` still
+# carried the former brand in a wire hash domain (`EXECUTION_CAPSULE_HASH_DOMAIN`).
 substrate-host = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 substrate-wire = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`

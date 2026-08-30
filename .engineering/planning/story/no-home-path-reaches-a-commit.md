@@ -9,7 +9,7 @@ relations:
 - derived_from: epic:adoption-follow-ups
 - informed_by: story:history-carries-a-home-directory
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 ## What is missing
 
@@ -84,9 +84,13 @@ Derived 2026-08-30 by `story-scoper`. Every line is **cited** (read from the sto
 - **Also likely:** the check's own exemption list — inferred. Four tracked files carry `/home/you/`
   placeholders that match the specified shape (`crates/harness-cli/src/render.rs:550`,
   `crates/harness-loop/src/event.rs:464`, `website/docs/guides/profiles.md:158`,
-  `website/docs/guides/sessions-and-events.md:105`), and two tracked planning-store files carry a
-  literal `/home/timo` (`.engineering/planning/journal.jsonl:16,153`,
-  `.engineering/planning/story/history-carries-a-home-directory.md:17`). The acceptance clause
+  `website/docs/guides/sessions-and-events.md:105`), and two tracked planning-store files carry the
+  operator's own home directory in full — `/home/` followed by the account name — at
+  `.engineering/planning/journal.jsonl:16,153` and
+  `.engineering/planning/story/history-carries-a-home-directory.md:17`. Written that way on
+  purpose: a Scope section that quoted the literal would be a third occurrence, in a tracked file,
+  put there by the story whose whole point is that there should be none. The adversary found
+  exactly that on 2026-08-30 — the check reported the tree clean while this paragraph carried one. The acceptance clause
   "the check passes the tree unmodified" cannot hold today without either an exemption in the
   script or edits to those six files.
 - **Confidence:** high — the story names the script path, the gate file and the line range, and all

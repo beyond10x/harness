@@ -65,6 +65,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   this binary. `2026-08-30` is released and reachable on `main`, so it was cut beside rather than
   edited (`AGENTS.md` invariant 13), and a second cut on the same date takes the `.1` suffix.
 
+- **A tracked file carrying an absolute home directory now fails the gate.**
+  `scripts/check-no-home-paths.py` judges the **index**, read with `git cat-file --batch` over
+  `git ls-files -s`, because a commit records the index and not the working copy — content staged
+  with a leak and tidied afterwards would otherwise be committed by a green check; the worktree copy
+  is judged too, because `git commit -a` stages it. Every file is searched **as bytes**, with a
+  second pass over the same bytes with NULs removed, so a path inside a committed `.pyc` or UTF-16
+  text is visible: that `.pyc` was the one file of twenty the cross-repository audit found that no
+  text grep would have caught.
+
+  A home directory needs **no trailing separator** — `HOME=/home/<name>` publishes the account
+  exactly as a subpath does — and the account class admits non-ASCII, so a contributor named
+  `müller` is protected like the author; a candidate is then trimmed to the name at its head, so an
+  elided path in a doc comment names nobody. One account, `you`, is a documentation placeholder in
+  every file type; `user` and `username` are not, because real machines have them. Two
+  planning-store paths are exempt with the reason in the script: the journal is append-only and
+  committed, and editing it would forge the record. `--self-test` (52 cases) is a gate step of its
+  own, because a check that passed everything would look exactly like a green one.
+
 ### Changed
 
 - **A `delegate` call that names an agent this run does not have no longer emits a
@@ -116,6 +134,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   **This is the harness naming itself as another vendor's client to that vendor.** It is recorded
   here rather than buried in a constant, and it is the operator's decision to send it, taken on
   2026-08-30 against their own subscription credential.
+
+- **The CLI contract version in force, `2026-08-30.1`, now says what actually moved, and a test
+  holds it to that.** `2026-08-30` claimed "strictly additive" while measuring itself against
+  `2026-08-29.1` — two cuts back — and nine fields had moved against its real predecessor
+  `2026-08-29.3`: `--model` and `--base-url` stopped being `required` and `--wire` lost its
+  `"openai-responses"` default, on `run`, `chat` and `workflow run`. That directory is released and
+  immutable (`AGENTS.md` invariant 13), so the correction is carried in `2026-08-30.1/README.md`,
+  which a consumer of the current pin reads. `2026-08-30` was also dated the day after the commit
+  that cut it (`719f6e3`, 2026-08-29 23:08); `2026-08-30.1` was cut on 2026-08-30. No flag,
+  `takes_value` or default moved in this change — `ARGV_CONTRACT_VERSION` is unchanged and the
+  command line is untouched.
+
+  `the_version_in_force_names_every_field_that_moved_between_pinned_versions` diffs every
+  consecutive pair of pinned `argv.json` files and fails when a moved field is named by no README a
+  consumer of the version in force reads. It matches an **ordered** sequence scoped to the section
+  naming that pair, so a document cannot satisfy it by reversing the direction of every row, by
+  denying the change in so many words, by listing the tokens on one junk line, or by attributing the
+  moves to a different pair — all four passed the first version of the guard. It iterates the
+  **union** of flag names, so a renamed or removed flag is a departure rather than a silent skip:
+  that is the failure the CLI contract exists for, `--substrate-embedded` having changed shape and
+  refused a pinned consumer at clap. Version order is compared numerically on the `.N` suffix, so a
+  tenth cut in one day does not sort before the ninth.
 
 ## [0.3.0] — 2026-08-30
 

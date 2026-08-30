@@ -476,12 +476,20 @@ mod tests {
         }
         let agents = agents_in(shipped).expect("the shipped agents read");
         let names: Vec<&str> = agents.iter().map(|agent| agent.name.as_str()).collect();
-        assert_eq!(
-            names,
-            vec!["decomposer", "plan-reviewer", "reverse-engineer"]
-        );
+        // Named, not counted. The sibling's roster is that repository's to grow, and pinning it
+        // here turns a document added over there into a red gate over here for nothing this
+        // parser did wrong. Every agent it ships still has to read, which is below.
+        for wanted in ["decomposer", "plan-reviewer", "reverse-engineer"] {
+            assert!(
+                names.contains(&wanted),
+                "`{wanted}` is missing from {names:?}"
+            );
+        }
 
-        let decomposer = &agents[0];
+        let decomposer = agents
+            .iter()
+            .find(|agent| agent.name == "decomposer")
+            .expect("the decomposer reads");
         assert_eq!(
             decomposer.tools,
             vec!["file_read", "search", "find", "run"],

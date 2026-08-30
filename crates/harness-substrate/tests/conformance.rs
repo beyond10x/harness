@@ -49,6 +49,12 @@
 //! `Ok(())` for every workspace with an empty `programs()`, which on a host with no delegated
 //! cgroup subtree is two of the three. That is the `embedded_live.rs` shape this file exists not to
 //! repeat, and it was in it.
+//!
+//! The claim reaches the runners as well, and it had a second hole there. `asked` handed an empty
+//! slice answered `Ok`, which `every_workspace` reads as *every workspace met the contract*, and
+//! `agreed` handed one workspace compared nothing and answered the one thing it had. Both now
+//! refuse, and `the_runner_refuses_to_report_a_pass_when_it_was_handed_no_workspace` and
+//! `the_comparison_refuses_to_report_agreement_between_one_workspace_and_itself` are what say so.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -206,10 +212,19 @@ fn read_only_workspaces() -> Vec<Workspace> {
 // --- the two runners, and what they say when a workspace differs --------------------------------
 
 /// Ask one question of every workspace and name the ones that answer against the contract.
+///
+/// **An empty set is a failure, not a pass.** `every_workspace` reads an `Ok` here as *every
+/// workspace met the contract*, and handed nothing this used to say that having asked nobody
+/// anything. Not reachable from the two callers, which build three workspaces by hand — which was
+/// equally true of the early return in `the_declared_set_is_what_run_accepts` until a machine with
+/// no delegated cgroup subtree reached it.
 fn asked(
     workspaces: &[Workspace],
     check: fn(&Workspace) -> Result<(), String>,
 ) -> Result<(), String> {
+    if workspaces.is_empty() {
+        return Err("  no workspace was asked, so nothing was checked".to_owned());
+    }
     let failures: Vec<String> = workspaces
         .iter()
         .filter_map(|workspace| {
@@ -242,18 +257,28 @@ fn every_read_only_workspace(behaviour: &str, check: fn(&Workspace) -> Result<()
 /// Every workspace gives the same answer, or the two that differ are named with both answers.
 ///
 /// Answers the one thing they all said, so the caller can see it was a real answer.
+///
+/// **Two is the least that can disagree.** Handed one workspace the comparison loop never runs and
+/// this would answer `Ok` having compared nothing, which is the same hole as [`asked`] on an empty
+/// slice and the same one the module header claims this file does not have.
 fn agreed(workspaces: &[Workspace], ask: fn(&Workspace) -> Value) -> Result<Value, String> {
-    let mut answers = workspaces
-        .iter()
-        .map(|workspace| (workspace.name, ask(workspace)));
-    let Some((first, expected)) = answers.next() else {
-        return Err("no workspace was asked, so nothing was compared".to_owned());
+    let Some((head, rest)) = workspaces
+        .split_first()
+        .filter(|(_, rest)| !rest.is_empty())
+    else {
+        return Err(format!(
+            "{} workspace(s) were asked, so nothing was compared",
+            workspaces.len()
+        ));
     };
-    for (name, answer) in answers {
+    let first = head.name;
+    let expected = ask(head);
+    for workspace in rest {
+        let answer = ask(workspace);
         if answer != expected {
             return Err(format!(
-                "`{first}` and `{name}` answer differently:\n  {first}: {expected}\n  {name}: \
-                 {answer}"
+                "`{first}` and `{}` answer differently:\n  {first}: {expected}\n  {}: {answer}",
+                workspace.name, workspace.name
             ));
         }
     }
@@ -1032,18 +1057,33 @@ fn a_write_under_a_directory_that_does_not_exist_yet(workspace: &Workspace) -> R
     let outcome = workspace
         .operations
         .file_write("deep/down/new.txt", FIVE_LINES);
-    let landed = workspace.on_disk("deep/down/new.txt").as_deref() == Some(FIVE_LINES);
+    let on_disk = workspace.on_disk("deep/down/new.txt");
     // What each does **today**, read off the implementations and not off the trait.
     let creates_parents = workspace.name == "LocalOperations";
-    if landed == creates_parents && outcome.is_ok() == creates_parents {
+    let held = if creates_parents {
+        outcome.is_ok() && on_disk.as_deref() == Some(FIVE_LINES)
+    } else {
+        // **`is_none`, and not "the bytes are not the ones asked for".** The note above says this
+        // route writes *nothing*, and a comparison against `FIVE_LINES` does not say that: a write
+        // that made `deep/down/` and left half a file in it answers `Err` and is not `FIVE_LINES`,
+        // so it read to this pin as a clean refusal. A partial write is the one failure a pin on a
+        // write path exists to catch.
+        outcome.is_err() && on_disk.is_none()
+    };
+    if held {
         return Ok(());
     }
     Err(format!(
-        "this workspace {} create the parents of a new file, and now it {} — see \
+        "this workspace {} create the parents of a new file and left {} at `deep/down/new.txt`, \
+         and now the outcome is {outcome:?} with {on_disk:?} there — see \
          `story:a-confined-write-makes-its-own-parents` and this case's own note before changing \
-         anything here (outcome {outcome:?}, on disk: {landed})",
+         anything here",
         if creates_parents { "did" } else { "did not" },
-        if landed { "did" } else { "did not" },
+        if creates_parents {
+            "the file it was given"
+        } else {
+            "nothing"
+        },
     ))
 }
 
@@ -1080,18 +1120,39 @@ fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_work
 /// **When this case goes red**, whichever side moved, delete it and fold `./notes.txt` into
 /// `every_workspace_answers_the_same_whole_small_file` — the contract is assertable at that point
 /// and this pin only hides it.
+///
+/// # It quotes nothing of substrate's, and says how it knows the spelling is the reason
+///
+/// The refusing side is checked as *a refusal* plus one fact this repository owns: the **same
+/// provider, the same tree, the same call** reads `notes.txt` under its plain name. That is what
+/// makes the refusal about the spelling rather than about the file, and it holds whatever words
+/// substrate refuses in. Matching a substring of substrate's error — `path-escape`, or the prose
+/// beside it — would put a string this repository does not control inside its own gate, and a
+/// rename over there, or a `Debug` rendering becoming a written sentence, would turn this red for
+/// no change in behaviour.
 fn a_path_spelled_with_a_leading_dot(workspace: &Workspace) -> Result<(), String> {
     workspace.seed("notes.txt", FIVE_LINES);
-    let read = workspace
+    let dotted = workspace
         .operations
         .file_read("./notes.txt", ReadWindow::whole());
+    let plain = workspace
+        .operations
+        .file_read("notes.txt", ReadWindow::whole());
+    // The control. Whatever happens to `./notes.txt`, the file itself is readable here — so a
+    // refusal below is about how the path was spelled and not about the tree.
+    if plain.as_ref().map(|answer| &answer["lines"]["total"]) != Ok(&json!(5)) {
+        return Err(format!(
+            "could not read `notes.txt` under its plain name, so this case cannot say anything \
+             about the spelling: {plain:?}"
+        ));
+    }
     // What each does **today**: only the provider that hands the path to substrate refuses it.
     let refuses_the_spelling = workspace.name == "ConfinedOperations";
-    match (&read, refuses_the_spelling) {
-        (Ok(answer), false) if answer["lines"]["total"] == json!(5) => Ok(()),
-        (Err(why), true) if why.contains("path-escape") => Ok(()),
+    match (&dotted, refuses_the_spelling) {
+        (Ok(answer), false) if answer == plain.as_ref().expect("read above") => Ok(()),
+        (Err(_), true) => Ok(()),
         _ => Err(format!(
-            "this workspace {} read `./notes.txt` today, and now the answer is {read:?} — see \
+            "this workspace {} read `./notes.txt` today, and now the answer is {dotted:?} — see \
              `story:one-spelling-of-a-path-in-every-workspace` and this case's own note before \
              changing anything here",
             if refuses_the_spelling {
@@ -1199,4 +1260,309 @@ fn a_line_longer_than_one_reply_may_carry_is_cut_the_same_way_in_every_workspace
             )
         },
     );
+}
+
+// --- second adversarial pass: the boundaries the CRLF fix has to hold at -------------------------
+
+/// Every line-ending shape a file can have, against every window that can bite, in all three.
+///
+/// # Why a sweep and not another example
+///
+/// The fix for the CRLF ceiling replaced `str::lines` with `split_inclusive('\n')` and made two
+/// claims at once: that the weight charged is the line *as the file holds it* — `\r` in, separator
+/// out, which is what `Line::length` charges on the unconfined side — and that what is *shown*
+/// still follows `str::lines`'s own rule, where a `\r` is a line ending only when a newline follows
+/// it. Those are separate properties of one expression and they come apart at the ends of a file: a
+/// last line with no newline, a lone `\r`, a file that is only separators, `\r\r\n`.
+///
+/// So this asks all three the same read over 17 file shapes and 26 windows — 442 questions each —
+/// and names the first shapes and windows where any two answer differently. The `max_bytes` sweep
+/// covers 0 and 1 as well as every ceiling that can fall inside or exactly on a line.
+///
+/// **A refusal is compared as *a refusal* and not by its words.** The trait's `Err` is a sentence
+/// and the trait does not shape it; two providers refusing the same read in different words are
+/// keeping the contract, and pinning the wording here would freeze a difference the trait allows.
+/// What each refusal is required to *say* has its own cases above, and one thing it must not say
+/// has [`a_refusal_for_a_short_file_does_not_blame_a_byte_ceiling`].
+#[test]
+fn every_line_ending_shape_answers_the_same_under_every_window_in_every_workspace() {
+    /// A refusal is one outcome, whatever it says; an answer is compared whole.
+    fn outcome(result: Result<Value, String>) -> Value {
+        result.unwrap_or_else(|_| json!("refused"))
+    }
+
+    let shapes: &[(&str, &str)] = &[
+        ("empty", ""),
+        ("one_newline", "\n"),
+        ("two_newlines", "\n\n"),
+        ("one_crlf", "\r\n"),
+        ("two_crlf", "\r\n\r\n"),
+        ("lone_cr_inside_a_line", "a\rb\n"),
+        ("cr_before_crlf", "a\r\r\n"),
+        ("trailing_cr_and_no_newline", "alpha\nbeta\r"),
+        ("no_trailing_newline", "alpha\nbeta"),
+        ("cr_only_endings", "alpha\rbeta\rgamma"),
+        ("five_lf", FIVE_LINES),
+        ("five_crlf", FIVE_CRLF_LINES),
+        ("mixed_endings", "alpha\r\nbeta\ngamma\r\n"),
+        ("blank_line_between_crlf", "a\r\n\r\nb\r\n"),
+        ("blank_line_between_lf", "a\n\nb\n"),
+        ("multibyte_crlf", "héllo\r\nwörld\r\n"),
+        ("byte_order_mark", "\u{feff}alpha\r\nbeta\r\n"),
+    ];
+    let mut windows: Vec<(String, ReadWindow)> = vec![
+        ("whole".to_owned(), ReadWindow::whole()),
+        ("lines(1,1)".to_owned(), ReadWindow::lines(1, 1)),
+        ("lines(1,2)".to_owned(), ReadWindow::lines(1, 2)),
+        ("lines(2,1)".to_owned(), ReadWindow::lines(2, 1)),
+        ("lines(1,99)".to_owned(), ReadWindow::lines(1, 99)),
+    ];
+    // 0 and 1 included: the first line is answered whatever the ceiling says, and both providers
+    // have to agree that it is.
+    for ceiling in 0..=20u64 {
+        windows.push((
+            format!("max_bytes({ceiling})"),
+            ReadWindow {
+                offset: None,
+                limit: None,
+                max_bytes: Some(ceiling),
+            },
+        ));
+    }
+
+    let spaces = workspaces(DECLARED);
+    let mut differences: Vec<String> = Vec::new();
+    for (shape, content) in shapes {
+        let file = format!("{shape}.txt");
+        for workspace in &spaces {
+            workspace.seed(&file, content);
+        }
+        for (window_name, window) in &windows {
+            let answers: Vec<(&str, Value)> = spaces
+                .iter()
+                .map(|workspace| {
+                    (
+                        workspace.name,
+                        outcome(workspace.operations.file_read(&file, *window)),
+                    )
+                })
+                .collect();
+            let (first, expected) = &answers[0];
+            for (name, answer) in &answers[1..] {
+                if answer != expected {
+                    differences.push(format!(
+                        "  {shape} @ {window_name}:\n    {first}: {expected}\n    {name}: {answer}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        differences.is_empty(),
+        "the same bytes and the same window must answer the same through every workspace; {} of \
+         {} questions differ:\n{}",
+        differences.len(),
+        shapes.len() * windows.len(),
+        differences
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// A refusal must not blame a byte ceiling that nothing reached.
+///
+/// `ConfinedOperations::file_read` computes `ceiling_cut` — whether the route answered its whole
+/// ceiling — and consults it for `bytes`, `truncated`, `lines.total` and the `note` it attaches.
+/// The **refusal** for an `offset` past the end does not consult it: it is one sentence for both
+/// cases, and it tells the model "the route answers from the start of the file up to a byte ceiling
+/// of N bytes, and that is where it stopped", plus, in the answer path's own words, that lines past
+/// that ceiling "cannot be reached on this path at any `offset`".
+///
+/// On a three-byte file under a 1 MiB route ceiling nothing stopped anywhere. A model reading line
+/// 2 of a one-line file is told the file was cut off by a limit, which is the mirror of invariant
+/// 8: not a truncation reported as whole, but a whole answer reported as truncated — and the move
+/// it invites, giving up on a file it has entirely seen, is worse than the one invariant 8 stops.
+/// The unconfined provider says the true thing in the same case: "`x` has 1 lines and `offset`
+/// names line 2, which is past the end."
+fn a_refusal_for_a_short_file_does_not_blame_a_byte_ceiling(
+    workspace: &Workspace,
+) -> Result<(), String> {
+    workspace.seed("short.txt", "only one line\n");
+    let Err(why) = workspace
+        .operations
+        .file_read("short.txt", ReadWindow::lines(2, 1))
+    else {
+        return Err("answered a window past the end of a one-line file".to_owned());
+    };
+    if why.contains("byte ceiling") || why.contains("cannot be reached") {
+        return Err(format!(
+            "a 14-byte file was refused as though a byte ceiling had cut it: {why}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_refusal_for_a_short_file_does_not_blame_a_byte_ceiling_in_any_workspace() {
+    every_workspace(
+        "a refusal the model reads has to be true; a file nothing truncated must not be refused as \
+         one that was:",
+        a_refusal_for_a_short_file_does_not_blame_a_byte_ceiling,
+    );
+}
+
+// --- second adversarial pass: the runner's own empty case ---------------------------------------
+
+/// `asked` reports a pass when it was handed no workspace at all.
+///
+/// The header now claims **"No branch in this file reports a pass without asserting something."**
+/// [`agreed`] holds that line itself — handed nothing it answers "no workspace was asked, so
+/// nothing was compared" — and [`all_agree`] holds a second one, refusing a comparison in which
+/// every workspace refused. [`asked`], which is what [`every_workspace`] and
+/// [`every_read_only_workspace`] run on, holds neither: an empty slice produces an empty `failures`
+/// and `Ok(())`, which `every_workspace` reads as *every workspace met the contract*.
+///
+/// Not reachable from the two callers today, both of which build three workspaces by hand. That is
+/// the same thing that was true of `the_declared_set_is_what_run_accepts`'s early return until a
+/// machine with no delegated cgroup subtree reached it, and the guard `agreed` already carries is
+/// four lines.
+#[test]
+fn the_runner_refuses_to_report_a_pass_when_it_was_handed_no_workspace() {
+    let nothing: [Workspace; 0] = [];
+    let outcome = asked(&nothing, a_plain_path_lands_under_its_own_name);
+    assert!(
+        outcome.is_err(),
+        "`asked` answered {outcome:?} for an empty set of workspaces, so `every_workspace` would \
+         report a pass having asked nobody anything — the property the module header states"
+    );
+}
+
+/// `agreed` reports agreement when there was nobody to disagree.
+///
+/// The other half of the header's claim, one runner over. Handed a single workspace the comparison
+/// loop never ran, and `all_agree` would take that `Ok` as *all three answered the same*. Its own
+/// callers pass three, and so did `the_declared_set_is_what_run_accepts`'s caller pass a workspace
+/// that could take the branch nobody expected to be taken.
+#[test]
+fn the_comparison_refuses_to_report_agreement_between_one_workspace_and_itself() {
+    let alone: Vec<Workspace> = workspaces(DECLARED).into_iter().take(1).collect();
+    let outcome = agreed(&alone, |workspace| {
+        workspace.seed("notes.txt", FIVE_LINES);
+        answered(
+            workspace
+                .operations
+                .file_read("notes.txt", ReadWindow::whole()),
+        )
+    });
+    assert!(
+        outcome.is_err(),
+        "`agreed` answered {outcome:?} for one workspace, so `all_agree` would report that every \
+         workspace agreed having compared nothing"
+    );
+    assert!(
+        agreed(&[], |_| json!(null)).is_err(),
+        "and the empty case is the same hole with nothing in it"
+    );
+}
+
+// --- second adversarial pass: is the parent-directory pin tight in both directions? --------------
+
+/// A workspace that leaves a partial file behind and then reports the write failed.
+///
+/// Exactly the shape a write that created its parents, wrote some of the bytes and then hit
+/// substrate's refusal would leave: a file on disk that is not what was asked for, and an `Err`.
+struct LeavesAPartialFile(LocalOperations);
+
+impl Operations for LeavesAPartialFile {
+    fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
+        let partial: String = text.chars().take(5).collect();
+        let _ = self.0.file_write(path, &partial);
+        Err("workspace.file-write: resource.not-found".to_owned())
+    }
+
+    fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        self.0.file_read(path, window)
+    }
+
+    fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
+        self.0.file_edit(path, old, new)
+    }
+
+    fn dir_list(&self, path: &str) -> Result<Value, String> {
+        self.0.dir_list(path)
+    }
+
+    fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
+        self.0.search(pattern, path, options)
+    }
+
+    fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
+        self.0.find(glob, path, max_results)
+    }
+
+    fn run(&self, argv: &[String]) -> Result<Value, Refused> {
+        self.0.run(argv)
+    }
+
+    fn lands(&self, path: &str) -> Result<String, String> {
+        self.0.lands(path)
+    }
+
+    fn programs(&self) -> &[String] {
+        self.0.programs()
+    }
+
+    fn writes(&self) -> bool {
+        self.0.writes()
+    }
+}
+
+/// The parent-directory pin passes a confined workspace that left a partial file behind.
+///
+/// The pin's own note says the confined route "answers `resource.not-found` and **writes
+/// nothing**", and the two halves it checks are `outcome.is_ok()` and
+/// `on_disk(..) == Some(FIVE_LINES)`. A write that created `deep/down/` and left the wrong bytes in
+/// it satisfies both: the outcome is an `Err` as expected, and the file on disk is not `FIVE_LINES`
+/// so `landed` is `false` as expected. The half that says *nothing is on disk* is not asserted, and
+/// a partial write is the one failure a pin on a write path exists to catch.
+#[test]
+fn the_parent_directory_pin_notices_a_write_that_left_something_behind() {
+    let (root, tree) = tree();
+    let partial = vec![Workspace {
+        // The pin branches on this name, so this is the workspace it holds to *not writing*.
+        name: "ConfinedOperations",
+        operations: Box::new(LeavesAPartialFile(
+            LocalOperations::unconfined(&tree, Vec::new()).expect("the workspace opens"),
+        )),
+        tree,
+        _root: root,
+    }];
+    let outcome = asked(&partial, a_write_under_a_directory_that_does_not_exist_yet);
+    let left_behind = partial[0].on_disk("deep/down/new.txt");
+    assert!(
+        outcome.is_err(),
+        "the write left `{left_behind:?}` at `deep/down/new.txt` and reported a failure, and the \
+         pin answered {outcome:?} — it holds `on_disk(..) == Some(FIVE_LINES)` and not `nothing is \
+         on disk`, so a partial write reads to it as a clean refusal"
+    );
+}
+
+// --- second adversarial pass: the two story ids the pins point at -------------------------------
+
+/// The ids written into the source are the two the coordinator is filing, character for character.
+#[test]
+fn the_pinned_cases_name_stories_by_their_exact_ids() {
+    let source = include_str!("conformance.rs");
+    for id in [
+        "story:a-confined-write-makes-its-own-parents",
+        "story:one-spelling-of-a-path-in-every-workspace",
+    ] {
+        assert!(
+            source.contains(id),
+            "a pin points at `{id}` and nothing in this file spells it that way"
+        );
+    }
 }

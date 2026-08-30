@@ -215,13 +215,31 @@ impl Operations for ConfinedOperations {
             })
             .collect();
         let total = rows.len() as u64;
+        // A window that starts past the end is a refusal and not an empty answer — and **which**
+        // refusal depends on whether anything actually cut the file.
+        //
+        // One sentence used to serve both, and it blamed the route's byte ceiling every time. On a
+        // fourteen-byte file under a one-mebibyte ceiling nothing stopped anywhere, and a model
+        // reading line 2 of a one-line file was told the read had run into a limit — with the
+        // answer path's own note saying the lines past it "cannot be reached on this path at any
+        // `offset`". Both false. It is invariant 8 through the mirror: not a cut answer reported as
+        // whole, but a whole answer reported as cut, and what it invites — giving up on a file the
+        // model has entirely seen — is the worse of the two moves. The second sentence below is
+        // `LocalOperations`'s, word for word, because there is one true thing to say here.
         if offset > 1 && offset > total {
-            return Err(format!(
-                "this confined read of `{path}` reaches line {total} — the route answers from the \
-                 start of the file up to a byte ceiling of {} bytes, and that is where it stopped. \
-                 `offset` names line {offset}, past it, so nothing was read.",
-                self.read_ceiling_bytes
-            ));
+            return Err(if ceiling_cut {
+                format!(
+                    "this confined read of `{path}` reaches line {total} — the route answers from \
+                     the start of the file up to a byte ceiling of {} bytes, and that is where it \
+                     stopped. `offset` names line {offset}, past it, so nothing was read.",
+                    self.read_ceiling_bytes
+                )
+            } else {
+                format!(
+                    "`{path}` has {total} lines and `offset` names line {offset}, which is past \
+                     the end. Nothing was read."
+                )
+            });
         }
 
         let mut text = String::new();

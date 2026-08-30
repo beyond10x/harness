@@ -141,6 +141,26 @@ impl Bridge {
         stdin.flush().expect("flushing to the server");
     }
 
+    /// Writes two frames in one `write`, the way a client that pipelines them actually does.
+    ///
+    /// Not a detail. Written separately, the server's reading thread decodes the first, comes back
+    /// for the second and finds the pipe empty, and *blocks* -- handing the main thread a whole
+    /// scheduling quantum in which to run a turn that ends in microseconds. The interrupt is then
+    /// decoded after its turn is over, which is a real client behaving differently from the one
+    /// the case means to describe, not a defect in the server. In one buffer the second line is
+    /// already in the reader's `BufReader` when it asks, so no second read syscall happens at all.
+    ///
+    /// Measured on the `ftp://not-a-wire` case, 20 attempts per run, whole suite at
+    /// `--test-threads=17`: 15/17/19/19 hits split, 20/20 every run combined.
+    fn write_pipelined(&mut self, first: &Value, second: &Value) {
+        let stdin = self.stdin.as_mut().expect("stdin is open");
+        let both = format!("{first}\n{second}\n");
+        stdin
+            .write_all(both.as_bytes())
+            .expect("writing to the server");
+        stdin.flush().expect("flushing to the server");
+    }
+
     fn request(&mut self, method: &str, params: &Value) -> Value {
         let id = self.next_id;
         self.next_id += 1;
@@ -894,42 +914,58 @@ fn an_interrupt_sent_between_turns_does_not_cancel_the_next_one() {
 // Adversarial cases. Added by the adversary pass against a4c89b1; each is red on that commit.
 // ---------------------------------------------------------------------------------------------
 
-/// Runs one pipelined-interrupt attempt on a fresh connection until it lands inside the window.
+/// Runs a pipelined-interrupt attempt many times and requires nearly all of them to be served.
 ///
-/// # Why this is a retry and not a margin
+/// # Why this is a rate and not a retry
 ///
 /// The three cases below pipeline `turn/start` and `turn/interrupt` at a turn that ends in
 /// *microseconds* -- an unusable budget, or a model client that will not build. The client cannot
 /// make the interrupt arrive inside such a turn: both frames go out together, but on a loaded
 /// machine the reading thread can be descheduled after it queues `turn/start` and before it
 /// decodes the interrupt, by which time the turn is over. An interrupt that arrives after its turn
-/// has ended is genuinely late, and the server is right to report the turn as it ended, so a
-/// single attempt that misses the window proves nothing in either direction. Measured on the fixed
-/// server: 1 miss in 50 suite runs on a 2-CPU cpuset at `--test-threads=17`.
+/// has ended is genuinely late, and the server is right to report the turn as it ended, so one
+/// attempt that misses proves nothing in either direction.
+///
+/// **A first version of this asked for one good attempt out of six, and that was wrong.** It is
+/// true that an attempt reaching the window and served wrongly reports a miss; it does not follow
+/// that a broken server misses every attempt, only that a *totally* broken one does. One-of-six
+/// accepts a server that is wrong five times in six, and a partial regression is the historical
+/// shape of this exact defect -- the pre-fix baseline was 21 red of 50, 42% wrong, which
+/// one-of-six would have accepted about 96 times in 100. A server that is wrong half the time
+/// passed the whole suite twenty runs of twenty under that rule.
+///
+/// So the rule is a rate, and the numbers come from measurement rather than taste. On a correct
+/// server the window is reached on 596 of 600 attempts -- thirty samples of twenty, the whole
+/// suite at `--test-threads=17`, half of them under `taskset -c 0-1`, worst sample 18 -- so the
+/// per-attempt miss rate is about 0.5%. At `REQUIRED` of `ATTEMPTS` the scheduler alone fails this
+/// about once in 260,000 runs, while a server wrong 42% of the time -- the pre-fix baseline, 21
+/// red of 50 -- fails it about 994 times in 1000. `the_start_window_is_reached_on_almost_every_attempt`
+/// states the same rule as its own case for the `--max-turns 0` shape.
 ///
 /// Every other interrupt case in this file uses the `slow` fixture, whose turn lasts seconds, and
 /// needs none of this.
 ///
-/// # What it cannot hide
-///
-/// An attempt that *reaches* the window and is served wrongly is indistinguishable, from the
-/// client, from one that missed it -- both report a miss. So a server that answers the interrupt
-/// after the terminal frame reports a miss on every attempt and no number of attempts turns it
-/// green. Verified against exactly that mutant (the `?` restored on the model client, so the turn
-/// returns before `Wire::settle_interrupts`): 10 red of 10.
-///
-/// `attempt` returns `None` when the invariant held, or `Some(diagnostic)` when this attempt did
-/// not land inside the window.
+/// `attempt` returns `None` when the invariant held, or `Some(diagnostic)` when it did not.
 fn within_the_start_window(expectation: &str, mut attempt: impl FnMut() -> Option<String>) {
-    const ATTEMPTS: usize = 6;
-    let mut last = String::new();
+    /// Enough that the scheduler's share of the misses is not decisive, few enough to stay cheap:
+    /// each attempt is one process and one connection.
+    const ATTEMPTS: usize = 20;
+    /// Three misses tolerated: one more than the worst sample measured, which was 18.
+    const REQUIRED: usize = 17;
+
+    let mut misses = Vec::new();
     for _ in 0..ATTEMPTS {
-        match attempt() {
-            None => return,
-            Some(missed) => last = missed,
+        if let Some(missed) = attempt() {
+            misses.push(missed);
         }
     }
-    panic!("{expectation}; no attempt of {ATTEMPTS} landed inside the window. Last: {last}");
+    let hits = ATTEMPTS - misses.len();
+    assert!(
+        hits >= REQUIRED,
+        "{expectation}; {hits} of {ATTEMPTS} attempts were served correctly, under the {REQUIRED} \
+         a correct server reaches. A rate this low is a server that is sometimes wrong, not a \
+         scheduler that was sometimes slow. Misses: {misses:?}"
+    );
 }
 
 /// Reads until `turn/completed`, returning (the answer to `id` if it came first, the frames seen).
@@ -975,12 +1011,14 @@ fn an_interrupt_is_answered_before_the_terminal_frame_even_when_the_turn_errors(
             bridge.handshake();
             let thread_id = bridge.start_thread(&json!({}));
 
-            bridge.write(&json!({"id": 50, "method": "turn/start", "params": {
-                "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-            }}));
-            bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
-                "threadId": thread_id,
-            }}));
+            bridge.write_pipelined(
+                &json!({"id": 50, "method": "turn/start", "params": {
+                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+                }}),
+                &json!({"id": 99, "method": "turn/interrupt", "params": {
+                    "threadId": thread_id,
+                }}),
+            );
 
             let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
             acknowledgement
@@ -1007,12 +1045,14 @@ fn an_interrupt_that_cancelled_a_turn_decides_its_status_even_when_the_turn_erro
             bridge.handshake();
             let thread_id = bridge.start_thread(&json!({}));
 
-            bridge.write(&json!({"id": 50, "method": "turn/start", "params": {
-                "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-            }}));
-            bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
-                "threadId": thread_id,
-            }}));
+            bridge.write_pipelined(
+                &json!({"id": 50, "method": "turn/start", "params": {
+                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+                }}),
+                &json!({"id": 99, "method": "turn/interrupt", "params": {
+                    "threadId": thread_id,
+                }}),
+            );
 
             let (_, frames) = read_turn_watching_for(&mut bridge, 99);
             (frames.last().expect("a terminal frame")["params"]["turn"]["status"]
@@ -1195,17 +1235,63 @@ fn an_interrupt_is_answered_before_the_terminal_frame_when_the_model_client_will
             bridge.handshake();
             let thread_id = bridge.start_thread(&json!({}));
 
-            bridge.write(&json!({"id": 50, "method": "turn/start", "params": {
-                "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-            }}));
-            bridge.write(&json!({"id": 99, "method": "turn/interrupt", "params": {
-                "threadId": thread_id,
-            }}));
+            bridge.write_pipelined(
+                &json!({"id": 50, "method": "turn/start", "params": {
+                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+                }}),
+                &json!({"id": 99, "method": "turn/interrupt", "params": {
+                    "threadId": thread_id,
+                }}),
+            );
 
             let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
             let terminal = &frames.last().expect("a terminal frame")["params"]["turn"]["status"];
             (acknowledgement.is_none() || terminal != &json!("interrupted"))
                 .then(|| format!("{frames:?}"))
         },
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Second adversarial pass, against 329e2c3.
+// ---------------------------------------------------------------------------------------------
+
+/// One `--max-turns 0` attempt at the start window. `true` when the invariant held.
+fn budget_error_attempt(endpoint: &Endpoint) -> bool {
+    let mut bridge = Bridge::start(endpoint, &["--max-turns", "0"]);
+    bridge.handshake();
+    let thread_id = bridge.start_thread(&json!({}));
+    bridge.write_pipelined(
+        &json!({"id": 50, "method": "turn/start", "params": {
+            "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+        }}),
+        &json!({"id": 99, "method": "turn/interrupt", "params": {
+            "threadId": thread_id,
+        }}),
+    );
+    let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
+    acknowledgement.is_some()
+        && frames.last().expect("a terminal frame")["params"]["turn"]["status"]
+            == json!("interrupted")
+}
+
+#[test]
+fn the_start_window_is_reached_on_almost_every_attempt() {
+    // The rate `within_the_start_window` now applies to all three of its cases, stated once more
+    // as a case of its own: how often an attempt reaches the window, rather than whether any
+    // attempt does. It exists because the first version of that wrapper asked for one good attempt
+    // of six and so accepted a server wrong five times in six -- a guard against a partial
+    // regression, which is the historical shape of this defect, rather than only against a total
+    // one.
+    const ATTEMPTS: usize = 20;
+    const REQUIRED: usize = 18;
+    let endpoint = Endpoint::start("text");
+    let hits = (0..ATTEMPTS)
+        .filter(|_| budget_error_attempt(&endpoint))
+        .count();
+    assert!(
+        hits >= REQUIRED,
+        "{hits} of {ATTEMPTS} attempts were served correctly; the window is reached on nearly \
+         every attempt on a correct server, so a rate this low is a server that is sometimes wrong"
     );
 }

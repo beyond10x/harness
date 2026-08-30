@@ -299,10 +299,12 @@ impl Server<'_> {
                 // The count and the frame are not tied to one another, and cannot be: a frame is
                 // counted on the reading thread and dequeued on this one. A frame counted into a
                 // *turn's* `owed` could be dequeued here and take `stray` down for a count that
-                // belongs to a different frame — but only if a turn ended owing one, and since
-                // `drive_turn` settles what it owes on every exit path the only way left is a
-                // `settle_interrupts` that failed, which means the connection is gone or the
-                // frame never arrived at all.
+                // belongs to a different frame — but only if a turn ended owing one, and there
+                // are exactly two ways left to do that. `drive_turn` settles on every path out of
+                // itself, so one is a `settle_interrupts` that failed: the connection is gone, or
+                // the frame never arrived. The other is an announcement that failed to write, in
+                // `start_turn` above, which returns an error straight out of `Server::run` — so
+                // this arm is never reached again on that connection.
                 //
                 // Even then it is the harmless direction. Only [`Watch`] ever raises `stray`, and
                 // only with no turn to cancel, so it cannot be counted too high; a decrement that
@@ -387,6 +389,57 @@ impl Server<'_> {
         Ok(())
     }
 
+    /// Makes `control` the turn the reading thread cancels, and hands it what it already missed.
+    ///
+    /// Installed before the client is told the turn exists, not after. The gap between the two was
+    /// a window in which the reading thread found no turn to cancel, and installing early cannot
+    /// cancel the wrong one: this connection runs a single turn at a time and `turn/interrupt`
+    /// names no turn, so from here on there is exactly one turn an interrupt could mean. What the
+    /// client has not been told yet is the id — which it never needed in order to send the frame,
+    /// and which no code path reads.
+    ///
+    /// The count taken over is interrupts decoded before this turn could be installed. They are
+    /// this turn's, by the queue's order: one sent before `turn/start` would have left the queue
+    /// before it and taken the count back down. A client that pipelines the two frames reaches
+    /// this every time rather than by luck, and it used to be acknowledged and dropped.
+    ///
+    /// Both under one lock, so the reading thread cannot see a half-installed turn.
+    fn install(&self, control: &TurnControl) {
+        let carried = match self.interrupts.lock() {
+            Ok(mut interrupts) => {
+                let carried = std::mem::take(&mut interrupts.stray);
+                interrupts.active = Some(control.clone());
+                carried
+            }
+            Err(_) => 0,
+        };
+        control.decoded_n(carried);
+    }
+
+    /// Stops any further interrupt attaching to the turn that just ended.
+    fn clear_active(&self) {
+        if let Ok(mut interrupts) = self.interrupts.lock() {
+            interrupts.active = None;
+        }
+    }
+
+    /// Tells the client the turn exists: its id, then `turn/started`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError`] when the client's pipe is gone.
+    fn announce(&self, id: &Value, thread_id: &str, turn_id: &str) -> Result<(), TransportError> {
+        let mut writer = self.wire.writer.borrow_mut();
+        writer.respond(id, &json!({"turn": {"id": turn_id}}))?;
+        writer.notify(
+            "turn/started",
+            &json!({
+                "threadId": thread_id,
+                "turn": {"id": turn_id, "status": "inProgress", "items": []},
+            }),
+        )
+    }
+
     fn start_turn(
         &mut self,
         id: &Value,
@@ -417,37 +470,24 @@ impl Server<'_> {
         let turn_id = self.mint("turn");
         let message_item_id = self.mint("msg");
         let control = TurnControl::new();
-        // Installed before the client is told the turn exists, not after. The gap between the two
-        // was a window in which the reading thread found no turn to cancel, and installing early
-        // cannot cancel the wrong one: this connection runs a single turn at a time and
-        // `turn/interrupt` names no turn, so from here on there is exactly one turn an interrupt
-        // could mean. What the client has not been told yet is the id — which it never needed to
-        // send this frame, and which no code path reads.
-        let carried = match self.interrupts.lock() {
-            Ok(mut interrupts) => {
-                let carried = std::mem::take(&mut interrupts.stray);
-                interrupts.active = Some(control.clone());
-                carried
-            }
-            Err(_) => 0,
-        };
-        // Interrupts decoded before this turn could be installed. They are this turn's, by the
-        // queue's order: one sent before `turn/start` would have left the queue before it and the
-        // count would be zero. A client that pipelines the two frames hits this every time rather
-        // than by luck, and it used to be acknowledged and dropped.
-        control.decoded_n(carried);
+        self.install(&control);
 
-        {
-            let mut writer = self.wire.writer.borrow_mut();
-            writer.respond(id, &json!({"turn": {"id": turn_id}}))?;
-            writer.notify(
-                "turn/started",
-                &json!({
-                    "threadId": thread_id,
-                    "turn": {"id": turn_id, "status": "inProgress", "items": []},
-                }),
-            )?;
+        // Bound rather than `?`-ed, like the two in `drive_turn` and for the second of the same
+        // two reasons. The turn is already installed by the time these are written, so a `?` here
+        // would return with `interrupts.active` still holding this turn's control — for the life
+        // of the connection, because the clear below is skipped — and with whatever the turn owed
+        // never answered.
+        //
+        // Unlike `drive_turn`'s, these two cannot be *settled*: the only way to answer an
+        // interrupt is to write, and the write is what just failed. So the slot is cleared and the
+        // error raised. In practice the connection is already gone and `Server::run` is about to
+        // end it, which is why this was never visible; the point is that the invariant does not
+        // rest on that being true.
+        if let Err(error) = self.announce(id, &thread_id, &turn_id) {
+            self.clear_active();
+            return Err(error.into());
         }
+
         let outcome = self.drive_turn(
             &thread_id,
             &turn_id,
@@ -456,9 +496,7 @@ impl Server<'_> {
             &control,
             new_model,
         );
-        if let Ok(mut interrupts) = self.interrupts.lock() {
-            interrupts.active = None;
-        }
+        self.clear_active();
 
         let mut writer = self.wire.writer.borrow_mut();
         match outcome {

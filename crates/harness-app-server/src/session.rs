@@ -125,6 +125,12 @@ impl Wire {
     ///    interrupt that jumped a `turn/start` that way would be counted against the wrong turn
     ///    and cancel a turn nobody asked to stop. That is the trap [`Watch`](crate::Watch)'s own
     ///    comment warns about, and no test in this repository would notice it.
+    ///
+    /// Fact 1 is about requests only, and deliberately: [`drain_control`](Self::drain_control)
+    /// reads the channel directly and does *not* look at the stash, so a frame off the channel can
+    /// be served ahead of an older stashed one. Harmless exactly because of fact 3 — only
+    /// non-requests are ever stashed, and nothing in the accounting depends on when those are
+    /// handed back. If fact 3 stops holding, this stops being harmless too.
     fn serve_control(
         &self,
         message: Incoming,

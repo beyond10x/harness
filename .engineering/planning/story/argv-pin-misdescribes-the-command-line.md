@@ -2,13 +2,13 @@
 format: aep.planning-md/1
 id: story:argv-pin-misdescribes-the-command-line
 kind: story
-status: active
+status: implemented
 title: The argv pin records a placeholder for flags that take no word, and no short flag at all
 summary: 23 bare flags carry a value_name the binary refuses; -p is accepted on four commands and pinned nowhere.
 relations:
 - derived_from: epic:pinned-interfaces-honest
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 ## Evidence
 

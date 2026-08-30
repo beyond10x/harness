@@ -191,15 +191,55 @@ impl Operations for ConfinedOperations {
         // — or a file of exactly that size, which is answered the same way for want of the route's
         // own `eof`. Anything shorter is the file.
         let ceiling_cut = bytes >= self.read_ceiling_bytes;
-        let lines: Vec<&str> = whole.lines().collect();
-        let total = lines.len() as u64;
+        // `split_inclusive` and not `lines`, so the separator each line actually carries is still
+        // in view when the byte ceiling is charged.
+        //
+        // **`max_bytes` is a number the caller states**, published to the model in `file_read`'s
+        // own schema, so it has to mean one thing through every workspace. Under `lines()` the
+        // `\r` of a CRLF file was gone before the weight was taken, and the unconfined reader
+        // charges it by name — `Line::length` there is "separator excluded, `\r` included. What
+        // the byte ceiling is charged". One byte a line is enough: the same file at the same
+        // stated ceiling answered one line through this provider and two through that one.
+        //
+        // The element count is `lines()`'s: an empty string yields nothing, and a trailing newline
+        // yields no extra empty line. What is *shown* keeps `lines()`'s own rule as well — a `\r`
+        // is a line ending only when a newline follows it — because that is the text a model
+        // quotes back to `file_edit`.
+        let rows: Vec<(&str, u64)> = whole
+            .split_inclusive('\n')
+            .map(|row| {
+                let body = row.strip_suffix('\n');
+                let weight = body.unwrap_or(row).len() as u64 + 1;
+                let shown = body.map_or(row, |line| line.strip_suffix('\r').unwrap_or(line));
+                (shown, weight)
+            })
+            .collect();
+        let total = rows.len() as u64;
+        // A window that starts past the end is a refusal and not an empty answer — and **which**
+        // refusal depends on whether anything actually cut the file.
+        //
+        // One sentence used to serve both, and it blamed the route's byte ceiling every time. On a
+        // fourteen-byte file under a one-mebibyte ceiling nothing stopped anywhere, and a model
+        // reading line 2 of a one-line file was told the read had run into a limit — with the
+        // answer path's own note saying the lines past it "cannot be reached on this path at any
+        // `offset`". Both false. It is invariant 8 through the mirror: not a cut answer reported as
+        // whole, but a whole answer reported as cut, and what it invites — giving up on a file the
+        // model has entirely seen — is the worse of the two moves. The second sentence below is
+        // `LocalOperations`'s, word for word, because there is one true thing to say here.
         if offset > 1 && offset > total {
-            return Err(format!(
-                "this confined read of `{path}` reaches line {total} — the route answers from the \
-                 start of the file up to a byte ceiling of {} bytes, and that is where it stopped. \
-                 `offset` names line {offset}, past it, so nothing was read.",
-                self.read_ceiling_bytes
-            ));
+            return Err(if ceiling_cut {
+                format!(
+                    "this confined read of `{path}` reaches line {total} — the route answers from \
+                     the start of the file up to a byte ceiling of {} bytes, and that is where it \
+                     stopped. `offset` names line {offset}, past it, so nothing was read.",
+                    self.read_ceiling_bytes
+                )
+            } else {
+                format!(
+                    "`{path}` has {total} lines and `offset` names line {offset}, which is past \
+                     the end. Nothing was read."
+                )
+            });
         }
 
         let mut text = String::new();
@@ -207,13 +247,12 @@ impl Operations for ConfinedOperations {
         let mut answered_bytes: u64 = 0;
         let mut kept: u64 = 0;
         let mut last: u64 = 0;
-        for (index, line) in lines.iter().enumerate().skip(
+        for (index, &(line, weight)) in rows.iter().enumerate().skip(
             usize::try_from(offset - 1)
                 .unwrap_or(usize::MAX)
-                .min(lines.len()),
+                .min(rows.len()),
         ) {
             let number = index as u64 + 1;
-            let weight = line.len() as u64 + 1;
             let within_limit = window.limit.is_none_or(|count| kept < count);
             let within_ceiling = kept == 0 || answered_bytes + weight <= ceiling;
             if !(within_limit && within_ceiling) {
@@ -257,7 +296,26 @@ impl Operations for ConfinedOperations {
         Ok(answer)
     }
 
+    /// One file, whole, through the confined route — unless this workspace said it changes nothing.
+    ///
+    /// # Why the check is here as well as in the catalogue
+    ///
+    /// [`Operations::writes`] is the single question `harness_tools::Catalogue::of` asks to decide
+    /// which entries exist, so a model can never reach this on a workspace that answered `false`.
+    /// An **embedder** can: the trait is public and the unconfined provider has always answered a
+    /// caller who went around the catalogue rather than serving one. Until this check existed, the
+    /// same `writes() == false` meant *refused* through one implementation and *written* through
+    /// the other, which made the one question two answers — the thing the trait's own note about
+    /// `writes` ("one question in one place") exists to prevent.
+    ///
+    /// In a real deployment the two agree on the outcome and disagree only about who says so: a
+    /// `false` here comes from `Facts::holds_workspaces`, and a daemon that serves no workspaces
+    /// would refuse the write itself. This makes the refusal the provider's own, in the sentence
+    /// [`Operations::unavailable`] writes for every implementation.
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
+        if !self.writes {
+            return Err(Self::unavailable("file_write"));
+        }
         self.backend
             .file_write(&self.workspace, path, text)
             .map_err(|error| error.to_string())
@@ -269,7 +327,13 @@ impl Operations for ConfinedOperations {
     /// what it read, so a file whose first ceiling of bytes is all that came back would have been
     /// written back at that length — an edit that silently deleted everything past the ceiling.
     /// The same ceiling test [`file_read`](Self::file_read) uses, and the same erring towards *cut*.
+    ///
+    /// Refused before anything is read where this workspace changes nothing, for the reason
+    /// [`file_write`](Self::file_write) gives.
     fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
+        if !self.writes {
+            return Err(Self::unavailable("file_edit"));
+        }
         let current = self
             .backend
             .file_read(&self.workspace, path)

@@ -222,9 +222,22 @@ bash scripts/gate.sh
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,
 `python3 scripts/check-provider-wires.py`, `python3 scripts/check-app-server-profile.py`,
 `python3 scripts/check-cli-contract.py` — the contract checkers, one per pinned interface — and
-`python3 scripts/check-no-home-paths.py`, which refuses a tracked file carrying an absolute home
-directory (`--self-test` runs first, because a check that passed everything would look green).
-Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
+`python3 scripts/check-no-home-paths.py`. Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
+
+**The home-path check judges the index and the worktree, and only a literal POSIX path.** It reads
+what `git cat-file` returns for every entry in `git ls-files -s`, because a commit records the index
+and not the working copy, and it searches the worktree copy too because `git commit -a` stages that.
+It matches the *shape* `/home/<name>` and `/Users/<name>`, with or without a trailing separator,
+searched as **bytes** — a path inside a committed `.pyc` or UTF-16 text is the case it exists for —
+and its account class admits non-ASCII, so a contributor is protected like the author.
+
+What a green run does **not** say: nothing about `~`, `$HOME` or any path assembled at run time;
+nothing about a Windows home directory (`C:\Users\<name>`); nothing about history, which
+`story:history-carries-a-home-directory` decided not to rewrite. One account name, `you`, is treated
+as a documentation placeholder in every file type — `user` and `username` are not, because they are
+account names real machines have. Two planning-store paths are exempt with the reason in the script:
+the journal is append-only and committed, and editing it to satisfy a check would forge the record.
+`--self-test` is a gate step of its own, because a check that passed everything would look green.
 
 **`python3` must be available**: the wire fixtures are a standard-library HTTP server, driven as a
 real subprocess over a real socket. A missing interpreter is a failed gate, not a skipped check.

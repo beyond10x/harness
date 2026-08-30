@@ -470,6 +470,56 @@ fn an_embedded_workspace_with_the_wrong_name_refuses_the_run_by_name() {
     );
 }
 
+/// The workspace-name rule `run --help` and `chat --help` state is the one this binary enforces.
+///
+/// Both pages told the operator the directory "must therefore be named `ws_something` — substrate's
+/// guarded filesystem will not represent any other name". `0c31438` shipped workspace adoption and
+/// left the sentence standing: substrate `0.2.2`'s `validate_root_name` asks for one path component
+/// of alphanumerics, `_` and `-` that is not `.`, `..` or empty and does not begin `-`, and the
+/// `ws_` prefix it used to demand was the id scheme rather than the containment.
+///
+/// Measured rather than read off the source, and in that order: `my-project` is a name the help
+/// page forbids, and the binary adopts it and publishes the writing entries. So the pages are
+/// asserted against a rule this same test has just watched the binary keep — and they have to state
+/// it in the words the refusal uses, because an operator who is refused reads one and an operator
+/// deciding what to type reads the other.
+///
+/// Nothing pins help text (`contracts/cli/b10x-harness/<version>/argv.json` records `long`,
+/// `short`, `takes_value`, `value_name`, `default`, `required`, `conflicts_with` and `requires`,
+/// and no help string), which is why neither half of the CLI contract check could see this.
+#[test]
+fn the_help_pages_state_the_workspace_name_rule_this_binary_enforces() {
+    let (_root, workspace) = adoptable_workspace("my-project");
+    let adopted = run(&["tools", "--substrate-embedded"], &workspace);
+    assert_eq!(
+        adopted.status,
+        Some(0),
+        "`my-project` is a name this binary adopts: {}",
+        adopted.stderr
+    );
+
+    for command in ["run", "chat"] {
+        let help = raw(&[command, "--help"]);
+        assert_eq!(help.status, Some(0), "`{command} --help`: {}", help.stderr);
+        // Whitespace collapsed before the phrase is looked for: clap wraps long help to the
+        // terminal's width, so a rule stated in three words is three words on one line here and
+        // could be two and one somewhere narrower.
+        let flowed = help.stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            !flowed.contains("ws_"),
+            "`{command} --help` still requires a `ws_` workspace name, which this binary dropped \
+             at substrate 0.2.2 — the directory it just adopted is called `my-project`:\n{}",
+            help.stdout
+        );
+        assert!(
+            flowed.contains("one path component"),
+            "`{command} --help` has to state the rule that is enforced, in the words the refusal \
+             uses, or an operator learns it by being refused:\n{}",
+            help.stdout
+        );
+    }
+}
+
 #[test]
 fn a_named_socket_with_no_daemon_refuses_rather_than_going_read_only() {
     let (root, workspace) = adoptable_workspace("ws_probe");

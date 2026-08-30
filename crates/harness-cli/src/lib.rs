@@ -561,9 +561,11 @@ struct RunOptions {
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
     ///
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
-    /// substrate's root, and reads and writes land in the same place. The directory must therefore
-    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
+    /// substrate's root, and reads and writes land in the same place. Its directory name is the
+    /// workspace's own id, so it must be one path component of alphanumerics, `_` and `-`, and may
+    /// not be `.`, `..` or begin with `-`; a name that is not refuses the run by name rather than
+    /// quietly writing somewhere else. Point this at a project you already have — no prefix on the
+    /// name, and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.
@@ -931,9 +933,11 @@ struct ToolsOptions {
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
     ///
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
-    /// substrate's root, and reads and writes land in the same place. The directory must therefore
-    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
+    /// substrate's root, and reads and writes land in the same place. Its directory name is the
+    /// workspace's own id, so it must be one path component of alphanumerics, `_` and `-`, and may
+    /// not be `.`, `..` or begin with `-`; a name that is not refuses the run by name rather than
+    /// quietly writing somewhere else. Point this at a project you already have — no prefix on the
+    /// name, and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.

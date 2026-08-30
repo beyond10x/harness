@@ -159,6 +159,53 @@ fn a_project_directory_is_adopted_under_its_own_name_and_a_bad_one_says_what_to_
     assert!(error.contains("is not a directory to adopt"), "{error}");
 }
 
+/// `workspace_adopt`'s own documentation states the rule the case above measures.
+///
+/// Its `# Errors` section said the name "must begin `ws_` and hold only alphanumerics and
+/// underscores" while the body seventeen lines below adopted `work-native`. Same commit as the
+/// help-text defect (`0c31438`), same class, smaller surface: the prefix went at substrate `0.2.2`
+/// and the sentence describing it did not.
+///
+/// Read out of this crate's own source, because a doc comment is reachable from nowhere else — and
+/// a doc comment nothing reads is exactly how this one survived the commit that falsified it. What
+/// is asserted is the pair the case above proves: the dropped rule is not named, and the rule that
+/// is enforced is, in the words the refusal uses.
+#[test]
+fn the_documentation_on_workspace_adopt_states_the_rule_its_body_enforces() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("embedded.rs");
+    let text = std::fs::read_to_string(&source)
+        .unwrap_or_else(|error| panic!("reading `{}`: {error}", source.display()));
+
+    let signature = "pub fn workspace_adopt(";
+    let lines: Vec<&str> = text.lines().collect();
+    let declared = lines
+        .iter()
+        .position(|line| line.contains(signature))
+        .unwrap_or_else(|| panic!("`{signature}` is in `{}`", source.display()));
+    let doc: Vec<&str> = lines[..declared]
+        .iter()
+        .rev()
+        .take_while(|line| line.trim_start().starts_with("///"))
+        .copied()
+        .collect();
+    assert!(
+        !doc.is_empty(),
+        "`workspace_adopt` carries a doc comment, or there is nothing here to check"
+    );
+    let doc = doc.join("\n");
+
+    assert!(
+        !doc.contains("ws_"),
+        "the documentation on `workspace_adopt` still demands a `ws_` prefix its body dropped at          substrate 0.2.2 — the case above adopts `work-native`:\n{doc}"
+    );
+    assert!(
+        doc.contains("one path component"),
+        "and it has to state the rule the body does enforce, in the words the refusal uses:\n{doc}"
+    );
+}
+
 #[test]
 fn a_staged_driver_is_a_program_the_confined_run_can_actually_start() {
     // The whole point, end to end. A driven run allow-listed its own CLI by absolute host path,

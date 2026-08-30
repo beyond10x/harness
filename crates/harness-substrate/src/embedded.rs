@@ -203,9 +203,11 @@ impl Embedded {
     /// # Errors
     ///
     /// Returns [`SubstrateError::Refused`] when the name is not one the driver can represent — it
-    /// must begin `ws_` and hold only alphanumerics and underscores — or when no such directory is
-    /// there. The name rule is the driver's; see [`Backend::workspace_create`] for why meeting the
-    /// stricter of its two checks is the only thing a caller can do.
+    /// must be one path component of alphanumerics, `_` and `-`, and may not be empty, `.`, `..`
+    /// or begin with `-` — or when no such directory is there. The prefix this used to demand was
+    /// substrate's resource-id scheme and never its containment, and it went at `0.2.2`; the
+    /// charset is checked here as well as in the driver, so a name that will not do is refused
+    /// with a sentence a caller can act on rather than with a flat path-escape.
     pub fn workspace_adopt(&self, name: &str) -> Result<String, SubstrateError> {
         self.driver
             .workspace_root_identity(name)

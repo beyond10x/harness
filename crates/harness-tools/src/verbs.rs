@@ -251,6 +251,16 @@ impl ToolPort for Verbs {
         self.catalogue.operations()
     }
 
+    /// The entries, under their own names — never the three verbs.
+    ///
+    /// A verb is a **route** and not a capability: `tool_invoke` performs nothing of its own, and a
+    /// narrowing that took it away from an agent granted `file_read` would take away the only way
+    /// to reach the read. What a narrowing names is what stands behind it, which is exactly the
+    /// vocabulary [`ToolPort::invoked`] answers in, so the loop compares like with like.
+    fn reachable(&self) -> Vec<ToolName> {
+        self.catalogue.names()
+    }
+
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.subjects_of(call)
     }
@@ -292,6 +302,11 @@ impl ToolPort for Forked<'_> {
 
     fn operations(&self) -> Vec<&'static str> {
         self.0.catalogue.operations()
+    }
+
+    /// The same entries: a fork confines a child exactly as this port confines its parent.
+    fn reachable(&self) -> Vec<ToolName> {
+        self.0.catalogue.names()
     }
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {

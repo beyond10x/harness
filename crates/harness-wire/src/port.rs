@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::WireError;
 use crate::envelope::Subject;
-use crate::id::{CallId, WireId};
+use crate::id::{CallId, ToolName, WireId};
 use crate::item::{ToolCall, ToolOutcome};
 use crate::turn::{ToolSpec, TurnOutcome, TurnRequest};
 
@@ -176,6 +176,30 @@ pub trait ToolPort {
             .iter()
             .find(|spec| spec.name == call.name)
             .cloned()
+    }
+
+    /// Every name a call over this port can **reach**, whatever the port publishes them as.
+    ///
+    /// # The vocabulary a narrowing is written in
+    ///
+    /// A named agent's `tools:` list names the things a run may *do*, and behind a verb surface
+    /// those are not the things it publishes: [`ToolPort::specs`] answers `tool_search`,
+    /// `tool_describe`, `tool_invoke` on every run and `file_write` is an argument. A gate reading
+    /// `specs()` therefore narrows the **route** instead of the reach — it takes the verb away from
+    /// an agent granted a read, and lets every entry through to one granted the verb.
+    ///
+    /// This is the same vocabulary [`ToolPort::invoked`] answers in, and the two are one rule seen
+    /// from two sides: this says which names a narrowing may name, `invoked` says which of them one
+    /// call reached. **Neither decides anything.** Whether a name is admitted stays with the loop,
+    /// which is what keeps this from being a second gate free to disagree with the first.
+    ///
+    /// Defaulted to the published names, which is exactly right for a flat port — what it publishes
+    /// is what it performs — and is what makes this method invisible to every port that has no
+    /// indirection. A port that under-reports here narrows *more* than it should and never less: a
+    /// published name absent from this list is a route, and a route publishes nothing of its own,
+    /// so the caller ends up admitting nothing rather than admitting everything.
+    fn reachable(&self) -> Vec<ToolName> {
+        self.specs().iter().map(|spec| spec.name.clone()).collect()
     }
 
     /// Every neutral operation this port can perform, whatever it publishes them as.

@@ -344,16 +344,27 @@ pub struct LoopConfig {
     /// what this run was admitted — see [`Agent::admitted`].
     pub agents: Option<Agents>,
 
-    /// Which of the port's tools this run may use, or [`None`] for all of them.
+    /// Which of the things this run can **reach** it may use, or [`None`] for all of them.
     ///
     /// **A narrowing and never a widening.** Set only when a named agent declared a toolset: the
     /// value is that declaration already intersected with what the parent was admitted, so a
     /// child cannot reach a tool its parent did not have by naming one. `None` is what every run
     /// a caller starts has, and what a delegate with no agent has.
     ///
-    /// Enforced in one place — [`AgentLoop::port_specs`] — which both the published toolset and
-    /// the admission check read, so a tool filtered out of the list is also refused when called.
-    /// Two chokepoints would be two chances to disagree.
+    /// # Written in the names of entries, not of published tools
+    ///
+    /// The two are the same list under a flat surface and are not under a verb surface, where what
+    /// is published is `tool_search`, `tool_describe`, `tool_invoke` and what is *reached* is the
+    /// catalogue behind them. [`harness_wire::ToolPort::reachable`] is the port's answer to which
+    /// vocabulary is which, and [`AgentLoop::routes`] is the difference: a published name that
+    /// reaches nothing of its own is a route, and a route is never narrowed away — an agent granted
+    /// `file_read` and refused `tool_invoke` would have been granted nothing at all.
+    ///
+    /// Enforced in one place — the predicate *admitted or a route*, which
+    /// [`AgentLoop::port_specs`] filters the published toolset by and [`AgentLoop::invoke`] admits
+    /// calls by, reading [`harness_wire::ToolPort::invoked`] so that the name it judges is the
+    /// entry's and not the verb's. Two chokepoints would be two chances to disagree, and so would
+    /// two vocabularies.
     pub admits: Option<Vec<harness_wire::ToolName>>,
 
     /// The skills this run may load, or [`None`] to publish no `skill` tool.
@@ -2904,10 +2915,23 @@ impl<'a> AgentLoop<'a> {
         };
         // **The parent's own admitted set, never the port's whole list.** A child of a narrowed
         // run must not be able to climb back out by naming an agent.
+        //
+        // Its *reach* and not what it publishes, because that is the vocabulary an agent document
+        // is written in: a `tools: [Read, Grep]` intersected against `tool_search`,
+        // `tool_describe`, `tool_invoke` meets nothing, and the child would be handed an empty
+        // grant with two `withheld` entries claiming this run's catalogue has no reader. Under a
+        // flat surface the two lists are the same list and this is the same intersection it was.
         let parent_tools: Vec<String> = self
-            .port_specs()
-            .iter()
-            .map(|spec| spec.name.as_str().to_owned())
+            .tools
+            .reachable()
+            .into_iter()
+            .filter(|name| {
+                self.config
+                    .admits
+                    .as_ref()
+                    .is_none_or(|admitted| admitted.contains(name))
+            })
+            .map(|name| name.as_str().to_owned())
             .collect();
         let (admitted, refused) = agent.as_ref().map_or_else(
             || (parent_tools.clone(), Vec::new()),
@@ -3519,24 +3543,30 @@ impl<'a> AgentLoop<'a> {
         // by naming it, which a model can do from its own instructions without guessing. A
         // permission boundary that only hides is not one. Found by the test that asserts it.
         //
-        // What this does **not** narrow is an entry reached through a verb: under the `verbs`
-        // surface the call names `tool_invoke` and the entry is an argument, so this admits the
-        // verb and the entry is decided inside the port. Named agents are a flat-surface feature
-        // until that is answered, and this comment is the record of which half is done.
-        if let Some(admitted) = &self.config.admits
-            && !admitted.contains(&call.name)
-        {
-            sink.emit(LoopEvent::Warning {
-                code: "unpublished-tool".to_owned(),
-                message: format!(
-                    "the model called `{}`, which this run was not admitted",
-                    call.name
-                ),
-            });
-            return ToolOutcome::failed(format!(
-                "`{}` is not one of this run's tools; call only what was published",
-                call.name
-            ));
+        // **What is judged is the entry, never the spelling.** Under the `verbs` surface the call
+        // names `tool_invoke` and the entry is an argument, so a check reading `call.name` saw the
+        // verb on every call: it refused the entry the agent's author *did* grant and it never
+        // named the one it did not, leaving a record that claimed a narrowing which had not held.
+        // So the port is asked what this call invokes — the same question the approver, the event
+        // and the refusal text are already decided on, and the same rule design 0002 § 2 states for
+        // a hook's `tools` filter — and the verb itself comes back a route, admitted whatever the
+        // narrowing says because it is the only way to the entries that were granted.
+        if self.config.admits.is_some() {
+            let invoked = self
+                .tools
+                .invoked(call)
+                .map_or_else(|| call.name.clone(), |spec| spec.name);
+            if !self.admits(&invoked, &self.routes()) {
+                sink.emit(LoopEvent::Warning {
+                    code: "unpublished-tool".to_owned(),
+                    message: format!(
+                        "the model called `{invoked}`, which this run was not admitted"
+                    ),
+                });
+                return ToolOutcome::failed(format!(
+                    "`{invoked}` is not one of this run's tools; call only what was published"
+                ));
+            }
         }
         let published = self.published(&call.name);
         // The spec that decides is the **invoked** one, not the published verb's: a verb over a
@@ -3706,22 +3736,58 @@ impl<'a> AgentLoop<'a> {
         noted
     }
 
+    /// The published tools that perform nothing of their own — the verbs of an indirect surface.
+    ///
+    /// A published name the port does not list as [`reachable`](harness_wire::ToolPort::reachable)
+    /// is a **route**: `tool_invoke` runs no entry until an argument says which, and taking it away
+    /// from a narrowed run would leave the run unable to reach the entries it *was* granted. So a
+    /// route is admitted whatever the narrowing says, and what the narrowing decides is the entry
+    /// the route leads to — which [`harness_wire::ToolPort::invoked`] names.
+    ///
+    /// Empty for a flat port, whose every published tool is its own entry, which is why this
+    /// changes nothing about a flat run. Empty, too, for a port that under-reports `reachable`:
+    /// that run publishes nothing and admits nothing rather than admitting everything, because a
+    /// wrong answer here must cost reach and never boundary.
+    fn routes(&self) -> Vec<harness_wire::ToolName> {
+        let reachable = self.tools.reachable();
+        self.tools
+            .specs()
+            .iter()
+            .filter(|spec| !reachable.contains(&spec.name))
+            .map(|spec| spec.name.clone())
+            .collect()
+    }
+
+    /// Whether this run may use `name`, which is the whole of the narrowing rule.
+    ///
+    /// *Admitted, or a route to something admitted.* [`AgentLoop::port_specs`] filters the
+    /// published toolset by it and [`AgentLoop::invoke`] admits calls by it, so a tool taken out of
+    /// the list is also refused when the model names it anyway and the two cannot drift.
+    fn admits(&self, name: &harness_wire::ToolName, routes: &[harness_wire::ToolName]) -> bool {
+        match &self.config.admits {
+            None => true,
+            Some(admitted) => admitted.contains(name) || routes.contains(name),
+        }
+    }
+
     /// What this run's port publishes, after any narrowing the run was configured with.
     ///
-    /// The one place the filter is applied. [`AgentLoop::request`] renders this to the model and
-    /// [`AgentLoop::published`] admits calls from it, so a tool a named agent was not given is
-    /// absent from the toolset *and* refused if the model names it anyway — the same publication
-    /// rule the machine's own capabilities already follow, applied to a second question.
+    /// One half of the one place the filter is applied. [`AgentLoop::request`] renders this to the
+    /// model and [`AgentLoop::published`] admits calls from it, so a tool a named agent was not
+    /// given is absent from the toolset *and* refused if the model names it anyway — the same
+    /// publication rule the machine's own capabilities already follow, applied to a second
+    /// question, through the same [`AgentLoop::admits`] the other half asks.
     fn port_specs(&self) -> Vec<ToolSpec> {
         let specs = self.tools.specs();
-        match &self.config.admits {
-            None => specs.to_vec(),
-            Some(admitted) => specs
-                .iter()
-                .filter(|spec| admitted.contains(&spec.name))
-                .cloned()
-                .collect(),
+        if self.config.admits.is_none() {
+            return specs.to_vec();
         }
+        let routes = self.routes();
+        specs
+            .iter()
+            .filter(|spec| self.admits(&spec.name, &routes))
+            .cloned()
+            .collect()
     }
 
     fn published(&self, name: &harness_wire::ToolName) -> Option<ToolSpec> {

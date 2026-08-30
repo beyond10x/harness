@@ -14,6 +14,13 @@ use super::*;
 
 const WIRE: &str = "scripted";
 
+/// The verb a call names when the entry it wants is an argument.
+///
+/// `harness_tools::verbs::INVOKE_VERB` spelled again rather than depended on: `harness-loop` does
+/// not know `harness-tools` exists, and a test that imported it would be asserting over the very
+/// coupling this crate refuses.
+const INVOKE_VERB: &str = "tool_invoke";
+
 fn wire() -> WireId {
     WireId::new(WIRE).expect("the test wire id is valid")
 }
@@ -158,6 +165,8 @@ struct ScriptedTools {
     invoked: Option<ToolSpec>,
     /// Specs for names this port never published — catalogue entries reachable behind a verb.
     routed: BTreeMap<String, ToolSpec>,
+    /// The catalogue a verb surface publishes its three verbs over, by entry name.
+    catalogue: BTreeMap<String, ToolSpec>,
     delay: Option<Duration>,
     /// What the loop said was left on the clock, per call.
     remaining: Vec<Option<Duration>>,
@@ -178,6 +187,7 @@ impl ScriptedTools {
             envelopes: BTreeMap::new(),
             invoked: None,
             routed: BTreeMap::new(),
+            catalogue: BTreeMap::new(),
             delay: None,
             remaining: Vec::new(),
             batches: Vec::new(),
@@ -220,6 +230,18 @@ impl ScriptedTools {
         self
     }
 
+    /// The catalogue this port's verbs stand over, which is what makes it a verb surface.
+    ///
+    /// Both routes `harness_tools::Verbs::invoked_entry` answers: `tool_invoke {"name": …}`
+    /// reaches the entry the argument names, and a bare entry name reaches it directly. Neither
+    /// entry is published — [`ToolPort::specs`] stays the verbs, whatever the catalogue holds.
+    fn over(mut self, entries: Vec<ToolSpec>) -> Self {
+        for entry in entries {
+            self.catalogue.insert(entry.name.as_str().to_owned(), entry);
+        }
+        self
+    }
+
     /// Answers `count` outcomes to every batch, whatever it was asked.
     fn miscounting(mut self, count: usize) -> Self {
         self.miscount = Some(count);
@@ -238,12 +260,35 @@ impl ToolPort for ScriptedTools {
         &self.specs
     }
 
+    /// The catalogue where there is one, and the published names where there is not.
+    ///
+    /// The same split the two shipped surfaces make: `harness_tools::Verbs` answers its entries and
+    /// `harness_tools::Flat` takes the trait's default, because what it publishes is what it
+    /// performs.
+    fn reachable(&self) -> Vec<ToolName> {
+        if self.catalogue.is_empty() {
+            return self.specs.iter().map(|spec| spec.name.clone()).collect();
+        }
+        self.catalogue
+            .values()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
+
     fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
         if let Some(invoked) = &self.invoked {
             return Some(invoked.clone());
         }
         if let Some(routed) = self.routed.get(call.name.as_str()) {
             return Some(routed.clone());
+        }
+        let named = if call.name.as_str() == INVOKE_VERB {
+            call.arguments.get("name").and_then(Value::as_str)
+        } else {
+            Some(call.name.as_str())
+        };
+        if let Some(entry) = named.and_then(|name| self.catalogue.get(name)) {
+            return Some(entry.clone());
         }
         let published = self.specs.iter().find(|spec| spec.name == call.name)?;
         Some(
@@ -5058,6 +5103,104 @@ fn a_narrowed_run_is_offered_less_and_refused_the_rest_by_the_same_rule() {
         "refused by the rule that already refuses a tool the run never published, rather than by \
          a second rule that could disagree with it: {:?}",
         bare_kinds(&sink)
+    );
+}
+
+#[test]
+fn a_narrowed_run_is_refused_the_entry_behind_a_verb_by_the_same_rule() {
+    // The sibling above, under the surface where the call does not name the tool. Behind three
+    // verbs the model calls `tool_invoke` and the entry is an argument, so a gate reading the
+    // call's own name sees `tool_invoke` on every call and never `file_write` — a narrowing that
+    // reports as one and is not, which is worse than none because the run's record claims it held.
+    //
+    // What decides is the entry the port says the call **invokes**, which is already the rule for
+    // the approver, for the event, for the refusal text and — design 0002 § 2 — for a hook. This
+    // is that same rule reaching one more gate, not a second gate beside it.
+    let agents = Agents::new(vec![Agent {
+        name: "reader".to_owned(),
+        description: "Reads and reports.".to_owned(),
+        tools: vec!["file_read".to_owned()],
+        instructions: "You only read.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "reader"}),
+            )])),
+            // The child reaches, through the verb, the entry its author did not grant it.
+            Ok(asks_for(&[(
+                "call-2",
+                INVOKE_VERB,
+                json!({"name": "file_write", "arguments": {"path": "a", "text": "b"}}),
+            )])),
+            // And then the one it did.
+            Ok(asks_for(&[(
+                "call-3",
+                INVOKE_VERB,
+                json!({"name": "file_read", "arguments": {"path": "a"}}),
+            )])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("tool_search", Approval::NotRequired),
+            spec("tool_describe", Approval::NotRequired),
+            spec(INVOKE_VERB, Approval::NotRequired),
+        ])
+        .over(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, sink) = harness.run();
+
+    let child = harness
+        .model
+        .seen
+        .iter()
+        .find(|request| request.instructions.contains("You only read."))
+        .expect("the agent's own body reaches the child, after the delegate preamble");
+    assert_eq!(
+        delegated(&sink)
+            .iter()
+            .filter_map(|event| match event {
+                LoopEvent::Warning { code, message } if code == "unpublished-tool" =>
+                    Some(message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["the model called `file_write`, which this run was not admitted"],
+        "refused by the rule that already refuses a tool the run never published, naming the \
+         entry rather than the verb it arrived through — the same message a flat surface gives: \
+         {:?}",
+        delegated(&sink)
+            .iter()
+            .map(|event| kind(event))
+            .collect::<Vec<_>>()
+    );
+    let reached: Vec<&str> = harness
+        .tools
+        .calls
+        .iter()
+        .filter_map(|call| call.arguments.get("name").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        reached,
+        vec!["file_read"],
+        "the entry its author granted ran; the one it did not never reached the port"
+    );
+    assert_eq!(
+        published_names(child),
+        vec!["tool_search", "tool_describe", INVOKE_VERB],
+        "the verbs are the route to every entry, so a narrowing takes entries away and never the \
+         route: a child published nothing at all could not reach the entry it *was* granted"
     );
 }
 

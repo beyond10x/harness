@@ -16,16 +16,26 @@ harness-tools = { workspace = true }
 harness-wire = { workspace = true }
 # **The one dependency on a sibling component, and both boundaries it crosses are argued in
 # `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
-# daemon artifact and the wire contract; this imports the driver. The socket path works against a
-# daemon built from this revision (verified 2026-08-29); embedding stays because it needs no
-# deployment, and because the wire types turn a 422 nobody could diagnose into a compile error.
+# daemon artifact and the wire contract; this imports the driver. The socket path was verified
+# 2026-08-29 against a daemon built from substrate `f1cfc1c` (`1b1f6a8` here), and that still holds
+# at the pinned `43c5a10`: substrate's wire and daemon crates gained only a test in between, and the
+# range's one production change — `substrate-host`'s `validate_root_name` — only widens which names
+# a workspace root may take, while `tests/live.rs` mints its own through `workspace_create`.
+# Embedding stays because it needs no deployment, and because the wire types turn a 422 nobody could
+# diagnose into a compile error.
 #
 # **Pinned by revision, never by path.** A `path` into a sibling checkout builds against whatever
 # happens to be checked out there, and `--locked` cannot lock it — the gate was green against a tree
-# no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.2.1` (2026-08-29): the first
-# tag after the brand sweep — `0.2.0` still carried the former brand in a wire hash domain
-# (`EXECUTION_CAPSULE_HASH_DOMAIN`) — and identical to the previously pinned revision `f1cfc1c` in
-# `substrate-host` and `substrate-wire`; the release added the website and the version.
+# no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.2.2` (2026-08-29, the revision
+# `43c5a10` the lockfile resolved it to): the release whose workspace adoption drops the `ws_`
+# root-name requirement, which is what lets a run be pointed at a directory the operator already
+# owns rather than at a `ws_`-named scratch copy of it (`0c31438` here). **The floor is `0.2.2`.**
+# Both `version` requirements below are `^0.2.2`, so cargo refuses a lower tag until they move too;
+# and moving them buys a driver that adopts an operator-named directory and then refuses the first
+# write into it with `workspace.path-escape`, because `0.2.1`'s `validate_root_name` still wants
+# `ws_`. Nothing in this crate's suite covers that, so a rollback would look green. `0.2.1` earns
+# its mention only as the first release without the former brand's capsule hash domain: at `0.2.0`
+# that was `daemonloom.execution-capsule.v1`, inline at `crates/substrate-wire/src/lib.rs:1482`.
 substrate-host = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 substrate-wire = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`

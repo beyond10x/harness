@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:cli-contract-dated-ahead
 kind: story
-status: draft
+status: active
 title: The CLI pin in force is dated when it was cut and diffed against what preceded it
 relations:
 - derived_from: epic:pinned-interfaces-honest
-revision: 3
+- serves: vision:b10x-owns-its-loop
+revision: 5
 ---
 ## Evidence
 

@@ -2,14 +2,16 @@
 format: aep.planning-md/1
 id: story:a-steps-scope-is-the-scope-it-runs-under
 kind: story
-status: draft
+status: active
 title: A step's declared write scope is the scope it runs under, so the same map denies the same write on both arms
 summary: 'The projection carries each step''s first-match-wins scope and FlowRunner ignores it: the toolset is built once per run, so the eval''s deliberate-denial step wrote revision: 99 to the planning store on the native arm where the driven arm refuses it at the tool layer'
 owner: harness
 tags:
 - safety
 - workflow
-revision: 1
+relations:
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 # Story: a step's declared write scope is the scope it runs under
 

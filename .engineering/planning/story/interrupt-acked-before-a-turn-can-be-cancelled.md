@@ -8,7 +8,7 @@ summary: 'turn/started is notified before TurnControl is installed: an interrupt
 relations:
 - derived_from: epic:bridge-mode-proof
 - informed_by: story:bridge-interrupt-race-pinned
-revision: 1
+revision: 2
 ---
 ## Evidence
 
@@ -81,3 +81,16 @@ An interrupt decoded between `turn/start` being answered and the turn becoming i
 that turn rather than being acknowledged and dropped — pinned by a case that injects the window and
 fails without the fix — and `crates/harness-cli/tests/bridge_mode.rs`'s two interrupt tests pass
 with their client-side gate removed.
+
+## A test for it is already written
+
+An adversarial pass against `wt/bridge-interrupt` wrote two cases before it was stopped, saved as
+`.wave/records/adversary-bridge-cases.patch` (123 lines, against `crates/harness-cli/tests/bridge_mode.rs`):
+
+- `an_acknowledged_interrupt_never_also_delivers_the_answer` — the assertion this story exists for.
+  An interrupt that was acknowledged must not be followed by the completed answer.
+- `a_request_arriving_mid_stream_is_refused_before_the_turn_ends`
+
+They were never run, so their state is unknown; whoever takes this story applies the patch first and
+finds out. A story that starts from an unrun test is still ahead of one that starts from a
+description of one.

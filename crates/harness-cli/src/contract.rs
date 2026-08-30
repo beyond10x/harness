@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.1";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.2";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -99,20 +99,33 @@ fn reachable<'a>(
 /// Positional arguments are not recorded because this command line has none: every value is named,
 /// which is what makes an invocation readable in a driver's source three months later. One added
 /// later would need its own field here rather than being folded into this one.
+///
+/// A row is keyed by its long flag and carries the short spelling beside it, because `-p` is a
+/// command line a consumer can type today and a document that recorded only `--profile` could lose
+/// it without either half of the check noticing.
 fn flags(command: &clap::Command) -> Value {
     let mut rows: Vec<Value> = command
         .get_arguments()
         .filter(|argument| !argument.is_positional())
         .filter_map(|argument| {
             let long = argument.get_long()?;
+            // The one that broke a consumer: whether the flag eats the next word. It decides the
+            // placeholder too — clap holds a value name for every argument, including the bare
+            // flags whose usage line it never prints one for.
+            let takes_value = argument.get_action().takes_values();
             Some(json!({
                 "long": format!("--{long}"),
-                // The one that broke a consumer: whether the flag eats the next word.
-                "takes_value": argument.get_action().takes_values(),
-                "value_name": argument
-                    .get_value_names()
-                    .and_then(|names| names.first())
-                    .map(std::string::ToString::to_string),
+                // The other spelling of the same flag, or null where there is only one.
+                "short": argument.get_short().map(|short| format!("-{short}")),
+                "takes_value": takes_value,
+                "value_name": takes_value
+                    .then(|| {
+                        argument
+                            .get_value_names()
+                            .and_then(|names| names.first())
+                            .map(std::string::ToString::to_string)
+                    })
+                    .flatten(),
                 "default": argument
                     .get_default_values()
                     .first()
@@ -330,7 +343,8 @@ mod tests {
                 "2026-08-29.2",
                 "2026-08-29.3",
                 "2026-08-30",
-                "2026-08-30.1"
+                "2026-08-30.1",
+                "2026-08-30.2"
             ],
             "a released version may be superseded and never removed"
         );
@@ -498,11 +512,16 @@ mod tests {
     ///
     /// A command that is gone takes its flags with it and is reported once, not once per flag.
     fn moves_between(before: &Value, after: &Value) -> Vec<Moved> {
-        const PINNED_FIELDS: [&str; 6] = [
+        // `short` is one of them: `-p` is a command line a consumer can type, and a flag that
+        // loses its short spelling breaks an invocation that already worked exactly as a renamed
+        // long flag does. A document cut before the key existed holds no `short` on either side of
+        // a pair, so absence never reads as a move.
+        const PINNED_FIELDS: [&str; 7] = [
             "conflicts_with",
             "default",
             "required",
             "requires",
+            "short",
             "takes_value",
             "value_name",
         ];
@@ -970,23 +989,22 @@ mod tests {
 
     /// A flag that eats no word records no placeholder for one.
     ///
-    /// `2026-08-30.1/README.md` says `value_name` holds "the placeholder in the usage line, or
-    /// `null`", and clap prints no placeholder for a bare flag: `b10x-harness run --help` renders
-    /// `--substrate-embedded` and `--delegate` with nothing after them, beside
-    /// `-p, --profile <NAME>` which has one. The document nonetheless records
+    /// Every pinned README says `value_name` holds "the placeholder in the usage line", and clap
+    /// prints no placeholder for a bare flag: `b10x-harness run --help` renders
+    /// `--substrate-embedded` and `--delegate` with nothing after them, beside a
+    /// `-p, --profile <NAME>` that has one. Up to `2026-08-30.1` the document recorded
     /// `"value_name": "SUBSTRATE_EMBEDDED"` against `"takes_value": false` on 23 rows — including
-    /// the one flag this whole contract exists because of. A driver that generates a command line
-    /// from `value_name` emits `--substrate-embedded SUBSTRATE_EMBEDDED`, which is the exact word
+    /// the one flag this whole contract exists because of. A driver that generated a command line
+    /// from `value_name` emitted `--substrate-embedded SUBSTRATE_EMBEDDED`, which is the exact word
     /// clap refused from the consumer pinned to `0.1.0`.
     ///
     /// `a_flag_that_eats_the_next_word_is_distinguished_from_one_that_does_not` asserts
     /// `takes_value` on that flag and never looks at the placeholder beside it.
-    // Red today, on purpose. 23 bare flags record a `value_name` the pinned document defines as
-    // the usage-line placeholder — `--substrate-embedded` among them, at
-    // `contracts/cli/b10x-harness/2026-08-30.1/argv.json`. Making it green re-pins `argv.json`,
-    // which is a new cut: `story:argv-pin-misdescribes-the-command-line`.
+    // Red from the day it was written until `2026-08-30.2`, on purpose, and carrying `#[ignore]`
+    // with the story that would close it named in the attribute: making it green re-pins
+    // `argv.json`, and a released version is immutable, so it took a new cut
+    // (`story:argv-pin-misdescribes-the-command-line`).
     #[test]
-    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` cuts a new argv.json"]
     fn a_flag_that_eats_no_word_records_no_placeholder_for_one() {
         let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
         let mut contradictory: Vec<String> = Vec::new();
@@ -1008,24 +1026,25 @@ mod tests {
 
     /// Every short flag a consumer can type is pinned, or the document says it is not pinned.
     ///
-    /// `-p` is a short flag on `--profile`, on the root command and on every command that takes a
-    /// run's options (`crates/harness-cli/src/lib.rs:340` and `:480`), and clap prints it:
-    /// `-p, --profile <NAME>`. The pinned document has no field for it — every row is keyed by
-    /// `long` alone — and `2026-08-30.1/README.md` names it in neither direction: "What is pinned"
-    /// says "one row per long flag" and "What is not pinned" lists the help text, the summaries,
-    /// clap's print order and the exit statuses. The word "short" does not appear in the file.
+    /// `-p` is a short flag on `--profile`, on every command that takes a run's options and on
+    /// `profiles explain` (`crates/harness-cli/src/lib.rs:340` and `:480`), and clap prints it:
+    /// `-p, --profile <NAME>`. Up to `2026-08-30.1` the pinned document had no field for it —
+    /// every row was keyed by `long` alone — and that README named it in neither direction: "What
+    /// is pinned" said "one row per long flag" and "What is not pinned" listed the help text, the
+    /// summaries, clap's print order and the exit statuses. The word "short" appeared nowhere in
+    /// the file.
     ///
-    /// So `-p` is a piece of the argv surface that can be renamed, repointed at another flag or
-    /// dropped with both halves of the check green — which is the failure this contract was cut to
-    /// prevent, on a flag a consumer can already type today.
-    // Red today, on purpose. `-p` on `--profile` (`crates/harness-cli/src/lib.rs:340` and `:480`)
-    // is a short flag a consumer can already type that the pinned document does not record. The
-    // honest fix is pinning it, which re-pins `argv.json` and so is a new cut:
-    // `story:argv-pin-misdescribes-the-command-line`. This test's `readme.contains("short")` hatch
-    // would also go green on a README sentence disclaiming short flags — that is moving the
-    // goalpost, not fixing it, and is why it is not taken here.
+    /// So `-p` was a piece of the argv surface that could be renamed, repointed at another flag or
+    /// dropped with both halves of the check green — the failure this contract was cut to prevent,
+    /// on a flag a consumer can already type today. `2026-08-30.2` pins it: every row carries
+    /// `short`, and `short` is a field [`moves_between`] diffs, so losing it is a move the README
+    /// of the cut that loses it has to state.
+    // Red from the day it was written until `2026-08-30.2`, on purpose, and carrying `#[ignore]`
+    // with the story that would close it named in the attribute. The `readme.contains("short")`
+    // hatch below would also have gone green on a README sentence disclaiming short flags — that
+    // is moving the goalpost rather than closing the gap, and it is not the route that was taken:
+    // `-p` is in `argv.json`, where the byte-for-byte pin above holds it.
     #[test]
-    #[ignore = "fails until `story:argv-pin-misdescribes-the-command-line` pins `-p`"]
     fn a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned() {
         let command = Cli::command();
         let mut nested: Vec<(String, &clap::Command)> = Vec::new();

@@ -290,11 +290,25 @@ impl Server<'_> {
             "thread/start" => self.start_thread(id, params),
             "turn/start" => self.start_turn(id, params, new_model),
             "turn/interrupt" => {
-                // Reached only between turns — a running turn is inside `drive_turn`, not here —
-                // so there is nothing to cancel and the reading thread left a count rather than a
-                // cancellation. Taking it back down here is what keeps it off the next turn: the
-                // client sent this frame before it asked for that turn, and the queue's order is
-                // what says so.
+                // Reached from the main loop, which is between turns — a running turn is inside
+                // `drive_turn` — so there is no turn here to cancel and the reading thread left a
+                // count rather than a cancellation. Taking it back down is what keeps it off the
+                // next turn: the client sent this frame before it asked for that turn, and the
+                // queue's order is what says so.
+                //
+                // The count and the frame are not tied to one another, and cannot be: a frame is
+                // counted on the reading thread and dequeued on this one. A frame counted into a
+                // *turn's* `owed` could be dequeued here and take `stray` down for a count that
+                // belongs to a different frame — but only if a turn ended owing one, and since
+                // `drive_turn` settles what it owes on every exit path the only way left is a
+                // `settle_interrupts` that failed, which means the connection is gone or the
+                // frame never arrived at all.
+                //
+                // Even then it is the harmless direction. Only [`Watch`] ever raises `stray`, and
+                // only with no turn to cancel, so it cannot be counted too high; a decrement that
+                // pairs with the wrong frame can only leave it too low, and too low means an
+                // interrupt cancels its turn at the drain rather than before it streams. Too
+                // high would mean cancelling a turn nobody asked to stop.
                 if let Ok(mut interrupts) = self.interrupts.lock() {
                     interrupts.stray = interrupts.stray.saturating_sub(1);
                 }
@@ -502,7 +516,7 @@ impl Server<'_> {
         let config = LoopConfig::new(self.config.model.as_str(), thread.instructions.as_str())
             .with_budget(self.config.budget.clone())
             .with_context_window(self.config.context_window);
-        let mut model = new_model(control.cancel.clone())?;
+        let model = new_model(control.cancel.clone());
         let mut tools = BridgeTools::new(
             self.wire.clone(),
             thread_id,
@@ -521,30 +535,47 @@ impl Server<'_> {
             control.clone(),
         );
 
-        let outcome = AgentLoop::new(&mut *model, &mut tools, &mut approvals, config)
-            .with_cancel(control.cancel.clone())
-            .run(input, &mut sink)
-            .map_err(|error| error.to_string())?;
+        // Bound rather than `?`-ed on the spot, and so is the model client above it. A turn that
+        // could not proceed at all — an unusable budget, a client that would not build, a wire
+        // that failed on the first request — was still cancelled by whatever cancelled it, and
+        // still owes the client an answer to the frame that did the cancelling. Returning here
+        // would write `turn/completed` with an interrupt unanswered and the status `failed`, for
+        // a turn a person stopped: the exact symptom this change exists to remove, surviving on
+        // the paths that jumped over the fix. Both errors are carried past the two steps below
+        // and raised last, so every way out of this function settles what the turn owes.
+        let ended = match model {
+            Ok(mut model) => AgentLoop::new(&mut *model, &mut tools, &mut approvals, config)
+                .with_cancel(control.cancel.clone())
+                .run(input, &mut sink)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error),
+        };
 
         // Every interrupt this turn was cancelled by is a frame the client is still waiting on an
         // answer to, and it has to have one *before* the frame that says the turn ended. An
         // acknowledgement read after `turn/completed` is not an acknowledgement, it is a receipt.
         // `BridgeSink` drains between streamed events, which covers a turn that streamed anything;
-        // a turn cancelled before its first event never reaches that drain, and one cancelled
-        // before it began never starts a stream to drain between.
+        // a turn cancelled before its first event never reaches that drain, one cancelled before
+        // it began never starts a stream to drain between, and one that failed outright reaches
+        // neither.
         if let Err(error) = self.wire.settle_interrupts(control) {
             sink.broken.get_or_insert(error);
         }
 
         // An interrupt that was actually asked for is the reason this turn ended, even if the
-        // connection then dropped. Letting a later write failure overwrite it would report a
+        // connection then dropped or the run could not proceed at all. Letting a later write
+        // failure — or a budget this run could never have satisfied — overwrite it would report a
         // person's own cancellation as a fault.
         if control.requested.load(Ordering::SeqCst) {
             return Ok(TurnResult {
                 status: "interrupted".to_owned(),
-                text: outcome.text,
+                // Whatever the run had when it stopped, and nothing when it never started. An
+                // interrupted turn's text is not delivered either way: `start_turn` writes
+                // `item/completed` only for a turn that completed.
+                text: ended.map(|outcome| outcome.text).unwrap_or_default(),
             });
         }
+        let outcome = ended?;
         if let Some(error) = sink.broken.take() {
             return Err(error.to_string());
         }

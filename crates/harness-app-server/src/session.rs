@@ -103,6 +103,28 @@ impl Wire {
     /// then handed the answer it cancelled — so the two are one statement apart, here and in
     /// [`BridgeTools::await_response`](crate::session::BridgeTools), which is the only other place
     /// a control frame is dequeued while a turn is running.
+    ///
+    /// # The three facts the interrupt accounting rests on
+    ///
+    /// `Interrupts::stray` decides which turn an interrupt belongs to — the one it was sent after
+    /// — purely from the order frames leave the queue. Nothing enforces that ordering in one
+    /// place, so it is written down here, where the next person to add an arm to this `match` will
+    /// read it.
+    ///
+    /// 1. **One channel, one producer, one consumer.** [`Reader`] owns the only sender and this
+    ///    thread the only receiver, so frames are dequeued in the order they were decoded, which
+    ///    is the order the client wrote them.
+    /// 2. **The count is raised before the frame is queued.** `pump` calls `watch.interrupted()`
+    ///    and *then* `sender.send` (`transport.rs`). So a frame that was counted is a frame
+    ///    already on its way, which is what lets [`settle_interrupts`](Self::settle_interrupts)
+    ///    wait for one instead of guessing.
+    /// 3. **Nothing may put a `Request` in the stash.** The `other =>` arm below is reachable only
+    ///    for a response, a notification or a malformed frame, because both arms above it match
+    ///    every [`Incoming::Request`]. [`next_frame`](Self::next_frame) prefers the stash, so a
+    ///    stashed request would be dequeued ahead of frames the client sent earlier — and an
+    ///    interrupt that jumped a `turn/start` that way would be counted against the wrong turn
+    ///    and cancel a turn nobody asked to stop. That is the trap [`Watch`](crate::Watch)'s own
+    ///    comment warns about, and no test in this repository would notice it.
     fn serve_control(
         &self,
         message: Incoming,

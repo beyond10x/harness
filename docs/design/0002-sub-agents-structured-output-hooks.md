@@ -127,8 +127,48 @@ files to answer one question costs the parent one tool result, not forty reads i
 | **its own turn ceiling** | `Delegation::max_turns` (default 20): a child that loops does not spend the parent's remaining fifty turns |
 | **the remaining wall clock** | as every tool call does |
 | **its spend absorbed by the parent on every exit path** | a child that failed on the wire after three turns still spent them; the parent's ceilings bind on that too |
-| **no `delegate`** | depth 1: `Delegation::depth` counts down and a child at depth 0 publishes no `delegate`. A tree of delegates is **milestone M4**, with concurrency, when a run shows a need |
+| **no `delegate`** | depth 1: `Delegation::depth` counts down and a child at depth 0 publishes no `delegate`. A tree of delegates is still **milestone M4**, when a run shows a need. Delegates *side by side* were the other half of M4 and shipped — see below |
 | **no `answer`** | the child's result is its text; a schema for the child is **milestone M2**, one field on the call |
+
+### Side by side (M4, shipped)
+
+A turn that asked for three delegates paid three whole child runs of latency back to back. Nothing
+about them required it: a delegate starts from an empty conversation, so no child can read what
+another produced and there is no ordering between them to preserve.
+
+**Neighbouring `delegate` calls of one turn form a group**, capped at `Delegation::max_parallel`
+(default 4). Neighbouring and not gathered from the whole turn, exactly as a batch of pure tool
+calls is: a call between two delegates is a barrier, because the second child may be there to look
+at what that call did.
+
+| the group's children get | how |
+|---|---|
+| a model port each | `ModelPort::fork` — the same endpoint, the same credential source, the same connection pool and, on the Responses wire, the same request counter and prompt-cache key |
+| a tool port each | `ToolPort::fork` — the **same catalogue**, shared rather than copied, so a fork publishes exactly what its parent publishes. A fork that published one entry more would be widening a run by delegating |
+| one approver between them | not forked: one person, asked one question at a time. A child asks the run's own thread |
+| one hook file between them | not forked: *how many copies of my guard are running* must not depend on how many sub-tasks a model asked for |
+| one event sink between them | not forked: the record is one ordered stream. A child's events arrive wrapped in `Delegated { call_id }`, as they always have |
+| **a share of the token budget** | `(limit − spent) / children`. Tokens add up, so a group cannot promise the whole remainder to each of four children |
+| **the whole of the wall clock** | wall clock does *not* add up: four children running at the same moment take one child's worth of it. The same figure a batch of tool calls is handed |
+
+**Running side by side is an optimisation and never a difference in what a run can do.** Where a
+port will not fork, where `max_parallel` is 1, or where the remainder will not divide, the same
+delegates run **in order** — the same children, the same gate, the same results in the same order.
+Order is in fact the more accurate accounting: each child is carved on what the one before it
+actually spent. That is what concurrency costs here, and it is paid in budget precision rather than
+in reach.
+
+A child on a worker thread that cannot reach the run's thread **fails closed**: an approval nobody
+gave is a denial and a hook that could not be consulted did not say yes. A child that panics is a
+failed tool result naming what happened, and its siblings finish.
+
+**What a reader of the record sees**, with no new event: two `DelegateStarted` before either
+`DelegateFinished`, and the two children's `Delegated` events interleaved. That cannot happen in a
+run that delegated in order, so the record already distinguishes the two.
+
+The model is told, in the `delegate` description, that several calls in one turn run at once — and
+only on a run that can actually do it. A model that is not told does not ask, and concurrency
+nobody asks for never fires.
 
 ### The spec the model sees
 
@@ -197,8 +237,10 @@ pub struct AfterCall { pub note: Option<String>, pub decision: HookDecision }  /
 pub struct NoHooks;   // every default; the loop's default
 ```
 
-`AgentLoop::with_hooks(&mut dyn HookPort)`. The loop spawns nothing: the port is the seam, exactly
-as `ApprovalPort` is, and the process-running implementation lives in the shell.
+`AgentLoop::with_hooks(&mut dyn HookPort)`. The loop spawns no process: the port is the seam,
+exactly as `ApprovalPort` is, and the process-running implementation lives in the shell. Under M4 a
+group of delegates runs on threads, and the hooks stay off them — a child asks the run's own thread,
+which holds the one `HookPort` and consults it for one call at a time.
 
 | point | fires | `Proceed` | `Block { reason }` | `Failed { reason }` |
 |---|---|---|---|---|
@@ -259,7 +301,7 @@ run sees which hook decided what.
 | `harness-loop` | `OutputSchema`, `Delegation`, `HookPort`/`HookDecision`/`HookPoint`/`NoHooks`; `LoopConfig::{output_schema, delegation}`; `AgentLoop::with_hooks`; `LoopStop::Unstructured`; `LoopOutcome::structured`; events `Answered`, `DelegateStarted`, `DelegateFinished`, `Delegated`, `HookRan`; the owned-tool resolution in `run_calls`; the nudge and the stop hook in `drive`; the nested loop |
 | `harness-cli` | `--output-schema`, `--delegate`, `--delegate-turns`, `--hooks`; `hooks.rs` (file, protocol, process); renderer arms; session field; the argv pin `contracts/cli/b10x-harness/2026-08-29` **updated in place** — it is unreleased, and invariant 13 immutability starts at release |
 | `harness-app-server` | ignores the new events; publishes none of the three (the client mediates its own tools; hooks and delegation there are the client's) |
-| `harness-wire` | **nothing.** No new field, no new event: the answer travels as a tool call, and that is the reason § 1 chose it |
+| `harness-wire` | for § 1 and § 3, **nothing**: no new field and no new event, because the answer travels as a tool call, which is the reason § 1 chose it. For M4, one defaulted method on each of `ModelPort` and `ToolPort` — `fork`, answering `None` unless the port can be run beside itself |
 
 ## 5. Not in this design
 
@@ -267,12 +309,29 @@ run sees which hook decided what.
   ones nothing here confines (design 0001 § 2). metaharness is the MCP side of this family.
 - **Multimodal input.** `Item::UserText` is text; an image item is a new neutral value on both
   wires and a new contract version each. Nothing that measures this harness has asked for it.
-- **Provider-native structured output (M2), schema validation in the loop (M3), delegate trees and
-  parallel delegates (M4).** Each waits for the evidence that the shipped path is not enough.
+- **Provider-native structured output (M2), schema validation in the loop (M3), delegate trees
+  (M4).** Each waits for the evidence that the shipped path is not enough. *Parallel* delegates
+  were the other half of M4 and shipped once a run showed the need — see § 2. Trees did not: each
+  level is a context nobody can read afterwards, and that argument is untouched by concurrency.
 
 ## 6. Evidence this needs
 
 All of it is `provider_emulated` until a live run: the `answer` path on both emulators (call, nudge,
 `Unstructured`), a delegate that reads three files and reports, a `before-call` hook that blocks a
-write, an `after-call` hook that notes, a `stop` hook that turns the run once more. The first live
+write, an `after-call` hook that notes, a `stop` hook that turns the run once more.
+
+For M4 the evidence is that two children were **inside a turn at the same time**, which no
+measurement of elapsed time can establish — a fast serial run and a slow parallel one look alike.
+`two_delegates_of_one_turn_run_at_the_same_time` reads a high-water mark taken inside the forked
+port instead, and every fallback path (a port that will not fork, `max_parallel: 1`, a budget that
+will not divide, a call between two delegates) is pinned to produce the same two results in the
+same order.
+
+That much is against doubles the loop's own tests wrote. The `delegate-pair` scenario is the other
+half: a run through the **shipped binary**, on both emulators, whose record shows two
+`delegate-started` before either `delegate-finished` — a bracketing a run that delegated in order
+cannot produce. It is what proves the *shipped* ports fork, and it earned its place immediately:
+`harness-cli`'s `Published` delegates every `ToolPort` method by hand, inherited `fork`'s `None`
+default when the method was added, and sent every real run straight back to one child at a time
+with every loop test still green. The first live
 measurement to take is the one § 1 named: how often a real model ends in prose under `answer`.

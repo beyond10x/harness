@@ -263,7 +263,7 @@ unless a run asks for it.
 | what | how it is spelled | what it is |
 |---|---|---|
 | structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it **and the turn that ask opens is held to that tool at the provider** — one turn per run, never any other; if it still does not, the run stops `unstructured` and exits 2 — never a success status over prose |
-| sub-agents | `--delegate` (`--delegate-turns N`, default 20) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and the remainder of the parent's budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate |
+| sub-agents | `--delegate` (`--delegate-turns N`, default 20; `--delegate-parallel N`, default 4) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and a share of the parent's remaining budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate. **Neighbouring `delegate` calls of one turn run side by side** — each child gets a fork of the model and tool ports, while the approver, the hooks and the record stay single and are asked from the run's own thread. `--delegate-parallel 1` runs them one at a time |
 | hooks | `--hooks <FILE>` | the operator's own programs, run as an argv (never a shell) at three moments: `before-call` (after approval; exit 2 refuses the call, a hook that fails refuses it too), `after-call` (a note the model reads beside the result), `stop` (exit 2 keeps the run working with the reason, at most three times). Named on the command line, **never discovered in the workspace** |
 
 None of the three is a catalogue entry or touches `harness-wire`: `answer` and `delegate` are tools
@@ -271,9 +271,13 @@ the **loop** owns, resolved before the tool port ever sees a call, and a hook is
 approver, with the process-running half in the shell. A delegate's tool calls meet exactly the gate
 the parent's do; a hook can refuse what the gate allowed and can allow nothing the gate refused.
 
-Provider-native structured output (constrained decoding on the wire), schema validation in the loop,
-delegate trees and parallel delegates are labelled later milestones in the design, each waiting on
-a live run that shows the shipped path is not enough.
+Running delegates side by side changes how long a turn takes and nothing else: where a port will
+not hand out a second handle on itself, or the remaining token budget will not divide between the
+children, the same delegates run in order and reach the same results in the same order.
+
+Provider-native structured output (constrained decoding on the wire), schema validation in the loop
+and delegate *trees* are labelled later milestones in the design, each waiting on a live run that
+shows the shipped path is not enough.
 
 ## Workflows
 

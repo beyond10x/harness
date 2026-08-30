@@ -155,26 +155,14 @@ impl Verbs {
     }
 }
 
-impl ToolPort for Verbs {
-    fn specs(&self) -> &[ToolSpec] {
-        &self.specs
-    }
-
-    /// What the **catalogue** can do, which is the question the three verbs hide.
-    ///
-    /// The verbs are the same on every run; this is what differs, and it is what a reader of the
-    /// record actually wants to know about the run's reach.
-    fn operations(&self) -> Vec<&'static str> {
-        self.catalogue.operations()
-    }
-
+impl Verbs {
     /// The subjects of the **entry being invoked**, not of the verb.
     ///
     /// A gate that read `tool_invoke`'s own arguments would see one opaque blob for every call in
     /// the run. What it needs is the file or the program underneath, so the verb is unwrapped
-    /// before the question is answered — which is the whole reason `subjects` is per-call rather
-    /// than per-spec.
-    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+    /// before the question is answered — which is the whole reason
+    /// [`ToolPort::subjects`] is per-call rather than per-spec.
+    fn subjects_of(&self, call: &ToolCall) -> Vec<Subject> {
         self.invoked_entry(call)
             .map(|(entry, arguments)| entry.subjects(arguments))
             .unwrap_or_default()
@@ -189,8 +177,9 @@ impl ToolPort for Verbs {
     /// entry, or one this run does not have, touches nothing: the catalogue refuses it by name
     /// before anything runs, and the model learns the names — so it is described as the read it
     /// amounts to rather than as the run it is not.
-    /// The spec of the entry, whether it was named inside `tool_invoke` or called by its own name.
-    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+    ///
+    /// The same answer whether the entry was named inside `tool_invoke` or called by its own name.
+    fn spec_invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
         let Some(published) = self.specs.iter().find(|spec| spec.name == call.name) else {
             // Not a verb. A bare entry name is routed rather than refused, and what decides
             // approval is the entry's own spec — the same one an approver would have been handed
@@ -212,21 +201,13 @@ impl ToolPort for Verbs {
         ))
     }
 
-    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
-        self.call_within(call, None)
-    }
-
-    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
-        outcome(self.answer(call, remaining))
-    }
-
     /// Runs the invocations side by side and answers the catalogue questions where they stand.
     ///
     /// `tool_search` and `tool_describe` read a list this process already holds, so a thread for
     /// one would cost more than it saved; they are answered in place and the invocations go to
     /// [`Catalogue::invoke_batch`](crate::Catalogue::invoke_batch). Positions are kept either way,
     /// because the loop matches outcomes to calls by index.
-    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+    fn answer_all(&self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
         let routed: Vec<Option<(&str, &Value)>> = calls
             .iter()
             .map(|call| {
@@ -254,6 +235,88 @@ impl ToolPort for Verbs {
                 None => outcome(self.answer(call, remaining)),
             })
             .collect()
+    }
+}
+
+impl ToolPort for Verbs {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.specs
+    }
+
+    /// What the **catalogue** can do, which is the question the three verbs hide.
+    ///
+    /// The verbs are the same on every run; this is what differs, and it is what a reader of the
+    /// record actually wants to know about the run's reach.
+    fn operations(&self) -> Vec<&'static str> {
+        self.catalogue.operations()
+    }
+
+    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+        self.subjects_of(call)
+    }
+
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+        self.spec_invoked(call)
+    }
+
+    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        outcome(self.answer(call, None))
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        outcome(self.answer(call, remaining))
+    }
+
+    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        self.answer_all(calls, remaining)
+    }
+
+    /// A second handle on this same surface, for a loop running two children side by side.
+    ///
+    /// Shared and not copied, for the reason [`crate::Flat`]'s fork gives: the catalogue is what
+    /// confines a run, and a fork must publish exactly what this port publishes. Here it also has
+    /// to *route* exactly the same way — a bare entry name reaches the same entry in a child as in
+    /// its parent — which is true for free of a fork that is the same `Verbs`.
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        Some(Box::new(Forked(self)))
+    }
+}
+
+/// A borrowed [`Verbs`], published as its own [`ToolPort`].
+struct Forked<'a>(&'a Verbs);
+
+impl ToolPort for Forked<'_> {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.0.specs
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.0.catalogue.operations()
+    }
+
+    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+        self.0.subjects_of(call)
+    }
+
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+        self.0.spec_invoked(call)
+    }
+
+    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        outcome(self.0.answer(call, None))
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        outcome(self.0.answer(call, remaining))
+    }
+
+    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        self.0.answer_all(calls, remaining)
+    }
+
+    /// A fork of a fork is a fork of the same [`Verbs`], not a chain of them.
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        Some(Box::new(Forked(self.0)))
     }
 }
 

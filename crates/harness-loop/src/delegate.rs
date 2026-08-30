@@ -23,9 +23,26 @@ pub const DELEGATE_MAX_TURNS: u64 = 20;
 
 /// How deep delegation goes. One: a delegate publishes no `delegate` of its own.
 ///
-/// A tree of delegates, and delegates side by side, is milestone M4 of design 0002 — wanted when a
-/// run shows the need, not before, because each level is a context nobody can read afterwards.
+/// A **tree** of delegates is still milestone M4 of design 0002 — wanted when a run shows the
+/// need, not before, because each level is a context nobody can read afterwards. Delegates *side
+/// by side* were the other half of that milestone and are built: see [`Delegation::max_parallel`].
 pub const MAX_DELEGATION_DEPTH: u32 = 1;
+
+/// How many delegates one turn may run at the same time by default.
+///
+/// # Why the default is more than one
+///
+/// A turn that asks for three delegates paid three whole child runs of latency back to back, and
+/// nothing about them requires it: a delegate starts from an empty conversation, so no child can
+/// read what another produced, and there is no ordering between them to preserve. The figure is a
+/// ceiling on **model turns in flight**, not on threads doing work — each child spends nearly all
+/// of its wall clock waiting on a provider.
+///
+/// Four, and not more, because every child in flight is a full conversation being charged for: a
+/// model that asks for eight has committed the run's remaining token budget eight ways before the
+/// first of them has said anything. A run that wants more says so
+/// ([`Delegation::with_max_parallel`]).
+pub const DELEGATE_MAX_PARALLEL: u32 = 4;
 
 /// What a delegate is told about being one, appended to the parent's standing instruction.
 ///
@@ -56,6 +73,19 @@ pub const DELEGATE_DESCRIPTION: &str = "Hand a self-contained sub-task to a fres
     cannot see this conversation, so the task must say everything it needs. It reports once, in \
     text, when it is done; you read only that report.";
 
+/// Appended to [`DELEGATE_DESCRIPTION`] on a run whose delegates may run side by side.
+///
+/// Said out loud because a model that does not know it can ask for two at once does not, and the
+/// concurrency then exists and never fires. Only appended when the run actually has it: a run at
+/// `max_parallel: 1` that advertised this would be telling the model something false about what
+/// its next turn costs.
+///
+/// The count is described rather than quoted, for the reason [`DELEGATE_PREAMBLE`] gives about
+/// quoting a constant into a `&str` constant.
+pub const DELEGATE_PARALLEL_NOTE: &str = " Several of these calls in one turn run at the same \
+    time, so ask for every independent sub-task at once rather than one per turn; they cannot see \
+    each other, so no task may depend on another's result.";
+
 /// Whether, and how, a run may delegate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delegation {
@@ -65,6 +95,19 @@ pub struct Delegation {
     pub max_turns: u64,
     /// How many further levels may delegate. `1` is a child that cannot; `0` publishes nothing.
     pub depth: u32,
+    /// How many delegates of one turn may run at the same time. `1` runs them one after another.
+    ///
+    /// A ceiling and not a promise: what actually decides is whether this run's ports will hand
+    /// out a second handle on themselves ([`harness_wire::ModelPort::fork`],
+    /// [`harness_wire::ToolPort::fork`]) and whether the run's remaining token budget divides. A
+    /// group that cannot be run side by side is run in order, and nothing about the run changes
+    /// except how long it takes.
+    ///
+    /// Only **neighbouring** calls form a group, the way a batch of reads does: a turn that asks
+    /// for `[delegate, file_write, delegate]` runs the first delegate, then the write, then the
+    /// second, because the model put an effect between them and the second child may be there to
+    /// look at what it did.
+    pub max_parallel: u32,
 }
 
 impl Default for Delegation {
@@ -74,6 +117,7 @@ impl Default for Delegation {
                 .expect("the default delegate name is a legal tool name"),
             max_turns: DELEGATE_MAX_TURNS,
             depth: MAX_DELEGATION_DEPTH,
+            max_parallel: DELEGATE_MAX_PARALLEL,
         }
     }
 }
@@ -83,6 +127,23 @@ impl Delegation {
     pub fn with_max_turns(mut self, max_turns: u64) -> Self {
         self.max_turns = max_turns;
         self
+    }
+
+    /// How many of one turn's delegates may run at the same time. `0` is read as `1`.
+    ///
+    /// Read rather than refused because there is nothing to refuse: *no delegate may run beside
+    /// another* and *one may run at a time* are the same run, and a typed zero here would end a
+    /// run over a figure that names the behaviour it already has.
+    #[must_use]
+    pub fn with_max_parallel(mut self, max_parallel: u32) -> Self {
+        self.max_parallel = max_parallel.max(1);
+        self
+    }
+
+    /// Whether this run may have two children in flight at once.
+    #[must_use]
+    pub fn runs_side_by_side(&self) -> bool {
+        self.max_parallel > 1
     }
 
     /// The tool the model sees.
@@ -117,7 +178,11 @@ impl Delegation {
     fn bare_spec(&self) -> ToolSpec {
         ToolSpec {
             name: self.name.clone(),
-            description: DELEGATE_DESCRIPTION.to_owned(),
+            description: if self.runs_side_by_side() {
+                format!("{DELEGATE_DESCRIPTION}{DELEGATE_PARALLEL_NOTE}")
+            } else {
+                DELEGATE_DESCRIPTION.to_owned()
+            },
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -153,6 +218,7 @@ impl Delegation {
             name: self.name.clone(),
             max_turns: self.max_turns,
             depth,
+            max_parallel: self.max_parallel,
         })
     }
 }

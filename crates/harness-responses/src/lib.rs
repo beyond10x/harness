@@ -454,13 +454,15 @@ impl<'a> TurnDecoder<'a> {
     }
 }
 
-impl ModelPort for ResponsesClient {
-    fn wire(&self) -> &WireId {
-        &self.wire
-    }
-
-    fn turn(
-        &mut self,
+impl ResponsesClient {
+    /// One turn, over a shared reference.
+    ///
+    /// [`ModelPort::turn`] takes `&mut self` because a port may need it; this one never did — the
+    /// transport posts on `&self` and the request counter is an atomic. Written here so that
+    /// [`ModelPort::fork`] can hand a second agent loop a handle on this same client rather than a
+    /// copy of it.
+    fn turn_shared(
+        &self,
         request: &TurnRequest,
         sink: &mut dyn StreamSink,
     ) -> Result<TurnOutcome, WireError> {
@@ -472,6 +474,53 @@ impl ModelPort for ResponsesClient {
         project::check_tool_names(&request.tools)?;
         let body = project::request_body(&self.session, request);
         self.attempt_turn(&body, &request.model, sink)
+    }
+}
+
+impl ModelPort for ResponsesClient {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        self.turn_shared(request, sink)
+    }
+
+    /// A second handle on this client, for a loop running two children side by side.
+    ///
+    /// Borrowed rather than cloned, and here the sharing is load-bearing twice over. The request
+    /// counter is what makes every `x-client-request-id` of a run distinct; two clients counting
+    /// from zero would name two different requests the same thing. And `session` names this run's
+    /// conversation and routes it to one prompt cache — children share the standing instruction
+    /// that forms the cached prefix, so they should share the key that finds it.
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        Some(Box::new(Forked(self)))
+    }
+}
+
+/// A borrowed [`ResponsesClient`], published as its own [`ModelPort`].
+struct Forked<'a>(&'a ResponsesClient);
+
+impl ModelPort for Forked<'_> {
+    fn wire(&self) -> &WireId {
+        &self.0.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        self.0.turn_shared(request, sink)
+    }
+
+    /// A fork of a fork is a fork of the same client, not a chain of them.
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        Some(Box::new(Forked(self.0)))
     }
 }
 

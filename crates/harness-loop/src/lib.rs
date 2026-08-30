@@ -28,11 +28,17 @@
 //! call. The one place a point does **not** fire is the end of a delegate: `stop` is about the
 //! run's ending, and a child's ending is not one (see [`AgentLoop::stop_hook`]).
 //!
-//! **The loop spawns nothing.** [`HookPort`] is a seam exactly as [`ApprovalPort`] is; the
+//! **The loop spawns no process.** [`HookPort`] is a seam exactly as [`ApprovalPort`] is; the
 //! implementation that runs a process — the argv, the timeout, the stdout bound, the file naming
 //! the hooks — lives in the shell, which read that file from a path the operator gave it. Nothing
 //! here discovers a hook from a workspace. A run with hooks attached also batches nothing, so a
 //! hook fires exactly once per call.
+//!
+//! It does start **threads**, in one place: a turn's `delegate` calls may run side by side
+//! ([`AgentLoop::delegates_side_by_side`]). That is not a hole in the sentence above — a hook is
+//! still asked once per call, still by the shell's own [`HookPort`], and still on this thread. A
+//! child on a worker thread reaches the approver, the hooks and the record by asking this one
+//! ([`parallel`]), so there is exactly one of each however many children there are.
 
 //! # The two tools the loop owns
 //!
@@ -57,9 +63,11 @@ mod budget;
 mod delegate;
 mod event;
 mod hook;
+mod parallel;
 mod price;
 mod skill;
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use harness_wire::{
@@ -77,8 +85,8 @@ pub use answer::{
 pub use approval::{ApprovalDecision, ApprovalPort, ApproveAll, DenyAll};
 pub use budget::{Budget, BudgetError};
 pub use delegate::{
-    DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_TURNS, DELEGATE_PREAMBLE, Delegation,
-    MAX_DELEGATION_DEPTH,
+    DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_PARALLEL, DELEGATE_MAX_TURNS,
+    DELEGATE_PARALLEL_NOTE, DELEGATE_PREAMBLE, Delegation, MAX_DELEGATION_DEPTH,
 };
 pub use event::{
     CredentialRenewal, LoopEvent, LoopSink, NullLoopSink, ProfileRef, VecLoopSink, Withheld,
@@ -1272,6 +1280,154 @@ fn with_hook_note(result: ToolOutcome, note: String) -> ToolOutcome {
         output,
         failed,
         refusal,
+    }
+}
+
+/// One delegate, resolved: everything the parent worked out before the child could be started.
+///
+/// The budget is deliberately absent. It is the one thing that cannot be decided per child in
+/// isolation — a group divides the run's remainder between them ([`AgentLoop::carve`]) — so it is
+/// set where the child's loop is built, from a figure that knows how many children there are.
+struct Child {
+    /// What the child is asked to do, which is also the whole of its first conversation.
+    task: String,
+    /// The child's configuration, carrying the parent's budget until the caller replaces it.
+    config: LoopConfig,
+}
+
+/// How a delegate ended, as the parent has to report it.
+///
+/// Two variants rather than a `Result<LoopStop, _>` because the second one is not an error of the
+/// parent's: a child that broke is a **tool result the model reads**, and the run it belongs to
+/// goes on. What the parent must never do is let a child's failure end it — the model would be
+/// left believing a sub-task it never got an answer to had succeeded.
+enum ChildEnd {
+    /// The child's own loop reached a stop, whether or not that stop is a completion.
+    Stopped(LoopStop),
+    /// The child could not run, or stopped being able to. The words go to the model as written.
+    Broke(String),
+}
+
+impl ChildEnd {
+    /// How a child that ran on this thread ended.
+    fn of(ran: Result<LoopStop, LoopError>) -> Self {
+        match ran {
+            Ok(stop) => Self::Stopped(stop),
+            Err(error) => Self::Broke(error.to_string()),
+        }
+    }
+}
+
+/// What one child's thread hands back.
+///
+/// Two layers of [`std::thread::Result`], and they are not the same failure. The inner one is the
+/// child's own run panicking, caught inside the thread so that its siblings and the parent survive
+/// it. The outer one is the thread itself failing outside that guard — the harness, not the child —
+/// and it carries no state, because there was no run to have any.
+type ChildJoin = std::thread::Result<(RunState, std::thread::Result<Result<LoopStop, LoopError>>)>;
+
+/// Takes what a group of children spent, and turns each of them into the result the model reads.
+///
+/// In the order the model asked for them, whatever order they finished in: `answering[i]` says
+/// which of the turn's calls the `i`th running child answers. What each contributes to the parent
+/// is absorbed **however it ended**, for the reason [`AgentLoop::delegate`] gives — a child that
+/// broke on its fourth turn still spent four.
+fn absorb_children(
+    calls: &[&ToolCall],
+    answering: &[usize],
+    ended: Vec<ChildJoin>,
+    results: &mut [Option<ToolOutcome>],
+    state: &mut RunState,
+    sink: &mut dyn LoopSink,
+) {
+    for (&at, joined) in answering.iter().zip(ended) {
+        let call = calls[at];
+        let (end, turns) = match joined {
+            Ok((mut child_state, ran)) => {
+                state.absorb_child(&mut child_state);
+                let end = match ran {
+                    Ok(ran) => ChildEnd::of(ran),
+                    Err(payload) => ChildEnd::Broke(format!(
+                        "it panicked while running: {}. Whatever it did before that, it did.",
+                        parallel::panic_words(payload.as_ref())
+                    )),
+                };
+                (child_result(call, end, &child_state), child_state.turns)
+            }
+            Err(payload) => (
+                child_result(
+                    call,
+                    ChildEnd::Broke(format!(
+                        "it could not be run at all: {}",
+                        parallel::panic_words(payload.as_ref())
+                    )),
+                    // Nothing ran, so there is nothing to report but the absence.
+                    &RunState::resuming(Vec::new(), String::new()),
+                ),
+                0,
+            ),
+        };
+        let (stop, result) = end;
+        sink.emit(LoopEvent::DelegateFinished {
+            call_id: call.call_id.clone(),
+            stop,
+            turns,
+        });
+        results[at] = Some(result);
+    }
+}
+
+/// One delegate's outcome: the stop the record carries and the result the model reads.
+///
+/// Written once because two paths produce it — one child inside a tool call, and one of several
+/// running side by side — and a model that could tell them apart from the result would be reading
+/// something about the harness rather than about its sub-task.
+fn child_result(call: &ToolCall, end: ChildEnd, child: &RunState) -> (LoopStop, ToolOutcome) {
+    match end {
+        ChildEnd::Stopped(stop) => {
+            let result = ToolOutcome {
+                output: serde_json::json!({
+                    "stop": stop,
+                    "turns": child.turns,
+                    "text": child.text,
+                }),
+                // A bound the child hit, a wire error, a cancellation: the parent has to learn the
+                // sub-task did not finish, or it reads a half-answer as a whole one.
+                failed: !stop.is_completed(),
+                // A delegate is not refused by a rule of the run's; whatever refusals happened
+                // inside it were already reported as the child's own events.
+                refusal: None,
+            };
+            // The same bound every result meets. The preamble is what tells the child to report
+            // well inside it; this is what happens when it did not.
+            (stop, within_result_bound(call, result))
+        }
+        // A run that could not proceed at all never reached a stop of its own, and
+        // `DelegateFinished` has to carry one. `ProviderIncomplete` is the variant that already
+        // means *this run ended early, and here is the reason in words* — the reason is what a
+        // reader of the record needs, and inventing a variant would put a state in `LoopStop` that
+        // no run can actually stop in.
+        ChildEnd::Broke(reason) => (
+            LoopStop::ProviderIncomplete {
+                reason: reason.clone(),
+            },
+            ToolOutcome::failed(format!("the delegate could not run: {reason}")),
+        ),
+    }
+}
+
+/// One child's share of a remainder, or the ceiling's name when it will not divide that far.
+///
+/// [`None`] in is [`None`] out, as for [`remainder`]: an unset ceiling divides into unset ceilings.
+/// A share of zero is refused rather than rounded up to one, because rounding up is how `share`
+/// children each get the last token of a run that had one left.
+fn divided(left: Option<u64>, share: u64, name: &'static str) -> Result<Option<u64>, &'static str> {
+    let Some(left) = left else {
+        return Ok(None);
+    };
+    match left / share {
+        0 => Err(name),
+        each => Ok(Some(each)),
     }
 }
 
@@ -2486,17 +2642,25 @@ impl<'a> AgentLoop<'a> {
             // consulted and before anything reaches the port. Neither is a port call: `answer`
             // ends the run and `delegate` runs a whole second loop over these same ports.
             if let Some(owned) = self.owned(call) {
-                sink.emit(LoopEvent::ToolRequested(call.clone()));
-                if let Some(stop) = self.run_owned(&owned, call, state, deadline, sink) {
+                // One call, or the run of neighbouring `delegate` calls this one starts: those may
+                // run side by side, and deciding it here is what lets `run_owned` ask the
+                // `before-call` hook about every one of them before any of them starts.
+                let span = self.delegate_span(&owned, &calls[next..]);
+                let group = &calls[next..next + span];
+                for call in group {
+                    sink.emit(LoopEvent::ToolRequested(call.clone()));
+                }
+                if let Some(stop) = self.run_owned(&owned, group, state, deadline, sink) {
                     // Only the answer ends a turn from in here, and nothing after it is read. The
                     // same sentence the calls before it got: they were refused for the same
                     // reason, and `answering` is `Some` here because only an answer stops a turn.
+                    // An answer is never grouped, so `span` is one and the tail starts after it.
                     if let Some((_, refusal)) = answering.as_ref() {
-                        refuse_rest(&calls[next + 1..], refusal, state, sink);
+                        refuse_rest(&calls[next + span..], refusal, state, sink);
                     }
                     return Some(stop);
                 }
-                next += 1;
+                next += span;
                 continue;
             }
 
@@ -2521,7 +2685,10 @@ impl<'a> AgentLoop<'a> {
         None
     }
 
-    /// Runs one call on a tool the loop owns, under the bounds and the hooks a port call meets.
+    /// Runs the loop's own tools, under the bounds and the hooks a port call meets.
+    ///
+    /// `calls` is one call, except for a run of neighbouring `delegate` calls, which arrive
+    /// together because they may run side by side ([`AgentLoop::delegate_span`]).
     ///
     /// # The same gate, minus the one stage that has nothing to decide
     ///
@@ -2541,51 +2708,127 @@ impl<'a> AgentLoop<'a> {
     /// ceiling a run can have. What a delegate then does is asked about call by call, inside the
     /// child, on each entry's own envelope.
     ///
+    /// # Every stage runs over the whole group before the next one starts
+    ///
+    /// The three stages are three passes and not one loop, because the middle one is where a group
+    /// stops being sequential. A `before-call` hook is asked about every child before any child
+    /// runs — which is the only order in which a hook can still prevent one — and the results go
+    /// into the conversation in the order the model asked for them, whatever order they finished
+    /// in. A call the gate refused takes its place in that order with the others and never reaches
+    /// `after-call`, exactly as a single refused call does: there is no outcome a tool produced.
+    ///
     /// [`Some`] is the run ending here, which only the answer can ask for.
     fn run_owned(
         &mut self,
         owned: &Owned,
-        call: &ToolCall,
+        calls: &[ToolCall],
         state: &mut RunState,
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> Option<LoopStop> {
         let invoked = owned.spec();
-        if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
-            complete(
-                call,
-                ToolOutcome::failed(format!(
-                    "the arguments for `{}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound",
-                    call.name
-                )),
-                state,
-                sink,
-            );
-            return None;
-        }
-        if let Some(refusal) = self.before_call_hook(call, &invoked, sink) {
-            complete(call, refusal, state, sink);
-            return None;
-        }
+        // Stage one: what each call has to get past before anything runs. `Err` is the refusal it
+        // is answered with, held rather than completed so that the conversation still reads in the
+        // order the model asked.
+        let gated: Vec<Result<(), ToolOutcome>> = calls
+            .iter()
+            .map(|call| self.gate_owned(call, &invoked, sink))
+            .collect();
+        let admitted: Vec<&ToolCall> = calls
+            .iter()
+            .zip(&gated)
+            .filter_map(|(call, gate)| gate.is_ok().then_some(call))
+            .collect();
 
-        let (result, stop) = match owned {
-            Owned::Answer(_) => accept_answer(call, state),
-            Owned::Delegate(delegation) => {
-                (self.delegate(delegation, call, state, deadline, sink), None)
-            }
-            Owned::Skill(skills) => (load_skill(skills, call), None),
+        // Stage two: the tools themselves, over the calls the gate let through.
+        let mut ran: VecDeque<(ToolOutcome, Option<LoopStop>)> = match owned {
+            Owned::Answer(_) => admitted
+                .iter()
+                .map(|call| accept_answer(call, state))
+                .collect(),
+            Owned::Skill(skills) => admitted
+                .iter()
+                .map(|call| (load_skill(skills, call), None))
+                .collect(),
+            Owned::Delegate(delegation) => self
+                .run_delegates(delegation, &admitted, state, deadline, sink)
+                .into_iter()
+                .map(|result| (result, None))
+                .collect(),
         };
-        let result = self.after_call_hook(call, &invoked, result, sink);
-        complete(call, result, state, sink);
-        if stop.is_some() {
-            // After the result is in the conversation, so a reader of the record sees the answer
-            // announced by a run that had already recorded it.
-            sink.emit(LoopEvent::Answered {
-                call_id: call.call_id.clone(),
-                value: call.arguments.clone(),
-            });
+
+        // Stage three: `after-call`, and the conversation, in the order the model asked.
+        let mut stopped = None;
+        for (call, gate) in calls.iter().zip(gated) {
+            let (result, stop) = if let Err(refusal) = gate {
+                (refusal, None)
+            } else {
+                let (result, stop) = ran
+                    .pop_front()
+                    .expect("one outcome per call the gate admitted");
+                (self.after_call_hook(call, &invoked, result, sink), stop)
+            };
+            complete(call, result, state, sink);
+            if stop.is_some() {
+                // After the result is in the conversation, so a reader of the record sees the
+                // answer announced by a run that had already recorded it.
+                sink.emit(LoopEvent::Answered {
+                    call_id: call.call_id.clone(),
+                    value: call.arguments.clone(),
+                });
+                stopped = stop;
+            }
         }
-        stop
+        stopped
+    }
+
+    /// What one owned call must get past before the tool behind it runs: the argument bound, then
+    /// the operator's `before-call` hook.
+    ///
+    /// `Err` is the refusal the model reads. Neither refusal reaches `after-call`, because no tool
+    /// ran and that point is about what a tool did.
+    fn gate_owned(
+        &mut self,
+        call: &ToolCall,
+        invoked: &ToolSpec,
+        sink: &mut dyn LoopSink,
+    ) -> Result<(), ToolOutcome> {
+        if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
+            return Err(ToolOutcome::failed(format!(
+                "the arguments for `{}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound",
+                call.name
+            )));
+        }
+        match self.before_call_hook(call, invoked, sink) {
+            Some(refusal) => Err(refusal),
+            None => Ok(()),
+        }
+    }
+
+    /// How many of the turn's remaining calls this one owned resolution covers.
+    ///
+    /// One, for everything except a `delegate` on a run that may run delegates side by side. There
+    /// it is the **maximal run of neighbouring** `delegate` calls, capped at
+    /// [`Delegation::max_parallel`].
+    ///
+    /// Neighbouring rather than gathered from the whole turn, for the reason a batch of reads is
+    /// neighbouring: a call between two delegates is a barrier, because the second child may be
+    /// there to look at what that call did. A turn asking for more than the cap runs them in
+    /// groups of the cap, in order.
+    ///
+    /// `answer` is never grouped — it ends the turn, and what follows it is refused rather than
+    /// run — and neither is `skill`, which reads a document this process already holds.
+    fn delegate_span(&self, owned: &Owned, rest: &[ToolCall]) -> usize {
+        let Owned::Delegate(delegation) = owned else {
+            return 1;
+        };
+        if !delegation.runs_side_by_side() {
+            return 1;
+        }
+        rest.iter()
+            .take_while(|call| matches!(self.owned(call), Some(Owned::Delegate(_))))
+            .take(usize::try_from(delegation.max_parallel).unwrap_or(usize::MAX))
+            .count()
     }
 
     /// Whether this call is the run's own answer tool, without cloning a schema to find out.
@@ -2623,39 +2866,10 @@ impl<'a> AgentLoop<'a> {
         None
     }
 
-    /// Runs a second loop to completion inside this tool call, and returns what it reported.
-    ///
-    /// The child starts from an empty conversation: it sees the parent's standing instruction and
-    /// [`DELEGATE_PREAMBLE`], and the `task` string, and nothing of the conversation the call came
-    /// from. That is the point — a sub-tree that reads forty files to answer one question costs
-    /// the parent one tool result rather than forty reads of context.
-    ///
-    /// # What is shared, and what the parent gets back
-    ///
-    /// The model port (the parent is blocked in here, so it is idle), the tool port (delegation
-    /// widens nothing: the child can do exactly what the parent's catalogue admits), the approver
-    /// (a person is asked about the child's write exactly as about the parent's), the hooks — for
-    /// `before-call` and `after-call`, an operator's hook on `run` firing in a delegate too or it
-    /// was not a hook on `run`, while `stop` belongs to the run and is not consulted at a child's
-    /// end ([`AgentLoop::stop_hook`]) — and the cancellation token (Ctrl-C reaches the innermost
-    /// blocked read). What comes back is the child's usage and cost, added to the parent's totals
-    /// **however the child ended**, and one result carrying its stop, its turn count and its final
-    /// text.
-    ///
-    /// Every event the child emits reaches the sink inside [`LoopEvent::Delegated`] — see
-    /// [`Wrapped`] — so the `Usage` and `Cost` events for the turns absorbed here have already
-    /// been seen, and none is emitted a second time.
-    ///
-    /// # A cancelled child ends the parent, and nothing here does that
-    ///
-    /// The token is shared, so a child that stopped [`LoopStop::Cancelled`] leaves it cancelled
-    /// and the parent's own check — the one at the top of [`AgentLoop::run_calls`], before the
-    /// next call of this same turn — refuses the rest and ends the run. Special-casing it here
-    /// would be a second implementation of that.
     /// Which named agent a delegate call asked for, and the toolset it leaves the child.
     ///
-    /// Split out of [`Self::delegate`] because that function is the whole of running a child and
-    /// resolving *which* child is a separate question with its own failure modes.
+    /// Split out of [`Self::prepare_child`] because that function is the whole of building a child
+    /// and resolving *which* child is a separate question with its own failure modes.
     ///
     /// # Errors
     ///
@@ -2702,46 +2916,35 @@ impl<'a> AgentLoop<'a> {
         Ok((agent, admitted, refused))
     }
 
-    fn delegate(
-        &mut self,
-        delegation: &Delegation,
-        call: &ToolCall,
-        state: &mut RunState,
-        deadline: Option<Instant>,
-        sink: &mut dyn LoopSink,
-    ) -> ToolOutcome {
+    /// Everything the parent has to work out before a child can be started.
+    ///
+    /// Resolved **before** the budget is carved and before anything is emitted, because how much
+    /// budget a group of children gets each depends on how many of them turn out to be startable
+    /// at all: a call that names no task, or an agent this run does not have, takes no share of
+    /// the run's remainder and no `DelegateStarted` in the record.
+    ///
+    /// The budget is deliberately not set here. It is the one thing that cannot be decided per
+    /// child in isolation — see [`AgentLoop::carve`] — so the caller sets it as it builds the
+    /// loop, which is also the only place it could be got wrong in one child and right in another.
+    ///
+    /// # Errors
+    ///
+    /// The failed [`ToolOutcome`] the model reads, naming what about the call could not be used.
+    fn prepare_child(&self, call: &ToolCall) -> Result<Child, ToolOutcome> {
         let task = call
             .arguments
             .get("task")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
         if task.trim().is_empty() {
-            return ToolOutcome::failed(format!(
+            return Err(ToolOutcome::failed(format!(
                 "`{}` needs a `task`: one non-empty string saying everything the delegate needs, \
                  because it cannot see this conversation",
                 call.name
-            ));
+            )));
         }
-        // Before the child exists, so a run with nothing left never spends a turn learning it.
-        let budget = match self.carve(delegation, state, deadline) {
-            Ok(budget) => budget,
-            Err(ceiling) => {
-                return ToolOutcome::failed(format!(
-                    "the run's budget has no room for a delegate: {ceiling}"
-                ));
-            }
-        };
-        sink.emit(LoopEvent::DelegateStarted {
-            call_id: call.call_id.clone(),
-            task: task.to_owned(),
-        });
-
-        let (agent, admitted, refused) = match self.agent_for(call) {
-            Ok(resolved) => resolved,
-            Err(refusal) => return refusal,
-        };
-
-        let child = LoopConfig {
+        let (agent, admitted, refused) = self.agent_for(call)?;
+        let config = LoopConfig {
             // The parent's standing instruction whole, so the delegate knows where it is and what
             // its tools are for, and the preamble after it — which is everything that is true only
             // of a child. A named agent's own body goes after both: it is the most specific thing
@@ -2766,7 +2969,6 @@ impl<'a> AgentLoop<'a> {
             // A delegate publishes no agents of its own, for the reason it publishes no delegate:
             // one level, so a tree nobody can read afterwards cannot be built by accident.
             agents: None,
-            budget,
             // Its report is its text; a schema for a child is milestone M2 of design 0002.
             output_schema: None,
             delegation: self
@@ -2776,19 +2978,120 @@ impl<'a> AgentLoop<'a> {
                 .and_then(Delegation::for_child),
             ..self.config.clone()
         };
+        Ok(Child {
+            task: task.to_owned(),
+            config,
+        })
+    }
+
+    /// Runs a turn's `delegate` calls and answers one outcome per call, in order.
+    ///
+    /// # Side by side is an optimisation and never a difference in what a run can do
+    ///
+    /// The group runs concurrently when everything lines up: more than one call, a run configured
+    /// for it ([`Delegation::max_parallel`]), ports that will hand out a second handle on
+    /// themselves ([`ModelPort::fork`], [`ToolPort::fork`]), and a remainder of the run's budget
+    /// that divides. When any of those does not hold, the same calls run one after another and
+    /// **nothing else about the run changes** — the same children, the same tools, the same gate,
+    /// the same results in the same order. That is what makes this safe to have on by default: the
+    /// worst a port that cannot fork costs is the wall-clock a run has always paid.
+    ///
+    /// Running in order is not merely the fallback, it is the more *accurate* accounting: each
+    /// child is carved on what the one before it actually spent, where a group has to divide the
+    /// remainder up front. That is the cost of concurrency and it is paid in budget precision, not
+    /// in reach.
+    fn run_delegates(
+        &mut self,
+        delegation: &Delegation,
+        calls: &[&ToolCall],
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> Vec<ToolOutcome> {
+        if calls.len() > 1
+            && delegation.runs_side_by_side()
+            && let Some(results) =
+                self.delegates_side_by_side(delegation, calls, state, deadline, sink)
+        {
+            return results;
+        }
+        calls
+            .iter()
+            .map(|call| self.delegate(delegation, call, state, deadline, sink))
+            .collect()
+    }
+
+    /// Runs a second loop to completion inside this tool call, and returns what it reported.
+    ///
+    /// The child starts from an empty conversation: it sees the parent's standing instruction and
+    /// [`DELEGATE_PREAMBLE`], and the `task` string, and nothing of the conversation the call came
+    /// from. That is the point — a sub-tree that reads forty files to answer one question costs
+    /// the parent one tool result rather than forty reads of context.
+    ///
+    /// # What is shared, and what the parent gets back
+    ///
+    /// The model port (the parent is blocked in here, so it is idle), the tool port (delegation
+    /// widens nothing: the child can do exactly what the parent's catalogue admits), the approver
+    /// (a person is asked about the child's write exactly as about the parent's), the hooks — for
+    /// `before-call` and `after-call`, an operator's hook on `run` firing in a delegate too or it
+    /// was not a hook on `run`, while `stop` belongs to the run and is not consulted at a child's
+    /// end ([`AgentLoop::stop_hook`]) — and the cancellation token (Ctrl-C reaches the innermost
+    /// blocked read). What comes back is the child's usage and cost, added to the parent's totals
+    /// **however the child ended**, and one result carrying its stop, its turn count and its final
+    /// text.
+    ///
+    /// Every event the child emits reaches the sink inside [`LoopEvent::Delegated`] — see
+    /// [`Wrapped`] — so the `Usage` and `Cost` events for the turns absorbed here have already
+    /// been seen, and none is emitted a second time.
+    ///
+    /// # A cancelled child ends the parent, and nothing here does that
+    ///
+    /// The token is shared, so a child that stopped [`LoopStop::Cancelled`] leaves it cancelled
+    /// and the parent's own check — the one at the top of [`AgentLoop::run_calls`], before the
+    /// next call of this same turn — refuses the rest and ends the run. Special-casing it here
+    /// would be a second implementation of that.
+    fn delegate(
+        &mut self,
+        delegation: &Delegation,
+        call: &ToolCall,
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> ToolOutcome {
+        let child = match self.prepare_child(call) {
+            Ok(child) => child,
+            Err(refusal) => return refusal,
+        };
+        // Before the child exists, so a run with nothing left never spends a turn learning it.
+        let budget = match self.carve(delegation, state, deadline, 1) {
+            Ok(budget) => budget,
+            Err(ceiling) => {
+                return ToolOutcome::failed(format!(
+                    "the run's budget has no room for a delegate: {ceiling}"
+                ));
+            }
+        };
+        sink.emit(LoopEvent::DelegateStarted {
+            call_id: call.call_id.clone(),
+            task: child.task.clone(),
+        });
+
         let mut wrapped = Wrapped {
             call_id: call.call_id.clone(),
             sink,
         };
         // The child's own state, held here rather than inside the run, because the parent has to
         // read what it spent however it ended — see the absorption below.
-        let mut child_state = RunState::resuming(Vec::new(), task);
+        let mut child_state = RunState::resuming(Vec::new(), child.task);
         let ran = {
             let mut child_loop = AgentLoop::new(
                 &mut *self.model,
                 &mut *self.tools,
                 &mut *self.approvals,
-                child,
+                LoopConfig {
+                    budget,
+                    ..child.config
+                },
             )
             .with_cancel(self.cancel.clone());
             if let Some(hooks) = self.hooks.as_deref_mut() {
@@ -2804,37 +3107,7 @@ impl<'a> AgentLoop<'a> {
         // before the parent's next turn.
         state.absorb_child(&mut child_state);
 
-        let (stop, result) = match ran {
-            Ok(stop) => {
-                let result = ToolOutcome {
-                    output: serde_json::json!({
-                        "stop": stop,
-                        "turns": child_state.turns,
-                        "text": child_state.text,
-                    }),
-                    // A bound the child hit, a wire error, a cancellation: the parent has to learn
-                    // the sub-task did not finish, or it reads a half-answer as a whole one.
-                    failed: !stop.is_completed(),
-                    // A delegate is not refused by a rule of the run's; whatever refusals happened
-                    // inside it were already reported as the child's own events.
-                    refusal: None,
-                };
-                // The same bound every result meets. The preamble is what tells the child to
-                // report well inside it; this is what happens when it did not.
-                (stop, within_result_bound(call, result))
-            }
-            // A run that could not proceed at all never reached a stop of its own, and
-            // `DelegateFinished` has to carry one. `ProviderIncomplete` is the variant that
-            // already means *this run ended early, and here is the reason in words* — the reason
-            // is what a reader of the record needs, and inventing a variant would put a state in
-            // `LoopStop` that no run can actually stop in.
-            Err(error) => (
-                LoopStop::ProviderIncomplete {
-                    reason: error.to_string(),
-                },
-                ToolOutcome::failed(format!("the delegate could not run: {error}")),
-            ),
-        };
+        let (stop, result) = child_result(call, ChildEnd::of(ran), &child_state);
         sink.emit(LoopEvent::DelegateFinished {
             call_id: call.call_id.clone(),
             stop,
@@ -2846,27 +3119,200 @@ impl<'a> AgentLoop<'a> {
         result
     }
 
-    /// The remainder of this run's budget, as the budget of one delegate.
+    /// Runs a group of delegates at the same time, one thread each, and answers in call order.
     ///
-    /// Every ceiling the parent set — turns excepted — is carved to `limit − spent so far`,
-    /// because a delegate spends the run's budget rather than one of its own and the parent
-    /// absorbs what it spent when the call returns. Turns are the exception: the child gets
-    /// [`Delegation::max_turns`] of its own, so a child that loops does not spend the parent's
-    /// remaining fifty turns finding out. The per-turn output offer is passed through rather than
-    /// carved, because it bounds one turn and is not a total to divide.
+    /// [`None`] is *this group cannot be run this way* — and never a refusal. The caller runs the
+    /// same calls in order instead and the run reaches the same place; see
+    /// [`AgentLoop::run_delegates`]. There are three reasons it can happen, and each is a fact
+    /// about the run rather than about the model's request: fewer than two children turned out to
+    /// be startable, a port would not fork, or the remainder of the budget would not divide.
+    ///
+    /// # What each child gets, and what stays on this thread
+    ///
+    /// Forked, so the children genuinely run at once: the model port and the tool port. A fork of
+    /// each is the same endpoint and the same catalogue — delegation widens nothing here either.
+    ///
+    /// Not forked, because there is one of them by nature: the approver (one person, asked one
+    /// question at a time), the operator's hooks (one file of programs, run one at a time) and the
+    /// run's event sink (one ordered record). A child reaches all three by asking this thread,
+    /// which sits in [`parallel::answer_children`] for exactly as long as any child is running.
+    ///
+    /// # What a reader of the record sees
+    ///
+    /// Two `DelegateStarted` before either `DelegateFinished`, and the two children's `Delegated`
+    /// events interleaved. That interleaving *is* the evidence the group ran side by side: it
+    /// cannot occur in a run that delegated in order, so no new event is needed to say so.
+    ///
+    /// # Cancel and the deadline are not checked between the children
+    ///
+    /// They are checked before the group and after it, exactly as for a batch of tool calls, and
+    /// for the same reason: there is no "between". What is different, and better, is that a cancel
+    /// **does** reach inside — the token is the run's own and each child checks it between its own
+    /// turns and its own calls, so Ctrl-C stops four children rather than being noticed after the
+    /// last one finishes.
+    fn delegates_side_by_side(
+        &mut self,
+        delegation: &Delegation,
+        calls: &[&ToolCall],
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> Option<Vec<ToolOutcome>> {
+        // Every child resolved before any budget is divided, because a call that cannot start
+        // takes no share of the run's remainder.
+        let prepared: Vec<Result<Child, ToolOutcome>> =
+            calls.iter().map(|call| self.prepare_child(call)).collect();
+        let share = prepared.iter().filter(|child| child.is_ok()).count();
+        if share < 2 {
+            // One child left, or none. Nothing to run side by side, and the ordinary path carves
+            // the remainder whole rather than dividing it by a group that is not there.
+            return None;
+        }
+        let budget = self.carve(delegation, state, deadline, share).ok()?;
+
+        let mut results: Vec<Option<ToolOutcome>> = calls.iter().map(|_| None).collect();
+        let mut running: Vec<(usize, Child)> = Vec::with_capacity(share);
+        for (at, (_, child)) in calls.iter().zip(prepared).enumerate() {
+            match child {
+                Err(refusal) => results[at] = Some(refusal),
+                Ok(child) => running.push((at, child)),
+            }
+        }
+
+        // Reborrowed field by field rather than taken through `self`, because the forked ports
+        // borrow two of them for as long as the children run while the approver, the hooks and the
+        // sink are in use on this thread the whole time. Four disjoint borrows of one struct,
+        // which is exactly what they are.
+        let hooked = self.hooks.is_some();
+        let cancel = self.cancel.clone();
+        // **Before a single event is emitted**, because every way out of this function above and
+        // including here is one where the caller runs the same children in order — and it will
+        // emit their `DelegateStarted` itself. A group that announced two children and then handed
+        // them back wrote two starts for each of them into the record, which is what a shipped
+        // `ToolPort` wrapper that forgot to delegate `fork` actually produced.
+        let mut forked: Vec<(
+            Box<dyn ModelPort + Send + '_>,
+            Box<dyn ToolPort + Send + '_>,
+        )> = Vec::with_capacity(running.len());
+        for _ in &running {
+            forked.push(((*self.model).fork()?, (*self.tools).fork()?));
+        }
+        // Committed: from here the group runs, so this is where the children are announced.
+        for (at, child) in &running {
+            sink.emit(LoopEvent::DelegateStarted {
+                call_id: calls[*at].call_id.clone(),
+                task: child.task.clone(),
+            });
+        }
+        let approvals: &mut dyn ApprovalPort = &mut *self.approvals;
+        // Which call of the turn each child answers, kept beside the group because the group is
+        // indexed by *what is running* and the conversation by *what the model asked*.
+        let answering: Vec<usize> = running.iter().map(|(at, _)| *at).collect();
+        let call_ids: Vec<CallId> = answering
+            .iter()
+            .map(|at| calls[*at].call_id.clone())
+            .collect();
+
+        let ended = std::thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel::<parallel::FromChild>();
+            let handles: Vec<_> = running
+                .drain(..)
+                .zip(forked)
+                .enumerate()
+                .map(|(at, ((_, child), (mut model, mut tools)))| {
+                    let tx = tx.clone();
+                    let cancel = cancel.clone();
+                    let budget = budget.clone();
+                    scope.spawn(move || {
+                        let mut sink = parallel::ChildSink { at, tx: tx.clone() };
+                        let mut approvals = parallel::ChildApprovals { tx: tx.clone() };
+                        let mut hooks = hooked.then(|| parallel::ChildHooks { tx: tx.clone() });
+                        let mut state = RunState::resuming(Vec::new(), child.task);
+                        // A child that panicked must not take the run with it: the parent has
+                        // three more children in flight and a conversation that needs an outcome
+                        // for every call in it. The same containment a batch of tool calls has.
+                        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let mut child_loop = AgentLoop::new(
+                                &mut *model,
+                                &mut *tools,
+                                &mut approvals,
+                                LoopConfig {
+                                    budget,
+                                    ..child.config
+                                },
+                            )
+                            .with_cancel(cancel);
+                            if let Some(hooks) = hooks.as_mut() {
+                                child_loop = child_loop.with_hooks(hooks);
+                            }
+                            child_loop.nested = true;
+                            child_loop.run_over(&mut state, &mut sink)
+                        }));
+                        (state, ran)
+                    })
+                })
+                .collect();
+            // The parent's own handle on the channel, dropped so that the receive loop below ends
+            // when the last child's does and not one message later.
+            drop(tx);
+            parallel::answer_children(
+                &rx,
+                &call_ids,
+                approvals,
+                self.hooks.as_deref_mut(),
+                &mut *sink,
+            );
+            handles
+                .into_iter()
+                .map(std::thread::ScopedJoinHandle::join)
+                .collect::<Vec<_>>()
+        });
+
+        absorb_children(calls, &answering, ended, &mut results, state, sink);
+
+        Some(
+            results
+                .into_iter()
+                .map(|result| result.expect("every call in the group is answered exactly once"))
+                .collect(),
+        )
+    }
+
+    /// The remainder of this run's budget, as the budget of one of `share` delegates.
+    ///
+    /// Every ceiling the parent set — turns and the clock excepted — is carved to
+    /// `(limit − spent so far) / share`, because a delegate spends the run's budget rather than
+    /// one of its own and the parent absorbs what it spent when the call returns.
+    ///
+    /// Turns are the first exception: the child gets [`Delegation::max_turns`] of its own, so a
+    /// child that loops does not spend the parent's remaining fifty turns finding out. The
+    /// per-turn output offer is passed through rather than carved, because it bounds one turn and
+    /// is not a total to divide.
+    ///
+    /// # The clock is the second exception, and dividing it would be wrong
+    ///
+    /// Tokens add up: four children that each spend a thousand have spent four thousand of the
+    /// run's. Wall clock does not — four children that each take a minute, running at the same
+    /// moment, take a minute. So each is told the whole of what is left, which is the same figure
+    /// [`AgentLoop::run_batch`] hands a group of tool calls and for the same reason. The deadline
+    /// is read again the moment the group returns, which is where the overshoot is bounded.
     ///
     /// # Errors
     ///
-    /// The name of the first ceiling with nothing left. Starting a child on a remainder of zero
-    /// would spend a turn to be told what is knowable here — and [`Budget::validate`] refuses a
-    /// zero bound by name anyway, so it would come back as an error rather than as the refusal
-    /// the model can act on.
+    /// The name of the first ceiling with nothing left, or with nothing left once divided.
+    /// Starting a child on a remainder of zero would spend a turn to be told what is knowable here
+    /// — and [`Budget::validate`] refuses a zero bound by name anyway, so it would come back as an
+    /// error rather than as the refusal the model can act on. For a group, the caller reads it as
+    /// *do not run these side by side* and runs them in order, where each child is carved whole
+    /// against what the one before it actually spent.
     fn carve(
         &self,
         delegation: &Delegation,
         state: &RunState,
         deadline: Option<Instant>,
+        share: usize,
     ) -> Result<Budget, &'static str> {
+        let share = u64::try_from(share).unwrap_or(u64::MAX).max(1);
         // Already a remainder rather than a ceiling, so nothing is taken off it. `deadline` is
         // `Some` exactly when `max_duration_ms` is, both being built from the same field.
         let left_ms = deadline.map(|deadline| {
@@ -2879,21 +3325,33 @@ impl<'a> AgentLoop<'a> {
         });
         Ok(Budget {
             max_turns: Some(delegation.max_turns),
-            max_input_tokens: remainder(
-                self.config.budget.max_input_tokens,
-                state.input_total,
+            max_input_tokens: divided(
+                remainder(
+                    self.config.budget.max_input_tokens,
+                    state.input_total,
+                    "max_input_tokens",
+                )?,
+                share,
                 "max_input_tokens",
             )?,
-            max_output_tokens: remainder(
-                self.config.budget.max_output_tokens,
-                state.output_total,
+            max_output_tokens: divided(
+                remainder(
+                    self.config.budget.max_output_tokens,
+                    state.output_total,
+                    "max_output_tokens",
+                )?,
+                share,
                 "max_output_tokens",
             )?,
             max_output_tokens_per_turn: self.config.budget.max_output_tokens_per_turn,
             max_duration_ms: remainder(left_ms, 0, "max_duration_ms")?,
-            max_cost_microunits: remainder(
-                self.config.budget.max_cost_microunits,
-                state.cost_total.unwrap_or(0),
+            max_cost_microunits: divided(
+                remainder(
+                    self.config.budget.max_cost_microunits,
+                    state.cost_total.unwrap_or(0),
+                    "max_cost_microunits",
+                )?,
+                share,
                 "max_cost_microunits",
             )?,
         })

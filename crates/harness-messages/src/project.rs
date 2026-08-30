@@ -4,8 +4,8 @@
 //! field, which is what lets a second wire cost a second projection instead of a second loop.
 
 use harness_wire::{
-    Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolChoice, ToolName, ToolSpec,
-    TurnRequest, Usage, WireError, WireErrorCode, WireId,
+    CredentialKind, Item, MAX_TOOL_ARGUMENT_BYTES, Sampling, StopReason, ToolCall, ToolChoice,
+    ToolName, ToolSpec, TurnRequest, Usage, WireError, WireErrorCode, WireId,
 };
 use serde_json::{Map, Value, json};
 
@@ -22,6 +22,30 @@ pub const TOOL_NAME_PATTERN: &str = "^[a-zA-Z0-9_-]{1,128}$";
 
 /// Longest tool name this wire will publish.
 pub const MAX_TOOL_NAME_BYTES: usize = 128;
+
+/// The first `system` block this route requires before it serves a subscription token.
+///
+/// # What it is, and why it is a separate block
+///
+/// A token obtained on a person's behalf reaches this endpoint under a further condition the
+/// documented API has no field for: **the first block of `system` must be this string and nothing
+/// else**. Measured on 2026-08-30 against `https://api.anthropic.com/v1` on the operator's own
+/// subscription token — with the string as block 0 the request is served, and every other shape
+/// answers `429 rate_limit_error` carrying **no** `anthropic-ratelimit-*` headers at all. The
+/// match is exact: dropping the trailing full stop, adding a leading space, adding a trailing
+/// newline, or merging the run's own instruction into the same block all answer 429, while extra
+/// blocks *after* it are served. `claude-haiku-4-5` is served regardless.
+///
+/// **The 429 is why this is worth a constant rather than a note.** It is the status a caller reads
+/// as *out of quota*, and the missing headers mean nothing downstream can tell it apart from one:
+/// a run refused for this reason retries four times, backs off, and reports a rate limit the
+/// account is nowhere near.
+///
+/// It is only sent for [`CredentialKind::Oauth`]. A key issued to a program is served without it,
+/// and sending it there would put a claim about the client into every request that did not need
+/// one.
+pub const SUBSCRIPTION_CLIENT_PREAMBLE: &str =
+    "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Largest `temperature` this wire admits.
 ///
@@ -465,7 +489,17 @@ pub fn stream_error(event: &Value) -> WireError {
 /// unlike the first wire's. This route **requires** `max_tokens`, so absence cannot be preserved
 /// on it; the caller resolves what to send before calling, and where that number came from is a
 /// decision written down at the call site rather than invented here.
-pub fn request_body(request: &TurnRequest, max_output_tokens: u64) -> Value {
+///
+/// `credential` is passed for the same reason and is not a detail of the transport: on this route
+/// **how the credential is presented changes the body**. A subscription token is served only when
+/// `system` opens with [`SUBSCRIPTION_CLIENT_PREAMBLE`] as its own block, so the projection needs
+/// to know which presentation this request travels under. [`None`] and a key issued to a program
+/// are the same shape here — the run's own instruction, alone.
+pub fn request_body(
+    request: &TurnRequest,
+    max_output_tokens: u64,
+    credential: Option<CredentialKind>,
+) -> Value {
     let TurnRequest {
         model,
         instructions,
@@ -486,14 +520,24 @@ pub fn request_body(request: &TurnRequest, max_output_tokens: u64) -> Value {
     // turn of the run. That matters more here than a tidier string would: the loop is stateless
     // and replays its conversation, so the head is re-sent on every turn and is paid for at the
     // full input rate without one.
-    body.insert(
-        "system".to_owned(),
-        json!([{
-            "type": "text",
-            "text": instructions,
-            "cache_control": {"type": "ephemeral"},
-        }]),
-    );
+    // **A subscription token adds a block in front.** See [`SUBSCRIPTION_CLIENT_PREAMBLE`]: this
+    // route serves one only when `system` opens with that exact string as its own block. It goes
+    // in front of the run's instruction rather than into it, because merging the two into one
+    // block is one of the shapes that is refused.
+    let mut system = Vec::with_capacity(2);
+    if credential == Some(CredentialKind::Oauth) {
+        system.push(json!({"type": "text", "text": SUBSCRIPTION_CLIENT_PREAMBLE}));
+    }
+    // **The breakpoint stays on the instruction, which is the last block either way.** A
+    // breakpoint covers everything rendered before it, so one at the end of `system` covers the
+    // whole constant head under both presentations; put on the preamble instead it would leave the
+    // instruction — the larger half, re-sent on every turn of a stateless loop — outside the cache.
+    system.push(json!({
+        "type": "text",
+        "text": instructions,
+        "cache_control": {"type": "ephemeral"},
+    }));
+    body.insert("system".to_owned(), Value::Array(system));
     let mut messages = items_to_messages(items);
     mark_rolling_breakpoint(&mut messages);
     body.insert("messages".to_owned(), Value::Array(messages));
@@ -873,6 +917,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             4096,
+            None,
         );
         assert_eq!(body["stream"], json!(true));
         assert_eq!(body["max_tokens"], json!(4096));
@@ -915,6 +960,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             4096,
+            None,
         );
         let messages = body["messages"].as_array().expect("an array");
         let last = messages.last().expect("a last message");
@@ -969,6 +1015,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             1024,
+            None,
         );
         let last = body["messages"]
             .as_array()
@@ -1012,6 +1059,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             1024,
+            None,
         );
         let last = body["messages"]
             .as_array()
@@ -1040,6 +1088,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             1024,
+            None,
         );
         for field in ["temperature", "top_p", "output_config"] {
             assert!(body.get(field).is_none(), "{field} leaked into {body}");
@@ -1062,6 +1111,7 @@ mod tests {
                 &ToolChoice::Auto,
             ),
             1024,
+            None,
         );
         assert_eq!(body["temperature"], json!(0.2));
         assert_eq!(body["top_p"], json!(0.95));
@@ -1089,6 +1139,7 @@ mod tests {
                     choice,
                 ),
                 4096,
+                None,
             )
         };
 

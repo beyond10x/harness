@@ -8,12 +8,18 @@
 //! run working — that is narrowing too: it takes away the model's right to stop, never adds a
 //! right to act.
 //!
-//! # The loop spawns nothing
+//! # The loop spawns no process, and runs no hook on a thread of its own
 //!
 //! This is a port, exactly as [`crate::ApprovalPort`] is. The implementation that runs a process
 //! lives in the shell, where the file naming the hooks was read from a path the operator gave.
 //! Nothing here is ever discovered from the workspace: a hook found in a repository would be a
 //! program the *repository* runs on the operator's machine.
+//!
+//! A run whose delegates go side by side is the one place the loop starts threads, and the
+//! operator's programs stay off them: a child asks the run's thread, which holds the one
+//! [`HookPort`] the shell attached and consults it for one call at a time
+//! ([`crate::parallel`]). *How many copies of my guard are running* must not depend on how many
+//! sub-tasks a model happened to ask for.
 //!
 //! Design: `docs/design/0002-sub-agents-structured-output-hooks.md` § 3.
 

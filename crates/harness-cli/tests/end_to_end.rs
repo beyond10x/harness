@@ -1764,6 +1764,149 @@ fn a_delegate_reads_a_file_in_its_own_context_and_the_parent_reads_only_the_repo
     );
 }
 
+/// Two `delegate-started` before either `delegate-finished`, over the shipped binary and the
+/// shipped wire client.
+///
+/// # Why this is not the loop's own test again
+///
+/// `harness-loop` proves the *mechanism* against doubles it wrote itself. What only a run through
+/// the binary can prove is that the **real** ports fork: `ResponsesClient::fork` and the tool
+/// surface's, over a real socket, with the real argv that chose them. A `fork` that answered `None`
+/// in the shipped client would be a run that quietly went back to one child at a time, with every
+/// loop test still green.
+///
+/// # And why the assertion is on the order of two events rather than on a clock
+///
+/// A fast serial run and a slow parallel one look alike to a timer. Two `delegate-started` with no
+/// `delegate-finished` between them cannot happen in a run that delegated in order: the loop emits
+/// a child's start immediately before running it to completion. So the bracketing *is* the
+/// evidence.
+fn two_delegates_of_one_turn_run_side_by_side_on(
+    fixture: &Fixture,
+    wire: &[&str],
+    // The two wires mint call ids in their own vocabularies, and the pairing being pinned here is
+    // between a child and *a* call rather than between a child and a spelling.
+    ids: [&str; 2],
+) {
+    let workspace = workspace();
+
+    let mut arguments = vec!["--delegate", "--json"];
+    arguments.extend_from_slice(wire);
+    let output = run_against(fixture, &arguments, workspace.path());
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let bracketing: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event["kind"].as_str() {
+            Some(kind @ ("delegate-started" | "delegate-finished")) => Some(kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bracketing,
+        vec![
+            "delegate-started",
+            "delegate-started",
+            "delegate-finished",
+            "delegate-finished"
+        ],
+        "both children start before either finishes, which a run that delegated in order cannot \
+         produce: {bracketing:?}"
+    );
+
+    // Each child was handed its own task and answered from it. The group's whole risk is that a
+    // child's work is attributed to the wrong `delegate` call — the children finish in no
+    // particular order, and nothing downstream could tell — so what is pinned is the pairing of
+    // call id to task on the way in and to the child's own text on the way out.
+    let handed: Vec<(&str, &str)> = events
+        .iter()
+        .filter(|event| event["kind"] == "delegate-started")
+        .filter_map(|event| Some((event["call_id"].as_str()?, event["task"].as_str()?)))
+        .collect();
+    assert_eq!(
+        handed,
+        vec![
+            (ids[0], "DELEGATE-TASK the left half"),
+            (ids[1], "DELEGATE-TASK the right half"),
+        ],
+        "each child got the task of the call it answers: {handed:?}"
+    );
+    for (call, half) in [(ids[0], "left"), (ids[1], "right")] {
+        let said: String = events
+            .iter()
+            .filter(|event| event["kind"] == "delegated" && event["call_id"] == call)
+            .filter(|event| event["event"]["kind"] == "text-delta")
+            .filter_map(|event| event["event"]["text"].as_str())
+            .collect();
+        assert_eq!(
+            said,
+            format!("child reporting on {half}"),
+            "what the child of `{call}` said arrives under that call and no other"
+        );
+    }
+    let parent: String = events
+        .iter()
+        .filter(|event| event["kind"] == "text-delta")
+        .filter_map(|event| event["text"].as_str())
+        .collect();
+    assert!(
+        parent.contains("both delegates reported"),
+        "the parent answers for itself: {parent}"
+    );
+}
+
+#[test]
+fn two_delegates_of_one_turn_run_side_by_side_on_the_responses_wire() {
+    two_delegates_of_one_turn_run_side_by_side_on(
+        &Fixture::start("delegate-pair"),
+        &[],
+        ["call_b10x_001", "call_b10x_002"],
+    );
+}
+
+#[test]
+fn two_delegates_of_one_turn_run_side_by_side_on_the_messages_wire() {
+    two_delegates_of_one_turn_run_side_by_side_on(
+        &Fixture::messages("delegate-pair"),
+        &["--wire", "anthropic-messages"],
+        ["toolu_b10x_001", "toolu_b10x_002"],
+    );
+}
+
+/// `--delegate-parallel 1` is the behaviour every version before this had: one child at a time.
+#[test]
+fn a_run_told_to_delegate_one_at_a_time_brackets_each_child_before_starting_the_next() {
+    let fixture = Fixture::start("delegate-pair");
+    let workspace = workspace();
+
+    let output = run_against(
+        &fixture,
+        &["--delegate", "--delegate-parallel", "1", "--json"],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let bracketing: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event["kind"].as_str() {
+            Some(kind @ ("delegate-started" | "delegate-finished")) => Some(kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bracketing,
+        vec![
+            "delegate-started",
+            "delegate-finished",
+            "delegate-started",
+            "delegate-finished"
+        ],
+        "each child is bracketed before the next begins: {bracketing:?}"
+    );
+}
+
 #[test]
 fn a_delegate_turn_ceiling_binds_the_child_and_the_parent_is_told_it_did_not_finish() {
     // `--delegate-turns` is the child's own ceiling and not the parent's remainder, so a child

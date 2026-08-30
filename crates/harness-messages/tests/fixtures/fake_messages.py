@@ -32,6 +32,7 @@ SCENARIOS = [
     "cold",
     "cold-once",
     "delegate",
+    "delegate-pair",
     "dynamic-tool",
     "failed",
     "fails-after-turn",
@@ -144,7 +145,8 @@ def thinking_events(index=0):
     ]
 
 
-def tool_use_events(name, arguments, index=0, partial_json=None):
+def tool_use_events(name, arguments, index=0, partial_json=None, nth=1):
+    """One tool call block. `nth` gives it its own id, which several in a turn each need."""
     encoded = json.dumps(arguments, separators=(",", ":")) if partial_json is None else partial_json
     midpoint = len(encoded) // 2
     return [
@@ -153,7 +155,7 @@ def tool_use_events(name, arguments, index=0, partial_json=None):
             "index": index,
             "content_block": {
                 "type": "tool_use",
-                "id": "toolu_b10x_001",
+                "id": f"toolu_b10x_{nth:03d}",
                 "name": name,
                 "input": {},
             },
@@ -185,6 +187,19 @@ def called(name, arguments, leading=()):
         *tool_use_events(name, arguments, index=index),
         *message_end("tool_use", 8),
     ]
+
+
+def called_several(calls):
+    """One turn that asks for several calls at once, each its own content block.
+
+    The shape a turn takes when a model hands out more than one sub-task: the loop reads them as
+    neighbours and may run them side by side, so nothing about the stream may make them look
+    ordered.
+    """
+    blocks = []
+    for index, (name, arguments) in enumerate(calls):
+        blocks.extend(tool_use_events(name, arguments, index=index, nth=index + 1))
+    return [message_start(), *blocks, *message_end("tool_use", 8)]
 
 
 def first_user_text(body):
@@ -604,6 +619,24 @@ class Handler(BaseHTTPRequestHandler):
                     called(
                         "delegate",
                         {"task": f"{DELEGATED} read README.md and say what it says"},
+                    )
+                )
+        elif scenario == "delegate-pair":
+            # Two sub-tasks handed out in one turn, which the loop may run side by side. Each child
+            # answers from its own task, so a result that arrived under the wrong call id would be
+            # visible in the parent's record.
+            asked = first_user_text(body)
+            if DELEGATED in asked:
+                self._send_sse(answered(f"child reporting on {asked.split()[-2]}"))
+            elif has_tool_result(body):
+                self._send_sse(answered("both delegates reported"))
+            else:
+                self._send_sse(
+                    called_several(
+                        [
+                            ("delegate", {"task": f"{DELEGATED} the left half"}),
+                            ("delegate", {"task": f"{DELEGATED} the right half"}),
+                        ]
                     )
                 )
         elif scenario == "reasoning":

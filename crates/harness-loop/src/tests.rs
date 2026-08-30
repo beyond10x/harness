@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use harness_wire::{
     AccessKind, CallId, Effect, Envelope, Idempotency, Item, ModelPort, Risk, StopReason,
@@ -5224,4 +5226,624 @@ fn a_call_outside_a_turn_is_refused_by_the_same_approver_and_reaches_nothing_pas
         approvals(&sink),
         vec!["asked flow-command-1", "flow-command-1 approved=false"]
     );
+}
+
+// --- delegates side by side (design 0002 § 2, milestone M4) ---------------------------------------
+
+/// What a group of children does to the model port they were forked from, watched from outside.
+///
+/// The interesting question a test has to answer about concurrency is *were two of them ever inside
+/// a turn at the same time*, and it cannot be answered by timing a run: a fast serial run and a slow
+/// parallel one look alike. So each child announces itself on the way in, waits for its siblings,
+/// and the high-water mark is read afterwards.
+///
+/// The wait is **bounded**. A run that turns out to be serial has to fail this test rather than hang
+/// it: the first child waits out `patience` for a sibling that is not coming, answers anyway, and
+/// the peak the assertion reads is one.
+struct Siblings {
+    /// How many children are inside a turn right now.
+    live: AtomicUsize,
+    /// The most that were ever inside one at the same time. The whole point of the fixture.
+    peak: AtomicUsize,
+    /// How many have ever arrived, which **only goes up**.
+    ///
+    /// What a child waits on, and not `live`: a sibling that arrived and left again has still
+    /// arrived, and waiting on the live count means the first child to arrive waits out its
+    /// patience for a second that has already been and gone.
+    arrived: AtomicUsize,
+    /// How many children a turn waits for before answering.
+    expect: usize,
+    /// How long it waits for them before deciding they are not coming.
+    patience: Duration,
+}
+
+impl Siblings {
+    fn expecting(expect: usize) -> Arc<Self> {
+        Arc::new(Self {
+            live: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            arrived: AtomicUsize::new(0),
+            expect,
+            // Long enough that a loaded machine still sees the siblings arrive, short enough that
+            // the serial case fails in a couple of seconds rather than sitting there.
+            patience: Duration::from_secs(2),
+        })
+    }
+
+    fn peak(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    /// One child's turn: arrive, wait for the others, leave.
+    fn take_a_turn(&self) {
+        let live = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(live, Ordering::SeqCst);
+        self.arrived.fetch_add(1, Ordering::SeqCst);
+        let until = Instant::now() + self.patience;
+        while self.arrived.load(Ordering::SeqCst) < self.expect && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        self.live.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A model whose forks are what the children run on, and whose own turns are the parent's.
+///
+/// The split is the fixture's whole trick: the parent holds the [`SharedModel`] and every child
+/// holds a [`ForkedModel`], so *the parent's script* and *what a child does* are two different
+/// behaviours over one port — which is exactly the shape a real run has.
+struct SharedModel {
+    wire: WireId,
+    parent: VecDeque<Result<TurnOutcome, WireError>>,
+    children: Arc<Siblings>,
+    /// Whether this port will hand out a second handle on itself at all.
+    forkable: bool,
+    /// A child that should panic rather than answer, by the task it was given.
+    panics_on: Option<String>,
+    /// Whether every child spends a turn on a tool call before reporting.
+    children_read_first: bool,
+}
+
+impl SharedModel {
+    fn new(parent: Vec<Result<TurnOutcome, WireError>>, children: &Arc<Siblings>) -> Self {
+        Self {
+            wire: wire(),
+            parent: parent.into(),
+            children: Arc::clone(children),
+            forkable: true,
+            panics_on: None,
+            children_read_first: false,
+        }
+    }
+
+    /// Every child calls a tool before it reports, which is what gives a run two turns to bound
+    /// and one call to put to an approver.
+    fn children_reading_first(mut self) -> Self {
+        self.children_read_first = true;
+        self
+    }
+
+    /// The same fixture over a port that refuses to fork, which is how a run falls back to order.
+    fn unforkable(mut self) -> Self {
+        self.forkable = false;
+        self
+    }
+
+    fn panicking_on(mut self, task: &str) -> Self {
+        self.panics_on = Some(task.to_owned());
+        self
+    }
+}
+
+impl ModelPort for SharedModel {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        _sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        request.validate()?;
+        self.parent
+            .pop_front()
+            .unwrap_or_else(|| Err(WireError::protocol("the parent's script ran out of turns")))
+    }
+
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        self.forkable.then(|| {
+            Box::new(ForkedModel {
+                wire: self.wire.clone(),
+                children: Arc::clone(&self.children),
+                panics_on: self.panics_on.clone(),
+                reads_first: self.children_read_first,
+                taken: 0,
+            }) as Box<dyn ModelPort + Send>
+        })
+    }
+}
+
+/// One child's handle on the shared model: it answers with the task it was given, once.
+struct ForkedModel {
+    wire: WireId,
+    children: Arc<Siblings>,
+    panics_on: Option<String>,
+    /// Whether the child spends a turn on a tool call before it reports.
+    reads_first: bool,
+    /// Turns this one child has taken, so it can tell its first from its second.
+    taken: usize,
+}
+
+/// The task a child was handed, which is the first user item of its conversation.
+fn task_in(request: &TurnRequest) -> String {
+    request
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::UserText { text } => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+impl ModelPort for ForkedModel {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        _sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        request.validate()?;
+        let task = task_in(request);
+        self.taken += 1;
+        self.children.take_a_turn();
+        assert!(
+            self.panics_on.as_deref() != Some(task.as_str()),
+            "the child given `{task}` was told to panic"
+        );
+        if self.reads_first && self.taken == 1 {
+            return Ok(asks_for(&[("child-read", "read", json!({"path": task}))]));
+        }
+        Ok(answer(&format!("done: {task}")))
+    }
+}
+
+/// A toolset a whole group of children can hold at once, recording what all of them called.
+struct SharedTools {
+    specs: Vec<ToolSpec>,
+    calls: Arc<Mutex<Vec<ToolCall>>>,
+    envelope: Option<Envelope>,
+    forkable: bool,
+}
+
+impl SharedTools {
+    fn new(specs: Vec<ToolSpec>) -> Self {
+        Self {
+            specs,
+            calls: Arc::new(Mutex::new(Vec::new())),
+            envelope: None,
+            forkable: true,
+        }
+    }
+
+    fn enveloped(mut self, envelope: Envelope) -> Self {
+        self.envelope = Some(envelope);
+        self
+    }
+
+    fn handle(&self) -> Self {
+        Self {
+            specs: self.specs.clone(),
+            calls: Arc::clone(&self.calls),
+            envelope: self.envelope.clone(),
+            forkable: self.forkable,
+        }
+    }
+}
+
+impl ToolPort for SharedTools {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.specs
+    }
+
+    fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
+        let published = self.specs.iter().find(|spec| spec.name == call.name)?;
+        Some(match &self.envelope {
+            Some(envelope) => ToolSpec {
+                envelope: envelope.clone(),
+                ..published.clone()
+            },
+            None => published.clone(),
+        })
+    }
+
+    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        self.calls.lock().expect("the call log").push(call.clone());
+        ToolOutcome::ok(json!({"read": call.name.as_str()}))
+    }
+
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        self.forkable
+            .then(|| Box::new(self.handle()) as Box<dyn ToolPort + Send>)
+    }
+}
+
+/// One run over ports a test built itself, rather than over [`Harness`]'s scripted pair.
+fn run_ports(
+    model: &mut dyn ModelPort,
+    tools: &mut dyn ToolPort,
+    approvals: &mut dyn ApprovalPort,
+    config: LoopConfig,
+) -> (Result<LoopOutcome, LoopError>, VecLoopSink) {
+    let mut sink = VecLoopSink::new();
+    let outcome = AgentLoop::new(model, tools, approvals, config).run("do the thing", &mut sink);
+    (outcome, sink)
+}
+
+/// A parent that asks for two delegates in one turn and then answers.
+fn asks_for_two_delegates() -> Vec<Result<TurnOutcome, WireError>> {
+    vec![
+        Ok(asks_for(&[
+            ("call-1", "delegate", json!({"task": "left"})),
+            ("call-2", "delegate", json!({"task": "right"})),
+        ])),
+        Ok(answer("both reported")),
+    ]
+}
+
+fn delegating_config(delegation: Delegation) -> LoopConfig {
+    LoopConfig::new("scripted-model", "be useful").with_delegation(Some(delegation))
+}
+
+#[test]
+fn two_delegates_of_one_turn_run_at_the_same_time() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates(), &siblings);
+    let mut tools = SharedTools::new(vec![spec("read", Approval::NotRequired)]);
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    let outcome = outcome.expect("a run whose delegates both report completes");
+
+    assert_eq!(outcome.stop, LoopStop::Completed);
+    assert_eq!(
+        siblings.peak(),
+        2,
+        "both children have to have been inside a turn at once; a peak of one is a run that \
+         delegated in order"
+    );
+    assert_eq!(
+        result_of(&outcome, "call-1").1["text"],
+        json!("done: left"),
+        "the first call's result is the first child's, whatever order they finished in"
+    );
+    assert_eq!(
+        result_of(&outcome, "call-2").1["text"],
+        json!("done: right")
+    );
+    assert_eq!(
+        bracketing(&sink),
+        vec![
+            ("delegate-started", "call-1"),
+            ("delegate-started", "call-2"),
+            ("delegate-finished", "call-1"),
+            ("delegate-finished", "call-2"),
+        ],
+        "both announced before either ends, which is what a reader of the record reads the \
+         concurrency off — and each announced exactly once"
+    );
+}
+
+/// The same turn, with the two children served by the parent's own port because nothing forked.
+///
+/// A run of delegates in order holds one port for the whole of each child, so the script reads as
+/// the three loops interleaved in the order the turns actually happen.
+fn asks_for_two_delegates_run_in_order() -> Vec<Result<TurnOutcome, WireError>> {
+    vec![
+        Ok(asks_for(&[
+            ("call-1", "delegate", json!({"task": "left"})),
+            ("call-2", "delegate", json!({"task": "right"})),
+        ])),
+        Ok(answer("done: left")),
+        Ok(answer("done: right")),
+        Ok(answer("both reported")),
+    ]
+}
+
+/// What a run in order must produce, whichever reason sent it down that path.
+///
+/// The event bracketing is asserted as well as the results, because a group that gave up **after**
+/// announcing its children wrote a second `DelegateStarted` for each of them when the caller then
+/// ran them in order — two starts and one finish per child, which is a record no reader can
+/// interpret. A shipped `ToolPort` wrapper that inherited `fork`'s default instead of delegating
+/// it is all it took to produce that.
+fn assert_ran_in_order(outcome: &LoopOutcome, siblings: &Siblings, sink: &VecLoopSink) {
+    assert_eq!(outcome.stop, LoopStop::Completed);
+    assert_eq!(
+        siblings.peak(),
+        0,
+        "nothing was forked, so no child ran on a handle of its own"
+    );
+    assert_eq!(result_of(outcome, "call-1").1["text"], json!("done: left"));
+    assert_eq!(result_of(outcome, "call-2").1["text"], json!("done: right"));
+    assert_eq!(
+        bracketing(sink),
+        vec![
+            ("delegate-started", "call-1"),
+            ("delegate-finished", "call-1"),
+            ("delegate-started", "call-2"),
+            ("delegate-finished", "call-2"),
+        ],
+        "each child announced once, and bracketed before the next begins"
+    );
+}
+
+/// Every `DelegateStarted` and `DelegateFinished` of a run, in order, with the call each names.
+fn bracketing(sink: &VecLoopSink) -> Vec<(&'static str, &str)> {
+    sink.events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::DelegateStarted { call_id, .. } => {
+                Some(("delegate-started", call_id.as_str()))
+            }
+            LoopEvent::DelegateFinished { call_id, .. } => {
+                Some(("delegate-finished", call_id.as_str()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_model_port_that_will_not_fork_runs_the_same_delegates_in_order_and_refuses_nothing() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates_run_in_order(), &siblings).unforkable();
+    let mut tools = SharedTools::new(Vec::new());
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    assert_ran_in_order(
+        &outcome.expect("a run whose port will not fork still completes"),
+        &siblings,
+        &sink,
+    );
+}
+
+#[test]
+fn a_tool_port_that_will_not_fork_runs_the_same_delegates_in_order_and_refuses_nothing() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates_run_in_order(), &siblings);
+    let mut tools = SharedTools::new(Vec::new());
+    tools.forkable = false;
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    assert_ran_in_order(
+        &outcome.expect("a run whose tool port will not fork still completes"),
+        &siblings,
+        &sink,
+    );
+}
+
+#[test]
+fn a_run_that_may_not_delegate_side_by_side_runs_its_two_delegates_in_order() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates_run_in_order(), &siblings);
+    let mut tools = SharedTools::new(Vec::new());
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default().with_max_parallel(1)),
+    );
+    assert_ran_in_order(&outcome.expect("the run completes"), &siblings, &sink);
+}
+
+#[test]
+fn a_call_between_two_delegates_is_a_barrier_and_they_do_not_group() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(
+        vec![
+            Ok(asks_for(&[
+                ("call-1", "delegate", json!({"task": "left"})),
+                ("call-2", "write", json!({"path": "a"})),
+                ("call-3", "delegate", json!({"task": "right"})),
+            ])),
+            // Each child in turn, on the parent's own port, because neither was forked.
+            Ok(answer("done: left")),
+            Ok(answer("done: right")),
+            Ok(answer("done")),
+        ],
+        &siblings,
+    );
+    let mut tools =
+        SharedTools::new(vec![spec("write", Approval::NotRequired)]).enveloped(Envelope {
+            effects: vec![Effect::Write],
+            risk: Risk::Low,
+            idempotency: Idempotency::NonIdempotent,
+            access: Vec::new(),
+        });
+    let (outcome, _) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    let outcome = outcome.expect("the run completes");
+    assert_eq!(
+        siblings.peak(),
+        0,
+        "neither delegate was forked: the second may be there to look at what the write did, so          it waits for it and the two never form a group"
+    );
+    assert_eq!(result_of(&outcome, "call-1").1["text"], json!("done: left"));
+    assert_eq!(
+        result_of(&outcome, "call-3").1["text"],
+        json!("done: right")
+    );
+}
+
+#[test]
+fn a_budget_that_will_not_divide_between_the_children_runs_them_in_order_rather_than_refusing_them()
+{
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates_run_in_order(), &siblings);
+    let mut tools = SharedTools::new(Vec::new());
+    let mut config = delegating_config(Delegation::default());
+    // Eleven, of which the parent's first turn spends ten: one token of headroom, which is enough
+    // for a child whole and nothing at all halved. A group that will not divide is run in order,
+    // where each child is carved on what the one before it actually spent.
+    config.budget = Budget {
+        max_input_tokens: Some(11),
+        ..Budget::default()
+    };
+    let (outcome, _) = run_ports(&mut model, &mut tools, &mut DenyAll, config);
+    assert_eq!(
+        siblings.peak(),
+        0,
+        "run in order on the parent's own port, not forked and not refused as a group"
+    );
+    let outcome = outcome.expect("the run ends on its budget rather than failing");
+    assert!(
+        !result_of(&outcome, "call-1").0,
+        "the first child had the whole remainder and reported"
+    );
+}
+
+#[test]
+fn a_child_that_panics_is_a_failed_result_and_its_siblings_finish() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates(), &siblings).panicking_on("left");
+    let mut tools = SharedTools::new(Vec::new());
+    // The panic is caught and reported; the hook the test harness installs would otherwise print
+    // the backtrace of a panic this test is deliberately causing.
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    std::panic::set_hook(previous);
+
+    let outcome = outcome.expect("a run one of whose children panicked still ends");
+    assert_eq!(outcome.stop, LoopStop::Completed);
+    let (failed, output) = result_of(&outcome, "call-1");
+    assert!(failed, "the model has to learn the sub-task did not happen");
+    assert!(
+        output.as_str().unwrap_or_default().contains("panicked"),
+        "and what happened to it: {output}"
+    );
+    assert_eq!(
+        result_of(&outcome, "call-2").1["text"],
+        json!("done: right"),
+        "the sibling of a child that panicked reports as normal"
+    );
+    assert!(
+        sink.events().iter().any(|event| matches!(
+            event,
+            LoopEvent::DelegateFinished { call_id, .. } if call_id.as_str() == "call-1"
+        )),
+        "the record carries an ending for it, or a reader sees a delegate that never came back"
+    );
+}
+
+#[test]
+fn a_child_on_its_own_thread_is_gated_by_the_runs_own_approver() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates(), &siblings).children_reading_first();
+    let mut tools =
+        SharedTools::new(vec![spec("read", Approval::NotRequired)]).enveloped(Envelope {
+            effects: vec![Effect::Read],
+            // Above the run's `Risk::Low` ceiling, so a person is asked about it.
+            risk: Risk::Medium,
+            idempotency: Idempotency::Idempotent,
+            access: Vec::new(),
+        });
+    let mut approvals = Recording::default();
+    let (outcome, _) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut approvals,
+        delegating_config(Delegation::default()),
+    );
+    let outcome = outcome.expect("the run completes");
+
+    assert_eq!(siblings.peak(), 2, "the children did run side by side");
+    assert_eq!(
+        approvals.asked.len(),
+        2,
+        "one decision per child, taken by the run's own approver on the run's own thread — two \
+         approvers would be two gates, and a person cannot answer two prompts at once"
+    );
+    assert_eq!(result_of(&outcome, "call-1").1["text"], json!("done: left"));
+}
+
+/// An approver that records what it was asked, from whichever thread asked it.
+#[derive(Default)]
+struct Recording {
+    asked: Vec<ToolName>,
+}
+
+impl ApprovalPort for Recording {
+    fn decide(&mut self, _: &ToolCall, spec: &ToolSpec) -> ApprovalDecision {
+        self.asked.push(spec.name.clone());
+        ApprovalDecision::Approved
+    }
+}
+
+#[test]
+fn the_delegate_tool_tells_the_model_it_can_ask_for_several_only_when_the_run_can_run_several() {
+    let together = Delegation::default().spec();
+    assert!(
+        together.description.contains("at the same time"),
+        "a model that is not told cannot use it: {}",
+        together.description
+    );
+    let in_order = Delegation::default().with_max_parallel(1).spec();
+    assert!(
+        !in_order.description.contains("at the same time"),
+        "and a run that cannot must not claim it: {}",
+        in_order.description
+    );
+}
+
+#[test]
+fn a_group_of_delegates_divides_the_runs_remaining_tokens_between_them() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates(), &siblings).children_reading_first();
+    let mut tools = SharedTools::new(vec![spec("read", Approval::NotRequired)]);
+    let mut config = delegating_config(Delegation::default());
+    // The parent's first turn reports ten input tokens, leaving fourteen. Halved, each child is
+    // started on seven — and each child's own first turn reports ten, so each stops on a ceiling
+    // that names the figure it was given.
+    config.budget = Budget {
+        max_input_tokens: Some(24),
+        ..Budget::default()
+    };
+    let (outcome, _) = run_ports(&mut model, &mut tools, &mut DenyAll, config);
+    let outcome = outcome.expect("a run that ends on its budget is an outcome, not a failure");
+
+    assert_eq!(siblings.peak(), 2, "they ran side by side");
+    for call in ["call-1", "call-2"] {
+        assert_eq!(
+            result_of(&outcome, call).1["stop"],
+            json!({"kind": "max-input-tokens", "limit": 7, "reported": 10}),
+            "half the remainder each: tokens add up, so a group cannot promise the whole of it \
+             twice"
+        );
+    }
 }

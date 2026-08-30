@@ -8,7 +8,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use b10x_harness_messages::{
-    ANTHROPIC_VERSION, OAUTH_BETA, WIRE, decode_stream, header_names, request_body,
+    ANTHROPIC_VERSION, OAUTH_BETA, SUBSCRIPTION_CLIENT_PREAMBLE, WIRE, decode_stream, header_names,
+    request_body,
 };
 use harness_wire::{
     Approval, CallId, CredentialKind, Envelope, Item, Sampling, StopReason, ToolCall, ToolChoice,
@@ -16,9 +17,10 @@ use harness_wire::{
 };
 use serde_json::{Value, json};
 
-/// The cut that added `tool_choice`. `2026-08-29b` is the same wire without it, and `2026-08-29`
-/// is the one before the rolling cache breakpoint; both stay pinned as they were released.
-const VERSION: &str = "2026-08-30";
+/// The cut that added the subscription client preamble. `2026-08-30` is the same wire without it,
+/// `2026-08-29b` the one before `tool_choice`, and `2026-08-29` the one before the rolling cache
+/// breakpoint; all three stay pinned as they were released.
+const VERSION: &str = "2026-08-30.1";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -55,6 +57,16 @@ fn strings(value: &Value) -> Vec<String> {
 /// The canonical turn: an instruction, a person's input, a replayed thinking block, one call and
 /// its result. Every field the harness ever sends appears here.
 fn canonical_request() -> Value {
+    canonical_request_as(None)
+}
+
+/// The same turn, projected under a named credential presentation.
+///
+/// **The presentation is an argument because on this route it changes the body.** A subscription
+/// token is served only when `system` opens with the client preamble as its own block, so the
+/// contract pins two request fixtures rather than one and this is the single place either is
+/// built — a second builder would prove only that the second builder works.
+fn canonical_request_as(credential: Option<CredentialKind>) -> Value {
     let items = vec![
         Item::user("read the readme"),
         Item::Opaque {
@@ -110,6 +122,7 @@ fn canonical_request() -> Value {
         // Named, not defaulted: this route requires an output bound, so the fixture pins what one
         // looks like rather than pinning that it can be left out — it cannot.
         4096,
+        credential,
     )
 }
 
@@ -122,6 +135,54 @@ fn the_request_the_harness_sends_matches_the_pinned_fixture() {
         expected,
         "the request shape changed; re-pin the fixture and say so in the changelog"
     );
+}
+
+#[test]
+fn the_request_a_subscription_token_sends_matches_its_own_pinned_fixture() {
+    let expected: Value = serde_json::from_str(&fixture("turn-request-oauth.json"))
+        .expect("the oauth request fixture is JSON");
+    assert_eq!(
+        canonical_request_as(Some(CredentialKind::Oauth)),
+        expected,
+        "the subscription request shape changed; re-pin the fixture and say so in the changelog"
+    );
+}
+
+/// The whole of what this version cut a directory for.
+///
+/// Asserted field by field rather than only by whole-body equality above, because a reader of the
+/// contract is entitled to find the rule stated: **block 0 is the preamble, exactly, alone**, and
+/// the run's own instruction is the block after it. Every other shape measured on 2026-08-30
+/// answered `429` with no rate-limit headers, which reads downstream as an exhausted quota.
+#[test]
+fn a_subscription_token_opens_the_system_with_the_client_preamble_and_nothing_else() {
+    let oauth = canonical_request_as(Some(CredentialKind::Oauth));
+    let system = oauth["system"].as_array().expect("an array");
+
+    assert_eq!(system.len(), 2, "{oauth}");
+    assert_eq!(system[0]["text"], json!(SUBSCRIPTION_CLIENT_PREAMBLE));
+    assert_eq!(system[0]["type"], json!("text"));
+    // Alone: the preamble block carries the string and no breakpoint, so nothing can be appended
+    // to it later without this failing.
+    assert_eq!(
+        system[0].as_object().expect("an object").len(),
+        2,
+        "the preamble block carries text and type and nothing else: {oauth}"
+    );
+    assert_eq!(system[1]["text"], json!("be useful"));
+
+    // The breakpoint moves to the last block so the constant head stays cached — see the
+    // projection's own note. Under a key issued to a program there is one block and it is both.
+    assert_eq!(
+        system[1]["cache_control"],
+        json!({"type": "ephemeral"}),
+        "{oauth}"
+    );
+    assert!(system[0].get("cache_control").is_none(), "{oauth}");
+
+    let key = canonical_request();
+    assert_eq!(key["system"].as_array().expect("an array").len(), 1);
+    assert_eq!(key["system"][0]["text"], json!("be useful"));
 }
 
 #[test]

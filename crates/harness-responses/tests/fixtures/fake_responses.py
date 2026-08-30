@@ -29,6 +29,7 @@ SCENARIOS = [
     "cold",
     "cold-once",
     "delegate",
+    "delegate-pair",
     "dynamic-tool",
     "failed",
     "fails-after-turn",
@@ -102,13 +103,14 @@ def reasoning_item():
     }
 
 
-def function_call_item(name, arguments):
+def function_call_item(name, arguments, nth=1):
+    """One call. `nth` distinguishes several in a turn, which need distinct ids to be answerable."""
     return {
-        "id": "fc_b10x_001",
+        "id": f"fc_b10x_{nth:03d}",
         "type": "function_call",
         "status": "completed",
         "name": name,
-        "call_id": "call_b10x_001",
+        "call_id": f"call_b10x_{nth:03d}",
         "arguments": json.dumps(arguments, separators=(",", ":")),
     }
 
@@ -162,6 +164,44 @@ def function_call_events(name, arguments):
             "response": response_object("completed", [item], usage_object(8)),
         },
     ]
+
+
+def function_calls_events(calls):
+    """One turn that asks for several calls at once, each at its own output index.
+
+    The shape a turn takes when a model hands out more than one sub-task: the loop reads them as
+    neighbours and may run them side by side, so nothing about the stream may make them look
+    ordered.
+    """
+    items = [
+        function_call_item(name, arguments, nth=nth)
+        for nth, (name, arguments) in enumerate(calls, start=1)
+    ]
+    events = [{"type": "response.created", "response": response_object("in_progress", [], None)}]
+    for index, item in enumerate(items):
+        events.extend(
+            [
+                {
+                    "type": "response.output_item.added",
+                    "output_index": index,
+                    "item": {**item, "status": "in_progress", "arguments": ""},
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": item["id"],
+                    "output_index": index,
+                    "delta": item["arguments"],
+                },
+                {"type": "response.output_item.done", "output_index": index, "item": item},
+            ]
+        )
+    events.append(
+        {
+            "type": "response.completed",
+            "response": response_object("completed", items, usage_object(8)),
+        }
+    )
+    return events
 
 
 def first_user_text(body):
@@ -563,6 +603,24 @@ class Handler(BaseHTTPRequestHandler):
                     function_call_events(
                         "delegate",
                         {"task": f"{DELEGATED} read README.md and say what it says"},
+                    )
+                )
+        elif scenario == "delegate-pair":
+            # Two sub-tasks handed out in one turn, which the loop may run side by side. Each child
+            # answers from its own task, so the parent's two results are told apart by their text
+            # and a result that arrived under the wrong call id would be visible.
+            asked = first_user_text(body)
+            if DELEGATED in asked:
+                self._send_sse(text_events(f"child reporting on {asked.split()[-2]}"))
+            elif has_function_output(body):
+                self._send_sse(text_events("both delegates reported"))
+            else:
+                self._send_sse(
+                    function_calls_events(
+                        [
+                            ("delegate", {"task": f"{DELEGATED} the left half"}),
+                            ("delegate", {"task": f"{DELEGATED} the right half"}),
+                        ]
                     )
                 )
         elif scenario == "reasoning":

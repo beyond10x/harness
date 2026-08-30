@@ -2,11 +2,11 @@
 format: aep.planning-md/1
 id: story:history-carries-a-home-directory
 kind: story
-status: draft
+status: rejected
 title: Two published commits carry the operator's home directory
 relations:
 - derived_from: epic:adoption-follow-ups
-revision: 2
+revision: 4
 ---
 ## What is true
 

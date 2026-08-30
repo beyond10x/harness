@@ -50,6 +50,9 @@ fn body(items: &[Item]) -> serde_json::Value {
             tool_choice: ToolChoice::Auto,
         },
         1024,
+        // This suite is about how a fold reaches the wire, not about the credential; the shape
+        // under a subscription token differs only by a leading `system` block the contract pins.
+        None,
     )
 }
 

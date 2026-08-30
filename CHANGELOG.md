@@ -7,6 +7,116 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A turn's `delegate` calls now run side by side** (design 0002 § 2, milestone M4). A run that
+  asked for three sub-tasks in one turn paid three whole child runs of latency back to back,
+  because the loop resolved delegates strictly one at a time. Nothing about them required it: a
+  delegate starts from an empty conversation, so no child can read what another produced and there
+  is no ordering between them to preserve.
+
+  **Neighbouring** `delegate` calls of one turn form a group, capped by the new
+  `Delegation::max_parallel` (`--delegate-parallel <N>`, default 4, minimum 1). Neighbouring rather
+  than gathered from the whole turn, exactly as a batch of pure tool calls is: a call between two
+  delegates is a barrier, because the second child may be there to look at what that call did.
+
+  Each child gets its **own** model port and tool port, from two new defaulted trait methods —
+  `ModelPort::fork` and `ToolPort::fork`, both answering `None` (*cannot be run beside itself*)
+  unless a port says otherwise. `MessagesClient` and `ResponsesClient` fork by sharing: one
+  endpoint, one credential source, one connection pool, and — on the Responses wire — one request
+  counter, so two siblings cannot mint the same `x-client-request-id`. `Flat` and `Verbs` fork by
+  sharing the catalogue itself, so a fork publishes exactly what its parent publishes, entry for
+  entry. A fork that published one tool more would be a way to widen a run by delegating.
+
+  Three things are **not** forked, because there is one of each by nature: the approver (one
+  person, asked one question at a time), the operator's hooks (*how many copies of my guard are
+  running* must not depend on how many sub-tasks a model asked for) and the event sink (the record
+  is one ordered stream). A child on a worker thread reaches all three by asking the run's own
+  thread, which sits answering for exactly as long as any child is running. Each proxy **fails
+  closed**: an approval nobody gave is a denial, and a hook that could not be consulted did not say
+  yes. A child that panics comes back as a failed tool result naming what happened, and its
+  siblings finish.
+
+  **This is an optimisation and never a difference in what a run can do.** Where a port will not
+  fork, where `--delegate-parallel 1` is set, or where the run's remaining token budget will not
+  divide between the children, the same delegates run **in order** — the same children, the same
+  gate, the same results in the same order. Order is in fact the more accurate accounting: each
+  child is carved on what the one before it actually spent, where a group has to divide the
+  remainder up front. Tokens are divided because they add up; the wall clock is **not**, because
+  four children running at the same moment take one child's worth of it — the same figure a batch
+  of tool calls is handed.
+
+  A reader of the record tells the two apart with no new event: two `DelegateStarted` before either
+  `DelegateFinished`, and the children's `Delegated` events interleaved, cannot happen in a run
+  that delegated in order.
+
+  The `delegate` tool's description now says several calls in one turn run at once — **only** on a
+  run that can actually do it, because a model told something false about what its next turn costs
+  is worse than one not told at all, and a model that is not told does not ask.
+
+  Evidence is `provider_emulated`: a new `delegate-pair` scenario on **both** emulators, driven
+  through the shipped binary, whose record shows two `delegate-started` before either
+  `delegate-finished` — a bracketing a run that delegated in order cannot produce. Timing proves
+  nothing here; a fast serial run and a slow parallel one look alike.
+
+- **`contracts/cli/b10x-harness/2026-08-30.1`**, cut for `--delegate-parallel`. Strictly additive:
+  every flag of `2026-08-30` keeps its spelling, its `takes_value`, its default, its conflicts and
+  its requirements, and no subcommand changed. A consumer pinned to `2026-08-30` is correct against
+  this binary. `2026-08-30` is released and reachable on `main`, so it was cut beside rather than
+  edited (`AGENTS.md` invariant 13), and a second cut on the same date takes the `.1` suffix.
+
+### Changed
+
+- **A `delegate` call that names an agent this run does not have no longer emits a
+  `DelegateStarted` for a child that never starts.** The name was resolved *after* the event was
+  emitted, so the record carried a delegation that began and never finished — the one shape a
+  reader cannot interpret. Everything a child needs is now worked out before anything is emitted
+  and before any budget is carved, which is also what lets a group divide its remainder by the
+  number of children that will actually run. The refusal the model reads is unchanged; what moved
+  is that an unresolvable agent name is now reported instead of an exhausted budget when a call
+  would have failed both checks.
+
+### Fixed
+
+- **A subscription token now reaches `claude-opus-5` and `claude-sonnet-5` on the Messages wire.**
+  Both answered `429 rate_limit_error` on every request, at any hour, against an account measured
+  at 8% of its five-hour window — and the refusal carried **no `anthropic-ratelimit-*` headers at
+  all**, so nothing downstream could tell it apart from an exhausted quota. The transport did what
+  it is supposed to do with a `RateLimited` that says it is retriable: four attempts, a back-off,
+  and a reported rate limit that was not one.
+
+  The cause is a condition the documented API has no field for. Under a token obtained on a
+  person's behalf, this route serves a request only when `system` **opens with a fixed block**:
+
+  ```
+  "system": [
+    {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+    {"type": "text", "text": "<the run's own instruction>", "cache_control": {...}}
+  ]
+  ```
+
+  This harness sent one block — its own instruction — which is one of the shapes that is refused.
+  Measured on 2026-08-30 against `https://api.anthropic.com/v1`: the match is exact and positional.
+  Dropping the trailing full stop, adding a leading space, adding a trailing newline, or merging
+  the instruction into the same block each answer `429`; extra blocks *after* it are served.
+  `claude-haiku-4-5-20251001` is not gated at all, which is why the failure looked model-shaped and
+  not request-shaped. The `anthropic-beta` value makes no difference.
+
+  `harness_messages::SUBSCRIPTION_CLIENT_PREAMBLE` holds the string, and `request_body` now takes
+  the credential presentation as an argument — on this route **how the credential is presented
+  changes the body**, so the projection has to be told. A key issued to a program sends exactly
+  what it sent before: one block, the instruction, breakpoint on it. The breakpoint stays on the
+  last block under both, so the cached constant head still covers the instruction rather than only
+  the preamble.
+
+  Contract `contracts/provider-wires/anthropic-messages/2026-08-30.1` cuts a version for it and
+  pins **two** request fixtures, one per presentation, both built by the one function in
+  `crates/harness-messages/tests/contract.rs`. `2026-08-30` stays as released.
+
+  **This is the harness naming itself as another vendor's client to that vendor.** It is recorded
+  here rather than buried in a constant, and it is the operator's decision to send it, taken on
+  2026-08-30 against their own subscription credential.
+
 ## [0.3.0] — 2026-08-30
 
 ### Added

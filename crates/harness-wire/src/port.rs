@@ -103,6 +103,29 @@ pub trait ModelPort {
         request: &TurnRequest,
         sink: &mut dyn StreamSink,
     ) -> Result<TurnOutcome, WireError>;
+
+    /// A second handle on the same model API, for a caller running two loops at once.
+    ///
+    /// # Why a port has to say this rather than the caller assuming it
+    ///
+    /// [`ModelPort::turn`] takes `&mut self`, so one port is one turn at a time and a caller that
+    /// wants two must have two. Whether that is possible is the port's own fact and nothing above
+    /// it can tell: a client over HTTP forks into a second client sharing the connection pool and
+    /// the credential source, and a port that is one end of a single duplex connection to somebody
+    /// else's process cannot fork at all — a second turn down it would interleave with the first
+    /// on the wire.
+    ///
+    /// [`None`] — the default, so a port written before this existed keeps meaning what it did —
+    /// is *this cannot be run beside itself*. It is not a failure and nothing is refused for it:
+    /// the caller runs its work in order instead, which is what every caller did before forking
+    /// existed.
+    ///
+    /// A fork is the same endpoint, the same credential source and the same wire id. It is **not**
+    /// a second run's worth of anything the first one bounds: budgets, approvals and cancellation
+    /// live above this trait, and a caller that forks a port still owes every one of them.
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        None
+    }
 }
 
 /// Where the loop's tools come from.
@@ -222,6 +245,27 @@ pub trait ToolPort {
             .iter()
             .map(|call| self.call_within(call, remaining))
             .collect()
+    }
+
+    /// A second handle on the same toolset, for a caller running two loops at once.
+    ///
+    /// # Not the same question as [`ToolPort::call_batch`]
+    ///
+    /// A batch is *these calls, now, decided by the loop that is holding this port*. A fork is a
+    /// whole second agent loop that will decide its own calls, over the same catalogue, for as
+    /// long as it runs. Both are the port saying it can do two things at once; only the fork
+    /// hands the second one out.
+    ///
+    /// What a fork must be: the **same admitted set**, entry for entry. A fork that published one
+    /// more tool than the port it came from would be a way to widen a run by delegating, which is
+    /// the one thing delegation must never do. Narrowing is the caller's job and happens above
+    /// this trait.
+    ///
+    /// [`None`] — the default — is *this cannot be run beside itself*, which is the honest answer
+    /// for a port that is a callback over somebody else's connection. The caller then runs its
+    /// work in order, and nothing is refused for it.
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        None
     }
 }
 

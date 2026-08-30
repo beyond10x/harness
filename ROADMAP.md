@@ -237,6 +237,17 @@ by both wires, sent on the turn the nudge opens and no other, pinned as
 live run per feature — everything above is `provider_emulated`, and whether either route honours a
 tool choice is the vendor's documentation, not this repository's evidence.
 
+**And a second measurement decided the other half of M4.** A run that asked for three sub-tasks in
+one turn paid three whole child runs of latency back to back, because delegates ran strictly in
+order — which is what the milestone said would be revisited *when a run shows the need*. It did, so
+neighbouring `delegate` calls of one turn now run side by side (2026-08-30): `ModelPort::fork` and
+`ToolPort::fork`, both answering *cannot* by default, hand each child its own model and tool port,
+while the approver, the operator's hooks and the record stay single and are asked from the run's
+own thread. Where a port will not fork or the token remainder will not divide, the same delegates
+run in order — concurrency changes how long a turn takes and nothing else about what a run can do.
+Delegate **trees** remain out: each level is a context nobody can read afterwards, and that
+argument is untouched by this.
+
 Out of scope, and why: an MCP client would make this loop a client of a protocol whose tools
 nothing here confines — metaharness is the MCP side of this family; multimodal input is a new
 neutral value on both wires that nothing measuring this harness has asked for.

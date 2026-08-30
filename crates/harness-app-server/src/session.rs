@@ -402,6 +402,18 @@ impl ToolPort for BridgeTools {
         &self.specs
     }
 
+    /// **No fork, stated rather than inherited.**
+    ///
+    /// This port is one end of a single duplex connection to the client, and a call is a request
+    /// that waits for a matching response on it. Two loops going down it at once would interleave
+    /// two request streams on one channel — the port cannot be run beside itself, and saying so is
+    /// the honest answer rather than a default nobody chose. Bridge mode publishes no `delegate`
+    /// anyway; if it ever did, its children would run in order, which is what [`ToolPort::fork`]
+    /// answering [`None`] means.
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        None
+    }
+
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
         if let Some(error) = &self.broken {
             return ToolOutcome::failed(format!("the connection is gone: {error}"));

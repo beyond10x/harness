@@ -76,32 +76,27 @@ impl Flat {
     }
 }
 
-impl ToolPort for Flat {
-    fn specs(&self) -> &[ToolSpec] {
-        &self.specs
-    }
-
-    fn operations(&self) -> Vec<&'static str> {
-        self.catalogue.operations()
-    }
-
+/// Everything this surface does, written once and reached from two receivers.
+///
+/// [`Flat`] answers a [`ToolPort`] whose two call methods take `&mut self`; [`Forked`] is a second
+/// handle on the same catalogue and holds only a shared reference. Neither actually needs the
+/// exclusive borrow — the catalogue performs on `&self` — so the bodies live here and both impls
+/// are one line each. Two copies of them would be two chances to publish different tools from the
+/// same surface, which is the one thing a fork must never do.
+impl Flat {
     /// The subjects of the entry named, from its own arguments.
     ///
     /// No unwrapping here, unlike [`Verbs`](crate::Verbs): the call *is* the entry, so the
     /// arguments a gate reads are the ones the model sent. An unknown name touches nothing — the
     /// catalogue refuses it before anything runs.
-    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+    fn subjects_of(&self, call: &ToolCall) -> Vec<Subject> {
         self.catalogue
             .get(call.name.as_str())
             .map(|entry| entry.subjects(&call.arguments))
             .unwrap_or_default()
     }
 
-    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
-        self.call_within(call, None)
-    }
-
-    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+    fn invoke(&self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
         // Including the unknown name: `invoke_within` refuses it by name, listing every tool this
         // run has, which is the answer the model's next move needs.
         crate::catalogue::outcome(self.catalogue.invoke_within(
@@ -115,8 +110,8 @@ impl ToolPort for Flat {
     ///
     /// The loop hands over only calls whose invoked envelope does not mutate; what makes them safe
     /// to run at once is that decision, not this function, and
-    /// [`Catalogue::invoke_batch`] says so where it happens.
-    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+    /// [`Catalogue::invoke_batch`](crate::Catalogue::invoke_batch) says so where it happens.
+    fn invoke_all(&self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
         let named: Vec<(&str, &Value)> = calls
             .iter()
             .map(|call| (call.name.as_str(), &call.arguments))
@@ -126,5 +121,81 @@ impl ToolPort for Flat {
             .into_iter()
             .map(crate::catalogue::outcome)
             .collect()
+    }
+}
+
+impl ToolPort for Flat {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.specs
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.catalogue.operations()
+    }
+
+    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+        self.subjects_of(call)
+    }
+
+    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        self.invoke(call, None)
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        self.invoke(call, remaining)
+    }
+
+    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        self.invoke_all(calls, remaining)
+    }
+
+    /// A second handle on this same surface, for a loop running two children side by side.
+    ///
+    /// A shared reference and not a copy: the catalogue is what confines a run — one scope, one
+    /// declared program set, one [`Operations`](crate::Operations) — and a duplicate of it would
+    /// be a second thing to keep in step with the first. Shared, a fork publishes exactly the
+    /// entries this port publishes because they *are* the same entries, which is the property
+    /// [`ToolPort::fork`] requires. `Operations` is `Send + Sync`, so the catalogue crosses to a
+    /// worker thread as a reference; it is already invoked from several threads at once by
+    /// [`Catalogue::invoke_batch`](crate::Catalogue::invoke_batch).
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        Some(Box::new(Forked(self)))
+    }
+}
+
+/// A borrowed [`Flat`], published as its own [`ToolPort`].
+///
+/// It holds nothing: every answer comes from the [`Flat`] it points at, so there is no second copy
+/// of the specs, of the catalogue or of the scope to drift from the first.
+struct Forked<'a>(&'a Flat);
+
+impl ToolPort for Forked<'_> {
+    fn specs(&self) -> &[ToolSpec] {
+        &self.0.specs
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.0.catalogue.operations()
+    }
+
+    fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
+        self.0.subjects_of(call)
+    }
+
+    fn call(&mut self, call: &ToolCall) -> ToolOutcome {
+        self.0.invoke(call, None)
+    }
+
+    fn call_within(&mut self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
+        self.0.invoke(call, remaining)
+    }
+
+    fn call_batch(&mut self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        self.0.invoke_all(calls, remaining)
+    }
+
+    /// A fork of a fork is a fork of the same [`Flat`], not a chain of them.
+    fn fork(&self) -> Option<Box<dyn ToolPort + Send + '_>> {
+        Some(Box::new(Forked(self.0)))
     }
 }

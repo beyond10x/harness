@@ -39,7 +39,8 @@ use harness_wire::{
 use serde_json::{Value, json};
 
 pub use project::{
-    MAX_TEMPERATURE, MAX_TOOL_NAME_BYTES, TOOL_NAME_PATTERN, request_body, usage_from_message,
+    MAX_TEMPERATURE, MAX_TOOL_NAME_BYTES, SUBSCRIPTION_CLIENT_PREAMBLE, TOOL_NAME_PATTERN,
+    request_body, usage_from_message,
 };
 
 /// Identifies this projection. Opaque items carry it and may not be replayed into another wire.
@@ -615,13 +616,15 @@ fn append(block: &mut Value, field: &str, text: &str) {
     object.insert(field.to_owned(), json!(joined));
 }
 
-impl ModelPort for MessagesClient {
-    fn wire(&self) -> &WireId {
-        &self.wire
-    }
-
-    fn turn(
-        &mut self,
+impl MessagesClient {
+    /// One turn, over a shared reference.
+    ///
+    /// [`ModelPort::turn`] takes `&mut self` because a port may need it; this one never did — the
+    /// transport posts on `&self` and holds no per-turn state. Written here so that
+    /// [`ModelPort::fork`] can hand a second agent loop a handle on this same client rather than a
+    /// copy of it: one connection pool, one credential source, one request counter.
+    fn turn_shared(
+        &self,
         request: &TurnRequest,
         sink: &mut dyn StreamSink,
     ) -> Result<TurnOutcome, WireError> {
@@ -638,8 +641,60 @@ impl ModelPort for MessagesClient {
             request
                 .max_output_tokens
                 .unwrap_or(self.endpoint.max_output_tokens),
+            // Read off the source rather than the fetched credential: the *kind* is a property of
+            // where the token comes from and is known without touching the token itself, so the
+            // body is built before anything secret is in hand. See
+            // [`project::SUBSCRIPTION_CLIENT_PREAMBLE`] for what it changes.
+            self.bearer.as_ref().map(|source| source.kind()),
         );
         self.attempt_turn(&body, &request.model, sink)
+    }
+}
+
+impl ModelPort for MessagesClient {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        self.turn_shared(request, sink)
+    }
+
+    /// A second handle on this client, for a loop running two children side by side.
+    ///
+    /// Borrowed rather than cloned: the endpoint, the credential source and `reqwest`'s connection
+    /// pool are all things there should be one of per run, and a second client would fetch the
+    /// same credential from the same source through a second pool for no gain. The cancellation
+    /// token is shared for the same reason it is shared everywhere else — Ctrl-C has to reach a
+    /// child that is blocked mid-stream.
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        Some(Box::new(Forked(self)))
+    }
+}
+
+/// A borrowed [`MessagesClient`], published as its own [`ModelPort`].
+struct Forked<'a>(&'a MessagesClient);
+
+impl ModelPort for Forked<'_> {
+    fn wire(&self) -> &WireId {
+        &self.0.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        self.0.turn_shared(request, sink)
+    }
+
+    /// A fork of a fork is a fork of the same client, not a chain of them.
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        Some(Box::new(Forked(self.0)))
     }
 }
 

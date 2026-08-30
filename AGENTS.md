@@ -180,14 +180,26 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   approver, hooks and cancellation token, with the remainder of the parent's budget: delegation
   widens nothing, and every call inside a delegate is gated on its own entry's envelope exactly as
   the parent's calls are. Adding a third loop-owned tool is a design change (design 0002 § 0).
+
+  **Neighbouring `delegate` calls of one turn may run side by side**, and that is an optimisation
+  and never a difference in what a run can do. Each child gets a *fork* of the model port and of
+  the tool port — the same endpoint, the same catalogue, entry for entry — and the approver, the
+  operator's hooks and the event sink are **not** forked: there is one of each by nature, and a
+  child on a worker thread reaches all three by asking the run's own thread, one question at a
+  time. Where a port will not fork, or the remaining token budget will not divide between the
+  children, the same delegates run **in order** and nothing else about the run changes. Adding a
+  path where a child gets a port the parent did not have would be widening by delegation.
 - **A hook narrows and never widens, and is never ambient.** `before-call` fires **after** the
   approver said yes; its block is one more refusal and it cannot approve, change or redirect a
   call. `stop` can keep a run working; it cannot end one. Hooks are named on the command line
   (`--hooks <FILE>`) and are **never discovered in the workspace** — a hook found in a repository
   would be a program the repository runs on the operator's machine, which is the ambient fallback
-  the credential rule above forbids, for the same reason. The loop spawns nothing: `HookPort` is
-  a port like `ApprovalPort`, and the process-running half lives in `harness-cli`. A run with hooks
-  attached batches nothing, so a hook fires exactly once per call.
+  the credential rule above forbids, for the same reason. The loop spawns no **process**:
+  `HookPort` is a port like `ApprovalPort`, and the process-running half lives in `harness-cli`. A
+  run with hooks attached batches nothing, so a hook fires exactly once per call — and the one
+  place the loop starts **threads**, a group of delegates, keeps the operator's programs off them:
+  a child asks the run's own thread, which holds the single `HookPort` the shell attached. *How
+  many copies of my guard are running* must not depend on how many sub-tasks a model asked for.
 - **This repository is private.** Never commit credentials, tokens, key files or transcripts.
 
 ## Out of scope

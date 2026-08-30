@@ -827,6 +827,28 @@ struct RunOptions {
         requires = "delegate"
     )]
     delegate_turns: u64,
+    /// How many delegates of one turn may run at the same time.
+    ///
+    /// A turn that asks for three sub-tasks paid three whole child runs of latency back to back,
+    /// and nothing about them required it: a delegate starts from an empty conversation, so none
+    /// of them can read what another produced. `1` runs them one after another, which is what this
+    /// harness did before this flag existed.
+    ///
+    /// A **ceiling and not a promise**. Delegates run side by side only where the run's model and
+    /// tool ports will hand out a second handle on themselves and the remaining token budget
+    /// divides between the children; where either does not hold, the same delegates run in order
+    /// and nothing else about the run changes.
+    ///
+    /// **At least one**, refused here for the reason `--delegate-turns` is: a bound that admits
+    /// nothing is refused where it is written.
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = harness_loop::DELEGATE_MAX_PARALLEL,
+        value_parser = clap::value_parser!(u32).range(1..),
+        requires = "delegate"
+    )]
+    delegate_parallel: u32,
     /// A file declaring the operator's own programs to run at each call and at the end.
     ///
     /// Named here and **never discovered**: a hook found in the workspace would be a program the
@@ -1876,9 +1898,11 @@ fn agents_from(
 }
 
 fn delegation(options: &RunOptions) -> Option<harness_loop::Delegation> {
-    options
-        .delegate
-        .then(|| harness_loop::Delegation::default().with_max_turns(options.delegate_turns))
+    options.delegate.then(|| {
+        harness_loop::Delegation::default()
+            .with_max_turns(options.delegate_turns)
+            .with_max_parallel(options.delegate_parallel)
+    })
 }
 
 /// Who decides a call above this run's ceiling.
@@ -2443,6 +2467,16 @@ impl harness_wire::ToolPort for Published {
         remaining: Option<std::time::Duration>,
     ) -> Vec<harness_wire::ToolOutcome> {
         self.as_port_mut().call_batch(calls, remaining)
+    }
+
+    /// Delegated like the rest, and the reason this file's opening sentence exists.
+    ///
+    /// Taken as the trait's default — `None`, *cannot be run beside itself* — a run's delegates
+    /// would go back to one at a time with every test in `harness-loop` still green, because the
+    /// surfaces behind this both fork perfectly well. That is exactly what happened the first time
+    /// this method existed and this line did not.
+    fn fork(&self) -> Option<Box<dyn harness_wire::ToolPort + Send + '_>> {
+        self.as_port().fork()
     }
 }
 

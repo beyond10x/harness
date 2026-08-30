@@ -25,6 +25,54 @@ want to depend on this flag existing can go on not passing it only if it also pi
 under this version the **default is 4**, which is a change in what a run does rather than in what
 the command line accepts, and is recorded in `CHANGELOG.md` rather than here.
 
+## What `2026-08-30` got wrong, and what a consumer of `2026-08-29.3` has to do
+
+`2026-08-30` is released, so it cannot be edited (`AGENTS.md` invariant 13) and this is the only
+document in the chain that can carry the correction. Read it here even if you were pinned two
+versions back — the version in force is the one you look at, so this is where it has to be.
+
+Three things about it are wrong.
+
+**Its date is a day ahead of its cut.** It was committed by `719f6e3` at `2026-08-29 23:08`, so a
+directory named `2026-08-30` puts a date on a pinned artefact that is not the day it was made. The
+day already held `2026-08-29`, `.1`, `.2` and `.3`; the honest name was `2026-08-29.4`. This
+directory, `2026-08-30.1`, was cut by `c5bb2ed` at `2026-08-30 10:10` and is dated the day it was
+made.
+
+**It measured itself against the wrong version.** Its heading reads *What changed since
+2026-08-29.1*, but `2026-08-29.2` (which added `workflow`) and `2026-08-29.3` (which added
+`--agents-dir`, `--plugin-dir` and `--skills-dir`) stood between them. Its real predecessor is
+`2026-08-29.3`.
+
+**It was not strictly additive, and said it was.** Against `2026-08-29.3` — its real predecessor —
+`profiles` and `providers` arrived and three flags moved on every command that takes a run's
+options. This is the whole table:
+
+| command | flag | field | in `2026-08-29.3` | in `2026-08-30` |
+| --- | --- | --- | --- | --- |
+| `chat` | `--base-url` | `required` | `true` | `false` |
+| `chat` | `--model` | `required` | `true` | `false` |
+| `chat` | `--wire` | `default` | `"openai-responses"` | `null` |
+| `run` | `--base-url` | `required` | `true` | `false` |
+| `run` | `--model` | `required` | `true` | `false` |
+| `run` | `--wire` | `default` | `"openai-responses"` | `null` |
+| `workflow run` | `--base-url` | `required` | `true` | `false` |
+| `workflow run` | `--model` | `required` | `true` | `false` |
+| `workflow run` | `--wire` | `default` | `"openai-responses"` | `null` |
+
+None of the nine breaks an invocation that already worked: a flag that stopped being required may
+still be passed, and a default that went away is now supplied from a profile after clap has run.
+What they break is a **driver that reads this document to decide what it must send**. Under
+`2026-08-29.3` clap refused `run` without `--model` and `--base-url`, so a driver could rely on
+being told; under `2026-08-30` and here it does not, and a run with neither a profile nor those
+flags gets as far as harness code before it fails. Anything generating a command line, a form or a
+validator off `required` — and anything reading `--wire`'s `default` to know which wire it will get
+without asking — has to be re-read against this version.
+
+`2026-08-30`'s claim that "a consumer pinned to `.1` is correct against this binary and needs to
+change nothing" holds for what clap will *accept*. It does not hold for what this document *says*,
+and the second is what a driver is pinning.
+
 ## Why the command line is a contract
 
 `--substrate-embedded` changed from taking a value to being bare. The change was right — it had
@@ -89,6 +137,7 @@ are stated in `README.md` and are `0` answered, `2` stopped for a named reason, 
 | --- | --- |
 | the manifest digest matches the file | `scripts/check-cli-contract.py` |
 | this binary's clap definition produces exactly these bytes | `crates/harness-cli/src/contract.rs`, `the_pinned_argv_contract_is_what_this_binary_defines` |
+| what this README says moved is what actually moved | `crates/harness-cli/src/contract.rs`, `the_version_in_force_names_every_field_that_moved_between_pinned_versions` |
 
 Neither is sufficient alone: a checker alone pins a document nothing produces, and a Rust test
 alone pins a document nothing else can verify was not quietly edited alongside the code
@@ -96,10 +145,24 @@ alone pins a document nothing else can verify was not quietly edited alongside t
 
 ## Cutting the next version
 
-1. Copy this directory to today's date, or to today's date with the next `.N` when there has
-   already been a cut today.
+1. Copy this directory to **today's** date, or to today's date with the next `.N` when there has
+   already been a cut today. Never tomorrow's: a date that is not the day of the cut is the defect
+   corrected above, and it is unrecoverable once pushed.
 2. Regenerate `argv.json` from `contract::argv()` and re-pin `manifest.json`.
-3. Point `ARGV_CONTRACT_VERSION` at it, and add it to the list in
+3. Write *What changed since* against the version **immediately** before it — the directory that
+   sorts right before yours, not the one you happen to remember.
+4. Name every field that moved on a surviving flag, one line each, carrying the command, the flag,
+   the field, the value before and the value after, each in backticks. `2026-08-30` skipped this
+   step and shipped "strictly additive" over nine moved fields.
+5. Carry the *What `2026-08-30` got wrong* section forward, until nobody can still be pinned to
+   `2026-08-29.3`. It is only in this document because the version it corrects is immutable, and a
+   correction a reader of the pin in force cannot see is not a correction.
+6. Point `ARGV_CONTRACT_VERSION` at it, and add it to the list in
    `every_released_argv_version_is_still_pinned_beside_the_current_one`.
-4. Enter what changed in `CHANGELOG.md`, naming any flag whose `takes_value` moved — that is the
+7. Enter what changed in `CHANGELOG.md`, naming any flag whose `takes_value` moved — that is the
    change a consumer cannot survive silently.
+
+Steps 3 to 5 are checked, not trusted:
+`the_version_in_force_names_every_field_that_moved_between_pinned_versions` in
+`crates/harness-cli/src/contract.rs` diffs every consecutive pair of pinned `argv.json` files and
+fails when a moved field is named by no README a consumer of the version in force reads.

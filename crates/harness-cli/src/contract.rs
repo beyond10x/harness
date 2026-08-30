@@ -361,6 +361,153 @@ mod tests {
         }
     }
 
+    /// Where the version directories live.
+    fn versions_directory() -> std::path::PathBuf {
+        pinned()
+            .parent()
+            .expect("the version directory")
+            .parent()
+            .expect("the product directory")
+            .to_path_buf()
+    }
+
+    /// Every pinned version, oldest first.
+    ///
+    /// Lexicographic order is chronological here because the scheme is a date and a `.N` suffix
+    /// (`AGENTS.md` invariant 13): `2026-08-29` sorts before `2026-08-29.1`, which sorts before
+    /// `2026-08-30`.
+    fn versions_in_order() -> Vec<String> {
+        let directory = versions_directory();
+        let mut present: Vec<String> = std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", directory.display()))
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        present.sort();
+        present
+    }
+
+    /// One pinned version's argv document.
+    fn argv_of(version: &str) -> Value {
+        let path = versions_directory().join(version).join("argv.json");
+        serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display())),
+        )
+        .unwrap_or_else(|error| panic!("`{}` is not JSON: {error}", path.display()))
+    }
+
+    /// One pinned version's prose.
+    fn readme_of(version: &str) -> String {
+        let path = versions_directory().join(version).join("README.md");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display()))
+    }
+
+    /// Every flag of a pinned document, keyed by the command it is typed after and its long name.
+    fn flags_of(document: &Value) -> std::collections::BTreeMap<(String, String), Value> {
+        let mut rows = std::collections::BTreeMap::new();
+        for (subcommand, listed) in document["arguments"].as_object().expect("an object") {
+            for row in listed.as_array().expect("a list of arguments") {
+                let long = row["long"].as_str().expect("a long flag").to_owned();
+                rows.insert((subcommand.clone(), long), row.clone());
+            }
+        }
+        rows
+    }
+
+    /// The version in force accounts for every field that moved, measured against what preceded it.
+    ///
+    /// A *what changed* section is the part of a contract a consumer reads before deciding to
+    /// change nothing, so it is the part that has to be true. `2026-08-30` measured itself against
+    /// `2026-08-29.1` while `.2` and `.3` stood between them, and concluded "strictly additive"
+    /// for a diff in which `--model` and `--base-url` stopped being required and `--wire` lost its
+    /// default on three commands. Nobody reading that document could have found out.
+    ///
+    /// So the claim is read out of the bytes rather than out of the prose. Every field that moved
+    /// between two consecutive pinned versions must be named — the command, the flag, the field,
+    /// the value before and the value after, all on one line and each in backticks — either by the
+    /// README of the version it moved in, or by the README of the version in force, which must
+    /// then also name the two versions the move sits between.
+    ///
+    /// The second alternative exists because a released version is immutable (`AGENTS.md`
+    /// invariant 13): a wrong one cannot be corrected in place, so the correction has to live where
+    /// a consumer of the current pin will actually find it. That means every later cut carries the
+    /// correction forward, which is the cost of having published the wrong thing once.
+    #[test]
+    fn the_version_in_force_names_every_field_that_moved_between_pinned_versions() {
+        const PINNED_FIELDS: [&str; 6] = [
+            "conflicts_with",
+            "default",
+            "required",
+            "requires",
+            "takes_value",
+            "value_name",
+        ];
+        let present = versions_in_order();
+        let (current, earlier) = present.split_last().expect("a version in force");
+        assert_eq!(
+            current.as_str(),
+            ARGV_CONTRACT_VERSION,
+            "this build pins the newest one"
+        );
+        let previous = earlier.last().expect("a version before the one in force");
+        let in_force = readme_of(current);
+        assert!(
+            in_force.contains(&format!("## What changed since {previous}")),
+            "`{current}/README.md` must measure itself against `{previous}`, the version \
+             immediately before it, and not against one further back"
+        );
+
+        let mut unnamed: Vec<String> = Vec::new();
+        for pair in present.windows(2) {
+            let (older, newer) = (&pair[0], &pair[1]);
+            let was = flags_of(&argv_of(older));
+            let now = flags_of(&argv_of(newer));
+            let successor = readme_of(newer);
+            let between = in_force.contains(&format!("`{older}`"))
+                && in_force.contains(&format!("`{newer}`"));
+            for ((subcommand, long), before) in &was {
+                let Some(after) = now.get(&(subcommand.clone(), long.clone())) else {
+                    continue;
+                };
+                for field in PINNED_FIELDS {
+                    if before[field] == after[field] {
+                        continue;
+                    }
+                    let tokens = [
+                        format!("`{subcommand}`"),
+                        format!("`{long}`"),
+                        format!("`{field}`"),
+                        format!("`{}`", before[field]),
+                        format!("`{}`", after[field]),
+                    ];
+                    let names = |text: &str| {
+                        text.lines()
+                            .any(|line| tokens.iter().all(|token| line.contains(token.as_str())))
+                    };
+                    if names(&successor) || (between && names(&in_force)) {
+                        continue;
+                    }
+                    unnamed.push(format!(
+                        "  `{older}` -> `{newer}`: `{subcommand}` `{long}` `{field}` {} -> {}",
+                        before[field], after[field]
+                    ));
+                }
+            }
+        }
+        assert!(
+            unnamed.is_empty(),
+            "a field moved and no document a consumer of `{ARGV_CONTRACT_VERSION}` reads says so.\n\
+             Name it in the README of the version it moved in, or — when that version is released \
+             and therefore immutable (`AGENTS.md` invariant 13) — in \
+             `{ARGV_CONTRACT_VERSION}/README.md`, on one line carrying the command, the flag, the \
+             field, the value before and the value after, each in backticks:\n{}",
+            unnamed.join("\n")
+        );
+    }
+
     #[test]
     fn the_document_is_canonical_so_two_builds_produce_the_same_bytes() {
         let text = argv();

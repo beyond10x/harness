@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:argv-pin-carries-effective-defaults
 kind: story
-status: draft
+status: active
 title: The argv pin says what a flag does when it is left out
 relations:
 - derived_from: epic:pinned-interfaces-honest
-revision: 3
+- serves: vision:b10x-owns-its-loop
+revision: 5
 ---
 ## Evidence
 

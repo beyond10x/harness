@@ -257,7 +257,26 @@ impl Operations for ConfinedOperations {
         Ok(answer)
     }
 
+    /// One file, whole, through the confined route — unless this workspace said it changes nothing.
+    ///
+    /// # Why the check is here as well as in the catalogue
+    ///
+    /// [`Operations::writes`] is the single question `harness_tools::Catalogue::of` asks to decide
+    /// which entries exist, so a model can never reach this on a workspace that answered `false`.
+    /// An **embedder** can: the trait is public and the unconfined provider has always answered a
+    /// caller who went around the catalogue rather than serving one. Until this check existed, the
+    /// same `writes() == false` meant *refused* through one implementation and *written* through
+    /// the other, which made the one question two answers — the thing the trait's own note about
+    /// `writes` ("one question in one place") exists to prevent.
+    ///
+    /// In a real deployment the two agree on the outcome and disagree only about who says so: a
+    /// `false` here comes from `Facts::holds_workspaces`, and a daemon that serves no workspaces
+    /// would refuse the write itself. This makes the refusal the provider's own, in the sentence
+    /// [`Operations::unavailable`] writes for every implementation.
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
+        if !self.writes {
+            return Err(Self::unavailable("file_write"));
+        }
         self.backend
             .file_write(&self.workspace, path, text)
             .map_err(|error| error.to_string())
@@ -269,7 +288,13 @@ impl Operations for ConfinedOperations {
     /// what it read, so a file whose first ceiling of bytes is all that came back would have been
     /// written back at that length — an edit that silently deleted everything past the ceiling.
     /// The same ceiling test [`file_read`](Self::file_read) uses, and the same erring towards *cut*.
+    ///
+    /// Refused before anything is read where this workspace changes nothing, for the reason
+    /// [`file_write`](Self::file_write) gives.
     fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
+        if !self.writes {
+            return Err(Self::unavailable("file_edit"));
+        }
         let current = self
             .backend
             .file_read(&self.workspace, path)

@@ -142,6 +142,95 @@ fn the_model_is_offered_exactly_three_tools_whatever_the_catalogue_holds() {
 }
 
 #[test]
+fn a_tool_invoke_naming_a_read_is_pure_at_the_default_ceiling_and_so_can_be_batched() {
+    // Not an accusation about this port — it is the corroboration for one about the loop.
+    // `AgentLoop::batchable` decides whether a call may skip `AgentLoop::invoke` (and with it the
+    // narrowing check that lives only there) from exactly three facts, all of them answered here:
+    // the call's own name is published, the **invoked** spec does not mutate, and it does not need
+    // approval at the run's ceiling — `Risk::Low` by default (`LoopConfig`).
+    //
+    // A `tool_invoke` naming a reading entry satisfies all three on the shipped surface, so the
+    // loop test that asserts a narrowed child is refused such a call is not an artefact of a
+    // scripted port. `file_write` fails the second, which is why a write cannot take that path.
+    let dir = tree();
+    let verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    assert!(
+        verbs
+            .specs()
+            .iter()
+            .any(|spec| spec.name.as_str() == INVOKE_VERB),
+        "the name a batchable call carries is the verb's, and it is published"
+    );
+
+    for entry in ["file_read", "search", "dir_list", "find"] {
+        let invoked = verbs
+            .invoked(&call(INVOKE_VERB, json!({"name": entry, "arguments": {}})))
+            .expect("a verb over a catalogue answers the entry it invokes");
+        assert_eq!(invoked.name.as_str(), entry);
+        assert!(!invoked.envelope.mutates(), "{entry} is a read");
+        assert!(
+            !invoked.envelope.needs_approval(harness_wire::Risk::Low),
+            "{entry} asks nobody at the default unattended ceiling"
+        );
+        assert_eq!(invoked.approval, harness_wire::Approval::NotRequired);
+    }
+
+    let write = verbs
+        .invoked(&call(
+            INVOKE_VERB,
+            json!({"name": "file_write", "arguments": {}}),
+        ))
+        .expect("the write entry too");
+    assert!(
+        write.envelope.mutates(),
+        "a write ends a batch group, which is why the same route cannot carry one"
+    );
+}
+
+#[test]
+fn a_tool_invoke_whose_name_is_not_an_entry_reaches_nothing_however_it_is_spelled() {
+    // The boundary of the argument the whole narrowing now reads. `Verbs::invoked_entry` resolves
+    // the entry with `Catalogue::get`, and `Verbs::answer` resolves it again with
+    // `Catalogue::invoke_within`, which calls the same `get`. If the two ever stopped agreeing,
+    // a call could be judged as the verb — a route, admitted whatever a run was narrowed to — and
+    // still run an entry. Every shape a `name` can arrive in is checked here so that a change
+    // which split them fails somewhere.
+    let dir = tree();
+    let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));
+
+    for name in [
+        json!(null),
+        json!(""),
+        json!(" file_read"),
+        json!("file_read "),
+        json!("FILE_READ"),
+        json!("File_Read"),
+        json!(7),
+        json!(["file_read"]),
+        json!({"name": "file_read"}),
+        json!("tool_invoke"),
+        json!("tool_search"),
+    ] {
+        let arguments = json!({"name": name, "arguments": {"path": "a.txt"}});
+        let answer = verbs.call(&call(INVOKE_VERB, arguments.clone()));
+        assert!(answer.failed, "{name} must not reach an entry: {answer:?}");
+        // And what the loop would judge it as agrees with what it did: either the port names a
+        // real entry and the loop narrows on that, or it names nothing it performed.
+        let invoked = verbs.invoked(&call(INVOKE_VERB, arguments));
+        assert!(
+            invoked.is_none_or(|spec| spec.name.as_str() == INVOKE_VERB),
+            "{name} was judged as an entry the call did not run"
+        );
+    }
+
+    // The `name` key absent altogether, which is the other way to arrive with none.
+    let answer = verbs.call(&call(INVOKE_VERB, json!({"arguments": {"path": "a.txt"}})));
+    assert!(answer.failed);
+    assert!(output(&answer).contains("`name` is required"), "{answer:?}");
+}
+
+#[test]
 fn search_with_no_argument_answers_the_whole_catalogue_because_it_is_short() {
     let dir = tree();
     let mut verbs = Verbs::new(Catalogue::of(Everything::at(dir.path(), &["cargo"])));

@@ -195,9 +195,20 @@ pub trait ToolPort {
     ///
     /// Defaulted to the published names, which is exactly right for a flat port — what it publishes
     /// is what it performs — and is what makes this method invisible to every port that has no
-    /// indirection. A port that under-reports here narrows *more* than it should and never less: a
-    /// published name absent from this list is a route, and a route publishes nothing of its own,
-    /// so the caller ends up admitting nothing rather than admitting everything.
+    /// indirection.
+    ///
+    /// # A wrong answer costs the run reach and never boundary
+    ///
+    /// A narrowing is only ever an **intersection** with this list, so a name left out of it is a
+    /// name no grant can hold: a port that under-reports produces a smaller grant, and a smaller
+    /// grant refuses more. A port that over-reports names things it cannot reach, and a call for
+    /// one of them is refused by the port itself. Neither direction can widen a run.
+    ///
+    /// That is a property of how the caller uses this list and not a courtesy: it holds because
+    /// nothing is exempted from the narrowing on the strength of being *absent* here. An earlier
+    /// caller did exactly that — it treated a published name missing from this list as indirection
+    /// to be let through — and the result was that a port saying less about itself got a run that
+    /// could do more, which is the failure this paragraph now rules out rather than describes.
     fn reachable(&self) -> Vec<ToolName> {
         self.specs().iter().map(|spec| spec.name.clone()).collect()
     }

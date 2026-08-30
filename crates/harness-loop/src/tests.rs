@@ -167,6 +167,10 @@ struct ScriptedTools {
     routed: BTreeMap<String, ToolSpec>,
     /// The catalogue a verb surface publishes its three verbs over, by entry name.
     catalogue: BTreeMap<String, ToolSpec>,
+    /// Answer `reachable` with nothing, the way a port that cannot tell would.
+    hides_reach: bool,
+    /// Answer `reachable` with *part* of what it publishes, the way a port that half-tells would.
+    reach_only: Option<Vec<ToolName>>,
     delay: Option<Duration>,
     /// What the loop said was left on the clock, per call.
     remaining: Vec<Option<Duration>>,
@@ -188,6 +192,8 @@ impl ScriptedTools {
             invoked: None,
             routed: BTreeMap::new(),
             catalogue: BTreeMap::new(),
+            hides_reach: false,
+            reach_only: None,
             delay: None,
             remaining: Vec::new(),
             batches: Vec::new(),
@@ -242,6 +248,25 @@ impl ScriptedTools {
         self
     }
 
+    /// Under-reports its reach: `reachable` answers nothing while `specs` still publishes.
+    ///
+    /// The shape any `ToolPort` outside this repository can have, because `reachable` is a
+    /// **defaulted** trait method and this is what a port that overrode it wrongly looks like.
+    fn hiding_reach(mut self) -> Self {
+        self.hides_reach = true;
+        self
+    }
+
+    /// Under-reports its reach in *part*: `reachable` names some of what `specs` publishes.
+    ///
+    /// The half-wrong answer, which is the likelier one — a port author who overrode `reachable`
+    /// and missed an entry, rather than one who returned nothing at all. It leaves the run's grant
+    /// non-empty, so nothing about an empty grant can be what saves it.
+    fn reaching_only(mut self, names: &[&str]) -> Self {
+        self.reach_only = Some(names.iter().map(|name| tool_name(name)).collect());
+        self
+    }
+
     /// Answers `count` outcomes to every batch, whatever it was asked.
     fn miscounting(mut self, count: usize) -> Self {
         self.miscount = Some(count);
@@ -266,6 +291,12 @@ impl ToolPort for ScriptedTools {
     /// `harness_tools::Flat` takes the trait's default, because what it publishes is what it
     /// performs.
     fn reachable(&self) -> Vec<ToolName> {
+        if self.hides_reach {
+            return Vec::new();
+        }
+        if let Some(only) = &self.reach_only {
+            return only.clone();
+        }
         if self.catalogue.is_empty() {
             return self.specs.iter().map(|spec| spec.name.clone()).collect();
         }
@@ -5201,6 +5232,377 @@ fn a_narrowed_run_is_refused_the_entry_behind_a_verb_by_the_same_rule() {
         vec!["tool_search", "tool_describe", INVOKE_VERB],
         "the verbs are the route to every entry, so a narrowing takes entries away and never the \
          route: a child published nothing at all could not reach the entry it *was* granted"
+    );
+}
+
+#[test]
+fn a_narrowed_run_is_refused_an_ungranted_entry_behind_a_verb_beside_a_neighbour() {
+    // The same narrowing as the test above, in the one shape the model chooses freely: **two calls
+    // in one turn**. `AgentLoop::run_calls` sends a run of neighbouring `batchable` calls to
+    // `run_batch`, which hands them to the port directly — `AgentLoop::invoke` is the only place
+    // the narrowing is checked, and a batched call never goes down it.
+    //
+    // Under a flat surface that is harmless, because `batchable` first asks `published`, and
+    // `port_specs` has already taken an unadmitted tool out of the published list. Under a verb
+    // surface the published name is `tool_invoke`, which `AgentLoop::routes` keeps published for
+    // every narrowing however tight — so `batchable` says yes to a call whose *entry* the run was
+    // never admitted, and the entry runs.
+    //
+    // An agent granted `[Grep]` must not be able to read a file. Here it asks for one beside a
+    // search it *was* granted, and the pair is a batch.
+    let agents = Agents::new(vec![Agent {
+        name: "grepper".to_owned(),
+        description: "Searches and reports.".to_owned(),
+        tools: vec!["search".to_owned()],
+        instructions: "You only search.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "grepper"}),
+            )])),
+            // One turn, two calls, neighbours: the entry it was never granted first, the one it
+            // was second. Both are reads, so neither ends the group.
+            Ok(asks_for(&[
+                (
+                    "call-2",
+                    INVOKE_VERB,
+                    json!({"name": "file_read", "arguments": {"path": "/etc/shadow"}}),
+                ),
+                (
+                    "call-3",
+                    INVOKE_VERB,
+                    json!({"name": "search", "arguments": {"query": "x"}}),
+                ),
+            ])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("tool_search", Approval::NotRequired),
+            spec("tool_describe", Approval::NotRequired),
+            spec(INVOKE_VERB, Approval::NotRequired),
+        ])
+        .over(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("search", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, sink) = harness.run();
+
+    let reached: Vec<&str> = harness
+        .tools
+        .calls
+        .iter()
+        .filter_map(|call| call.arguments.get("name").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        reached,
+        vec!["search"],
+        "the entry its author granted ran; `file_read` was never granted and must not reach the \
+         port because it happened to be asked for beside one that was. Batches: {:?}",
+        harness.tools.batches
+    );
+    assert_eq!(
+        delegated(&sink)
+            .iter()
+            .filter_map(|event| match event {
+                LoopEvent::Warning { code, message } if code == "unpublished-tool" =>
+                    Some(message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["the model called `file_read`, which this run was not admitted"],
+        "the same rule, and so the same message, whether the call stood alone or beside another"
+    );
+}
+
+#[test]
+fn a_narrowed_flat_run_refuses_an_ungranted_read_beside_a_neighbour() {
+    // The control for the test above, and the half of the acceptance that says *one rule, not two
+    // that can drift*: the identical turn under a flat surface. This one is green, which is what
+    // makes the verb surface's answer a drift and not a shared limitation.
+    let agents = Agents::new(vec![Agent {
+        name: "grepper".to_owned(),
+        description: "Searches and reports.".to_owned(),
+        tools: vec!["search".to_owned()],
+        instructions: "You only search.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "grepper"}),
+            )])),
+            Ok(asks_for(&[
+                ("call-2", "file_read", json!({"path": "/etc/shadow"})),
+                ("call-3", "search", json!({"query": "x"})),
+            ])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("search", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, sink) = harness.run();
+
+    let reached: Vec<&str> = harness
+        .tools
+        .calls
+        .iter()
+        .map(|call| call.name.as_str())
+        .collect();
+    assert_eq!(
+        reached,
+        vec!["search"],
+        "flat: the ungranted read never reaches the port, batched or not. Batches: {:?}",
+        harness.tools.batches
+    );
+    assert_eq!(
+        delegated(&sink)
+            .iter()
+            .filter_map(|event| match event {
+                LoopEvent::Warning { code, message } if code == "unpublished-tool" =>
+                    Some(message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["the model called `file_read`, which this run was not admitted"],
+    );
+}
+
+#[test]
+fn a_narrowed_child_cannot_widen_itself_by_delegating_again_without_an_agent() {
+    // `delegate.rs`: *"Delegation widens nothing: the child can do exactly what the parent's
+    // catalogue admits, entry for entry."* `AgentLoop::agent_for` says the same in its own words —
+    // *"a child of a narrowed run must not be able to climb back out by naming an agent"* — and
+    // the `delegate` tool's published description promises it to the model: *"Omit for a delegate
+    // with these same tools."*
+    //
+    // A child *can* climb back out by **not** naming one. `prepare_child` sets
+    // `admits: agent.as_ref().map(...)`, so an agentless delegate is handed `None` — the whole
+    // port — whatever its parent was narrowed to. The intersection `agent_for` computed for that
+    // case is thrown away.
+    //
+    // Two levels, because that is where a narrowing already exists to be escaped from: the run
+    // delegates to `reader`, granted `file_read` alone, and `reader` delegates once more with no
+    // agent. The grandchild writes.
+    let agents = Agents::new(vec![Agent {
+        name: "reader".to_owned(),
+        description: "Reads and reports.".to_owned(),
+        tools: vec!["file_read".to_owned()],
+        instructions: "You only read.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "reader"}),
+            )])),
+            // The narrowed child, delegating again and naming no agent.
+            Ok(asks_for(&[(
+                "call-2",
+                "delegate",
+                json!({"task": "keep looking"}),
+            )])),
+            // The grandchild, doing what neither it nor its parent was granted.
+            Ok(asks_for(&[(
+                "call-3",
+                "file_write",
+                json!({"path": "a", "text": "b"}),
+            )])),
+            Ok(answer("grandchild done")),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation {
+            depth: 2,
+            ..Delegation::default()
+        }))
+        .with_agents(Some(agents));
+    let (_, _sink) = harness.run();
+
+    let reached: Vec<&str> = harness
+        .tools
+        .calls
+        .iter()
+        .map(|call| call.name.as_str())
+        .collect();
+    assert_eq!(
+        reached,
+        Vec::<&str>::new(),
+        "a grandchild of a run narrowed to `file_read` may do no more than `file_read`; nothing \
+         here should have reached the port at all"
+    );
+}
+
+#[test]
+fn a_port_that_under_reports_its_reach_narrows_a_run_to_nothing_and_not_to_everything() {
+    // `ToolPort::reachable`'s own doc, which is the safety argument for defaulting the method:
+    // *"A port that under-reports here narrows more than it should and never less: a published
+    // name absent from this list is a route, and a route publishes nothing of its own, so the
+    // caller ends up admitting nothing rather than admitting everything."* `AgentLoop::routes`
+    // repeats it: *"Empty, too, for a port that under-reports `reachable`."*
+    //
+    // `routes` is `specs() \ reachable()`. Under-reporting makes that set **larger**, not empty —
+    // a port that answers `reachable` with nothing turns every tool it publishes into a route, and
+    // `AgentLoop::admits` admits every route whatever the narrowing says. The direction the doc
+    // rules out is the direction it goes.
+    //
+    // This matters because `reachable` is defaulted: any port outside this crate can get it wrong,
+    // and the doc tells its author the cost is reach.
+    let agents = Agents::new(vec![Agent {
+        name: "reader".to_owned(),
+        description: "Reads and reports.".to_owned(),
+        tools: vec!["file_read".to_owned()],
+        instructions: "You only read.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "reader"}),
+            )])),
+            Ok(asks_for(&[(
+                "call-2",
+                "file_write",
+                json!({"path": "a", "text": "b"}),
+            )])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ])
+        .hiding_reach(),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, _sink) = harness.run();
+
+    let child = harness
+        .model
+        .seen
+        .iter()
+        .find(|request| request.instructions.contains("You only read."))
+        .expect("the agent's own body reaches the child");
+    let reached: Vec<&str> = harness
+        .tools
+        .calls
+        .iter()
+        .map(|call| call.name.as_str())
+        .collect();
+    assert_eq!(
+        reached,
+        Vec::<&str>::new(),
+        "a wrong `reachable` costs reach and never boundary: this child's grant met nothing, so \
+         nothing may run. It was published {:?} and its record withholds `file_read`",
+        published_names(child)
+    );
+}
+
+#[test]
+fn a_port_that_under_reports_part_of_its_reach_still_costs_reach_and_not_boundary() {
+    // The sibling of `a_port_that_under_reports_its_reach_narrows_a_run_to_nothing...`, for the
+    // half-wrong answer rather than the wholly wrong one — and the case that decides whether
+    // `ToolPort::reachable`'s stated failure direction is true or merely true of one input.
+    //
+    // The port publishes `file_read` and `file_write` and names only `file_read` as reachable. The
+    // grant that comes out of that is `[file_read]`: **non-empty**, so nothing about an empty grant
+    // can be what refuses the write. `AgentLoop::routes` computed as `specs() \ reachable()` made
+    // `file_write` a route here and admitted it unconditionally — a port that said less about
+    // itself got a child that could do more. Asked positively — *does this grant hold a name the
+    // port does not publish?* — it cannot: `file_read` is published, so the run needs no
+    // indirection and is given none.
+    let agents = Agents::new(vec![Agent {
+        name: "reader".to_owned(),
+        description: "Reads and reports.".to_owned(),
+        tools: vec!["file_read".to_owned()],
+        instructions: "You only read.".to_owned(),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "look", "agent": "reader"}),
+            )])),
+            Ok(asks_for(&[(
+                "call-2",
+                "file_write",
+                json!({"path": "a", "text": "b"}),
+            )])),
+            // And the one it was granted, so this cannot pass by refusing everything.
+            Ok(asks_for(&[("call-3", "file_read", json!({"path": "a"}))])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("file_read", Approval::NotRequired),
+            spec("file_write", Approval::NotRequired),
+        ])
+        .reaching_only(&["file_read"]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, sink) = harness.run();
+
+    assert_eq!(
+        harness
+            .tools
+            .calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["file_read"],
+        "the granted read ran and the ungranted write did not: a port that under-reports its \
+         reach costs the run reach, never boundary"
+    );
+    assert_eq!(
+        delegated(&sink)
+            .iter()
+            .filter_map(|event| match event {
+                LoopEvent::Warning { code, message } if code == "unpublished-tool" =>
+                    Some(message.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["the model called `file_write`, which this run was not admitted"],
+        "and it is refused by the narrowing, in the narrowing's own words"
     );
 }
 

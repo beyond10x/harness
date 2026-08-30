@@ -274,6 +274,72 @@ fn what_is_not_pinned(readme: &str) -> String {
     body.join("\n")
 }
 
+/// The claims a section does not state, each having had to claim a **table row of its own**.
+///
+/// A claim is a list of cells. It is answered by a markdown table line carrying those cells side
+/// by side, in that order, compared for equality; and a line is consumed by the first claim it
+/// answers, so it can answer at most one. Both halves are paid for by a defect the move table met
+/// first, and the escape tables in `## What is not pinned` meet again:
+///
+/// - **cells rather than substrings.** A sentence carrying every word of a claim in prose is not
+///   the claim — *"Nothing here is a problem. `run` `chat` `--base-url` `--model`"* holds every
+///   token and says the opposite. A cell in a fixed column cannot be written backwards without
+///   being in the wrong column.
+/// - **one line per claim.** One row wide enough to hold every token otherwise answers six claims
+///   at once, and the document says six things by saying one.
+///
+/// Exported rather than kept private because two suites ask it — the move table below, and the
+/// escape tables in `crates/harness-cli/tests/argv_pin_consumer.rs`. A test carrying its own copy
+/// of this decision pins the copy, which is the failure
+/// [`unpinned_short_flags`] was moved here to avoid.
+#[must_use]
+pub fn rows_missing(section: &str, wanted: &[Vec<String>]) -> Vec<Vec<String>> {
+    let lines: Vec<&str> = section.lines().collect();
+    let mut claimed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut missing = Vec::new();
+    for claim in wanted {
+        let answer = lines
+            .iter()
+            .enumerate()
+            .find(|(number, line)| !claimed.contains(number) && states(line, claim));
+        match answer {
+            Some((number, _)) => {
+                claimed.insert(number);
+            }
+            None => missing.push(claim.clone()),
+        }
+    }
+    missing
+}
+
+/// Whether one line is a table row carrying these cells, side by side and in this order.
+fn states(line: &str, wanted: &[String]) -> bool {
+    let Some(cells) = cells_of(line) else {
+        return false;
+    };
+    cells.windows(wanted.len()).any(|window| {
+        window
+            .iter()
+            .zip(wanted.iter())
+            .all(|(cell, want)| *cell == want.as_str())
+    })
+}
+
+/// The trimmed cells of one markdown table row, or nothing where the line is not a row.
+fn cells_of(line: &str) -> Option<Vec<&str>> {
+    let trimmed = line.trim();
+    if trimmed.len() < 2 || !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+    Some(
+        trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect(),
+    )
+}
+
 /// One command's positional arguments, **in the order they are typed**.
 ///
 /// Not sorted, and that is the difference between this and [`flags`]: a flag is found by its name
@@ -836,70 +902,20 @@ mod tests {
         body.join("\n")
     }
 
-    /// The trimmed cells of one markdown table row, or nothing where the line is not a row.
-    fn row_cells(line: &str) -> Option<Vec<&str>> {
-        let trimmed = line.trim();
-        if trimmed.len() < 2 || !trimmed.starts_with('|') || !trimmed.ends_with('|') {
-            return None;
-        }
-        Some(
-            trimmed
-                .trim_matches('|')
-                .split('|')
-                .map(str::trim)
-                .collect(),
-        )
-    }
-
-    /// Whether one line is a table row carrying exactly this move's five cells, side by side.
+    /// The moves this section does not state, each having had to claim a table row of its own.
     ///
-    /// Cells rather than substrings, and equality rather than containment, because three separate
-    /// lies passed a bag-of-substrings test on one line:
-    ///
-    /// - the nine rows written **backwards** — `false` then `true`, so the flags became *more*
-    ///   required rather than less, the opposite of what happened;
-    /// - a sentence **denying** the move in the very words that describe it: *"Strictly additive
-    ///   after all. No change to `run` `--model` `required`: it is `true` and was never
-    ///   `false`."*;
-    /// - **one** junk line carrying every token at once, which absolved all nine moves together.
-    ///
-    /// A cell in the right column kills the first, being a table cell at all kills the second, and
-    /// [`unstated`]'s one-line-per-move kills the third.
-    fn row_states(line: &str, moved: &Moved) -> bool {
-        let Some(cells) = row_cells(line) else {
-            return false;
-        };
-        let wanted = moved.cells();
-        cells.windows(wanted.len()).any(|window| {
-            window
-                .iter()
-                .zip(wanted.iter())
-                .all(|(cell, want)| *cell == want.as_str())
-        })
-    }
-
-    /// The moves this section does not state, each having had to claim a line of its own.
-    ///
-    /// A line is consumed by the first move it answers. Without that, one row wide enough to hold
-    /// every token stands in for every move at once, and the document says nine things by saying
-    /// one.
+    /// [`rows_missing`] decides it, and the escape tables in
+    /// `crates/harness-cli/tests/argv_pin_consumer.rs` call the same function: the three lies that
+    /// paid for cells-not-substrings and one-line-per-claim are recorded there, and a revert of
+    /// either is a revert for both suites at once.
     fn unstated(section: &str, moves: &[Moved]) -> Vec<Moved> {
-        let lines: Vec<&str> = section.lines().collect();
-        let mut claimed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
-        let mut missing = Vec::new();
-        for moved in moves {
-            let answer = lines
-                .iter()
-                .enumerate()
-                .find(|(number, line)| !claimed.contains(number) && row_states(line, moved));
-            match answer {
-                Some((number, _)) => {
-                    claimed.insert(number);
-                }
-                None => missing.push(moved.clone()),
-            }
-        }
-        missing
+        let wanted: Vec<Vec<String>> = moves.iter().map(|moved| moved.cells().to_vec()).collect();
+        let missing = rows_missing(section, &wanted);
+        moves
+            .iter()
+            .filter(|moved| missing.contains(&moved.cells().to_vec()))
+            .cloned()
+            .collect()
     }
 
     /// The version in force accounts for everything that moved, measured against what preceded it.

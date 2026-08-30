@@ -341,7 +341,7 @@ pub fn default_dir() -> Result<PathBuf, String> {
     }
     Err(
         "neither `XDG_STATE_HOME` nor `HOME` is set, so there is no state directory to keep \
-         sessions in; name one explicitly"
+         sessions in; name one with `--session-dir`, or run with `--no-session` and file nothing"
             .to_owned(),
     )
 }

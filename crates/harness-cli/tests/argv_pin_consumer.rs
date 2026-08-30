@@ -7,27 +7,49 @@
 //!
 //! Two fields decide whether that works. `required` says whether omitting a flag is a parse error,
 //! and `default` says what a flag means when it is left out. This binary settles both of them
-//! **after** clap has parsed — `RunOptions::wire()` defaults the wire last, so a provider may set
-//! it and a typed flag may beat it, and `apply_profiles` refuses a run that has neither the
-//! endpoint flags nor a configured provider — and a document generated from clap's own definition
-//! (`AGENTS.md` invariant 14) can see neither. What it can do instead is say so, in the section it
-//! keeps for what it does not pin, and that is what these cases hold it to.
+//! **after** clap has parsed — `RunOptions::wire()` defaults the wire last so a provider may set it
+//! first, `session_dir()` picks a state directory out of the environment, and `apply_profiles`
+//! refuses a run that has neither the endpoint flags nor a configured provider — and a document
+//! generated from clap's own definition (`AGENTS.md` invariant 14) can see none of it. What it can
+//! do instead is say so, and these cases hold it to *what* it says rather than to *whether it
+//! mentions the words*.
+//!
+//! # The escape is a table, and that is the whole of why these cases bite
+//!
+//! An earlier version of this file asked whether the disclaiming section contained `` `run` `` and
+//! `` `--model` `` somewhere. Every actionable word could be deleted from it and the suite stayed
+//! green, and a disclaimer stating the **opposite** of the truth passed for holding the same
+//! tokens. So the escape is now one **table row per command and flag**, its cells compared for
+//! equality in fixed columns, one line consumed per claim — [`rows_missing`], which is also what
+//! the move table in `crates/harness-cli/src/contract.rs` is checked with, so the two cannot drift.
+//!
+//! And what the row has to say is **measured first**. The commands and flags a run demands are read
+//! out of the binary's own refusals by supplying what it names until it stops refusing; the value a
+//! flag takes when it is absent is read out of the session the run files. The table then has to
+//! match that, in both directions: a command the binary does not demand a flag on may not carry a
+//! row promising that it does.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use b10x_harness_cli::contract::ARGV_CONTRACT_VERSION;
+use b10x_harness_cli::contract::{ARGV_CONTRACT_VERSION, rows_missing};
 use serde_json::Value;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
 
-/// The heading under which the document gives up on saying which flags a run really demands.
+/// The heading under which the document says which flags a run demands that clap does not.
 const DEMANDED: &str = "Flags a run demands that clap does not";
 
-/// The heading under which it gives up on saying what a flag means when it is left out.
+/// The heading under which it says what a flag means when it is left out.
 const DEFAULTED: &str = "Defaults this binary applies after clap";
+
+/// The cell a demanded flag's row has to carry, in the column after the flag.
+///
+/// Fixed, and in a column, so that a row cannot state the opposite claim in the same words: a
+/// consumer scanning the table reads *what happens without it* out of one place.
+const WITHOUT_IT: &str = "`refused by name`";
 
 /// The repository root, from this crate's own directory.
 fn root() -> PathBuf {
@@ -64,8 +86,8 @@ fn pinned_readme() -> String {
 
 /// The body under one heading, up to the next heading of any level.
 ///
-/// Empty where there is no such heading, so a document that says nothing fails on what it does not
-/// say rather than on the reader not finding it.
+/// Empty where there is no such heading, so a document that stopped saying something fails on what
+/// it no longer says rather than on the reader not finding the place it used to say it.
 fn section(readme: &str, heading: &str) -> String {
     let mut inside = false;
     let mut body: Vec<&str> = Vec::new();
@@ -81,32 +103,19 @@ fn section(readme: &str, heading: &str) -> String {
     body.join("\n")
 }
 
-/// Every span between a pair of backticks, in order.
-fn backticked(text: &str) -> impl Iterator<Item = &str> {
-    text.split('`').skip(1).step_by(2)
-}
-
-/// Every long flag one section names as a backticked token.
-fn flags_named(section: &str) -> BTreeSet<String> {
-    backticked(section)
-        .filter(|token| token.starts_with("--"))
-        .map(str::to_owned)
-        .collect()
-}
-
 /// One command's row for one long flag, as the document holds it.
-fn row<'a>(document: &'a Value, command: &str, long: &str) -> Option<&'a Value> {
+fn row<'a>(document: &'a Value, command: &str, long: &'a str) -> Option<&'a Value> {
     document["arguments"][command]
         .as_array()?
         .iter()
         .find(|row| row["long"] == long)
 }
 
-/// Every command whose endpoint flags this document records as optional.
+/// Every command that flattens a run's options, named by the document rather than by this file.
 ///
-/// Derived rather than listed: `app-server` takes the same two flags and clap requires them there,
-/// so it is honest already and does not belong in the set. What is left is every command that
-/// flattens `RunOptions` for a run of the loop.
+/// A command whose `--base-url` and `--model` rows both say `"required": false`. `app-server` takes
+/// the same two flags and clap requires them there, so its rows already say what they mean and it
+/// is not in this set.
 fn commands_deferring_the_endpoint(document: &Value) -> Vec<String> {
     let mut deferring: Vec<String> = document["arguments"]
         .as_object()
@@ -123,16 +132,12 @@ fn commands_deferring_the_endpoint(document: &Value) -> Vec<String> {
     deferring
 }
 
-/// The command line the document alone says is enough: the words, then every flag it marks
+/// The words the document alone says are enough to type: the command, then every flag it marks
 /// required, then every word it says is typed after the verb.
-///
-/// A required flag whose value the document cannot supply — the document says a placeholder, not a
-/// value — is taken from `values`, and one that is in neither is a failure by name rather than a
-/// command line quietly assembled without it.
 fn minimal_invocation(
     document: &Value,
     command: &str,
-    values: &BTreeMap<&str, String>,
+    values: &BTreeMap<String, String>,
 ) -> Vec<String> {
     let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
     for listed in document["arguments"][command]
@@ -145,34 +150,28 @@ fn minimal_invocation(
         let long = listed["long"].as_str().expect("a long flag");
         argv.push(long.to_owned());
         if listed["takes_value"] == true {
-            argv.push(
-                values
-                    .get(long)
-                    .unwrap_or_else(|| {
-                        panic!("`{command} {long}` is required and this case has no value for it")
-                    })
-                    .clone(),
-            );
+            argv.push(value_for(values, long, command));
         }
     }
     for positional in document["positionals"][command]
         .as_array()
         .unwrap_or_else(|| panic!("`{command}` has a positional list in the pinned document"))
     {
-        if positional["required"] != true {
-            continue;
+        if positional["required"] == true {
+            let name = positional["name"].as_str().expect("a placeholder");
+            argv.push(value_for(values, name, command));
         }
-        let name = positional["name"].as_str().expect("a placeholder");
-        argv.push(
-            values
-                .get(name)
-                .unwrap_or_else(|| {
-                    panic!("`{command} <{name}>` is required and this case has no value for it")
-                })
-                .clone(),
-        );
     }
     argv
+}
+
+/// A value for a word the document says is needed but cannot supply — it records a placeholder,
+/// not a value. Missing is a failure by name, never a command line quietly assembled without it.
+fn value_for(values: &BTreeMap<String, String>, key: &str, command: &str) -> String {
+    values
+        .get(key)
+        .unwrap_or_else(|| panic!("`{command}` needs `{key}` and this case has no value for it"))
+        .clone()
 }
 
 struct Output {
@@ -181,19 +180,39 @@ struct Output {
     stderr: String,
 }
 
-/// The binary, with a config directory the case owns and nothing on standard input.
+/// Which machine a case measures on, and how bare it is.
 ///
-/// **The config directory is the point.** `--base-url` and `--model` may be supplied by a
-/// `[default]` provider in `$XDG_CONFIG_HOME/b10x/harness.toml`, so a case run against whatever the
-/// machine happens to have configured would measure that machine rather than this document. An
-/// empty directory is the state the pin describes: a consumer with the document and nothing else.
-fn refused(argv: &[String], config: &Path) -> Output {
-    let output = Command::new(BINARY)
-        .args(argv)
-        .env("XDG_CONFIG_HOME", config)
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
+/// **The config directory is always the case's own and always empty.** `--base-url` and `--model`
+/// may be supplied by a `[default]` provider in `$XDG_CONFIG_HOME/b10x/harness.toml`, so a case run
+/// against whatever the machine happens to have configured would measure that machine rather than
+/// this document.
+#[derive(Clone, Copy)]
+enum Machine<'a> {
+    /// A state directory exists, so a session has somewhere to go.
+    Ordinary { config: &'a Path, state: &'a Path },
+    /// Neither `XDG_STATE_HOME` nor `HOME`: a container, a `systemd` unit, `env -i`, a CI step
+    /// that cleared the environment. The document's audience is a driver, not a login shell.
+    Bare { config: &'a Path },
+}
+
+fn invoke(argv: &[String], machine: Machine<'_>) -> Output {
+    let mut command = Command::new(BINARY);
+    command.args(argv).stdin(Stdio::null());
+    match machine {
+        Machine::Ordinary { config, state } => {
+            command.env("XDG_CONFIG_HOME", config);
+            command.env("XDG_STATE_HOME", state);
+        }
+        Machine::Bare { config } => {
+            command.env_clear();
+            command.env("XDG_CONFIG_HOME", config);
+            command.env(
+                "PATH",
+                std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()),
+            );
+        }
+    }
+    let output = command.output().expect("the binary runs");
     Output {
         status: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -201,90 +220,108 @@ fn refused(argv: &[String], config: &Path) -> Output {
     }
 }
 
-/// Every flag this binary demands, that clap does not, is one the document accounts for.
-///
-/// `run`, `chat` and `workflow run` record `--base-url` and `--model` as `"required": false`, which
-/// is true of clap and false of the run: `apply_profiles` refuses one that has neither those flags
-/// nor a `[default]` provider, and the refusal names them. A consumer that took `required` at its
-/// word built `b10x-harness run --input …` and got exit `1`.
-///
-/// So the demand is **measured** — the minimal command line the document describes is assembled and
-/// run, and the flags the refusal names in backticks are read out of its own words — and each one
-/// has to be either `"required": true` in the document or named in the *What is not pinned* section
-/// beside the command it is typed after. Naming both, and as backticked tokens, is what stops the
-/// escape being a sentence that gestures at the problem: a document that gave up on `--model`
-/// everywhere by naming it once would say nothing about which command lines are affected.
-///
-/// **`workflow run` is checked against the document and not run**, alone of the three. It flattens
-/// the same `RunOptions` and records the same two rows as optional, but `workflow::dispatch` never
-/// calls `apply_profiles`, so the same command line panics at `RunOptions::base_url`'s `expect`
-/// with exit `101` instead of being refused by name. That is a defect in the binary rather than in
-/// the document and it is not this unit's to fix; what is this unit's is that the document has to
-/// account for the row on that command too, which is asserted below.
-#[test]
-fn a_flag_this_binary_demands_and_clap_does_not_is_named_by_the_document() {
-    let document = pinned_document();
-    let readme = pinned_readme();
-    let demanded = section(&readme, DEMANDED);
-    let config = tempfile::tempdir().expect("a temporary config directory");
+/// What one command demanded beyond the document's own `required` rows, and whether it ever ran.
+enum Demand {
+    /// It ran. These flags are the ones whose removal put the refusal back — and put it back
+    /// **naming them**, which is the claim the table's third cell makes.
+    Ran {
+        demanded: BTreeSet<String>,
+        /// Removing it refused the run, and the refusal did not name it. Demanded, but not by
+        /// name, so a consumer is told to change something and not what.
+        unnamed: BTreeSet<String>,
+    },
+    /// It never ran, and the last refusal named nothing a consumer could add. A command line the
+    /// document describes that no reader of the document can repair.
+    Stuck {
+        supplied: BTreeSet<String>,
+        status: Option<i32>,
+        stderr: String,
+    },
+}
 
-    let mut values = BTreeMap::new();
-    values.insert(
-        "--input",
-        "read the readme and tell me what it says".to_owned(),
-    );
-
-    let mut measured: BTreeSet<String> = BTreeSet::new();
-    let mut unaccounted: Vec<String> = Vec::new();
-    for command in ["run", "chat"] {
-        let argv = minimal_invocation(&document, command, &values);
-        let output = refused(&argv, config.path());
-        assert_eq!(
-            output.status,
-            Some(1),
-            "`b10x-harness {}` is the command line this document describes, and it is refused \
-             rather than parsed away or panicked on.\nstdout: {}\nstderr: {}",
-            argv.join(" "),
-            output.stdout,
-            output.stderr
-        );
-        for named in backticked(&output.stderr).filter(|token| token.starts_with("--")) {
-            if row(&document, command, named).is_none() {
-                continue;
-            }
-            measured.insert(named.to_owned());
+/// The command line, with these flags added to the document's own required rows.
+fn with(
+    document: &Value,
+    command: &str,
+    values: &BTreeMap<String, String>,
+    added: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut argv = minimal_invocation(document, command, values);
+    for long in added {
+        argv.push(long.clone());
+        if row(document, command, long).expect("a row")["takes_value"] == true {
+            argv.push(value_for(values, long, command));
         }
     }
-    assert!(
-        !measured.is_empty(),
-        "no flag was measured as demanded, so this case is asserting nothing: the refusal stopped \
-         naming the flags it wants, or stopped putting them in backticks"
-    );
+    argv
+}
 
-    for command in commands_deferring_the_endpoint(&document) {
-        for long in &measured {
-            let Some(row) = row(&document, &command, long) else {
-                continue;
+/// Every long flag of this command a message names in its own backticks.
+fn flags_named_in(document: &Value, command: &str, message: &str) -> BTreeSet<String> {
+    message
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|token| token.starts_with("--"))
+        .filter(|token| row(document, command, token).is_some())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The consumer's own loop, run against the binary: type what the document says, read the flags the
+/// refusal names in its own backticks, add them, try again — and then take back out whatever the
+/// run turns out not to need.
+///
+/// This is the measurement every case below rests on, and it is a measurement rather than a list:
+/// nothing here names `--base-url` or `--session-dir`, and a flag that stopped being demanded would
+/// stop being returned.
+///
+/// **The taking back out is not tidiness.** A refusal may offer alternatives — the one that wants a
+/// state directory names `--session-dir` *and* `--no-session` — and a consumer that added both
+/// would have this file report a demand for a flag the run is perfectly happy without. So each
+/// added flag is removed again, in name order and therefore deterministically, and kept only if the
+/// run is refused without it. What that leaves is one of possibly several sufficient sets, which is
+/// the honest answer to *what must a consumer type*: the alternative dropped first is the one the
+/// document's readers are not told they need, and the one kept is.
+fn demanded_by(
+    document: &Value,
+    command: &str,
+    values: &BTreeMap<String, String>,
+    machine: Machine<'_>,
+) -> Demand {
+    let mut supplied: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let output = invoke(&with(document, command, values, &supplied), machine);
+        if output.status == Some(0) {
+            break;
+        }
+        let named: BTreeSet<String> = flags_named_in(document, command, &output.stderr)
+            .difference(&supplied)
+            .cloned()
+            .collect();
+        if named.is_empty() {
+            return Demand::Stuck {
+                supplied,
+                status: output.status,
+                stderr: output.stderr,
             };
-            if row["required"] == true {
-                continue;
-            }
-            let named = demanded.contains(&format!("`{command}`"))
-                && demanded.contains(&format!("`{long}`"));
-            if !named {
-                unaccounted.push(format!("  `{command}`: `{long}`"));
-            }
         }
+        supplied.extend(named);
     }
 
-    assert!(
-        unaccounted.is_empty(),
-        "`{ARGV_CONTRACT_VERSION}` records these flags as `\"required\": false` and this binary \
-         refuses the run by name without them. A consumer building an invocation from the document \
-         alone gets a command line that does not run, and the `## What is not pinned` section's \
-         `### {DEMANDED}` names neither the command nor the flag:\n{}",
-        unaccounted.join("\n")
-    );
+    let mut demanded = supplied.clone();
+    let mut unnamed = BTreeSet::new();
+    for candidate in &supplied {
+        let mut without = demanded.clone();
+        without.remove(candidate);
+        let output = invoke(&with(document, command, values, &without), machine);
+        if output.status == Some(0) {
+            demanded = without;
+        } else if !flags_named_in(document, command, &output.stderr).contains(candidate) {
+            unnamed.insert(candidate.clone());
+        }
+    }
+    Demand::Ran { demanded, unnamed }
 }
 
 struct Fixture {
@@ -331,66 +368,213 @@ impl Drop for Fixture {
     }
 }
 
-/// A consumer with the document and nothing else builds a command line that runs, and can say
-/// which wire it will be on before it runs it.
-///
-/// The two halves of the acceptance, in one invocation. The command line is assembled from the
-/// document's `required` rows plus every flag its *What is not pinned* section says a run demands
-/// anyway — nothing else is consulted — and it has to reach the endpoint and exit `0`.
-///
-/// Then the wire. `--wire` records `"default": null`, which the document defines as *the value used
-/// when the flag is absent*; the flag is absent here and the session this run files says
-/// `openai-responses`, because `RunOptions::wire()` defaults it after clap. So the document either
-/// records that value on the row or names the flag, the command and the value it really gets — and
-/// the value is the part that makes the sentence worth reading: a consumer told only that
-/// *something* is decided elsewhere still cannot say which wire its invocation will speak.
-///
-/// `--workspace` and `--session-dir` are passed beyond the document's own set, and both are
-/// recorded defaults (`.` and `$XDG_STATE_HOME/b10x-harness/sessions`) pointed somewhere this case
-/// owns: a suite that files real sessions on the machine it runs on is one nobody can run twice.
-/// The session is also how the wire is read at all — it is the run's own record of which wire
-/// produced its items, kept because an opaque item may not cross wires.
-#[test]
-fn an_invocation_built_from_the_document_alone_runs_and_says_which_wire_it_is_on() {
-    let document = pinned_document();
-    let readme = pinned_readme();
-    let fixture = Fixture::start();
-    let config = tempfile::tempdir().expect("a temporary config directory");
-    let workspace = tempfile::tempdir().expect("a temporary workspace");
-    let sessions = tempfile::tempdir().expect("a temporary session directory");
-    std::fs::File::create(workspace.path().join("README.md"))
+/// A workspace with one readable file, and a one-step flow document beside it.
+fn workspace() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    std::fs::File::create(dir.path().join("README.md"))
         .and_then(|mut file| file.write_all(b"hello harness\n"))
         .expect("a readable file in the workspace");
+    std::fs::write(
+        dir.path().join("one-step.yaml"),
+        "id: one-step\nroot:\n  id: root\n  nodes:\n    - id: shape\n      nodes:\n        - id: \
+         specify\n          run:\n            state: specify\n            summary: \"State the \
+         required behaviour.\"\n",
+    )
+    .expect("a flow document");
+    dir
+}
 
-    let mut values = BTreeMap::new();
-    values.insert(
-        "--input",
-        "read the readme and tell me what it says".to_owned(),
+/// Everything a case may have to type that the document records a placeholder for.
+fn values(fixture: &Fixture, workspace: &Path, sessions: &Path) -> BTreeMap<String, String> {
+    [
+        ("--input", "read the readme and tell me what it says"),
+        ("--base-url", fixture.base_url.as_str()),
+        ("--model", "b10x-emulated"),
+        (
+            "--flow",
+            &workspace.join("one-step.yaml").display().to_string(),
+        ),
+        ("--session-dir", &sessions.display().to_string()),
+        ("--workspace", &workspace.display().to_string()),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect()
+}
+
+/// The escape table names exactly the commands and flags this binary demands and clap does not.
+///
+/// **Both directions, and both measured.** A row that is missing leaves a consumer building a
+/// command line that does not run; a row that is there for a command the binary does not behave
+/// that way on is a pinned document making a promise the binary does not keep, which is the defect
+/// the whole chain of these READMEs exists to stop repeating.
+///
+/// The demand is measured by [`demanded_by`] on two machines — one with a state directory and one
+/// with neither `XDG_STATE_HOME` nor `HOME` — because `--session-dir` is only demanded on the
+/// second, and a driver in a container is exactly the reader this document is written for.
+///
+/// **`workflow run` is measured and comes back [`Demand::Stuck`].** It flattens the same options
+/// and records the same rows, and `workflow::dispatch` never calls `apply_profiles`, so the command
+/// line the document describes aborts at `RunOptions::base_url`'s `expect` with exit `101` and a
+/// panic message naming no flag. A consumer cannot repair that from the document, so the table may
+/// not promise a refusal by name there — and this case fails if it does. The binary's half is
+/// `story:workflow-run-panics-and-drops-its-profile`; when it lands, `workflow run` starts coming
+/// back [`Demand::Ran`] and this case will require its rows.
+#[test]
+fn the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not() {
+    let document = pinned_document();
+    let demanded = section(&pinned_readme(), DEMANDED);
+    let fixture = Fixture::start();
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let state = tempfile::tempdir().expect("a temporary state directory");
+    let sessions = tempfile::tempdir().expect("a temporary session directory");
+    let workspace = workspace();
+    let values = values(&fixture, workspace.path(), sessions.path());
+    let machines = [
+        Machine::Ordinary {
+            config: config.path(),
+            state: state.path(),
+        },
+        Machine::Bare {
+            config: config.path(),
+        },
+    ];
+
+    let mut wanted: Vec<Vec<String>> = Vec::new();
+    let mut stuck: Vec<String> = Vec::new();
+    let mut forbidden: Vec<String> = Vec::new();
+    let mut measured_anything = false;
+    for command in commands_deferring_the_endpoint(&document) {
+        let mut demands: BTreeSet<String> = BTreeSet::new();
+        let mut unrepairable = false;
+        for machine in machines {
+            match demanded_by(&document, &command, &values, machine) {
+                Demand::Ran { demanded, unnamed } => {
+                    demands.extend(demanded);
+                    for long in unnamed {
+                        forbidden.push(format!(
+                            "  `{command}`: without `{long}` the run is refused and the refusal \
+                             does not name it, so `{WITHOUT_IT}` is not what happens"
+                        ));
+                    }
+                }
+                Demand::Stuck {
+                    supplied,
+                    status,
+                    stderr,
+                } => {
+                    unrepairable = true;
+                    stuck.push(format!(
+                        "  `{command}`: exited {status:?} after supplying {supplied:?}; the \
+                         refusal names no further flag of this command.\n    stderr: {}",
+                        stderr.trim()
+                    ));
+                }
+            }
+        }
+        if unrepairable {
+            // Nothing the document could say makes this command line run, so a row promising a
+            // refusal by name is a promise the binary does not keep.
+            if demanded.contains(&format!("`{command}`")) {
+                forbidden.push(format!(
+                    "  `{command}` is named in `### {DEMANDED}`, and a command line built from the \
+                     document alone does not reach a refusal by name on it"
+                ));
+            }
+            continue;
+        }
+        measured_anything |= !demands.is_empty();
+        for long in demands {
+            wanted.push(vec![
+                format!("`{command}`"),
+                format!("`{long}`"),
+                WITHOUT_IT.to_owned(),
+            ]);
+        }
+    }
+
+    assert!(
+        measured_anything,
+        "no command demanded a flag the document does not mark required, so this case is asserting \
+         nothing: either the binary stopped refusing, or its refusals stopped naming the flags in \
+         backticks and the measurement has to be re-derived from what they say now.\nstuck: {}",
+        stuck.join("\n")
     );
-    values.insert("--base-url", fixture.base_url.clone());
-    values.insert("--model", "b10x-emulated".to_owned());
+
+    let missing = rows_missing(&demanded, &wanted);
+    assert!(
+        missing.is_empty() && forbidden.is_empty(),
+        "`{ARGV_CONTRACT_VERSION}`'s `### {DEMANDED}` has to carry one table row per command and \
+         flag — `| <command> | <flag> | {WITHOUT_IT} |`, cells side by side and one line each, so \
+         that a sentence holding the same words in prose is not an answer and one wide row is not \
+         six answers.\nrows this binary's own refusals demand and the section does not \
+         state:\n{}\nrows the section states and the binary does not behave that way on:\n{}\nfor \
+         reference, commands whose command line no consumer can repair from the document:\n{}",
+        missing
+            .iter()
+            .map(|cells| format!("  | {} |", cells.join(" | ")))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        forbidden.join("\n"),
+        stuck.join("\n")
+    );
+}
+
+/// A consumer with the document and nothing else builds a command line that runs.
+///
+/// The first half of the acceptance, and the one a driver feels: the invocation is assembled from
+/// the document's `required` rows plus every flag its escape table says a run demands, nothing else
+/// is consulted, and it has to reach the endpoint and exit `0`.
+///
+/// The flags come out of the **table**, cell by cell, rather than out of every backticked token in
+/// the section — so a section that named a flag in prose while its table said nothing would build
+/// the same command line as one that said nothing at all, and this case would fail exactly as it
+/// did before the table existed.
+#[test]
+fn an_invocation_built_from_the_document_alone_reaches_the_endpoint() {
+    let document = pinned_document();
+    let demanded = section(&pinned_readme(), DEMANDED);
+    let fixture = Fixture::start();
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let state = tempfile::tempdir().expect("a temporary state directory");
+    let sessions = tempfile::tempdir().expect("a temporary session directory");
+    let workspace = workspace();
+    let values = values(&fixture, workspace.path(), sessions.path());
 
     let mut argv = minimal_invocation(&document, "run", &values);
-    for long in flags_named(&section(&readme, DEMANDED)) {
-        if row(&document, "run", &long).is_none() || argv.contains(&long) {
+    let told: Vec<String> = demanded
+        .lines()
+        .filter_map(|line| {
+            let cells = table_cells(line)?;
+            (cells.first().map(String::as_str) == Some("`run`")).then(|| cells[1].clone())
+        })
+        .map(|cell| cell.trim_matches('`').to_owned())
+        .filter(|long| row(&document, "run", long).is_some())
+        .collect();
+    assert!(
+        !told.is_empty(),
+        "`### {DEMANDED}` tells a consumer of `run` nothing, and the case that says it should is \
+         `the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not`"
+    );
+    for long in told {
+        if argv.contains(&long) {
             continue;
         }
         argv.push(long.clone());
-        argv.push(
-            values
-                .get(long.as_str())
-                .unwrap_or_else(|| {
-                    panic!("`run` is told to supply `{long}` and this case has no value for it")
-                })
-                .clone(),
-        );
+        if row(&document, "run", &long).expect("a row")["takes_value"] == true {
+            argv.push(value_for(&values, &long, "run"));
+        }
     }
     argv.push("--workspace".to_owned());
     argv.push(workspace.path().display().to_string());
-    argv.push("--session-dir".to_owned());
-    argv.push(sessions.path().display().to_string());
 
-    let output = refused(&argv, config.path());
+    let output = invoke(
+        &argv,
+        Machine::Ordinary {
+            config: config.path(),
+            state: state.path(),
+        },
+    );
     assert_eq!(
         output.status,
         Some(0),
@@ -400,42 +584,172 @@ fn an_invocation_built_from_the_document_alone_runs_and_says_which_wire_it_is_on
         output.stdout,
         output.stderr
     );
+}
 
-    let mut files: Vec<PathBuf> = std::fs::read_dir(sessions.path())
-        .expect("the session directory exists")
-        .map(|entry| entry.expect("an entry").path())
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "json")
+/// The trimmed cells of one markdown table row, or nothing where the line is not a row.
+fn table_cells(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if trimmed.len() < 2 || !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+    Some(
+        trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_owned())
+            .collect(),
+    )
+}
+
+/// The values one `run` uses for `--wire` and `--session-dir` with neither flag typed.
+///
+/// One run measures both: the wire out of the session file's own record of which wire produced its
+/// items, and the directory out of where that file landed. The directory comes back as the variable
+/// a document could actually record rather than as this case's own temporary path.
+fn defaults_run_uses(
+    document: &Value,
+    values: &BTreeMap<String, String>,
+    workspace: &Path,
+    config: &Path,
+    state: &Path,
+) -> [(&'static str, String); 2] {
+    let mut argv = minimal_invocation(document, "run", values);
+    for long in ["--base-url", "--model"] {
+        argv.push(long.to_owned());
+        argv.push(value_for(values, long, "run"));
+    }
+    argv.push("--workspace".to_owned());
+    argv.push(workspace.display().to_string());
+    for absent in ["--wire", "--session-dir"] {
+        assert!(
+            !argv.iter().any(|word| word == absent),
+            "the values this returns are the ones the binary chose, and it only measures that \
+             while it leaves `{absent}` out: {argv:?}"
+        );
+    }
+
+    let output = invoke(&argv, Machine::Ordinary { config, state });
+    assert_eq!(
+        output.status,
+        Some(0),
+        "the run this measurement rests on did not run.\nstdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+
+    let chosen = state.join("b10x-harness").join("sessions");
+    let mut filed: Vec<PathBuf> = std::fs::read_dir(&chosen)
+        .unwrap_or_else(|error| {
+            panic!(
+                "this measures the directory the binary picked with `--session-dir` absent; `{}`: \
+                 {error}",
+                chosen.display()
+            )
         })
+        .map(|entry| entry.expect("an entry").path())
+        .filter(|path| path.extension().is_some_and(|held| held == "json"))
         .collect();
-    assert_eq!(files.len(), 1, "one session was written: {files:?}");
+    assert_eq!(filed.len(), 1, "one session was filed: {filed:?}");
     let session: Value = serde_json::from_str(
-        &std::fs::read_to_string(files.pop().expect("one file")).expect("readable"),
+        &std::fs::read_to_string(filed.pop().expect("one file")).expect("readable"),
     )
     .expect("a session file");
-    let effective = session["wire"]
-        .as_str()
-        .expect("the session names its wire");
 
-    assert!(
-        !argv.iter().any(|word| word == "--wire"),
-        "the wire below is the one this binary chose, and the case only measures that while it \
-         leaves the flag out: {argv:?}"
+    [
+        (
+            "--wire",
+            session["wire"]
+                .as_str()
+                .expect("the session names its wire")
+                .to_owned(),
+        ),
+        (
+            "--session-dir",
+            format!(
+                "$XDG_STATE_HOME{}",
+                chosen
+                    .display()
+                    .to_string()
+                    .strip_prefix(&state.display().to_string())
+                    .expect("the session landed under the state directory this case named")
+            ),
+        ),
+    ]
+}
+
+/// Every default this binary applies after clap is a row of the escape table, carrying its value.
+///
+/// `default` is defined by the document as *the value used when the flag is absent*, and two rows
+/// on every run-taking command record `null` while a value is used: `--wire`, which
+/// `RunOptions::wire()` settles so a provider may set it first, and `--session-dir`, which
+/// `session_dir()` reads out of the environment. The second is the one with teeth — a consumer
+/// reading `null` as *nothing happens* has a harness filing a transcript on the operator's machine
+/// every run, at a path no field of the document names.
+///
+/// **Both are measured from one run**, with neither flag typed: the wire out of the session file's
+/// own record of which wire produced its items, and the directory out of where that file landed.
+/// The value the table has to carry is then the measured one, in a cell of its own — so a row
+/// naming the flag and saying something else about it, or saying the opposite, is not an answer.
+///
+/// The measurement is on `run` and the rows are required on every command whose row for that flag
+/// is **byte-identical** to `run`'s. That is the document's own statement that the flag behaves the
+/// same there, and it is the only generalisation available: `chat` reads a conversation from
+/// standard input and `workflow run` aborts before it reaches either resolver, so neither can be
+/// measured this way today.
+#[test]
+fn every_default_this_binary_applies_after_clap_is_a_row_carrying_its_value() {
+    let document = pinned_document();
+    let defaulted = section(&pinned_readme(), DEFAULTED);
+    let fixture = Fixture::start();
+    let config = tempfile::tempdir().expect("a temporary config directory");
+    let state = tempfile::tempdir().expect("a temporary state directory");
+    let sessions = tempfile::tempdir().expect("a temporary session directory");
+    let workspace = workspace();
+    let values = values(&fixture, workspace.path(), sessions.path());
+
+    let measured = defaults_run_uses(
+        &document,
+        &values,
+        workspace.path(),
+        config.path(),
+        state.path(),
     );
-    let recorded = row(&document, "run", "--wire").expect("`run --wire` is a row of the document");
-    if recorded["default"] == effective {
-        return;
+
+    let mut wanted: Vec<Vec<String>> = Vec::new();
+    let mut recorded: Vec<String> = Vec::new();
+    for (long, value) in &measured {
+        let reference = row(&document, "run", long).expect("`run` has this row");
+        if reference["default"] == value.as_str() {
+            // The document could record it on the row after all, and did. Nothing to disclaim.
+            recorded.push((*long).to_owned());
+            continue;
+        }
+        for command in document["arguments"].as_object().expect("an object").keys() {
+            if row(&document, command, long) == Some(reference) {
+                wanted.push(vec![
+                    format!("`{command}`"),
+                    format!("`{long}`"),
+                    format!("`{value}`"),
+                ]);
+            }
+        }
     }
-    let defaulted = section(&readme, DEFAULTED);
     assert!(
-        defaulted.contains("`run`")
-            && defaulted.contains("`--wire`")
-            && defaulted.contains(&format!("`{effective}`")),
-        "`run --wire` records `\"default\": {}` and this run got `{effective}` with the flag left \
-         out. The document defines `default` as the value used when the flag is absent, so it has \
-         to record that value or say — in `## What is not pinned`, under `### {DEFAULTED}`, naming \
-         the command, the flag and the value — that it does not.",
-        recorded["default"]
+        !wanted.is_empty() || recorded.len() == measured.len(),
+        "neither flag was measured as defaulted after clap, so this case is asserting nothing"
+    );
+
+    let missing = rows_missing(&defaulted, &wanted);
+    assert!(
+        missing.is_empty(),
+        "`{ARGV_CONTRACT_VERSION}` records `\"default\": null` for these, and this run used a value \
+         with the flag left out. `### {DEFAULTED}` has to carry one table row per command and flag \
+         — `| <command> | <flag> | <the value> |`, the value in a cell of its own — or the row has \
+         to record it. Missing:\n{}",
+        missing
+            .iter()
+            .map(|cells| format!("  | {} |", cells.join(" | ")))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

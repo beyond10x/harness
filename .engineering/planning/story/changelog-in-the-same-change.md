@@ -6,7 +6,7 @@ status: draft
 title: Three shipped changes enter the changelog they skipped
 relations:
 - derived_from: epic:tracking-documents-current
-revision: 2
+revision: 3
 ---
 ## Evidence
 
@@ -33,3 +33,23 @@ consumer reads carries none of it.
 
 `CHANGELOG.md`'s `Unreleased` section describes providers and profiles, workspace adoption with the
 substrate pin move, and the default model — each naming the flag or file surface it changed.
+
+## Scope
+
+Derived 2026-08-30 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `CHANGELOG.md` (repo root) — cited, the acceptance names it and nothing else
+- **Files:** `CHANGELOG.md:8` (`## [Unreleased]`, spans to `:119`) — cited
+- **Symbols:** none — cited, the story names no type, function or constant
+- **Also likely:** `CHANGELOG.md:120` (`## [0.3.0] — 2026-08-30`) — inferred, all three commits predate the cut release, so the entries may belong there rather than under `Unreleased`
+- **Documents:** `CHANGELOG.md` only. `AGENTS.md:251-252`, `AGENTS.md:267` and `contracts/cli/b10x-harness/2026-08-30/README.md:100-104` are read as the governing rule, not edited — cited
+- **Not in scope:** `scripts/gate.sh` — cited, the mechanical-guard question belongs to `epic:tracking-documents-current`'s scope, not this story's acceptance
+- **Confidence:** high — the acceptance is entirely one document, and the three changes are verified absent from both `Unreleased` and `0.3.0`
+- **Would collide with:** any unit that edits `CHANGELOG.md` — adding an `Unreleased` entry, or cutting a release section. No crate surface, so it is disjoint from every code unit
+
+Stale citations found while scoping: the story's `AGENTS.md:239-240` / `:255` are ~12 lines off — the
+rule text is at `AGENTS.md:251-252` and the tracking table at `:267`. "`CHANGELOG.md` last written by
+`a405f46`" is stale; `4f7c633` and `c5bb2ed` have written it since. The premise still holds: `profiles`,
+`--profile`, `--substrate-embedded`, `0.2.2`, `default model` and `alias` are all absent from
+`CHANGELOG.md:8-254`.

@@ -6,7 +6,7 @@ status: draft
 title: The status page agrees with the tree and with itself
 relations:
 - derived_from: epic:tracking-documents-current
-revision: 2
+revision: 3
 ---
 ## Evidence
 
@@ -35,3 +35,31 @@ this component has fewer capabilities, and therefore a smaller blast radius, tha
 
 `STATUS.md` names a commit it was observed at, every row is true of that commit, and its
 "What this component does not claim" section names nothing the table above it says exists.
+
+## Scope
+
+Derived 2026-08-30 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `STATUS.md` — cited; the whole acceptance is a property of that one file
+- **Files:** `STATUS.md:3` (observation commit), `:16` (Command line row), `:21`, `:22`, `:24`
+  (Subscription auth, Live provider, Substrate confinement rows), `:27-43` (§ *What this component
+  does not claim*), `:45-47` (§ *Test counts*) — cited
+- **Symbols:** none — cited; `ServerConfig::context_window`
+  (`crates/harness-app-server/src/lib.rs:41-50`) and `ARGV_CONTRACT_VERSION`
+  (`crates/harness-cli/src/contract.rs:34`, now `2026-08-30.1`) are read as evidence, not edited
+- **Also likely:** `README.md:43` — inferred; it repeats status claims the same wave would correct,
+  but the acceptance does not require it
+- **Documents:** `STATUS.md` only — cited; no crate, no contract, no gate script changes.
+  `scripts/gate.sh:6-11` reads none of these files, so nothing mechanical changes with it — cited
+- **Confidence:** high — the story, its epic and the tree all name the same single file, and every
+  cited line was re-read at `HEAD` (`c5bb2ed`)
+- **Would collide with:** any unit that edits `STATUS.md` — which, under `AGENTS.md:160` ("its own
+  gate and its own entry in `STATUS.md`"), is *every* story shipping a user-visible capability, plus
+  any unit that rewrites the § *Test counts* block after a gate run. It collides with no crate.
+
+Stale citations found while scoping: `STATUS.md` moved twice since the story was written (`bfcc352`,
+`c5bb2ed`), so `:15`→`:16`, `:32-35`→`:27-43`, `:43-45`→`:45-47`. Two of the five cited drifts are
+already fixed in the tree — `:3` names commit `5b8d21a`, and the sub-agents/hooks/structured-output
+disclaimer now says they shipped — so the remaining work is smaller than the body claims. `5b8d21a`
+is nine commits behind `HEAD`, so "names a commit it was observed at" holds but at a stale commit.

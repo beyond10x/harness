@@ -8,7 +8,7 @@ summary: The audit that found twenty leaked home directories across five reposit
 relations:
 - derived_from: epic:adoption-follow-ups
 - informed_by: story:history-carries-a-home-directory
-revision: 1
+revision: 2
 ---
 ## What is missing
 
@@ -65,3 +65,37 @@ path refuses both, and the portability half is the one a contributor feels.
   separate thing with a separate failure mode.
 - The four sibling repositories. Each needs its own copy; this story buys the one that can be tested
   here, and a second story can carry it outward once the shape is settled.
+
+## Scope
+
+Derived 2026-08-30 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `scripts/` — cited, the acceptance names the script and the gate it joins
+- **Files:** `scripts/check-no-home-paths.py` (new file) — cited, named verbatim in the acceptance
+- **Files:** `scripts/gate.sh:9-11` — cited, the story cites these lines and they hold the three
+  existing `check-*.py` steps verbatim; a fourth line lands here
+- **Symbols:** `git ls-files`, the `/home/<name>/` and `/Users/<name>/` shapes — cited
+- **Documents:** `AGENTS.md:218-224` § *The gate* — cited, the acceptance requires the new check be
+  named where the other three are; that sentence is at `:223-224`
+- **Documents:** `README.md:52-61` — inferred, the same gate step table lists all three checks and
+  would go stale; the story does not name it
+- **Also likely:** the check's own exemption list — inferred. Four tracked files carry `/home/you/`
+  placeholders that match the specified shape (`crates/harness-cli/src/render.rs:550`,
+  `crates/harness-loop/src/event.rs:464`, `website/docs/guides/profiles.md:158`,
+  `website/docs/guides/sessions-and-events.md:105`), and two tracked planning-store files carry a
+  literal `/home/timo` (`.engineering/planning/journal.jsonl:16,153`,
+  `.engineering/planning/story/history-carries-a-home-directory.md:17`). The acceptance clause
+  "the check passes the tree unmodified" cannot hold today without either an exemption in the
+  script or edits to those six files.
+- **Confidence:** high — the story names the script path, the gate file and the line range, and all
+  three were read in the tree
+- **Would collide with:** any unit adding or reordering a step in `scripts/gate.sh`; any unit
+  editing `AGENTS.md` § *The gate* or the `README.md` build-and-test table. It does **not** touch
+  any crate's source, so it is disjoint from all Rust work unless the exemption is taken as edits
+  to `harness-cli` / `harness-loop` rather than as an allowlist in the script.
+
+Open when scoped: where "a planted absolute path is caught by a test" lands — no existing
+`scripts/check-*.py` has a self-test, no pytest tree exists, and no Rust test invokes a check script.
+Whether the six tracked home-shaped paths get an allowlist or an edit is unstated, and the two
+choices have different collision surfaces.

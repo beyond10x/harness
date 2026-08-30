@@ -221,7 +221,10 @@ bash scripts/gate.sh
 `cargo test --workspace --locked`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,
 `python3 scripts/check-provider-wires.py`, `python3 scripts/check-app-server-profile.py`,
-`python3 scripts/check-cli-contract.py` — the contract checkers, one per pinned interface. Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
+`python3 scripts/check-cli-contract.py` — the contract checkers, one per pinned interface — and
+`python3 scripts/check-no-home-paths.py`, which refuses a tracked file carrying an absolute home
+directory (`--self-test` runs first, because a check that passed everything would look green).
+Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
 
 **`python3` must be available**: the wire fixtures are a standard-library HTTP server, driven as a
 real subprocess over a real socket. A missing interpreter is a failed gate, not a skipped check.

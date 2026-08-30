@@ -69,8 +69,9 @@ HOME_PATH = re.compile(rb"/(?:home|Users)/(" + ACCOUNT + rb")")
 # through `let key = "/home/<that account>/.ssh/id_ed25519"` in a source file. The exclusion is by
 # account name and applies in every file type, including Rust: two of the four placeholders here are
 # fixtures in `crates/harness-cli/src/render.rs` and `crates/harness-loop/src/event.rs`, which
-# render example output and are not documentation by path.
-PLACEHOLDER_ACCOUNTS = frozenset({"you"})
+# render example output and are not documentation by path. Held as bytes, like everything else
+# this searches, so that a caller comparing against a match reads the same type back.
+PLACEHOLDER_ACCOUNTS = frozenset({b"you"})
 
 # Paths that carry a real home directory as history rather than as a live path.
 #
@@ -124,7 +125,7 @@ def home_paths_in(name: str, data: bytes) -> list[str]:
                 continue
             # A trailing dot belongs to the prose, not to the account: `/home/you.` at the end of a
             # sentence names the same placeholder as `/home/you`.
-            if account.rstrip(".") in PLACEHOLDER_ACCOUNTS:
+            if account.rstrip(".").encode("utf-8") in PLACEHOLDER_ACCOUNTS:
                 continue
             line = view.count(b"\n", 0, match.start()) + 1
             root = view[match.start() : match.start(1)].decode("ascii")

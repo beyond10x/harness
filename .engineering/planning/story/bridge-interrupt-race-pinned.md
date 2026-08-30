@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: story:bridge-interrupt-race-pinned
 kind: story
-status: active
+status: implemented
 title: The bridge-mode interrupt test decides the same way under load
 relations:
 - derived_from: epic:gate-stays-trustworthy
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 ---
 ## Evidence
 

@@ -2,14 +2,14 @@
 format: aep.planning-md/1
 id: story:no-home-path-reaches-a-commit
 kind: story
-status: active
+status: implemented
 title: A tracked file carrying an absolute home directory fails the gate
 summary: The audit that found twenty leaked home directories across five repositories was run once, by hand, after publication; a gate step makes the twenty-first impossible.
 relations:
 - derived_from: epic:adoption-follow-ups
 - informed_by: story:history-carries-a-home-directory
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 ---
 ## What is missing
 

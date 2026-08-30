@@ -7,7 +7,7 @@ title: The argv pin records a placeholder for flags that take no word, and no sh
 summary: 23 bare flags carry a value_name the binary refuses; -p is accepted on four commands and pinned nowhere.
 relations:
 - derived_from: epic:pinned-interfaces-honest
-revision: 1
+revision: 2
 ---
 ## Evidence
 
@@ -46,6 +46,13 @@ another reason, and both are invisible until somebody generates an invocation fr
   short flags.
 - A new `contracts/cli/b10x-harness/<date>/` version directory: invariant 13 forbids editing a
   released one, and `2026-08-30.1` will be released once wave 2 is pushed.
+
+  **Only the `value_name` half needs the cut.** The short-flag half could be closed in the in-force
+  README alone, because the guard's escape hatch is `readme.contains("short")` — but writing *"short
+  flags are not pinned"* to turn a test green is disclaiming the gap rather than closing it. Pinning
+  `-p` is the honest fix, and that re-pins `argv.json` like the other half. Recorded because a
+  coordinator asserted on 2026-08-30 that both halves needed a cut for the same reason, and the
+  implementor was right that they do not.
 - `scripts/check-cli-contract.py` — a new per-flag key has to be learned there and made optional for
   the already-pinned versions.
 - `CHANGELOG.md` in the same change (invariant 14).
@@ -53,5 +60,13 @@ another reason, and both are invisible until somebody generates an invocation fr
 ## Acceptance
 
 `takes_value: false` implies `value_name: null` for every flag in the version in force; every short
-flag clap accepts is either pinned in the document or named in its *What is not pinned* section; and
-both halves of the CLI contract check are green against the new version.
+flag clap accepts is **pinned** in the document — not disclaimed in its *What is not pinned* section,
+which would satisfy the guard without closing the gap — and both halves of the CLI contract check are
+green against the new version.
+
+Two cases are already written and already red, carried `#[ignore]` in
+`crates/harness-cli/src/contract.rs` with this story named in their comments:
+`a_flag_that_eats_no_word_records_no_placeholder_for_one` (23 rows) and
+`a_short_flag_a_consumer_can_type_is_pinned_or_named_as_unpinned` (`-p` on four commands). Whoever
+takes this story starts from a red test rather than from a description of one — remove the
+`#[ignore]` first and work until both are green.

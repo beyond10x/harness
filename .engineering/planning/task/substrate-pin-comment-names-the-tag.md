@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: task:substrate-pin-comment-names-the-tag
 kind: task
-status: draft
+status: active
 title: The substrate pin's comment names the tag the pin actually holds
 relations:
 - decomposes: epic:tracking-documents-current
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 4
 ---
 ## Evidence
 

@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:one-conformance-suite-over-three-workspaces
 kind: story
-status: draft
+status: active
 title: One suite answers what a workspace admits, for all three implementations
 relations:
 - derived_from: epic:embedded-by-a-consumer
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 4
 ---
 ## Evidence
 

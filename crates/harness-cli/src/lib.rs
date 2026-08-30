@@ -561,9 +561,13 @@ struct RunOptions {
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
     ///
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
-    /// substrate's root, and reads and writes land in the same place. The directory must therefore
-    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
+    /// substrate's root, and reads and writes land in the same place. Its directory name is the
+    /// workspace's own id, so it must be one path component of ASCII alphanumerics, `_` and `-`,
+    /// and may not be `.`, `..` or begin with `-`; a name that is not refuses the run by name
+    /// rather than quietly writing somewhere else. **ASCII**, and that is the word to read twice:
+    /// `café`, `Projekt-Übung` and `日本語` are ordinary directory names made of letters, and this
+    /// binary refuses all three. Point this at a project you already have — no prefix on the name,
+    /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.
@@ -931,9 +935,13 @@ struct ToolsOptions {
     /// for a run on the operator's own machine, wrong for anything multi-tenant.
     ///
     /// The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes
-    /// substrate's root, and reads and writes land in the same place. The directory must therefore
-    /// be named `ws_something` — substrate's guarded filesystem will not represent any other name —
-    /// and one that is not refuses the run by name rather than quietly writing somewhere else.
+    /// substrate's root, and reads and writes land in the same place. Its directory name is the
+    /// workspace's own id, so it must be one path component of ASCII alphanumerics, `_` and `-`,
+    /// and may not be `.`, `..` or begin with `-`; a name that is not refuses the run by name
+    /// rather than quietly writing somewhere else. **ASCII**, and that is the word to read twice:
+    /// `café`, `Projekt-Übung` and `日本語` are ordinary directory names made of letters, and this
+    /// binary refuses all three. Point this at a project you already have — no prefix on the name,
+    /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
     /// Which confined workspace the write and execute tools act in.
@@ -1960,7 +1968,7 @@ fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
     }
     match &options.session_dir {
         Some(path) => Ok(Some(path.clone())),
-        None => transcript::default_dir().map(Some),
+        None => transcript::default_dir(transcript::Instead::NameOneOrFileNothing).map(Some),
     }
 }
 
@@ -2234,7 +2242,7 @@ fn chat_command(options: &RunOptions) -> Result<LoopStop, RunFailure> {
 fn sessions_command(options: &SessionsOptions) -> Result<(), String> {
     let dir = match &options.session_dir {
         Some(path) => path.clone(),
-        None => transcript::default_dir()?,
+        None => transcript::default_dir(transcript::Instead::NameOne)?,
     };
     let rows = transcript::Session::list(&dir)?;
     if rows.is_empty() {
@@ -2665,9 +2673,11 @@ fn adopted(
     {
         return Err(format!(
             "`--substrate-embedded` cannot adopt `{name}`: a workspace directory's name must be \
-             one path component of alphanumerics, `_` and `-`, and may not begin with `-`. That \
-             is what keeps it a single component the guarded filesystem can open beneath its \
-             root. Point at a directory whose name qualifies, or drop the flag for a read-only run."
+             one path component of ASCII alphanumerics, `_` and `-`, and may not begin with `-`. \
+             That is what keeps it a single component the guarded filesystem can open beneath its \
+             root. ASCII is meant literally — a name with a letter outside it is refused for that \
+             alone. Point at a directory whose name qualifies, or drop the flag for a read-only \
+             run."
         ));
     }
     let driver = harness_substrate::Embedded::open_with(

@@ -314,6 +314,33 @@ pub struct SessionRow {
     pub turns: u64,
 }
 
+/// What a caller can offer instead, when the machine names no state directory.
+///
+/// The refusal below tells an operator what to type, and **the two callers of this function do not
+/// take the same flags**: a run can also be told to file nothing, and a listing cannot — there is
+/// nothing for `b10x-harness sessions --no-session` to not-file, and clap answers *"unexpected
+/// argument"*. A single message naming both was advice one caller's operator is refused a second
+/// time for following, which is the defect class both stories in this unit were opened about.
+#[derive(Debug, Clone, Copy)]
+pub enum Instead {
+    /// A run. `--session-dir` names a directory; `--no-session` files nothing.
+    NameOneOrFileNothing,
+    /// A listing. There is only the directory to name.
+    NameOne,
+}
+
+impl Instead {
+    /// The flags this caller really takes, as the refusal should spell them.
+    fn flags(self) -> &'static str {
+        match self {
+            Self::NameOneOrFileNothing => {
+                "name one with `--session-dir`, or run with `--no-session` and file nothing"
+            }
+            Self::NameOne => "name one with `--session-dir`",
+        }
+    }
+}
+
 /// Where sessions live when the caller names no directory.
 ///
 /// `$XDG_STATE_HOME/b10x-harness/sessions`, or `$HOME/.local/state/…` — the XDG default, spelled
@@ -321,10 +348,10 @@ pub struct SessionRow {
 ///
 /// # Errors
 ///
-/// Refuses by name when neither variable is set. A harness that invented a directory in that case
-/// would write a transcript somewhere nobody knew to look — possibly inside the workspace, which
-/// is the one place it must never be.
-pub fn default_dir() -> Result<PathBuf, String> {
+/// Refuses by name when neither variable is set, naming the flags [`Instead`] says this caller
+/// takes. A harness that invented a directory in that case would write a transcript somewhere
+/// nobody knew to look — possibly inside the workspace, which is the one place it must never be.
+pub fn default_dir(instead: Instead) -> Result<PathBuf, String> {
     if let Some(state) = std::env::var_os("XDG_STATE_HOME")
         && !state.is_empty()
     {
@@ -339,11 +366,11 @@ pub fn default_dir() -> Result<PathBuf, String> {
             .join("b10x-harness")
             .join("sessions"));
     }
-    Err(
+    Err(format!(
         "neither `XDG_STATE_HOME` nor `HOME` is set, so there is no state directory to keep \
-         sessions in; name one explicitly"
-            .to_owned(),
-    )
+         sessions in; {}",
+        instead.flags()
+    ))
 }
 
 /// Seconds since the epoch, or zero on a clock set before it.
@@ -720,7 +747,7 @@ mod tests {
     fn the_default_directory_follows_the_state_variable_and_refuses_without_one() {
         // Reading the process environment, not writing it: these tests run in parallel and a
         // `set_var` here would change what another test sees.
-        let directory = default_dir();
+        let directory = default_dir(Instead::NameOneOrFileNothing);
         match (std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME")) {
             (Some(state), _) if !state.is_empty() => {
                 assert_eq!(

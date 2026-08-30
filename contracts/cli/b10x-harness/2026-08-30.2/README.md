@@ -13,7 +13,7 @@ same commands. Every one of the 27 rows below is this document being corrected t
 binary was already doing, so nothing here can break an invocation that already worked. What they
 change is what a driver **generating** an invocation from this document will emit.
 
-Four things were wrong.
+Five things were wrong.
 
 **23 flags that eat no word named a placeholder for one.** `value_name` is defined below as the
 placeholder in the usage line, and clap prints none for a bare flag: `b10x-harness run --help`
@@ -51,6 +51,17 @@ for `profiles show` — clap's `--help`, and nothing `required` — generated
 `--substrate-embedded` failure on another axis, and it survived all six earlier cuts because the
 document had no field to hold a positional. There is one now, `positionals`, and what it records is
 an arrival like the flags above.
+
+**And two fields said something about a flag left out that this binary decides after clap has
+parsed.** `--wire` and `--session-dir` record `"default": null` while the binary applies
+`openai-responses` and a state directory read from the environment; `--base-url`, `--model` and
+`--session-dir` record `"required": false` while a run without them is refused by name. Both fields
+are generated from clap's own definition (`AGENTS.md` invariant 14) and clap is not where any of it
+is settled, so no row can hold the answer and no row moves for this. What the document does instead
+is say so, in three new subsections of *What is not pinned* below: two tables with one row per
+command and flag, and the reason `workflow run` is in neither of them. A driver that read `required`
+and sent no endpoint got exit `1`; one that read `default` could not say which model API it was
+about to speak, or that a transcript of every run was being filed on the operator's machine.
 
 | command | flag | field | in `2026-08-30.1` | in `2026-08-30.2` |
 | --- | --- | --- | --- | --- |
@@ -218,8 +229,15 @@ word. Two take one, and both refuse to run without it: `profiles show <NAME>` an
 
 ## What is not pinned
 
-The help text, the summaries, the order clap prints things in, and the exit statuses — those last
-are stated in `README.md` and are `0` answered, `2` stopped for a named reason, `1` could not run.
+The help text, the summaries, and the order clap prints things in.
+
+**The exit statuses**, which `README.md` states as `0` answered, `2` stopped for a named reason and
+`1` could not run — plus `101`, which is not a status this binary means to produce and is what
+`workflow run` exits with today on a command line this document says is enough. It is written down
+here because the alternative is a document naming three statuses in one subsection and disclosing a
+fourth in another, and because a driver's `if code not in (0, 1, 2): raise` is exactly what a pinned
+status list is for. *The third run command these tables leave out* below says what it is and where
+it is tracked; when that lands, `101` comes out of this sentence.
 
 **clap's generated `help` subcommand, and every path under it** — `help`, `help run`,
 `profiles help explain`, and even `help help` — is not pinned either, and appears in neither
@@ -228,6 +246,95 @@ the flag does and does nothing else, and that text is the first thing this secti
 enumerating the tree would put 33 more paths in the list a driver enumerates as this product's
 verbs, `help help` among them. The flags clap generates are a different question and **are**
 pinned, in a row each — see *What is pinned* above.
+
+### Reading the two tables below
+
+Both tables carry **one row per command and flag and nothing else** — no sentence stands beside a
+row, because a sentence beside a row can deny it and a reader has no way to know which of the two
+was checked. *"None of the rows above is a requirement; a consumer may leave all six out"* was
+inserted under the first table and every case still passed. What each column means is here instead,
+once.
+
+**The first table**: `"required": false` is true of clap on every row of it — omitting the flag is
+not a parse error — and it is not true of the run. `without it` is what happens when it is left out.
+`when` is `always`, or it is `only where the environment names no state directory`, and those are
+the only two values it takes.
+
+`--base-url` and `--model` may come from a `[default]` provider in
+`$XDG_CONFIG_HOME/b10x/harness.toml` instead of from the command line, so *always* means *always,
+on a machine with no such provider configured* — which is the machine a driver launching this binary
+should assume it is on. `--session-dir` may come from `XDG_STATE_HOME` or from `HOME`; where neither
+is set the run is refused before the first request rather than inventing a place to write a
+transcript, and a run may also be told to file nothing instead. A consumer that read
+`"required": false` as *may be left out* emitted `b10x-harness run --input …` and got exit `1` with
+nothing sent — and, in a container with a cleared environment, got the same again after supplying
+the endpoint and the model.
+
+`sessions` is in that table for `--session-dir` alone. `b10x-harness sessions` is a complete command
+line under this document — no required flag, no word after the verb — and on a machine with no state
+directory it is refused by name exactly as a run is.
+
+**The second table**: `"default": null` is true of clap on every row of it — clap holds none — and
+the binary applies one after the parse. The third column is that value.
+
+`--wire` is defaulted **last**, so that a provider may set the wire and a typed flag may still beat
+it; `openai-responses` is the wire this harness shipped with, so an invocation predating the flag
+means what it did before. `--session-dir` falls back to `$HOME/.local/state/b10x-harness/sessions`
+where `XDG_STATE_HOME` is unset, and to the refusal in the first table where both are.
+
+Neither requirement nor default is recorded on the row, and neither can be. They are not properties
+of the command line: the same invocation is refused on one machine and runs on another, according to
+a config file and an environment the command line does not name, and `argv.json` is generated from
+clap's own definition (`AGENTS.md` invariant 14). So `null` on a row says *clap has no default*, not
+*there is no default* — and the second reading is the expensive one. A driver that took
+`--session-dir`'s `null` to mean nothing happens has a harness writing a transcript of every run into
+the operator's state directory, indefinitely, at a path no field of this document names.
+
+`app-server` takes `--base-url` and `--model` and clap requires them there, so its rows already say
+what they mean; neither table is about it.
+
+### Flags a run demands that clap does not
+
+| command | flag | without it | when |
+| --- | --- | --- | --- |
+| `chat` | `--base-url` | `refused by name` | `always` |
+| `chat` | `--model` | `refused by name` | `always` |
+| `chat` | `--session-dir` | `refused by name` | `only where the environment names no state directory` |
+| `run` | `--base-url` | `refused by name` | `always` |
+| `run` | `--model` | `refused by name` | `always` |
+| `run` | `--session-dir` | `refused by name` | `only where the environment names no state directory` |
+| `sessions` | `--session-dir` | `refused by name` | `only where the environment names no state directory` |
+
+### Defaults this binary applies after clap
+
+| command | flag | value when it is absent |
+| --- | --- | --- |
+| `chat` | `--session-dir` | `$XDG_STATE_HOME/b10x-harness/sessions` |
+| `chat` | `--wire` | `openai-responses` |
+| `run` | `--session-dir` | `$XDG_STATE_HOME/b10x-harness/sessions` |
+| `run` | `--wire` | `openai-responses` |
+| `sessions` | `--session-dir` | `$XDG_STATE_HOME/b10x-harness/sessions` |
+| `workflow run` | `--session-dir` | `$XDG_STATE_HOME/b10x-harness/sessions` |
+| `workflow run` | `--wire` | `openai-responses` |
+
+### The third run command these tables leave out
+
+`workflow run` flattens the same options and records the same rows, and it is deliberately absent
+from the first table above. It does not behave the way that table describes.
+
+A command line built from this document alone — its two `"required": true` rows and nothing else —
+does not reach a refusal by name on it. `workflow::dispatch` never resolves the profile, so the
+endpoint is still absent when the run reads it, and the process aborts on that with **exit `101`**,
+which is the fourth status disclosed at the top of this section.
+
+That is a defect in the binary, tracked as `story:workflow-run-panics-and-drops-its-profile`, and
+this document does not paper over it: a row promising a refusal by name there would be a second
+false statement laid on top of the first, and it is a pinned one. It keeps its `--wire` and
+`--session-dir` rows in the second table, because those values are what it uses on the runs that do
+reach a turn. When the binary is fixed the demanded rows belong in the first table too, and
+`crates/harness-cli/tests/argv_pin_consumer.rs`'s
+`the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not` will say so: it measures
+every command the tables could cover and fails on one that is missing.
 
 ## Checked from both directions
 
@@ -241,6 +348,10 @@ pinned, in a row each — see *What is pinned* above.
 | a flag that loses its short spelling is a move a README has to state | `crates/harness-cli/src/contract.rs`, `a_flag_that_loses_its_short_spelling_is_a_move` |
 | a positional the binary requires is recorded, and one that becomes required is a move | `crates/harness-cli/src/contract.rs`, `a_positional_the_binary_requires_is_pinned` and `a_positional_that_becomes_required_or_vanishes_is_a_move`, and `scripts/check-cli-contract.py` |
 | a bare flag holds no default this document silently drops | `crates/harness-cli/src/contract.rs`, `a_flag_that_eats_no_word_holds_no_default_but_claps_own` |
+| the escape tables name exactly the flags this binary demands, measured by supplying what its refusals name until it stops refusing | `crates/harness-cli/tests/argv_pin_consumer.rs`, `the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not` |
+| a command line built from this document alone reaches the endpoint | `crates/harness-cli/tests/argv_pin_consumer.rs`, `an_invocation_built_from_the_document_alone_reaches_the_endpoint` |
+| every value this binary uses for an absent flag is a row here carrying that value | `crates/harness-cli/tests/argv_pin_consumer.rs`, `every_default_this_binary_applies_after_clap_is_a_row_carrying_its_value` |
+| an escape stated as prose rather than as one table row per claim answers nothing | `crates/harness-cli/src/contract.rs`, `rows_missing`, which the move table above is also read with |
 | every rule the checker holds fires on a document that breaks it | `scripts/check-cli-contract.py --self-test`, its own gate step |
 
 Neither is sufficient alone: a checker alone pins a document nothing produces, and a Rust test

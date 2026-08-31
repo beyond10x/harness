@@ -256,7 +256,7 @@ neutral value on both wires that nothing measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 
-**Status: in progress — design 0003; M1 under `Unreleased`; of M2, command steps landed
+**Status: in progress — design 0003; M1 shipped in `0.2.0`; of M2, command steps landed
 (2026-08-30): a `kind: command` step is one `run` call through the run's gate, no model turn.**
 
 `crates/harness-flow` is 1,891 lines and 27 tests: a DAG of sub-trees, a group as a context scope,

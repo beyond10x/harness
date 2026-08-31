@@ -821,7 +821,12 @@ fn an_exec_over_the_socket_asks_for_confinement_by_name() {
     ]);
     let client = Client::with(script.clone());
     client
-        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
+        .exec(
+            "ws_a",
+            &["/usr/bin/true".to_owned()],
+            &super::ProcessWorkspaceAccess::ReadOnly,
+            None,
+        )
         .expect("ran");
 
     let seen = script.seen.lock().expect("not poisoned");
@@ -886,10 +891,20 @@ fn the_snapshot_is_asked_for_once_per_client_and_every_exec_names_that_one() {
     let client = Client::with(script.clone());
     client.machine().expect("probed");
     client
-        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
+        .exec(
+            "ws_a",
+            &["/usr/bin/true".to_owned()],
+            &super::ProcessWorkspaceAccess::ReadOnly,
+            None,
+        )
         .expect("ran");
     client
-        .exec("ws_a", &["/usr/bin/false".to_owned()], None)
+        .exec(
+            "ws_a",
+            &["/usr/bin/false".to_owned()],
+            &super::ProcessWorkspaceAccess::ReadOnly,
+            None,
+        )
         .expect("ran");
 
     let seen = script.seen.lock().expect("not poisoned");
@@ -1029,7 +1044,12 @@ fn an_exec_over_the_socket_is_refused_when_the_daemon_states_no_snapshot() {
     )]);
     let client = Client::with(script.clone());
     let refused = client
-        .exec("ws_a", &["/usr/bin/true".to_owned()], None)
+        .exec(
+            "ws_a",
+            &["/usr/bin/true".to_owned()],
+            &super::ProcessWorkspaceAccess::ReadOnly,
+            None,
+        )
         .expect_err("refused");
 
     assert!(
@@ -1060,6 +1080,7 @@ fn the_embedded_and_socket_paths_build_one_exec_input() {
             set: std::collections::BTreeMap::new(),
         },
         Vec::new(),
+        super::ProcessWorkspaceAccess::ReadOnly,
         None,
     );
 
@@ -1076,8 +1097,35 @@ fn the_embedded_and_socket_paths_build_one_exec_input() {
     assert_eq!(input.limits.memory_bytes, 8_589_934_592);
     assert_eq!(input.limits.cpu_millis, 3_600_000);
     assert!(input.wait);
+    assert_eq!(
+        input.workspace_access,
+        super::ProcessWorkspaceAccess::ReadOnly
+    );
+    assert!(
+        input
+            .measurements
+            .contains(&substrate_wire::ExecMeasurement::ResourceUsage)
+    );
     assert!(input.capsule.is_none());
     assert!(input.lease_ttl_ms.is_none());
+}
+
+#[test]
+fn process_writes_are_read_only_until_exact_directories_are_declared() {
+    assert_eq!(
+        super::process_workspace_access(&[]).expect("empty scope is valid"),
+        super::ProcessWorkspaceAccess::ReadOnly
+    );
+    assert_eq!(
+        super::process_workspace_access(&["target".into(), "generated".into()])
+            .expect("exact directories are valid"),
+        super::ProcessWorkspaceAccess::Scoped {
+            writable_subtrees: vec!["generated".into(), "target".into()],
+        }
+    );
+    let refused = super::process_workspace_access(&["target".into(), "target/debug".into()])
+        .expect_err("overlapping mounts would make the evidence ambiguous");
+    assert!(refused.contains("refused"), "{refused}");
 }
 
 #[test]
@@ -1094,6 +1142,7 @@ fn an_exec_is_bounded_by_what_the_run_has_left_and_never_above_the_ceiling() {
                 set: std::collections::BTreeMap::new(),
             },
             Vec::new(),
+            super::ProcessWorkspaceAccess::ReadOnly,
             remaining,
         )
         .limits

@@ -388,11 +388,14 @@ fn a_staged_driver_is_a_program_the_confined_run_can_actually_start() {
         return;
     }
     let workspace = embedded.workspace_create(600_000).expect("a workspace");
+    let workspace_access = b10x_harness_substrate::process_workspace_access(&[])
+        .expect("an empty process write scope is read-only");
 
     let observation = embedded
         .exec(
             &workspace,
             &[inside.clone(), "staged".to_owned()],
+            &workspace_access,
             Some(std::time::Duration::from_secs(30)),
         )
         .expect("the exec starts");

@@ -7,6 +7,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-01
+
+### Added
+
+- `--execution-path <direct|metaharness>` adds a machine-trust context layer that tells the agent
+  whether the native loop was launched directly or as a metaharness comparison arm, which
+  confinement path is active, and the implications of the outer observer.
+- Repeatable `--process-write-subtree <DIR>` grants confined processes exact relative write
+  directories. With no declaration, a process sees the adopted workspace read-only.
+
+### Changed
+
+- The substrate boundary now pins released substrate `0.4.0` (`31340a6`) and uses its measured
+  mount, environment, no-network, resource-accounting, and exact workspace-access request.
+- Compatible dependencies were refreshed, including `jsonschema 0.52`, `sha2 0.11`, `tokio 1.53`,
+  and `reqwest 0.12.28`.
+- CLI contract `2026-09-01` pins the two additive option families.
+
+### Fixed
+
+- A confined `run` no longer receives implicit write access to the whole adopted workspace.
+  Process writes are read-only by default and exact-directory scoped when explicitly declared;
+  overlapping declarations are refused before the first model request.
+
 ## [0.9.1] — 2026-08-31
 
 ### Changed

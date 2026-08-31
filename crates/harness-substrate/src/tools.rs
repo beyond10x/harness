@@ -28,7 +28,7 @@ use std::time::Duration;
 use harness_tools::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
 use serde_json::{Value, json};
 
-use crate::{Backend, Facts, Withheld};
+use crate::{Backend, Facts, ProcessWorkspaceAccess, Withheld};
 
 /// What a confined workspace can do on this machine.
 pub struct ConfinedOperations {
@@ -41,6 +41,7 @@ pub struct ConfinedOperations {
     backend: Box<dyn Backend + Send + Sync>,
     workspace: String,
     programs: Vec<String>,
+    process_workspace_access: ProcessWorkspaceAccess,
     writes: bool,
     /// What was declared here and this machine did not admit, with the predicate that decided.
     ///
@@ -66,6 +67,7 @@ impl std::fmt::Debug for ConfinedOperations {
             .debug_struct("ConfinedOperations")
             .field("workspace", &self.workspace)
             .field("programs", &self.programs)
+            .field("process_workspace_access", &self.process_workspace_access)
             .field("writes", &self.writes)
             .field("withheld", &self.withheld)
             .finish_non_exhaustive()
@@ -100,6 +102,7 @@ impl ConfinedOperations {
             } else {
                 Vec::new()
             },
+            process_workspace_access: ProcessWorkspaceAccess::ReadOnly,
             writes: facts.holds_workspaces(),
             read_ceiling_bytes: facts
                 .get("workspace.read-limit-bytes")
@@ -117,6 +120,17 @@ impl ConfinedOperations {
     #[must_use]
     pub fn withheld(&self) -> &[Withheld] {
         &self.withheld
+    }
+
+    /// Set the exact write surface available to programs started by `run`.
+    ///
+    /// The default is read-only. File tools retain their independently checked ordered scope;
+    /// process execution receives only directories the operator named exactly, because an
+    /// arbitrary glob cannot be translated into a mount without widening it.
+    #[must_use]
+    pub fn with_process_workspace_access(mut self, access: ProcessWorkspaceAccess) -> Self {
+        self.process_workspace_access = access;
+        self
     }
 }
 
@@ -415,7 +429,12 @@ impl Operations for ConfinedOperations {
             .into());
         }
         self.backend
-            .exec(&self.workspace, argv, remaining)
+            .exec(
+                &self.workspace,
+                argv,
+                &self.process_workspace_access,
+                remaining,
+            )
             .map_err(|error| Refused::from(error.to_string()))
     }
 

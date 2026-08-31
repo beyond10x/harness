@@ -318,6 +318,20 @@ enum ScopeAnnounce {
     Silent,
 }
 
+/// Which outer execution path launched this native loop.
+///
+/// This changes no authority. It is explicit context for the agent and the transcript reader: a
+/// metaharness-driven native arm is still this loop, but an outer observer owns comparison and may
+/// add confinement around the process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+enum ExecutionPath {
+    /// The operator launched this loop directly.
+    #[default]
+    Direct,
+    /// Metaharness launched and observes this loop as one comparison arm.
+    Metaharness,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "b10x-harness",
@@ -627,6 +641,12 @@ struct RunOptions {
     /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
+    /// How this native loop was launched: directly, or as a metaharness comparison arm.
+    ///
+    /// This is context, not permission. Metaharness sets it explicitly when it drives this binary;
+    /// no environment variable may silently change the answer.
+    #[arg(long, value_name = "PATH", default_value = "direct")]
+    execution_path: ExecutionPath,
     /// Which confined workspace the write and execute tools act in.
     ///
     /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
@@ -684,6 +704,13 @@ struct RunOptions {
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
     allow_program: Vec<String>,
+    /// Workspace-relative directory a confined `run` process may change. Repeatable.
+    ///
+    /// With no declaration, process execution sees the workspace read-only. File tools keep using
+    /// `--write-scope`; the two are separate because an arbitrary glob cannot be converted to an
+    /// exact writable mount without widening it. Name every build-output directory a command needs.
+    #[arg(long, value_name = "DIR")]
+    process_write_subtree: Vec<String>,
     /// How the catalogue reaches the model: every entry as its own tool, or three verbs over it.
     ///
     /// `flat` by default. The three-verb surface cost 33–44% of every tool call on discovery
@@ -1037,6 +1064,9 @@ struct ToolsOptions {
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
     allow_program: Vec<String>,
+    /// Workspace-relative directory a confined `run` process may change. Repeatable.
+    #[arg(long, value_name = "DIR")]
+    process_write_subtree: Vec<String>,
     /// Where a run may write, as `<glob>=<allowed|partial-only|denied>`, so `tools` answers with it.
     ///
     /// The same declaration `run` takes. It belongs in this answer because "what can this run do?"
@@ -1789,6 +1819,75 @@ fn push_toolchain_context(
     }
 }
 
+fn push_execution_context(
+    package: &mut ContextPackage,
+    options: &RunOptions,
+    catalogue: &harness_tools::Catalogue,
+    captured_at: &str,
+) -> Result<(), String> {
+    let process_access =
+        harness_substrate::process_workspace_access(&options.process_write_subtree)?;
+    let process_access = match process_access {
+        harness_substrate::ProcessWorkspaceAccess::ReadOnly => "read-only".to_owned(),
+        harness_substrate::ProcessWorkspaceAccess::ReadWrite => "read-write".to_owned(),
+        harness_substrate::ProcessWorkspaceAccess::Scoped { writable_subtrees } => {
+            format!("scoped:{}", writable_subtrees.join(","))
+        }
+    };
+    let (confinement, implication) = if options.substrate_embedded {
+        (
+            "substrate-embedded",
+            "the substrate driver is linked into this process; there is no authenticated peer boundary",
+        )
+    } else if options.substrate.is_some() {
+        (
+            "substrate-socket",
+            "a separate substrate daemon authenticates the Unix-socket peer",
+        )
+    } else {
+        (
+            "none",
+            "only local read tools are available; no process or write tool is published",
+        )
+    };
+    let launch = match options.execution_path {
+        ExecutionPath::Direct => "direct",
+        ExecutionPath::Metaharness => "metaharness",
+    };
+    let run_published = catalogue.names().iter().any(|name| name.as_str() == "run");
+    let body = [
+        "loop=b10x-native-provider-loop".to_owned(),
+        format!("launch={launch}"),
+        format!("confinement={confinement}"),
+        format!("confinement_implication={implication}"),
+        format!("process_workspace_access={process_access}"),
+        "process_network=none".to_owned(),
+        "process_environment=constructed-not-inherited".to_owned(),
+        "process_resource_measurement=requested".to_owned(),
+        format!("run_tool_published={run_published}"),
+        format!(
+            "outer_observer={}",
+            if options.execution_path == ExecutionPath::Metaharness {
+                "metaharness-observes-and-compares; this harness still owns its loop gates"
+            } else {
+                "none"
+            }
+        ),
+    ]
+    .join("\n");
+    package.push(
+        ContextLayer::new(
+            "environment.execution",
+            ContextKind::Environment,
+            ContextTrust::Machine,
+            ContextCacheClass::Session,
+            body,
+        )
+        .captured_at(captured_at),
+    );
+    Ok(())
+}
+
 /// The attributable instruction package for this run.
 fn instruction_package(
     options: &RunOptions,
@@ -1837,6 +1936,7 @@ fn instruction_package(
         options.no_project_instructions,
         &captured_at,
     );
+    push_execution_context(&mut package, options, catalogue, &captured_at)?;
     push_toolchain_context(&mut package, toolchains, &captured_at);
     Ok(package)
 }
@@ -1950,6 +2050,8 @@ fn prepare(
         &options.workspace,
     )?;
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
+    let process_workspace_access =
+        harness_substrate::process_workspace_access(&options.process_write_subtree)?;
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -1961,6 +2063,7 @@ fn prepare(
             workspace_id: &options.workspace_id,
             programs: &confined_programs,
             toolchain: &confined_toolchain,
+            process_workspace_access,
             scope: write_scope(&options.write_scope)?,
         },
     )?;
@@ -2671,6 +2774,7 @@ struct Confinement<'a> {
     workspace_id: &'a str,
     programs: &'a [String],
     toolchain: &'a harness_substrate::Toolchain,
+    process_workspace_access: harness_substrate::ProcessWorkspaceAccess,
     /// Where the run may write. Part of the confinement because it is the same decision: what this
     /// run may do, taken before it starts and not by it.
     scope: harness_tools::Scope,
@@ -2839,6 +2943,7 @@ fn published(
         workspace_id,
         programs,
         toolchain,
+        process_workspace_access,
         scope,
     } = confinement;
     let publish = |catalogue: harness_tools::Catalogue| match surface {
@@ -2851,7 +2956,9 @@ fn published(
 
     if *embedded {
         let workspace = adopted(&reading, workspace_name, *cgroup_root, toolchain)?;
-        let confined = workspace.confined(programs.to_vec());
+        let confined = workspace
+            .confined(programs.to_vec())
+            .with_process_workspace_access(process_workspace_access.clone());
         let mut withheld = confined.withheld().to_vec();
         let active_toolchains = active_toolchains();
         let admitted_toolchains = if harness_tools::Operations::programs(&confined).is_empty() {
@@ -2921,7 +3028,8 @@ fn published(
         &facts,
         *workspace_id,
         programs.to_vec(),
-    );
+    )
+    .with_process_workspace_access(process_workspace_access.clone());
     let withheld = confined.withheld().to_vec();
     Ok(Publication {
         tools: publish(
@@ -3313,6 +3421,8 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
         &options.workspace,
     )?;
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
+    let process_workspace_access =
+        harness_substrate::process_workspace_access(&options.process_write_subtree)?;
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -3324,6 +3434,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             workspace_id: &options.workspace_id,
             programs: &confined_programs,
             toolchain: &confined_toolchain,
+            process_workspace_access,
             scope: write_scope(&options.write_scope)?,
         },
     )?;
@@ -3946,8 +4057,8 @@ mod tests {
             // The regression that made a live run change nothing and say it had: the standing
             // instruction told a write-capable run that it could not write.
             assert!(
-                !text.contains("read-only"),
-                "what a run can do is the toolset's answer, not this text's: {text}"
+                !text.contains("The workspace is read-only"),
+                "the standing instruction must not override the published toolset: {text}"
             );
             assert!(text.contains("Never report work as done"), "{text}");
             assert!(text.contains("was not approved did not happen"), "{text}");
@@ -3975,6 +4086,39 @@ mod tests {
         assert!(
             text.contains(&environment::utc_date(std::time::SystemTime::now())),
             "and today's date: {text}"
+        );
+    }
+
+    #[test]
+    fn the_agent_sees_the_native_outer_path_and_exact_process_write_surface() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let workspace = dir.path().canonicalize().expect("canonical");
+        let text = instructions(
+            &options(&[
+                "--workspace",
+                workspace.to_str().expect("utf-8 path"),
+                "--execution-path",
+                "metaharness",
+                "--substrate-embedded",
+                "--process-write-subtree",
+                "target",
+            ]),
+            &a_catalogue(&workspace),
+            "",
+            Owned::default(),
+        )
+        .expect("execution context is available");
+
+        assert!(text.contains("loop=b10x-native-provider-loop"), "{text}");
+        assert!(text.contains("launch=metaharness"), "{text}");
+        assert!(
+            text.contains("process_workspace_access=scoped:target"),
+            "{text}"
+        );
+        assert!(text.contains("process_network=none"), "{text}");
+        assert!(
+            text.contains("metaharness-observes-and-compares"),
+            "the outer/inner implication is explicit: {text}"
         );
     }
 

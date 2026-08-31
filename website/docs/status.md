@@ -1,11 +1,11 @@
 ---
 title: Status and limitations
-description: What Harness 0.9.1 can do today and which claims are not yet earned.
+description: What Harness 0.10.0 can do today and which claims are not yet earned.
 ---
 
 # Status and limitations
 
-Harness is pre-v1. Version `0.9.1` was tagged on 2026-08-31; this documentation describes that
+Harness is pre-v1. Version `0.10.0` was tagged on 2026-09-01; this documentation describes that
 release.
 
 ## Available now
@@ -14,7 +14,7 @@ release.
 |---|---|
 | Provider turns | Streaming OpenAI Responses and Anthropic Messages projections |
 | Agent loop | Turn assembly, tool round trips, approvals, cancellation, compaction, and budgets |
-| Workspace tools | Bounded reads everywhere; writes, argv execution, and declarative Rust, Go, Taskfile, npm, Yarn, or explicitly loaded custom toolchains behind substrate capabilities |
+| Workspace tools | Bounded reads everywhere; file writes and argv execution behind substrate capabilities; child processes are workspace-read-only by default and receive only explicitly named writable subtrees |
 | Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `context show`, `app-server`, and `events` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
@@ -72,7 +72,7 @@ fixtures.
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
 profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
 means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
-a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-08-31`.
+a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-01`.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

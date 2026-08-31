@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::{Facts, SubstrateError};
+use crate::{Facts, ProcessWorkspaceAccess, SubstrateError};
 
 /// Where a confined workspace's operations actually happen.
 pub trait Backend {
@@ -66,6 +66,7 @@ pub trait Backend {
         &self,
         workspace: &str,
         argv: &[String],
+        workspace_access: &ProcessWorkspaceAccess,
         remaining: Option<Duration>,
     ) -> Result<Value, SubstrateError>;
 }

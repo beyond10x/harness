@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::Value;
 use substrate_wire::OutputStream;
 
-use crate::{Backend, Facts, SubstrateError, base64};
+use crate::{Backend, Facts, ProcessWorkspaceAccess, SubstrateError, base64};
 
 /// The most one read asks the daemon for when the daemon has not said what it admits.
 ///
@@ -469,6 +469,7 @@ impl Client {
         &self,
         workspace: &str,
         argv: &[String],
+        workspace_access: &ProcessWorkspaceAccess,
         remaining: Option<Duration>,
     ) -> Result<Value, SubstrateError> {
         let snapshot = self.admitted_snapshot()?;
@@ -484,6 +485,7 @@ impl Client {
                 set: BTreeMap::new(),
             },
             Vec::new(),
+            workspace_access.clone(),
             remaining,
         );
         let timeout_ms = input.limits.timeout_ms;
@@ -605,8 +607,9 @@ impl Backend for Client {
         &self,
         workspace: &str,
         argv: &[String],
+        workspace_access: &ProcessWorkspaceAccess,
         remaining: Option<Duration>,
     ) -> Result<Value, SubstrateError> {
-        Client::exec(self, workspace, argv, remaining)
+        Client::exec(self, workspace, argv, workspace_access, remaining)
     }
 }

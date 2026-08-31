@@ -60,8 +60,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use substrate_wire::{
-    ConfinementRequest, ExecEnvironment, ExecLimits, ExecStartInput, NetworkMode, ReadOnlyRoot,
-    SandboxProfile,
+    ConfinementRequest, ExecEnvironment, ExecLimits, ExecMeasurement, ExecStartInput, NetworkMode,
+    ReadOnlyRoot, SandboxProfile, WorkspaceAccess,
 };
 
 mod backend;
@@ -77,9 +77,32 @@ pub use backend::Backend;
 pub use client::{Client, Transport, UnixTransport};
 pub use embedded::Embedded;
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
+pub use substrate_wire::WorkspaceAccess as ProcessWorkspaceAccess;
 pub use toolchain::Toolchain;
 pub use tools::ConfinedOperations;
 pub use withheld::Withheld;
+
+/// Build and validate the exact workspace write surface for a confined process.
+///
+/// An empty declaration is read-only. Paths are workspace-relative directories and are sorted so
+/// the request and its evidence are stable. Validation happens before the model runs rather than
+/// becoming a failed tool call after a paid turn.
+///
+/// # Errors
+///
+/// Names a path set the substrate wire refuses.
+pub fn process_workspace_access(paths: &[String]) -> Result<ProcessWorkspaceAccess, String> {
+    if paths.is_empty() {
+        return Ok(ProcessWorkspaceAccess::ReadOnly);
+    }
+    let mut writable_subtrees = paths.to_vec();
+    writable_subtrees.sort();
+    writable_subtrees.dedup();
+    let access = ProcessWorkspaceAccess::Scoped { writable_subtrees };
+    substrate_wire::validate_workspace_access(&access)
+        .map_err(|error| format!("process workspace write scope was refused: {error}"))?;
+    Ok(access)
+}
 
 /// What substrate says this machine can do.
 ///
@@ -191,6 +214,7 @@ pub(crate) fn confined_exec_input(
     snapshot: String,
     env: ExecEnvironment,
     read_only_roots: Vec<ReadOnlyRoot>,
+    workspace_access: WorkspaceAccess,
     remaining: Option<Duration>,
 ) -> ExecStartInput {
     // The smaller of the ceiling below and what the run has left on its clock. The loop's
@@ -211,6 +235,7 @@ pub(crate) fn confined_exec_input(
             // snapshot is stale, so the run has to name the one it probed.
             capability_snapshot: snapshot,
             network: NetworkMode::None,
+            aperture: None,
             profile: SandboxProfile::Workspace,
             required: true,
         },
@@ -236,6 +261,10 @@ pub(crate) fn confined_exec_input(
             cpu_millis: 3_600_000,
         },
         wait: true,
+        workspace_access,
+        scratch: None,
+        measurements: [ExecMeasurement::ResourceUsage].into_iter().collect(),
+        secret_slots: Vec::new(),
         capsule: None,
         lease_ttl_ms: None,
     }

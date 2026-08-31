@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- An unenforceable budget is now a stated pre-run refusal on the command line. In particular,
+  `run --json --max-cost-microunits N` without a rate card used to exit `1` before the first
+  provider request but write no `refused` event; with session filing enabled it instead wrote a
+  session for the run that never started. The CLI now validates the assembled budget during
+  preparation, emits exactly one `{"kind":"refused"}` line, and files no session. The loop keeps
+  its own validation for library callers.
+
 - **An interrupt sent promptly after `turn/start` now stops the turn instead of being acknowledged
   and ignored** (bridge mode). The server answered `turn/start` and notified `turn/started` before
   it installed the control its reading thread cancels through, so an interrupt decoded in that

@@ -1726,6 +1726,19 @@ fn prepare(
         skills: skills.as_ref(),
         agents: agents.as_ref(),
     };
+    let run_budget = budget(options);
+    let run_prices = prices(options)?;
+    let priced = run_prices
+        .as_ref()
+        .is_some_and(|card| card.rates_for(options.model()).is_some());
+    // The loop validates again for every library caller. The command line validates here as well
+    // because this function is the boundary between a run that never started and one whose event
+    // record already began. Leaving the check to `AgentLoop::run_in` classified an unusable
+    // budget as a failed run, filed a session for it and, under `--json`, wrote no `refused`
+    // terminal at all.
+    run_budget
+        .validate(priced)
+        .map_err(|error| format!("budget refused: {error}"))?;
     let config = LoopConfig::new(
         options.model(),
         instructions(
@@ -1736,8 +1749,8 @@ fn prepare(
         )?,
     )
     .with_sampling(sampling(options))
-    .with_budget(budget(options))
-    .with_prices(prices(options)?)
+    .with_budget(run_budget)
+    .with_prices(run_prices)
     .with_unattended_ceiling(ceiling(options))
     // What makes compaction token-aware rather than a fixed 192 KiB of bytes.
     .with_context_window(Some(options.context_window))

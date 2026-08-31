@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-31
+
 ### Added
 
 - New immutable `2026-08-31` contracts for both provider wires pin the exact compact request bytes
@@ -44,7 +46,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The generic HTTP crate is again transport-shaped only: source guards reject vendor, credential,
   header and endpoint semantics. Callers supply opaque URLs, headers, bodies and decoders.
 - README, STATUS, ROADMAP, design 0002, the website and Rust API documentation now describe the
-  `0.5.0` tree, the current workspace-name grammar, local answer validation, conditional delegate
+  `0.6.0` tree, the current workspace-name grammar, local answer validation, conditional delegate
   concurrency, Rust contract gates and all three loop-owned tools. STATUS no longer carries brittle
   hand-maintained test counts, and strict rustdoc plus the website typecheck/build are release
   evidence.

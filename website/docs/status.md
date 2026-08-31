@@ -1,12 +1,12 @@
 ---
 title: Status and limitations
-description: What Harness 0.5.0 can do today and which claims are not yet earned.
+description: What Harness 0.6.0 can do today and which claims are not yet earned.
 ---
 
 # Status and limitations
 
-Harness is pre-v1. Version `0.5.0` was tagged on 2026-08-31; this documentation also describes the
-unreleased remediation in the repository tree on that date.
+Harness is pre-v1. Version `0.6.0` was tagged on 2026-08-31; this documentation describes that
+release.
 
 ## Available now
 

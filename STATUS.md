@@ -1,8 +1,7 @@
 # Status
 
-Observed on 2026-08-31 in the full-review remediation tree rebased on `0.5.0`. Current evidence is
-the repository-owned `cargo xtask gate`; historical live-provider observations remain dated in the
-rows that carry them.
+Observed on 2026-08-31 for release `0.6.0`. Current evidence is the repository-owned
+`cargo xtask gate`; historical live-provider observations remain dated in the rows that carry them.
 
 | Area | State | Next evidence |
 | --- | --- | --- |

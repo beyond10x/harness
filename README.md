@@ -27,7 +27,7 @@ this, never the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.5.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.6.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |

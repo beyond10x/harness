@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: review-result:harness-public-site-sweep
 kind: review-result
-status: active
+status: archived
 title: Harness public website and documentation sweep
 summary: Publication, governance, factual, reference, information-architecture, accessibility, and repository-security findings at 0.6.0.
 tags:
@@ -11,7 +11,7 @@ tags:
 - security
 relations:
 - reviews: vision:b10x-owns-its-loop
-revision: 1
+revision: 2
 ---
 ## Scope
 

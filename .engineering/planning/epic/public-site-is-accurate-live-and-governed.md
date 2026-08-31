@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: epic:public-site-is-accurate-live-and-governed
 kind: epic
-status: active
+status: implemented
 title: The public Harness site is accurate, live, and governed
 summary: Publish a task-oriented, accessible site whose claims and repository posture remain checked.
 tags:
@@ -11,7 +11,7 @@ tags:
 relations:
 - informed_by: review-result:harness-public-site-sweep
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 # Epic: The public Harness site is accurate, live, and governed
 

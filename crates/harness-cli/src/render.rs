@@ -213,7 +213,11 @@ impl<O: Write, E: Write> Renderer<O, E> {
                 self.note(&format!("  ? {name} needs a decision"));
             }
             LoopEvent::ToolCompleted { failed, .. } => {
-                self.note(if *failed { "  ← failed" } else { "  ← ok" });
+                self.note(if *failed {
+                    "  ← failed"
+                } else {
+                    "  ← returned"
+                });
             }
             _ => {}
         }
@@ -281,7 +285,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                 self.note(if approved { "  approved" } else { "  denied" });
             }
             LoopEvent::ToolCompleted { failed, .. } => {
-                self.note(if failed { "← failed" } else { "← ok" });
+                self.note(if failed { "← failed" } else { "← returned" });
             }
             LoopEvent::Usage(usage) => self.note(&format!(
                 "  usage {} in / {} out ({} cached)",
@@ -838,7 +842,7 @@ mod tests {
         );
         assert!(err.contains("· delegate: survey the crate"), "{err}");
         assert!(err.contains("  → file_read"), "indented by two: {err}");
-        assert!(err.contains("  ← ok"), "{err}");
+        assert!(err.contains("  ← returned"), "{err}");
         assert!(err.contains("  warning [unpublished-tool]"), "{err}");
         assert!(err.contains("delegate finished after 2 turn(s)"), "{err}");
     }

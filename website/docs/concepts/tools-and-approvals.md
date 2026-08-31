@@ -25,7 +25,9 @@ Reads are bounded to the workspace root. Paths are re-checked after canonicaliza
 paths traversed by a search, so a symlink inside the tree cannot be used to read outside it.
 
 `run` accepts an argv, not a shell string. Its program must appear in a repeated `--allow-program`
-declaration. An empty program set publishes no `run` tool.
+declaration. The match applies to `argv[0]`, the root executable Harness starts; descendants are
+not matched again, but remain inside the same confinement and whole-tree lifetime limits. An empty
+program set publishes no `run` tool.
 
 ## Flat and verb surfaces
 

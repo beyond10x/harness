@@ -1,0 +1,25 @@
+version: 1
+toolchains:
+  - name: taskfile
+    description: Statically discovered public Taskfile tasks.
+    project:
+      any: [Taskfile.yml, Taskfile.yaml, taskfile.yml, taskfile.yaml]
+    sandbox:
+      programs: [task]
+      env:
+        HOME: "{workspace}"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+    values:
+      - name: tasks
+        source:
+          kind: taskfile-tasks
+          files: [Taskfile.yml, Taskfile.yaml, taskfile.yml, taskfile.yaml]
+    tools:
+      - name: taskfile_run
+        description: Run one statically discovered public Taskfile task.
+        workspace-writes: true
+        parameters:
+          task: { kind: enum, required: true, values: tasks }
+          args: { kind: string-list, max-items: 128 }
+        commands:
+          - argv: [task, --taskfile, { value: tasks }, --disable-fuzzy, { arg: task }, { rest: { arg: args, separator: -- } }]

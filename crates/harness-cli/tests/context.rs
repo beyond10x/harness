@@ -233,18 +233,36 @@ fn a_declared_context_file_that_exists_is_handed_to_the_run_labelled_by_its_path
     let instruction = requests[0]["first_input_text"]
         .as_str()
         .expect("the standing instruction heads the input");
+    // The semantic kind and source are the only framing the model needs. Cache and digest data stay
+    // in the run manifest rather than spending prompt tokens.
     assert!(
-        instruction.contains("Files you have been given"),
-        "the run is told these are already read: {instruction}"
+        instruction.contains("kind=\"provided_context\""),
+        "{instruction}"
     );
-    // The path is the label, so the model can name the file it is quoting and a reader of the
-    // request can tell which declaration produced which bytes.
     assert!(
-        instruction.contains(&format!("--- {path} ---")),
+        instruction.contains(&format!("source=\"{path}\"")),
         "labelled by its path: {instruction}"
     );
     assert!(
         instruction.contains("the harness drives the model directly"),
         "and the file's own text is there: {instruction}"
     );
+}
+
+#[test]
+fn toolchain_context_exposes_only_the_named_fact_that_can_help_the_model() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new(BINARY)
+        .args(["context", "show", "--toolchain", "rust", "--body"])
+        .arg("--workspace")
+        .arg(workspace)
+        .output()
+        .expect("the binary runs");
+    let body = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(body.contains("rust.version="), "{body}");
+    assert!(!body.contains("sha256="), "{body}");
+    assert!(!body.contains("cache="), "{body}");
+    assert!(!body.contains("mount="), "{body}");
 }

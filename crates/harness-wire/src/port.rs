@@ -156,6 +156,14 @@ pub trait ToolPort {
         Vec::new()
     }
 
+    /// The neutral operation this concrete call resolves to, when the port has one.
+    ///
+    /// Dynamic catalogues cannot be reconstructed after a run from a static name table. Recording
+    /// this answer at call time preserves their meaning without teaching the wire their names.
+    fn operation(&self, _call: &ToolCall) -> Option<String> {
+        None
+    }
+
     /// What **this call** invokes, for the gate that decides whether a person is asked.
     ///
     /// # Why this is per call and not per spec

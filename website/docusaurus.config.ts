@@ -110,6 +110,7 @@ const config: Config = {
           title: 'Reference',
           items: [
             {label: 'Command line', to: '/docs/reference/cli'},
+            {label: 'Toolchains', to: '/docs/reference/toolchains'},
             {label: 'Provider wires', to: '/docs/reference/wires'},
             {label: 'Configuration', to: '/docs/reference/configuration'},
             {label: 'Workflow format', to: '/docs/reference/workflows'},

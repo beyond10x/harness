@@ -599,6 +599,18 @@ fn dollars(micro_usd: u64) -> Value {
 /// Empty for `tool_search` and `tool_describe` — they are questions about the catalogue, not acts —
 /// and for an entry outside the vocabulary, which reached no tool.
 fn operations(value: &Value) -> Vec<&'static str> {
+    if let Some(operation) = value["operation"].as_str() {
+        return match operation {
+            "file.read" => vec!["file.read"],
+            "file.write" => vec!["file.write"],
+            "file.edit" => vec!["file.edit"],
+            "dir.list" => vec!["dir.list"],
+            "search" => vec!["search"],
+            "find" => vec!["find"],
+            "shell" => vec!["shell"],
+            _ => Vec::new(),
+        };
+    }
     entry_of(value)
         .and_then(harness_tools::operation_of)
         .into_iter()
@@ -611,6 +623,13 @@ fn operations(value: &Value) -> Vec<&'static str> {
 /// a live gate answer the same question the same way. The arguments are the entry's own under
 /// either surface: the call's, flat; the ones nested under `arguments.arguments`, behind a verb.
 fn subjects(value: &Value) -> Vec<String> {
+    if let Some(subjects) = value["subjects"].as_array() {
+        return subjects
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect();
+    }
     let Some(entry) = entry_of(value) else {
         return Vec::new();
     };

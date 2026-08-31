@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-08-31`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-08-31.1`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -29,6 +29,7 @@ than copying every help paragraph.
 | `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
 | `tools` | Print the catalogue, skills and agents this machine would publish, without a model call |
+| `context show` | Assemble context and print its body-free manifest, or the explicit model-facing body |
 | `profiles` | Profile command group |
 | `profiles list` | List configured profile names |
 | `profiles show` | Print one profile |
@@ -37,6 +38,10 @@ than copying every help paragraph.
 | `providers` | Provider command group |
 | `providers list` | List built-in and overridden providers |
 | `providers show` | Print one effective provider, including credential and renewal facts |
+| `toolchains` | Declarative toolchain command group |
+| `toolchains list` | List built-in and explicitly loaded custom providers |
+| `toolchains show` | Print one validated provider definition and body-free provenance |
+| `toolchains validate` | Validate custom YAML specifications against built-ins and each other |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
 | `events` | Convert a Harness JSONL record into `metaharness.event/1` |
 
@@ -93,7 +98,7 @@ record rather than silent. A credential you name yourself always wins.
 | `--workspace PATH` | Root visible to workspace tools; defaults to `.` |
 | `--surface flat\|verbs` | Publish entries directly or under three catalogue verbs |
 | `--context FILE` | Preload a file; repeatable |
-| `--instructions-file FILE` | Replace the built-in standing instruction with the named file |
+| `--instructions-file FILE` | Add operator instructions beside the harness's immutable guidance |
 | `--no-project-instructions` | Omit `AGENTS.md` or `CLAUDE.md` from the standing instruction |
 | `--write-scope GLOB=SCOPE` | Restrict matching paths; repeatable, first match wins |
 | `--scope-announce stated\|silent` | Tell the model the write restrictions or test the gate silently |
@@ -127,9 +132,18 @@ may and may not do.
 | `--cgroup-root PATH` | Name a delegated cgroup root for embedded execution |
 | `--driver PATH` | Stage one host executable read-only at `/toolchain/driver` and admit that mounted path |
 | `--allow-program NAME` | Admit one root executable as `argv[0]`; repeatable. Descendants are not re-matched and remain confined with the root process |
-| `--toolchain rust\|go` | Mount the selected build toolchain read-only; mutable caches stay in the workspace |
+| `--toolchain auto\|NAME[,NAME...]` | Discover matching providers or select providers explicitly |
+| `--toolchain-spec FILE` | Load an additive custom provider document explicitly; repeatable and never workspace-discovered |
 
 See [Confined workspaces](../guides/confinement.md) for prerequisites.
+
+## Context inspection
+
+`b10x-harness context show` assembles the same typed context layers without starting a model turn.
+It prints a body-free provenance manifest by default; `--json` makes that manifest machine-readable,
+and `--body` explicitly prints the model-facing rendering. Digests, byte counts, timestamps and
+cache classes stay out of the model prompt. The prompt carries only semantic kind and trust, plus a
+source path where knowing the document's identity can improve the answer.
 
 ## Approvals
 

@@ -1,6 +1,6 @@
 [package]
-name = "b10x-harness-tools"
-description = "One catalogue of tools, published to every harness under three verbs"
+name = "b10x-harness-toolchain"
+description = "Versioned declarative toolchain providers for the b10x harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,13 +12,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-globset = { workspace = true }
-harness-toolchain = { workspace = true }
-harness-wire = { workspace = true }
-nix = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

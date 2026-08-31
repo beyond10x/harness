@@ -55,6 +55,10 @@ pub struct Profile {
     pub write: Option<bool>,
     pub approve_up_to: Option<String>,
     pub allow_program: Option<Vec<String>>,
+    /// Build toolchains to admit. Replaced as a set by a later profile, never merged.
+    pub toolchains: Option<Vec<String>>,
+    /// Explicit operator-authored toolchain specifications. Later profiles replace the set.
+    pub toolchain_specs: Option<Vec<PathBuf>>,
     pub write_scope: Option<Vec<String>>,
     pub plugin_dir: Option<Vec<String>>,
     pub max_turns: Option<u64>,
@@ -176,15 +180,19 @@ pub fn resolve(config: &Config, wanted: &[String], source: &str) -> Result<Resol
         overlay(&mut effective, profile);
     }
     if effective.write != Some(true)
-        && effective
+        && (effective
             .allow_program
             .as_ref()
             .is_some_and(|programs| !programs.is_empty())
+            || effective
+                .toolchains
+                .as_ref()
+                .is_some_and(|toolchains| !toolchains.is_empty()))
     {
         return Err(
             "this configuration declares programs to run and does not set `write = true`, \
              so no `run` tool is published and none of them can start. Set `write = true`, or drop \
-             `allow-program`. Said here rather than left for the model to discover by being \
+             `allow-program`/`toolchains`. Said here rather than left for the model to discover by being \
              refused mid-run."
                 .to_owned(),
         );
@@ -216,6 +224,8 @@ fn overlay(into: &mut Profile, from: &Profile) {
     take!(write);
     take!(approve_up_to);
     take!(allow_program);
+    take!(toolchains);
+    take!(toolchain_specs);
     take!(write_scope);
     take!(plugin_dir);
     take!(max_turns);
@@ -308,6 +318,22 @@ mod tests {
         let config = config("[[profiles]]\nname = \"p\"\nallow-program = [\"/usr/bin/git\"]\n");
         let error = resolve(&config, &["p".to_owned()], "<test>").expect_err("refused");
         assert!(error.contains("write = true"), "{error}");
+    }
+
+    #[test]
+    fn a_later_toolchain_set_replaces_the_earlier_one() {
+        let config = config(
+            "[default]\nwrite = true\ntoolchains = [\"rust\"]\n\
+             toolchain-specs = [\"base.yaml\"]\n\
+             [[profiles]]\nname = \"go\"\ntoolchains = [\"go\"]\n\
+             toolchain-specs = [\"go.yaml\"]\n",
+        );
+        let resolved = resolve(&config, &["go".to_owned()], "<test>").expect("resolves");
+        assert_eq!(resolved.profile.toolchains, Some(vec!["go".to_owned()]));
+        assert_eq!(
+            resolved.profile.toolchain_specs,
+            Some(vec![PathBuf::from("go.yaml")])
+        );
     }
 
     #[test]

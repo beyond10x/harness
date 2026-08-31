@@ -26,7 +26,7 @@ pub struct Entry {
     /// The neutral operation, as metaharness names it: `file.write`, `shell`.
     pub operation: &'static str,
     /// The name `tool_invoke` takes and `tool_search` answers.
-    pub name: &'static str,
+    pub name: String,
     /// One line, for a reader choosing between entries.
     pub summary: String,
     /// What its arguments are.
@@ -59,7 +59,7 @@ impl Entry {
     /// Panics only if a constant entry name stops being a legal tool name.
     pub fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: ToolName::new(self.name).expect("a constant entry name is a legal tool name"),
+            name: ToolName::new(&self.name).expect("a validated entry name is a legal tool name"),
             description: self.summary.clone(),
             input_schema: self.input_schema.clone(),
             approval: harness_wire::Approval::NotRequired,
@@ -72,6 +72,7 @@ impl Entry {
 pub struct Catalogue {
     operations: Box<dyn Operations>,
     entries: Vec<Entry>,
+    toolchains: Vec<harness_toolchain::ResolvedProvider>,
     /// Where this run may write. Empty restricts nothing — see [`crate::Scope`].
     scope: crate::Scope,
     /// Where the **step** now running may write, on top of `scope`.
@@ -88,7 +89,11 @@ impl std::fmt::Debug for Catalogue {
             .debug_struct("Catalogue")
             .field(
                 "entries",
-                &self.entries.iter().map(|e| e.name).collect::<Vec<_>>(),
+                &self
+                    .entries
+                    .iter()
+                    .map(|e| e.name.as_str())
+                    .collect::<Vec<_>>(),
             )
             .finish_non_exhaustive()
     }
@@ -113,17 +118,36 @@ impl Catalogue {
     /// entries whose calls come back as a refusal naming them — an outcome the model reads, not a
     /// silence.
     pub fn of(operations: impl Operations + 'static) -> Self {
+        Self::of_with_toolchains(operations, Vec::new())
+    }
+
+    /// The provider-admitted catalogue plus fixed tools from the active toolchain providers.
+    pub fn of_with_toolchains(
+        operations: impl Operations + 'static,
+        toolchains: Vec<harness_toolchain::ResolvedProvider>,
+    ) -> Self {
         let mut entries = vec![file_read(), dir_list(), search(), find()];
         if operations.writes() {
             entries.push(file_write());
             entries.push(file_edit());
         }
+        let internal = crate::toolchain::programs(&toolchains);
+        let published_programs: Vec<String> = operations
+            .programs()
+            .iter()
+            .filter(|program| !internal.contains(program))
+            .cloned()
+            .collect();
+        if !published_programs.is_empty() {
+            entries.push(run(&published_programs));
+        }
         if !operations.programs().is_empty() {
-            entries.push(run(operations.programs()));
+            entries.extend(crate::toolchain::entries(&toolchains));
         }
         Self {
             operations: Box::new(operations),
             entries,
+            toolchains,
             scope: crate::Scope::default(),
             step: crate::Scope::default(),
         }
@@ -195,7 +219,13 @@ impl Catalogue {
     /// publication gate admitted, so it is a fact about the machine and never a claim about it.
     #[must_use]
     pub fn operations(&self) -> Vec<&'static str> {
-        self.entries.iter().map(|entry| entry.operation).collect()
+        let mut operations = Vec::new();
+        for entry in &self.entries {
+            if !operations.contains(&entry.operation) {
+                operations.push(entry.operation);
+            }
+        }
+        operations
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -211,7 +241,7 @@ impl Catalogue {
         self.entries
             .iter()
             .map(|entry| {
-                ToolName::new(entry.name).expect("a constant entry name is a legal tool name")
+                ToolName::new(&entry.name).expect("a validated entry name is a legal tool name")
             })
             .collect()
     }
@@ -219,6 +249,31 @@ impl Catalogue {
     /// One entry by name.
     pub fn get(&self, name: &str) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.name == name)
+    }
+
+    /// The neutral operation one live entry performs.
+    #[must_use]
+    pub fn operation(&self, name: &str) -> Option<&'static str> {
+        self.get(name).map(|entry| entry.operation)
+    }
+
+    /// Concrete process and file subjects for one entry call.
+    pub fn subjects(&self, name: &str, arguments: &Value) -> Vec<Subject> {
+        if let Some(Ok(plan)) = crate::toolchain::plan(name, arguments, &self.toolchains) {
+            return plan
+                .groups
+                .iter()
+                .flat_map(|(_, plan)| {
+                    plan.argv
+                        .iter()
+                        .filter_map(|argv| argv.first().map(Subject::process))
+                        .chain(plan.writes.iter().map(Subject::file))
+                })
+                .collect();
+        }
+        self.get(name)
+            .map(|entry| entry.subjects(arguments))
+            .unwrap_or_default()
     }
 
     /// The entries a query names, or all of them.
@@ -367,6 +422,9 @@ impl Catalogue {
         remaining: Option<std::time::Duration>,
     ) -> Result<Value, Refused> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
+        if let Some(plan) = crate::toolchain::plan(name, arguments, &self.toolchains) {
+            return self.invoke_toolchain(plan?, remaining);
+        }
         // **Refused here, by the tool, because here is where this loop's policy lives.** Every
         // other arm adjudicates at a decision seam; this one has none and never grows one, so a
         // tool that must not act on a path refuses on that path exactly as `run` refuses a program
@@ -454,31 +512,81 @@ impl Catalogue {
                     under("max_results"),
                 )
                 .map_err(Refused::from),
-            "shell" => {
-                let items = arguments
-                    .get("argv")
-                    .and_then(Value::as_array)
-                    .filter(|items| !items.is_empty())
-                    .ok_or_else(|| {
-                        Refused::from("`argv` is required and names the program first")
-                    })?;
-                // Every item, or nothing. Dropping a non-string item would run a command nobody
-                // asked for — `["cargo", 5, "test"]` is not `cargo test`, it is a mistake the model
-                // has to hear about.
-                let mut argv = Vec::with_capacity(items.len());
-                for (index, item) in items.iter().enumerate() {
-                    let Some(text) = item.as_str() else {
-                        return Err(Refused::from(format!(
-                            "`argv[{index}]` is {item}, not a string; every item of an argv is a \
-                             string, and nothing was run"
-                        )));
-                    };
-                    argv.push(text.to_owned());
-                }
-                self.operations.run_within(&argv, remaining)
-            }
+            "shell" => self.invoke_shell(arguments, remaining),
             other => Err(format!("`{other}` is not an operation this build performs").into()),
         }
+    }
+
+    fn invoke_toolchain(
+        &self,
+        plan: crate::toolchain::CommandPlan,
+        remaining: Option<std::time::Duration>,
+    ) -> Result<Value, Refused> {
+        let mut grouped = serde_json::Map::new();
+        for (provider, provider_plan) in plan.groups {
+            for path in &provider_plan.writes {
+                if let Some(refusal) = self.refusal("file.write", path) {
+                    return Err(refusal.into());
+                }
+            }
+            let mut outputs = Vec::with_capacity(provider_plan.argv.len());
+            for argv in provider_plan.argv {
+                let output = self.operations.run_within(&argv, remaining)?;
+                if provider_plan.empty_stdout
+                    && output
+                        .get("stdout")
+                        .and_then(Value::as_str)
+                        .is_some_and(|stdout| !stdout.trim().is_empty())
+                {
+                    return Err(format!("formatting check failed: {}", output["stdout"]).into());
+                }
+                outputs.push(output);
+            }
+            let value = if outputs.len() == 1 {
+                outputs.pop().unwrap_or(Value::Null)
+            } else {
+                Value::Array(outputs)
+            };
+            grouped.insert(provider, value);
+        }
+        if grouped.len() == 1 {
+            grouped
+                .into_values()
+                .next()
+                .ok_or_else(|| Refused::from("toolchain provider produced no output"))
+        } else {
+            Ok(json!({"toolchains": grouped}))
+        }
+    }
+
+    fn invoke_shell(
+        &self,
+        arguments: &Value,
+        remaining: Option<std::time::Duration>,
+    ) -> Result<Value, Refused> {
+        let items = arguments
+            .get("argv")
+            .and_then(Value::as_array)
+            .filter(|items| !items.is_empty())
+            .ok_or_else(|| Refused::from("`argv` is required and names the program first"))?;
+        // Every item, or nothing. Dropping a non-string item would run a command nobody asked for.
+        let mut argv = Vec::with_capacity(items.len());
+        for (index, item) in items.iter().enumerate() {
+            let Some(text) = item.as_str() else {
+                return Err(Refused::from(format!(
+                    "`argv[{index}]` is {item}, not a string; every item of an argv is a string, \
+                     and nothing was run"
+                )));
+            };
+            argv.push(text.to_owned());
+        }
+        if crate::toolchain::programs(&self.toolchains).contains(&argv[0]) {
+            return Err(Refused::from(format!(
+                "`{}` is admitted only through its typed toolchain tools; `run` cannot name it",
+                argv[0]
+            )));
+        }
+        self.operations.run_within(&argv, remaining)
     }
 
     /// Perform several entries at once, one answer per call, in the order they were given.
@@ -559,7 +667,7 @@ impl Catalogue {
             "`{name}` is not a tool this run has. Available: {}.",
             self.entries
                 .iter()
-                .map(|entry| entry.name)
+                .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -627,7 +735,7 @@ fn writing(idempotency: Idempotency) -> Envelope {
 fn file_read() -> Entry {
     Entry {
         operation: "file.read",
-        name: "file_read",
+        name: "file_read".to_owned(),
         summary: "Read a window of one text file, as numbered lines. Each line comes back as its \
                   number, right-aligned in six columns, then a tab, then the line — the number is \
                   this reply's, not the file's, so strip it before quoting text to `file_edit`. \
@@ -655,7 +763,7 @@ fn file_read() -> Entry {
 fn dir_list() -> Entry {
     Entry {
         operation: "dir.list",
-        name: "dir_list",
+        name: "dir_list".to_owned(),
         summary: "List one directory. Paths are relative to the workspace root; `.` is the root."
             .to_owned(),
         input_schema: json!({
@@ -672,7 +780,7 @@ fn dir_list() -> Entry {
 fn search() -> Entry {
     Entry {
         operation: "search",
-        name: "search",
+        name: "search".to_owned(),
         summary: format!(
             "Find text in the workspace's files. A literal substring by default; set `regex` for a \
              regular expression. `glob` narrows which files are read and `context` answers the \
@@ -703,7 +811,7 @@ fn search() -> Entry {
 fn find() -> Entry {
     Entry {
         operation: "find",
-        name: "find",
+        name: "find".to_owned(),
         summary: format!(
             "List the files whose path matches a glob under the workspace. `*.rs` is that name at \
              any depth; `crates/**/*.rs` matches the whole workspace-relative path. Use this \
@@ -732,7 +840,7 @@ fn find() -> Entry {
 fn file_write() -> Entry {
     Entry {
         operation: "file.write",
-        name: "file_write",
+        name: "file_write".to_owned(),
         summary:
             "Write one file, whole. Creates it if it is not there. Replacing an existing file \
                   replaces all of it — use `file_edit` to change part of one."
@@ -754,7 +862,7 @@ fn file_write() -> Entry {
 fn file_edit() -> Entry {
     Entry {
         operation: "file.edit",
-        name: "file_edit",
+        name: "file_edit".to_owned(),
         summary:
             "Replace one exact piece of text in one file. The text must appear exactly once; a \
                   replacement that matched nothing, or several places, is refused rather than \
@@ -788,7 +896,7 @@ fn file_edit() -> Entry {
 fn run(programs: &[String]) -> Entry {
     Entry {
         operation: "shell",
-        name: "run",
+        name: "run".to_owned(),
         summary: format!(
             "Run one program and answer its output and exit status. This is not a shell: `argv` is \
              a list, nothing is composed, redirected or substituted, and only these programs may be \

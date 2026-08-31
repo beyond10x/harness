@@ -150,7 +150,9 @@ impl<O: Write, E: Write> Renderer<O, E> {
             // be noise. It is in the record, which is where a comparison reads it.
             agents: _,
             profiles,
+            context: _,
             credential_source: _,
+            toolchains: _,
         } = event
         else {
             return;
@@ -205,7 +207,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             LoopEvent::Warning { code, message } => {
                 let _ = writeln!(self.err, "  warning [{code}] {message}");
             }
-            LoopEvent::ToolRequested(call) => {
+            LoopEvent::ToolRequested { call, .. } => {
                 let line = requested(call);
                 self.note(&format!("  {line}"));
             }
@@ -274,7 +276,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
                     let _ = self.err.flush();
                 }
             }
-            LoopEvent::ToolRequested(call) => {
+            LoopEvent::ToolRequested { call, .. } => {
                 let line = requested(&call);
                 self.note(&line);
             }
@@ -608,6 +610,8 @@ mod tests {
                     skills: Vec::new(),
                     agents: Vec::new(),
                     profiles: Vec::new(),
+                    context: Vec::new(),
+                    toolchains: Vec::new(),
                     credential_source: "named".to_owned(),
                 },
                 LoopEvent::TextDelta {
@@ -809,7 +813,11 @@ mod tests {
                     call_id: harness_wire::CallId::new("call-3").expect("valid"),
                     task: "survey the crate\nand report".to_owned(),
                 },
-                wrapped(LoopEvent::ToolRequested(a_call("file_read"))),
+                wrapped(LoopEvent::ToolRequested {
+                    call: a_call("file_read"),
+                    operation: Some("file.read".to_owned()),
+                    subjects: vec!["file:.".to_owned()],
+                }),
                 wrapped(LoopEvent::ToolCompleted {
                     call_id: harness_wire::CallId::new("call-4").expect("valid"),
                     failed: false,
@@ -884,7 +892,11 @@ mod tests {
         // failed result alone this was a program that would not start; the code says it is a rule.
         let (_, err) = render(
             vec![
-                LoopEvent::ToolRequested(a_call("run")),
+                LoopEvent::ToolRequested {
+                    call: a_call("run"),
+                    operation: Some("shell".to_owned()),
+                    subjects: vec!["proc:sh".to_owned()],
+                },
                 LoopEvent::Warning {
                     code: "program-refused".to_owned(),
                     message: "`sh` is not a program this run may start. Declared: cargo."
@@ -946,6 +958,8 @@ mod tests {
             skills: Vec::new(),
             agents: Vec::new(),
             profiles: Vec::new(),
+            context: Vec::new(),
+            toolchains: Vec::new(),
             credential_source: "named".to_owned(),
         };
 
@@ -1135,6 +1149,8 @@ mod tests {
                 skills: Vec::new(),
                 agents: Vec::new(),
                 profiles: Vec::new(),
+                context: Vec::new(),
+                toolchains: Vec::new(),
                 credential_source: "named".to_owned(),
             }],
             false,

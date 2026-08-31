@@ -192,6 +192,20 @@ sandbox's unshared network prevents module lookup from reaching a proxy. A build
 the standard library and modules already present in the workspace, but it cannot inherit cached
 private modules or reach a proxy.
 
+`--toolchain auto` resolves the built-in Rust, Go, Taskfile, npm and Yarn YAML providers from
+root-relative markers without executing a compiler or task runner. Taskfile public tasks and root
+package scripts become enum arguments of one fixed `taskfile_run`, `npm_run` or `yarn_run` tool;
+they do not inflate the prompt with one tool per task. Language providers also contribute generic
+roles when every active provider implements the role. `--toolchain-spec FILE` adds an operator
+provider explicitly and is never discovered from the workspace. The catalogue is frozen before
+turn one, and internally admitted programs cannot be reached through raw `run` arguments.
+
+Every standing input is now a typed context layer. `--instructions-file` contributes an
+operator-trust layer beside the harness guidance rather than replacing it. `b10x-harness context
+show` prints the body-free provenance manifest; add `--body` only when the exact prompt text is
+needed. Audit fields such as the digest, byte count, capture time, and cache class are recorded but
+not sent to the model.
+
 ## What the model sees
 
 One [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral

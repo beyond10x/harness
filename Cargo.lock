@@ -137,6 +137,7 @@ dependencies = [
  "b10x-harness-messages",
  "b10x-harness-responses",
  "b10x-harness-substrate",
+ "b10x-harness-toolchain",
  "b10x-harness-tools",
  "b10x-harness-wire",
  "clap",
@@ -187,6 +188,7 @@ dependencies = [
  "jsonschema",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror",
 ]
 
@@ -220,6 +222,7 @@ dependencies = [
 name = "b10x-harness-substrate"
 version = "0.7.0"
 dependencies = [
+ "b10x-harness-toolchain",
  "b10x-harness-tools",
  "b10x-harness-wire",
  "serde",
@@ -233,9 +236,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-harness-toolchain"
+version = "0.7.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2 0.11.0",
+ "tempfile",
+]
+
+[[package]]
 name = "b10x-harness-tools"
 version = "0.7.0"
 dependencies = [
+ "b10x-harness-toolchain",
  "b10x-harness-wire",
  "globset",
  "nix",
@@ -261,6 +277,7 @@ name = "b10x-harness-xtask"
 version = "0.7.0"
 dependencies = [
  "b10x-harness-cli",
+ "b10x-harness-toolchain",
  "clap",
  "serde_json",
  "sha2 0.11.0",

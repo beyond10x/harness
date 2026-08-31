@@ -1,8 +1,8 @@
 use harness_wire::{CallId, ToolCall, ToolName, Usage};
 use serde::{Deserialize, Serialize};
 
-use crate::LoopStop;
 use crate::hook::{HookDecision, HookPoint};
+use crate::{ContextManifestEntry, LoopStop};
 
 /// One tool a run declared and its machine would not admit.
 ///
@@ -80,6 +80,14 @@ pub struct CredentialRenewal {
     pub byte_preserving: bool,
 }
 
+/// Body-free provenance for one resolved toolchain provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolchainRef {
+    pub name: String,
+    pub source: String,
+    pub sha256: String,
+}
+
 /// What `credential_source` says when nothing named a provider.
 fn named_credential() -> String {
     "named".to_owned()
@@ -149,6 +157,12 @@ pub enum LoopEvent {
         /// process, and one of those is a run configured entirely by typed flags.
         #[serde(default)]
         profiles: Vec<ProfileRef>,
+        /// Body-free provenance for every instruction layer sent to the model.
+        #[serde(default)]
+        context: Vec<ContextManifestEntry>,
+        /// Declarative provider definitions used by the run. Bodies and installation paths stay out.
+        #[serde(default)]
+        toolchains: Vec<ToolchainRef>,
         /// Where this run's credential came from — `named`, or `provider:<name>`.
         ///
         /// **This field is what pays for a provider being allowed to default a credential path at
@@ -221,7 +235,14 @@ pub enum LoopEvent {
     ReasoningDelta {
         text: String,
     },
-    ToolRequested(ToolCall),
+    ToolRequested {
+        #[serde(flatten)]
+        call: ToolCall,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        subjects: Vec<String>,
+    },
     ApprovalRequired {
         call_id: CallId,
         /// What is being decided. For a verb over a catalogue this is the **entry** — `run`,
@@ -404,6 +425,8 @@ mod tests {
             skills: Vec::new(),
             agents: Vec::new(),
             profiles: Vec::new(),
+            context: Vec::new(),
+            toolchains: Vec::new(),
             credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_value(&event).expect("serializes");
@@ -435,12 +458,14 @@ mod tests {
             skills: Vec::new(),
             agents: Vec::new(),
             profiles: Vec::new(),
+            context: Vec::new(),
+            toolchains: Vec::new(),
             credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
             encoded,
-            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"credential_source":"named"}"#,
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[],"toolchains":[],"credential_source":"named"}"#,
             "a run refused nothing, offered no skill, published no agent and read no profile says \
              `[]` to each; only a build older than the field is silent"
         );

@@ -324,3 +324,18 @@ Steps, each its own story:
 emulators, takes one retreat and stops at its bound, and puts every transition to a hook program
 that refuses one of them — with no `metaharness` and no `protocol` process alive; and one embedded
 run under Phase 5's consumer does the same through the library.
+
+## Phase 9: attributable context and toolchain providers
+
+**Status: implemented under `Unreleased`; live polyglot evidence remains open.**
+
+Design 0004 replaces the shell's flat standing instruction with typed layers carrying trust,
+source, freshness class and a body-free digest manifest. Toolchains are now strict declarative
+providers: built-in Rust, Go, Taskfile, npm and Yarn documents and explicitly loaded operator files
+share read-only discovery, typed argv, selected context facts and generic verification roles. The
+catalogue is fixed before turn one and only embedded substrate may admit process-local roots.
+
+**Exit evidence:** unit and contract tests pin context rendering/manifests, static Taskfile and
+package-script discovery, provider aggregation, typed argv, profile parsing, generated docs and the
+inspection CLI. Still open: one delegated-cgroup run in a polyglot workspace, proving generic and
+runner-specific calls execute and that a scoped formatter refuses every target before changing any.

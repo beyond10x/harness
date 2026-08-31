@@ -1,0 +1,94 @@
+version: 1
+toolchains:
+  - name: go
+    description: Go through the installed GOROOT, with mutable caches in the workspace.
+    project:
+      any: [go.mod, go.work]
+    roots:
+      - name: goroot
+        mount: go
+        candidates:
+          - kind: env-dir
+            var: GOROOT
+          - kind: path-program
+            program: go
+            ancestors: 2
+        require:
+          - path: bin/go
+            kind: executable
+          - path: VERSION
+            kind: file
+    sandbox:
+      programs: [go, gofmt]
+      env:
+        HOME: "{workspace}"
+        GOROOT: "{mount:goroot}"
+        GOPATH: "{workspace}/.go"
+        GOMODCACHE: "{workspace}/.go/pkg/mod"
+        GOCACHE: "{workspace}/.cache/go-build"
+        GOENV: "off"
+        GOTOOLCHAIN: "local"
+        GOSUMDB: "off"
+        CGO_ENABLED: "0"
+        PATH: "{mount:goroot}/bin:/usr/local/bin:/usr/bin:/bin"
+    facts:
+      - key: version
+        expose-to-model: true
+        source: { kind: first-line, root: goroot, path: VERSION }
+    tools:
+      - name: go_build
+        description: Build Go packages with network and checksum lookup disabled.
+        role: build
+        workspace-writes: true
+        parameters: &go_parameters
+          package: { kind: string, default: "./..." }
+        commands:
+          - argv: [go, build, { arg: package }]
+      - name: go_test
+        description: Run Go tests with network and checksum lookup disabled.
+        role: test
+        workspace-writes: true
+        parameters: *go_parameters
+        commands:
+          - argv: [go, test, { arg: package }]
+      - name: go_vet
+        description: Run go vet with network and checksum lookup disabled.
+        role: check
+        workspace-writes: true
+        parameters: *go_parameters
+        commands:
+          - argv: [go, vet, { arg: package }]
+      - name: go_fmt_check
+        description: List explicitly named Go files that are not gofmt formatted.
+        role: fmt-check
+        empty-stdout: true
+        parameters: &path_parameters
+          paths: { kind: workspace-path-list, required: true, min-items: 1, max-items: 128 }
+        commands:
+          - argv: [gofmt, -l, { each: paths }]
+      - name: go_fmt
+        description: Format only the explicitly named Go source files.
+        workspace-writes: true
+        parameters: *path_parameters
+        writes: [paths]
+        commands:
+          - argv: [gofmt, -w, { each: paths }]
+      - name: go_bench
+        description: Run Go benchmarks with network and checksum lookup disabled.
+        workspace-writes: true
+        parameters: *go_parameters
+        commands:
+          - argv: [go, test, { arg: package }, "-run=^$", "-bench=."]
+      - name: go_run
+        description: Build and run one Go package with network lookup disabled.
+        workspace-writes: true
+        parameters:
+          package: { kind: string, default: "." }
+          args: { kind: string-list, max-items: 128 }
+        commands:
+          - argv: [go, run, { arg: package }, { rest: { arg: args, separator: -- } }]
+      - name: go_fetch
+        description: Resolve Go modules from already-present local data only.
+        workspace-writes: true
+        commands:
+          - argv: [go, mod, download]

@@ -30,6 +30,16 @@ enum Task {
     },
     /// Verify the public website against shipped versions and the generated CLI surface.
     WebsiteContract,
+    /// Verify built-in toolchain specs, or prove the checker rejects planted defects.
+    ToolchainSpecs {
+        #[arg(long)]
+        self_test: bool,
+    },
+    /// Generate the built-in toolchain reference, or check its committed bytes.
+    ToolchainDocs {
+        #[arg(long)]
+        check: bool,
+    },
     /// Generate a new immutable command-line contract from clap.
     PinCli {
         /// Date-based contract version, for example `2026-08-31`.
@@ -49,6 +59,8 @@ fn main() -> ExitCode {
         Task::CliContract { self_test: true } => cli_contract::self_test(),
         Task::CliContract { self_test: false } => cli_contract::check(&root),
         Task::WebsiteContract => website_contract::check(&root),
+        Task::ToolchainSpecs { self_test } => toolchain_specs(self_test),
+        Task::ToolchainDocs { check } => toolchain_docs(&root, check),
         Task::PinCli { version } => cli_contract::pin(&root, &version),
     };
     match result {
@@ -93,6 +105,9 @@ fn gate(root: &Path) -> Result<(), String> {
     cli_contract::self_test()?;
     cli_contract::check(root)?;
     website_contract::check(root)?;
+    toolchain_specs(true)?;
+    toolchain_specs(false)?;
+    toolchain_docs(root, true)?;
     check_http_boundary(root)?;
 
     // These two pre-existing checkers were not changed by this wave. They remain until their own
@@ -111,6 +126,52 @@ fn gate(root: &Path) -> Result<(), String> {
         .args(["doc", "--workspace", "--no-deps", "--locked"]);
     run_command("strict rustdoc", &mut docs)?;
     println!("gate: green");
+    Ok(())
+}
+
+fn toolchain_specs(self_test: bool) -> Result<(), String> {
+    if !self_test {
+        let registry = harness_toolchain::Registry::builtins()?;
+        println!(
+            "toolchain specs: {} built-ins valid",
+            registry.names().len()
+        );
+        return Ok(());
+    }
+    let bad_version = "version: 2\ntoolchains: []\n";
+    if harness_toolchain::Registry::validate(bad_version, "planted-version.yaml").is_ok() {
+        return Err("toolchain spec self-test accepted an unsupported version".to_owned());
+    }
+    let unknown = "version: 1\nunknown: true\ntoolchains: []\n";
+    if harness_toolchain::Registry::validate(unknown, "planted-unknown.yaml").is_ok() {
+        return Err("toolchain spec self-test accepted an unknown field".to_owned());
+    }
+    let collision = "version: 1\ntoolchains:\n  - &p\n    name: duplicate\n    description: first\n    tools: [{name: duplicate_test, description: test, commands: [{argv: [\"true\"]}]}]\n    sandbox: {programs: [\"true\"]}\n  - *p\n";
+    if harness_toolchain::Registry::validate(collision, "planted-collision.yaml").is_ok() {
+        return Err("toolchain spec self-test accepted a provider collision".to_owned());
+    }
+    println!("toolchain spec checker self-test: rejected planted defects");
+    Ok(())
+}
+
+fn toolchain_docs(root: &Path, check: bool) -> Result<(), String> {
+    let path = root.join("website/docs/reference/toolchains.md");
+    let expected = harness_toolchain::builtin_reference()?;
+    if check {
+        let actual = std::fs::read_to_string(&path)
+            .map_err(|error| format!("reading generated `{}`: {error}", path.display()))?;
+        if actual != expected {
+            return Err(format!(
+                "`{}` is stale; run `cargo xtask toolchain-docs`",
+                path.display()
+            ));
+        }
+        println!("toolchain docs: current");
+        return Ok(());
+    }
+    std::fs::write(&path, expected)
+        .map_err(|error| format!("writing generated `{}`: {error}", path.display()))?;
+    println!("wrote {}", path.display());
     Ok(())
 }
 

@@ -6,9 +6,9 @@
 //! a root is a directory and a mount point. That is deliberate — the moment it knew what `cargo`
 //! was it would be carrying one client's vendor semantics.
 //!
-//! So the mapping from a named build toolchain to its directories and environment lives here, in
-//! the client that wants it. A second toolchain is a second constructor, not a change to the
-//! substrate contract.
+//! So declarative providers resolve names to directories and environment above this boundary. This
+//! module only converts their neutral resolved roots into substrate declarations; adding a
+//! provider does not add a branch here or change the substrate contract.
 //!
 //! # What it costs, stated plainly
 //!
@@ -22,9 +22,8 @@
 //! a crate or module it does not already have will fail, and that is the confinement working.
 
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use sha2::{Digest, Sha256};
 use substrate_wire::ReadOnlyRoot;
@@ -34,26 +33,13 @@ use substrate_wire::ReadOnlyRoot;
 /// Under one parent so a reader of the applied observation can tell at a glance which mounts are a
 /// toolchain and which are anything else, and so a second toolchain cannot silently collide with
 /// this one.
-const MOUNT_PREFIX: &str = "/toolchain";
-
-/// Where substrate binds the workspace.
-const WORKSPACE: &str = "/workspace";
-
 /// Where a staged driver appears inside the sandbox.
 ///
-/// Under [`MOUNT_PREFIX`] with the toolchains, because it is the same kind of thing: a closure
+/// Under `/toolchain` with the toolchains, because it is the same kind of thing: a closure
 /// brought in read-only for a process with no network to fetch one. A second mount point rather
 /// than a second entry under `/toolchain/rustup`, so a reader of the applied observation can tell
 /// the compiler from the program that drives the run.
 const DRIVER_MOUNT: &str = "/toolchain/driver";
-
-/// The toolchain directory `rustup` keeps a stable install under.
-///
-/// Named rather than discovered because the shim directory `rustup` puts on `PATH` lives in
-/// `CARGO_HOME`, and `CARGO_HOME` is now inside the workspace where no shim exists. Pointing
-/// `PATH` straight at the toolchain's own `bin` skips the shim entirely, which is what a confined
-/// run wants anyway: one fixed compiler, chosen before the run started.
-const TOOLCHAIN: &str = "stable-x86_64-unknown-linux-gnu";
 
 /// One host program, staged so a confined run can execute it.
 ///
@@ -88,163 +74,54 @@ pub struct Toolchain {
     roots: Vec<ReadOnlyRoot>,
     env: BTreeMap<String, String>,
     driver: Option<StagedDriver>,
+    programs: Vec<String>,
+    providers: Vec<harness_toolchain::ResolvedProvider>,
 }
 
 impl Toolchain {
-    /// The Go toolchain, found from an explicit `GOROOT` or from the `go` on `PATH`.
+    /// Builds the confined closure from provider definitions resolved by the declarative registry.
     ///
-    /// Only the toolchain root is mounted. Go's build and module caches live inside the workspace,
-    /// and module lookup is offline, so a run receives neither the operator's configuration nor
-    /// their cached private modules.
+    /// The registry has already performed every host read and path check. This conversion names
+    /// only substrate's neutral read-only roots and closed execution environment.
     ///
     /// # Errors
     ///
-    /// Names the missing declaration or path. Discovery never executes `go`: admitting a
-    /// toolchain must not run a program outside the confinement it is being assembled for.
-    pub fn go(goroot: Option<&Path>, path: Option<&OsStr>) -> Result<Self, String> {
-        let root = if let Some(root) = goroot {
-            root.to_path_buf()
-        } else {
-            let path = path.ok_or_else(|| {
-                "neither `GOROOT` nor `PATH` says where the Go toolchain is".to_owned()
-            })?;
-            let binary = std::env::split_paths(path)
-                .map(|directory| directory.join("go"))
-                .find(|candidate| is_executable_file(candidate))
-                .ok_or_else(|| "`PATH` contains no `go` toolchain".to_owned())?
-                .canonicalize()
-                .map_err(|error| format!("the Go toolchain's `go` program: {error}"))?;
-            binary
-                .parent()
-                .and_then(Path::parent)
-                .ok_or_else(|| {
-                    format!(
-                        "the Go toolchain's `go` program ({}) has no toolchain root",
-                        binary.display()
-                    )
-                })?
-                .to_path_buf()
-        };
-        let root = root.canonicalize().map_err(|error| {
-            format!(
-                "the Go toolchain's `GOROOT` directory ({}): {error}",
-                root.display()
-            )
-        })?;
-        if !root.is_dir() {
-            return Err(format!(
-                "the Go toolchain's `GOROOT` directory ({}) is not a directory",
-                root.display()
-            ));
-        }
-        let binary = root.join("bin/go");
-        if !is_executable_file(&binary) {
-            return Err(format!(
-                "the Go toolchain's `go` program ({}) is not an executable file",
-                binary.display()
-            ));
-        }
-
+    /// Refuses providers that require conflicting values for the same sandbox environment key.
+    pub fn from_providers(
+        providers: Vec<harness_toolchain::ResolvedProvider>,
+    ) -> Result<Self, String> {
         let mut toolchain = Self::default();
-        toolchain.roots.push(ReadOnlyRoot {
-            host_path: root.display().to_string(),
-            mount: format!("{MOUNT_PREFIX}/go"),
-        });
-        for (name, value) in [
-            ("HOME", WORKSPACE),
-            ("GOROOT", "/toolchain/go"),
-            ("GOPATH", "/workspace/.go"),
-            ("GOMODCACHE", "/workspace/.go/pkg/mod"),
-            ("GOCACHE", "/workspace/.cache/go-build"),
-            ("GOENV", "off"),
-            ("GOTOOLCHAIN", "local"),
-            ("GOSUMDB", "off"),
-            ("CGO_ENABLED", "0"),
-            ("PATH", "/toolchain/go/bin:/usr/local/bin:/usr/bin:/bin"),
-        ] {
-            toolchain.env.insert(name.to_owned(), value.to_owned());
+        for provider in &providers {
+            toolchain
+                .roots
+                .extend(provider.roots.iter().map(|root| ReadOnlyRoot {
+                    host_path: root.host.display().to_string(),
+                    mount: root.mount.clone(),
+                }));
+            toolchain.programs.extend(provider.programs.iter().cloned());
+            for (name, value) in &provider.env {
+                merge_env(&mut toolchain.env, name, value)?;
+            }
         }
+        toolchain.programs.sort();
+        toolchain.programs.dedup();
+        toolchain.providers = providers;
         Ok(toolchain)
     }
 
-    /// The Rust toolchain, from the directories `cargo` and `rustup` actually keep it in.
-    ///
-    /// Read from `CARGO_HOME` and `RUSTUP_HOME` where the operator set them and from `$HOME`'s
-    /// conventional locations otherwise — the same two places the tools themselves look, so a run
-    /// gets the toolchain the operator has rather than one this file guessed at.
+    /// Combines independently discovered installations into one read-only closure.
     ///
     /// # Errors
     ///
-    /// Names the directory that is missing. A toolchain half-declared would produce a build that
-    /// fails deep inside cargo with a message about a registry, which is a much worse way to find
-    /// out that a path was wrong.
-    pub fn rust(home: Option<&Path>) -> Result<Self, String> {
-        let rustup = match std::env::var_os("RUSTUP_HOME") {
-            Some(value) => PathBuf::from(value),
-            None => home.map(|home| home.join(".rustup")).ok_or_else(|| {
-                "neither `RUSTUP_HOME` nor a home directory says where the Rust \
-                                 toolchain is"
-                    .to_owned()
-            })?,
-        };
-        let rustup = rustup.canonicalize().map_err(|error| {
-            format!(
-                "the Rust toolchain's `rustup` directory ({}): {error}",
-                rustup.display()
-            )
-        })?;
-        if !rustup.is_dir() {
-            return Err(format!(
-                "the Rust toolchain's `rustup` directory ({}) is not a directory",
-                rustup.display()
-            ));
+    /// Refuses when two installations require different values for the same environment variable.
+    pub fn combine(mut self, other: Self) -> Result<Self, String> {
+        self.roots.extend(other.roots);
+        self.programs.extend(other.programs);
+        self.providers.extend(other.providers);
+        for (name, value) in other.env {
+            merge_env(&mut self.env, &name, &value)?;
         }
-
-        let mut toolchain = Self::default();
-        toolchain.roots.push(ReadOnlyRoot {
-            host_path: rustup.display().to_string(),
-            mount: format!("{MOUNT_PREFIX}/rustup"),
-        });
-
-        // `--clearenv` leaves the process with nothing, so everything the toolchain reads is said
-        // here. `PATH` carries rustup's shims, which is how `cargo` finds `rustc` at all.
-        toolchain
-            .env
-            .insert("RUSTUP_HOME".to_owned(), format!("{MOUNT_PREFIX}/rustup"));
-        toolchain.env.insert(
-            "PATH".to_owned(),
-            format!(
-                "{MOUNT_PREFIX}/rustup/toolchains/{TOOLCHAIN}/bin:/usr/local/bin:/usr/bin:/bin"
-            ),
-        );
-        // **`CARGO_HOME` is inside the workspace, and that is not a convenience.**
-        //
-        // Two reasons, and the first is the serious one. `~/.cargo` holds `credentials.toml` — a
-        // registry token — beside the package cache, so mounting it whole would hand every
-        // confined run the operator's publishing credential. It was mounted whole for one commit
-        // and that was wrong; nothing about a build needs the token, and a confinement that leaks
-        // one is not a confinement.
-        //
-        // The second is that cargo needs `CARGO_HOME` **writable** even offline: it takes a
-        // `.package-cache` lock there before it does anything, and against a read-only mount it
-        // blocks forever with no output — which is exactly how this was found.
-        //
-        // So the caller seeds `<workspace>/.cargo` with the package cache the run needs. That is a
-        // copy rather than a mount, and it is the caller's to make, because only the caller knows
-        // which crates a task will want.
-        toolchain
-            .env
-            .insert("CARGO_HOME".to_owned(), format!("{WORKSPACE}/.cargo"));
-        // The workspace, never the operator's home — which is not mounted and must not be implied.
-        toolchain
-            .env
-            .insert("HOME".to_owned(), WORKSPACE.to_owned());
-        // A build tree the run may write to. Without it cargo writes beside the sources, which is
-        // fine, but naming it keeps the output somewhere a caller can find and clear.
-        toolchain
-            .env
-            .insert("CARGO_TARGET_DIR".to_owned(), format!("{WORKSPACE}/target"));
-        Ok(toolchain)
+        Ok(self)
     }
 
     /// The same, with one host program staged and admitted read-only.
@@ -345,6 +222,40 @@ impl Toolchain {
     pub fn env(&self) -> &BTreeMap<String, String> {
         &self.env
     }
+
+    #[must_use]
+    pub fn programs(&self) -> &[String] {
+        &self.programs
+    }
+
+    /// The resolved provider definitions used to build this closure.
+    #[must_use]
+    pub fn providers(&self) -> &[harness_toolchain::ResolvedProvider] {
+        &self.providers
+    }
+}
+
+fn merge_env(env: &mut BTreeMap<String, String>, name: &str, value: &str) -> Result<(), String> {
+    match env.get_mut(name) {
+        None => {
+            env.insert(name.to_owned(), value.to_owned());
+        }
+        Some(existing) if existing == value => {}
+        Some(existing) if name == "PATH" => {
+            for part in value.split(':') {
+                if !existing.split(':').any(|current| current == part) {
+                    existing.push(':');
+                    existing.push_str(part);
+                }
+            }
+        }
+        Some(existing) => {
+            return Err(format!(
+                "the admitted toolchains disagree on `{name}` (`{existing}` versus `{value}`)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Lower-case hex, because a digest that reaches a record has one spelling.
@@ -354,9 +265,4 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(text, "{byte:02x}");
         text
     })
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    path.metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }

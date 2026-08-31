@@ -2213,7 +2213,7 @@ fn the_pure_calls_of_one_turn_go_to_the_port_together_and_a_write_is_a_barrier()
         .events()
         .iter()
         .filter_map(|event| match event {
-            LoopEvent::ToolRequested(call) => Some(call.call_id.as_str()),
+            LoopEvent::ToolRequested { call, .. } => Some(call.call_id.as_str()),
             _ => None,
         })
         .collect();
@@ -5777,7 +5777,7 @@ fn a_call_outside_a_turn_meets_the_gate_a_model_call_meets_and_asks_no_model() {
         .events()
         .iter()
         .filter_map(|event| match event {
-            LoopEvent::ToolRequested(requested) => Some(requested.name.as_str()),
+            LoopEvent::ToolRequested { call, .. } => Some(call.name.as_str()),
             LoopEvent::ToolCompleted { failed: false, .. } => Some("completed"),
             LoopEvent::ToolCompleted { failed: true, .. } => Some("completed-failed"),
             _ => None,

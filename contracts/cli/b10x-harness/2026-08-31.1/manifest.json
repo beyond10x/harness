@@ -1,0 +1,38 @@
+{
+  "files": [
+    {
+      "bytes": 57287,
+      "path": "argv.json",
+      "sha256": "4b2ff0cf6254be84faaf42d63a1902769ce991c201563f5e7b31d9b0713c555f"
+    }
+  ],
+  "generated_from": "clap::CommandFactory::command()",
+  "interface": "argv",
+  "product": "b10x-harness",
+  "subcommands": [
+    "app-server",
+    "chat",
+    "context",
+    "context show",
+    "events",
+    "profiles",
+    "profiles explain",
+    "profiles init",
+    "profiles list",
+    "profiles show",
+    "providers",
+    "providers list",
+    "providers show",
+    "run",
+    "sessions",
+    "toolchains",
+    "toolchains list",
+    "toolchains show",
+    "toolchains validate",
+    "tools",
+    "workflow",
+    "workflow plan",
+    "workflow run"
+  ],
+  "version": "2026-08-31.1"
+}

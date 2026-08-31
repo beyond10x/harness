@@ -90,10 +90,7 @@ impl Flat {
     /// arguments a gate reads are the ones the model sent. An unknown name touches nothing — the
     /// catalogue refuses it before anything runs.
     fn subjects_of(&self, call: &ToolCall) -> Vec<Subject> {
-        self.catalogue
-            .get(call.name.as_str())
-            .map(|entry| entry.subjects(&call.arguments))
-            .unwrap_or_default()
+        self.catalogue.subjects(call.name.as_str(), &call.arguments)
     }
 
     fn invoke(&self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
@@ -135,6 +132,12 @@ impl ToolPort for Flat {
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.subjects_of(call)
+    }
+
+    fn operation(&self, call: &ToolCall) -> Option<String> {
+        self.catalogue
+            .operation(call.name.as_str())
+            .map(ToOwned::to_owned)
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
@@ -180,6 +183,10 @@ impl ToolPort for Forked<'_> {
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.0.subjects_of(call)
+    }
+
+    fn operation(&self, call: &ToolCall) -> Option<String> {
+        self.0.operation(call)
     }
 
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {

@@ -7,6 +7,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Attributable `ContextPackage` layers distinguish harness, operator, workspace and machine trust,
+  record a body-free SHA-256 manifest on `started`, and render provenance tags into the model
+  instruction. `context show` inspects the manifest or, with `--body`, the explicit contents.
+- A strict YAML toolchain registry now drives the built-in Rust, Go, Taskfile, npm and Yarn
+  providers. `--toolchain-spec FILE` adds operator-authored providers explicitly; custom files are
+  never discovered from a workspace and cannot override built-ins.
+- `--toolchain auto` uses read-only marker, path and version-file probes without executing a
+  compiler or task runner. Taskfile tasks, including safe local includes, and root package scripts
+  become enum-validated `taskfile_run`, `npm_run` or `yarn_run` calls rather than raw commands.
+- `toolchains list`, `toolchains show` and `toolchains validate` inspect the registry, and the
+  website reference is generated from the same built-in documents under a gate drift check.
+- Profiles may declare replace-not-merge `toolchains` and `toolchain-specs` lists.
+
+### Changed
+
+- `--instructions-file` is now the `operator.instructions` layer beside immutable harness and live
+  tool guidance, rather than replacing the whole standing instruction.
+- Toolchain declarations are refused for socket-backed substrate, whose daemon did not receive the
+  process-local read-only roots.
+- Dynamic tool requests record their resolved neutral operation and subjects, and `started` records
+  body-free toolchain source hashes; neither audit detail is rendered into model context.
+- CLI contract `2026-08-31.1` adds `context show`, declarative toolchain inspection and explicit
+  custom specification flags.
+
 ## [0.7.0] — 2026-08-31
 
 ### Added

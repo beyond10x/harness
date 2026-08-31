@@ -15,9 +15,9 @@ use harness_wire::{
 };
 use serde_json::{Value, json};
 
-/// The cut that added `tool_choice`. `2026-08-22` is the same wire without it, and `2026-08-21`
-/// the one before the prompt-cache key; both stay pinned as they were released.
-const VERSION: &str = "2026-08-31";
+/// The cut that modeled the route's keepalive marker as progress. `2026-08-31` is the same wire
+/// without it and stays pinned as released.
+const VERSION: &str = "2026-08-31.1";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

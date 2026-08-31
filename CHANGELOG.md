@@ -21,6 +21,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Responses `keepalive` progress markers are now modeled no-ops instead of unknown conversation
+  items. They no longer emit a false warning or get replayed as opaque input on the next turn; the
+  accepted event is pinned by wire contract `2026-08-31.1`.
 - `run --help` no longer says every OAuth source is explicitly named and never renewed. It now
   distinguishes read-only explicit sources from provider-defaulted sources and the `codex`
   provider's reported, atomic pre-run renewal.

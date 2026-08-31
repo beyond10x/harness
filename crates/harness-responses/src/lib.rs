@@ -37,6 +37,7 @@ pub const WIRE: &str = "openai-responses";
 /// Every event discriminator the decoder interprets rather than preserving as unknown.
 pub const ACCEPTED_STREAM_EVENTS: &[&str] = &[
     "error",
+    "keepalive",
     "response.completed",
     "response.content_part.added",
     "response.content_part.done",
@@ -417,7 +418,8 @@ impl<'a> TurnDecoder<'a> {
             // restates the completed summary, and the `part` pair only brackets it. Emitting them
             // would show a reader the same sentence twice.
             Some(
-                "response.created"
+                "keepalive"
+                | "response.created"
                 | "response.in_progress"
                 | "response.content_part.added"
                 | "response.content_part.done"
@@ -846,6 +848,17 @@ mod tests {
             Item::Opaque { payload, .. }
                 if payload["type"] == json!("response.something_new")
         )));
+    }
+
+    #[test]
+    fn a_keepalive_advances_no_turn_and_is_never_replayed() {
+        let (outcome, sink) = drive(&[
+            json!({"type": "keepalive"}),
+            json!({"type": "response.completed", "response": {"status": "completed", "output": []}}),
+        ]);
+        let outcome = outcome.expect("a keepalive is modeled progress");
+        assert!(sink.events().is_empty(), "{:?}", sink.events());
+        assert!(outcome.items.is_empty(), "{:?}", outcome.items);
     }
 
     #[test]

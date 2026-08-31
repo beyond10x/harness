@@ -86,6 +86,11 @@ contain registry credentials.
 The confined process has no network. Seed only the package cache the task needs into
 `<workspace>/.cargo` before the run, or an offline build that needs an unavailable crate will fail.
 
+`--toolchain go` mounts the installation named by `GOROOT`, or the one containing the first `go`
+on `PATH`, read-only at `/toolchain/go`. Go's build cache, module cache and `GOPATH` live inside the
+workspace. `GOENV=off`, `GOTOOLCHAIN=local`, `GOPROXY=off` and `GOSUMDB=off` prevent operator
+configuration, toolchain downloads and module-network fallback from widening the declaration.
+
 ## Approval still applies
 
 Confinement decides what the machine can safely offer. Approval decides whether one offered call may

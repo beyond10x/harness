@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `--toolchain go` admits one discovered Go installation read-only while keeping `GOPATH`, module
+  and build caches inside the confined workspace. Operator Go configuration, cached private
+  modules, toolchain downloads and module-network fallback are excluded.
+
 ### Changed
 
 - The public documentation now separates tutorials, task-oriented guides, concepts and exact

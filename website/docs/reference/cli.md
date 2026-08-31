@@ -127,7 +127,7 @@ may and may not do.
 | `--cgroup-root PATH` | Name a delegated cgroup root for embedded execution |
 | `--driver PATH` | Stage one host executable read-only at `/toolchain/driver` and admit that mounted path |
 | `--allow-program NAME` | Admit one executable program; repeatable |
-| `--toolchain rust` | Mount the Rust toolchain read-only |
+| `--toolchain rust\|go` | Mount the selected build toolchain read-only; mutable caches stay in the workspace |
 
 See [Confined workspaces](../guides/confinement.md) for prerequisites.
 

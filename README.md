@@ -185,6 +185,12 @@ registry credential. Nothing seeds that directory: a confined build has no netwo
 copies the package cache the task needs (`registry/` from `~/.cargo`) into `<workspace>/.cargo`
 before the run, or the first `cargo build` fails inside cargo looking for a crate it cannot fetch.
 
+`--toolchain go` mounts the `GOROOT` named by the operator, or the installation containing the
+first `go` on `PATH`, read-only at `/toolchain/go`. `GOPATH`, the module cache and the build cache
+all live under the workspace; `GOENV=off` excludes the operator's Go configuration, and module
+lookup is explicitly offline. A build can therefore use the standard library and modules already
+present in the workspace, but it cannot inherit cached private modules or reach a proxy.
+
 ## What the model sees
 
 One [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral

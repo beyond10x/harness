@@ -1309,7 +1309,6 @@ fn a_declared_go_toolchain_keeps_all_mutable_state_inside_the_workspace() {
             ("GOENV".to_owned(), "off".to_owned()),
             ("GOMODCACHE".to_owned(), "/workspace/.go/pkg/mod".to_owned()),
             ("GOPATH".to_owned(), "/workspace/.go".to_owned()),
-            ("GOPROXY".to_owned(), "off".to_owned()),
             ("GOROOT".to_owned(), "/toolchain/go".to_owned()),
             ("GOSUMDB".to_owned(), "off".to_owned()),
             ("GOTOOLCHAIN".to_owned(), "local".to_owned()),
@@ -1339,6 +1338,38 @@ fn a_go_toolchain_is_discovered_from_path_without_executing_it() {
         std::path::Path::new(&toolchain.roots()[0].host_path),
         host.path().canonicalize().expect("the canonical root")
     );
+}
+
+#[test]
+fn a_declared_go_toolchain_fits_substrates_closed_non_secret_environment() {
+    let host = tempfile::tempdir().expect("a fake Go installation");
+    let bin = host.path().join("bin");
+    std::fs::create_dir(&bin).expect("a bin directory");
+    let program = bin.join("go");
+    std::fs::write(&program, b"not executed").expect("a go program");
+    let mut permissions = program.metadata().expect("program metadata").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
+    std::fs::set_permissions(&program, permissions).expect("an executable program");
+
+    let toolchain = super::Toolchain::go(Some(host.path()), None).expect("the explicit GOROOT");
+    for name in toolchain.env().keys() {
+        let lower = name.to_ascii_lowercase();
+        for forbidden in [
+            "authorization",
+            "bearer",
+            "credential",
+            "password",
+            "proxy",
+            "secret",
+            "token",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "`{name}` is refused by substrate's closed non-secret environment because it \
+                 contains `{forbidden}`"
+            );
+        }
+    }
 }
 
 #[test]

@@ -588,7 +588,7 @@ struct RunOptions {
     /// processes.
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
-    /// Admit a build toolchain read-only inside the confined workspace. Only `rust` today.
+    /// Admit a build toolchain read-only inside the confined workspace: `rust` or `go`.
     ///
     /// Without one a confined run can execute anything whose implementation lives under `/usr` —
     /// an interpreter — and nothing whose compilers and package registry live in the operator's
@@ -615,6 +615,10 @@ struct RunOptions {
     #[arg(long, value_name = "PATH")]
     driver: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
+    ///
+    /// The declaration is checked against `argv[0]`, the root executable Harness starts. Programs
+    /// that executable starts are not separately matched; they remain inside the same sandbox,
+    /// process limits, no-network namespace, workspace boundary and whole-tree timeout.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
     /// extra steps. A set nobody named means nobody wanted one.
@@ -964,6 +968,10 @@ struct ToolsOptions {
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
+    ///
+    /// The declaration is checked against `argv[0]`, the root executable Harness starts. Programs
+    /// that executable starts are not separately matched; they remain inside the same sandbox,
+    /// process limits, no-network namespace, workspace boundary and whole-tree timeout.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
     /// extra steps. A set nobody named means nobody wanted one.
@@ -2352,12 +2360,15 @@ fn toolchain(
     driver: Option<&std::path::Path>,
 ) -> Result<harness_substrate::Toolchain, String> {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let goroot = std::env::var_os("GOROOT").map(std::path::PathBuf::from);
+    let path = std::env::var_os("PATH");
     let toolchain = match name {
         None => harness_substrate::Toolchain::default(),
         Some("rust") => harness_substrate::Toolchain::rust(home.as_deref())?,
+        Some("go") => harness_substrate::Toolchain::go(goroot.as_deref(), path.as_deref())?,
         Some(other) => {
             return Err(format!(
-                "`{other}` is not a toolchain this build knows; there is `rust`"
+                "`{other}` is not a toolchain this build knows; there are `go` and `rust`"
             ));
         }
     };

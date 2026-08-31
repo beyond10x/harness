@@ -1281,6 +1281,106 @@ fn a_declared_rust_toolchain_never_mounts_the_operators_cargo_credential() {
 }
 
 #[test]
+fn a_declared_go_toolchain_keeps_all_mutable_state_inside_the_workspace() {
+    let host = tempfile::tempdir().expect("a fake Go installation");
+    let bin = host.path().join("bin");
+    std::fs::create_dir(&bin).expect("a bin directory");
+    let program = bin.join("go");
+    std::fs::write(&program, b"not executed").expect("a go program");
+    let mut permissions = program.metadata().expect("program metadata").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
+    std::fs::set_permissions(&program, permissions).expect("an executable program");
+
+    let toolchain = super::Toolchain::go(Some(host.path()), None).expect("the explicit GOROOT");
+    assert_eq!(toolchain.roots().len(), 1);
+    assert_eq!(toolchain.roots()[0].mount, "/toolchain/go");
+    assert_eq!(
+        std::path::Path::new(&toolchain.roots()[0].host_path),
+        host.path().canonicalize().expect("the canonical root")
+    );
+    assert_eq!(
+        toolchain.env(),
+        &std::collections::BTreeMap::from([
+            ("CGO_ENABLED".to_owned(), "0".to_owned()),
+            (
+                "GOCACHE".to_owned(),
+                "/workspace/.cache/go-build".to_owned()
+            ),
+            ("GOENV".to_owned(), "off".to_owned()),
+            ("GOMODCACHE".to_owned(), "/workspace/.go/pkg/mod".to_owned()),
+            ("GOPATH".to_owned(), "/workspace/.go".to_owned()),
+            ("GOROOT".to_owned(), "/toolchain/go".to_owned()),
+            ("GOSUMDB".to_owned(), "off".to_owned()),
+            ("GOTOOLCHAIN".to_owned(), "local".to_owned()),
+            ("HOME".to_owned(), "/workspace".to_owned()),
+            (
+                "PATH".to_owned(),
+                "/toolchain/go/bin:/usr/local/bin:/usr/bin:/bin".to_owned(),
+            ),
+        ])
+    );
+}
+
+#[test]
+fn a_go_toolchain_is_discovered_from_path_without_executing_it() {
+    let host = tempfile::tempdir().expect("a fake Go installation");
+    let bin = host.path().join("bin");
+    std::fs::create_dir(&bin).expect("a bin directory");
+    let program = bin.join("go");
+    std::fs::write(&program, b"not executed").expect("a go program");
+    let mut permissions = program.metadata().expect("program metadata").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
+    std::fs::set_permissions(&program, permissions).expect("an executable program");
+
+    let toolchain = super::Toolchain::go(None, Some(bin.as_os_str())).expect("PATH discovery");
+    assert_eq!(toolchain.roots()[0].mount, "/toolchain/go");
+    assert_eq!(
+        std::path::Path::new(&toolchain.roots()[0].host_path),
+        host.path().canonicalize().expect("the canonical root")
+    );
+}
+
+#[test]
+fn a_declared_go_toolchain_fits_substrates_closed_non_secret_environment() {
+    let host = tempfile::tempdir().expect("a fake Go installation");
+    let bin = host.path().join("bin");
+    std::fs::create_dir(&bin).expect("a bin directory");
+    let program = bin.join("go");
+    std::fs::write(&program, b"not executed").expect("a go program");
+    let mut permissions = program.metadata().expect("program metadata").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
+    std::fs::set_permissions(&program, permissions).expect("an executable program");
+
+    let toolchain = super::Toolchain::go(Some(host.path()), None).expect("the explicit GOROOT");
+    for name in toolchain.env().keys() {
+        let lower = name.to_ascii_lowercase();
+        for forbidden in [
+            "authorization",
+            "bearer",
+            "credential",
+            "password",
+            "proxy",
+            "secret",
+            "token",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "`{name}` is refused by substrate's closed non-secret environment because it \
+                 contains `{forbidden}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_undeclared_go_toolchain_is_refused_by_name() {
+    assert_eq!(
+        super::Toolchain::go(None, None).expect_err("there is no discovery source"),
+        "neither `GOROOT` nor `PATH` says where the Go toolchain is"
+    );
+}
+
+#[test]
 fn a_staged_driver_admits_one_file_and_never_the_directory_it_came_from() {
     // The failure this exists to remove: a driven run allow-listed its own CLI by absolute host
     // path, the sandbox had no such file, every `run` died at `ENOENT`, and the model wrote the

@@ -31,7 +31,7 @@ this, never the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.6.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.7.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |
@@ -185,6 +185,13 @@ registry credential. Nothing seeds that directory: a confined build has no netwo
 copies the package cache the task needs (`registry/` from `~/.cargo`) into `<workspace>/.cargo`
 before the run, or the first `cargo build` fails inside cargo looking for a crate it cannot fetch.
 
+`--toolchain go` mounts the `GOROOT` named by the operator, or the installation containing the
+first `go` on `PATH`, read-only at `/toolchain/go`. `GOPATH`, the module cache and the build cache
+all live under the workspace; `GOENV=off` excludes the operator's Go configuration, and the
+sandbox's unshared network prevents module lookup from reaching a proxy. A build can therefore use
+the standard library and modules already present in the workspace, but it cannot inherit cached
+private modules or reach a proxy.
+
 ## What the model sees
 
 One [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral
@@ -199,6 +206,11 @@ operations, published under one of two surfaces.
 | `file_write` | `file.write` | one file, whole | a confined workspace |
 | `file_edit` | `file.edit` | one exact piece of text, which must appear exactly once | a confined workspace |
 | `run` | `shell` | an argv over a **declared** program set — never a shell | a delegated cgroup |
+
+For `run`, the declaration matches `argv[0]`: the root executable Harness starts. Compilers,
+linkers and other descendants it starts are not matched again. They remain in the same sandbox,
+cgroup limits, no-network namespace and workspace boundary, and timeout or cancellation kills the
+whole process tree.
 
 Four entries with no backend, six with a confined workspace, seven inside a delegated cgroup. The
 catalogue is what the machine can perform, and a tool the machine cannot confine is one no surface

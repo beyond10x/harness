@@ -1,11 +1,11 @@
 ---
 title: Status and limitations
-description: What Harness 0.6.0 can do today and which claims are not yet earned.
+description: What Harness 0.7.0 can do today and which claims are not yet earned.
 ---
 
 # Status and limitations
 
-Harness is pre-v1. Version `0.6.0` was tagged on 2026-08-31; this documentation describes that
+Harness is pre-v1. Version `0.7.0` was tagged on 2026-08-31; this documentation describes that
 release.
 
 ## Available now
@@ -14,7 +14,7 @@ release.
 |---|---|
 | Provider turns | Streaming OpenAI Responses and Anthropic Messages projections |
 | Agent loop | Turn assembly, tool round trips, approvals, cancellation, compaction, and budgets |
-| Workspace tools | Bounded reads everywhere; writes and argv execution behind substrate capabilities |
+| Workspace tools | Bounded reads everywhere; writes, argv execution, and declared Rust or Go toolchains behind substrate capabilities |
 | Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `app-server`, and `events` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
@@ -39,6 +39,12 @@ authorization failures. The first live route observation also exposed invalid wo
 that the emulator had accepted. These runs establish that the named routes authenticated and
 completed on those dates; they do not turn emulator-derived fixture bytes into live captures or
 promise conformance with every deployment.
+
+On 2026-08-31 an authorized Anthropic Messages run also exercised the embedded confined path in a
+delegated cgroup. It used the admitted Go toolchain to build, format, test and vet a scratch todo
+server and web frontend; independent host checks then passed its frontend, health route and CRUD
+API. This is evidence for that live route and confinement path, not a promotion of the pinned wire
+fixtures.
 
 ## Important limitations
 

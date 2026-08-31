@@ -6,9 +6,9 @@
 //! a root is a directory and a mount point. That is deliberate — the moment it knew what `cargo`
 //! was it would be carrying one client's vendor semantics.
 //!
-//! So the mapping from *a Rust build* to *these two directories and these four variables* lives
-//! here, in the client that wants it. A second toolchain is a second constructor, not a change to
-//! the substrate contract.
+//! So the mapping from a named build toolchain to its directories and environment lives here, in
+//! the client that wants it. A second toolchain is a second constructor, not a change to the
+//! substrate contract.
 //!
 //! # What it costs, stated plainly
 //!
@@ -19,9 +19,10 @@
 //! given, and a reader can see exactly what was admitted.
 //!
 //! Nothing here opens a network. A toolchain is a closure brought *in*; a build that needs to fetch
-//! a crate it does not already have will fail, and that is the confinement working.
+//! a crate or module it does not already have will fail, and that is the confinement working.
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -90,6 +91,82 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
+    /// The Go toolchain, found from an explicit `GOROOT` or from the `go` on `PATH`.
+    ///
+    /// Only the toolchain root is mounted. Go's build and module caches live inside the workspace,
+    /// and module lookup is offline, so a run receives neither the operator's configuration nor
+    /// their cached private modules.
+    ///
+    /// # Errors
+    ///
+    /// Names the missing declaration or path. Discovery never executes `go`: admitting a
+    /// toolchain must not run a program outside the confinement it is being assembled for.
+    pub fn go(goroot: Option<&Path>, path: Option<&OsStr>) -> Result<Self, String> {
+        let root = if let Some(root) = goroot {
+            root.to_path_buf()
+        } else {
+            let path = path.ok_or_else(|| {
+                "neither `GOROOT` nor `PATH` says where the Go toolchain is".to_owned()
+            })?;
+            let binary = std::env::split_paths(path)
+                .map(|directory| directory.join("go"))
+                .find(|candidate| is_executable_file(candidate))
+                .ok_or_else(|| "`PATH` contains no `go` toolchain".to_owned())?
+                .canonicalize()
+                .map_err(|error| format!("the Go toolchain's `go` program: {error}"))?;
+            binary
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| {
+                    format!(
+                        "the Go toolchain's `go` program ({}) has no toolchain root",
+                        binary.display()
+                    )
+                })?
+                .to_path_buf()
+        };
+        let root = root.canonicalize().map_err(|error| {
+            format!(
+                "the Go toolchain's `GOROOT` directory ({}): {error}",
+                root.display()
+            )
+        })?;
+        if !root.is_dir() {
+            return Err(format!(
+                "the Go toolchain's `GOROOT` directory ({}) is not a directory",
+                root.display()
+            ));
+        }
+        let binary = root.join("bin/go");
+        if !is_executable_file(&binary) {
+            return Err(format!(
+                "the Go toolchain's `go` program ({}) is not an executable file",
+                binary.display()
+            ));
+        }
+
+        let mut toolchain = Self::default();
+        toolchain.roots.push(ReadOnlyRoot {
+            host_path: root.display().to_string(),
+            mount: format!("{MOUNT_PREFIX}/go"),
+        });
+        for (name, value) in [
+            ("HOME", WORKSPACE),
+            ("GOROOT", "/toolchain/go"),
+            ("GOPATH", "/workspace/.go"),
+            ("GOMODCACHE", "/workspace/.go/pkg/mod"),
+            ("GOCACHE", "/workspace/.cache/go-build"),
+            ("GOENV", "off"),
+            ("GOTOOLCHAIN", "local"),
+            ("GOSUMDB", "off"),
+            ("CGO_ENABLED", "0"),
+            ("PATH", "/toolchain/go/bin:/usr/local/bin:/usr/bin:/bin"),
+        ] {
+            toolchain.env.insert(name.to_owned(), value.to_owned());
+        }
+        Ok(toolchain)
+    }
+
     /// The Rust toolchain, from the directories `cargo` and `rustup` actually keep it in.
     ///
     /// Read from `CARGO_HOME` and `RUSTUP_HOME` where the operator set them and from `$HOME`'s
@@ -277,4 +354,9 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(text, "{byte:02x}");
         text
     })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    path.metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }

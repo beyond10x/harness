@@ -158,3 +158,25 @@ fn every_page_the_workspace_rule_is_rendered_on_states_the_same_rule() {
         );
     }
 }
+
+#[test]
+fn every_allow_program_help_page_names_the_root_process_boundary() {
+    let pages: [&[&str]; 4] = [
+        &["run", "--help"],
+        &["chat", "--help"],
+        &["tools", "--help"],
+        &["workflow", "run", "--help"],
+    ];
+    for page in pages {
+        let help = invoke(page);
+        let named = page.join(" ");
+        assert_eq!(help.status, Some(0), "`{named}`: {}", help.stderr);
+        let text = flowed(&help.stdout);
+        assert!(
+            text.contains("argv[0]") && text.contains("not separately matched"),
+            "`{named}` must say that the declaration gates the root executable rather than every \
+             descendant:\n{}",
+            help.stdout
+        );
+    }
+}

@@ -1,0 +1,32 @@
+{
+  "wire": "openai-responses",
+  "version": "2026-08-31.1",
+  "transport": "https-sse",
+  "endpoint": "POST {base_url}/responses",
+  "streaming": true,
+  "stateful": false,
+  "request_encoding": {"json": "compact", "trailing_newline": true},
+  "request_headers": [
+    {"name": "accept", "value": "text/event-stream"},
+    {"name": "content-type", "value": "application/json"},
+    {"name": "originator", "value": "b10x-harness"},
+    {"name": "session-id", "value": "b10x-session-fixture"},
+    {"name": "x-client-request-id", "value": "b10x-session-fixture-7"},
+    {"name": "authorization", "value": "<credential omitted>"}
+  ],
+  "terminal_sentinel": {"required": true, "bytes": "data: [DONE]\n\n"},
+  "request_fields": ["include", "input", "max_output_tokens", "model", "prompt_cache_key", "reasoning", "store", "stream", "temperature", "tool_choice", "tools", "top_p"],
+  "stream_events": ["error", "keepalive", "response.completed", "response.content_part.added", "response.content_part.done", "response.created", "response.failed", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.in_progress", "response.incomplete", "response.output_item.added", "response.output_item.done", "response.output_text.delta", "response.output_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done"],
+  "output_items": ["function_call", "message", "reasoning"],
+  "unmodelled_output_items": "preserved as opaque and reported as a warning",
+  "usage_fields": ["input_tokens", "input_tokens_details.cached_tokens", "output_tokens"],
+  "conformance": "provider_emulated",
+  "files": [
+    {"path":"fixtures/accepted-events.json","bytes":555,"sha256":"663d87b2f27083f14ea709a9aeec9faa6a751a46d472538c3d3fc5172c5e76d2"},
+    {"path":"fixtures/error-stream.sse","bytes":86,"sha256":"4831dce58c99009c45b66dcab87ceebfa4213bfee79f574476c448b2dac62fc5"},
+    {"path":"fixtures/failed-stream.sse","bytes":127,"sha256":"552da305905b7bfdde9637bbecc9071668d88ac3c050920944baf1046a5d0f90"},
+    {"path":"fixtures/incomplete-stream.sse","bytes":196,"sha256":"50bab647b0f03d682cc0e4fb822df183b283d7c93dd985ce26a0fc5e038a2f37"},
+    {"path":"fixtures/turn-request.json","bytes":996,"sha256":"73f1cff6c5c8f294538a6cce58015f7ac94342a91251b943cd4e5479956194f5"},
+    {"path":"fixtures/turn-stream.sse","bytes":1772,"sha256":"780c629aba8f3a2224a983e0a1c0b09bbf199d48749878ffdf23df01dd27e505"}
+  ]
+}

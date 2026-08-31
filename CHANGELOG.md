@@ -7,7 +7,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-31
+
+### Added
+
+- `--toolchain go` admits one discovered Go installation read-only while keeping `GOPATH`, module
+  and build caches inside the confined workspace. Operator Go configuration, cached private
+  modules, toolchain downloads and module-network fallback are excluded.
+
 ### Changed
+
+- Human progress renders a non-failed tool outcome as `← returned`, not `← ok`: a `run` tool may
+  successfully return an observation whose child exit status is nonzero. JSON events and their
+  `failed` field are unchanged.
+- CLI help and confinement documentation now state that `--allow-program` matches the root
+  executable in `argv[0]`. Descendants are not re-matched, but stay inside the same sandbox,
+  no-network namespace, resource limits, workspace boundary and whole-tree lifetime.
 
 - The public documentation now separates tutorials, task-oriented guides, concepts and exact
   reference; documents both built-in credential defaults and the `codex` provider's bounded
@@ -21,6 +36,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Responses `keepalive` progress markers are now modeled no-ops instead of unknown conversation
+  items. They no longer emit a false warning or get replayed as opaque input on the next turn; the
+  accepted event is pinned by wire contract `2026-08-31.1`.
 - `run --help` no longer says every OAuth source is explicitly named and never renewed. It now
   distinguishes read-only explicit sources from provider-defaulted sources and the `codex`
   provider's reported, atomic pre-run renewal.

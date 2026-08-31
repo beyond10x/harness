@@ -71,6 +71,10 @@ Programs are an allowlist of executable names:
 ```
 
 Harness starts an argv directly. It never invokes a shell to reinterpret one string.
+`--allow-program` is matched against `argv[0]`, the root executable Harness starts. Programs that
+root starts — such as compilers and linkers — are not matched again. They remain inside the same
+sandbox, cgroup limits, no-network namespace and workspace boundary, and whole-tree timeout or
+cancellation covers them too.
 
 For an executable outside the sandbox's ordinary `/usr`, `/bin`, `/lib`, `/lib64`, or workspace
 mounts, use `--driver /absolute/host/path`. Harness stages exactly that file read-only at
@@ -85,6 +89,12 @@ contain registry credentials.
 
 The confined process has no network. Seed only the package cache the task needs into
 `<workspace>/.cargo` before the run, or an offline build that needs an unavailable crate will fail.
+
+`--toolchain go` mounts the installation named by `GOROOT`, or the one containing the first `go`
+on `PATH`, read-only at `/toolchain/go`. Go's build cache, module cache and `GOPATH` live inside the
+workspace. `GOENV=off`, `GOTOOLCHAIN=local` and `GOSUMDB=off` prevent operator configuration and
+toolchain downloads from widening the declaration; the sandbox's unshared network prevents module
+lookup from reaching a proxy.
 
 ## Approval still applies
 

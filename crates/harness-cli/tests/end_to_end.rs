@@ -1179,6 +1179,62 @@ fn a_command_line_the_parser_refuses_states_that_the_run_never_started() {
 }
 
 #[test]
+fn an_unenforceable_spend_ceiling_is_one_json_refusal_and_no_session() {
+    // `Budget::validate` runs before the loop's `Started` event and before any request. The CLI
+    // used to classify that error as a run that had started and failed: stdout was empty under
+    // `--no-session`, or held only a `session` line when filing was enabled. Both shapes left a
+    // JSONL driver with no terminal saying the run was refused.
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let output = run(
+        &[
+            "run",
+            "--base-url",
+            "http://127.0.0.1:1/v1",
+            "--model",
+            "b10x-emulated",
+            "--max-cost-microunits",
+            "1",
+            "--session-dir",
+            sessions.path().to_str().expect("utf-8 path"),
+            "--json",
+            "--input",
+            "hi",
+        ],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    assert_eq!(
+        output.stdout.lines().count(),
+        1,
+        "one terminal and no session line: {}",
+        output.stdout
+    );
+    let refused: Value = serde_json::from_str(output.stdout.trim()).expect("one JSON refusal line");
+    assert_eq!(refused["kind"], "refused", "{refused}");
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("max_cost_microunits")),
+        "{refused}"
+    );
+    assert!(
+        output.stderr.contains("budget refused")
+            && !output.stderr.contains("posting to http://127.0.0.1:1"),
+        "the budget, not the unreachable endpoint, decides before any request: {}",
+        output.stderr
+    );
+    assert_eq!(
+        fs::read_dir(sessions.path())
+            .expect("the session directory remains readable")
+            .count(),
+        0,
+        "a run that never started files no session"
+    );
+}
+
+#[test]
 fn a_write_is_refused_when_the_run_may_not_ask_anybody() {
     // `--approve deny` is the library's own default approver, chosen explicitly. The call comes
     // back to the model as a failed outcome — it has to know the effect did not happen — and the

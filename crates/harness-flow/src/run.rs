@@ -46,7 +46,7 @@ pub struct StepContext {
 }
 
 /// What a step did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepOutcome {
     /// It ran and did what it was for.
     Passed,
@@ -55,6 +55,22 @@ pub enum StepOutcome {
     /// A failure, not an error: the walk carries on and skips whatever needed this step, which is
     /// what a person would do. A workflow that could not represent a failed step would need one.
     Failed,
+    /// The step was reached and hands control to a person.
+    ///
+    /// This is terminal for the current walk, but it is neither a failed step nor a broken run.
+    /// The path comes from the walk; the reason is the caller's own instruction to the operator.
+    Paused { reason: String },
+}
+
+/// How a walk ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowStatus {
+    /// Every reachable step finished cleanly.
+    Completed,
+    /// The walk finished, but at least one reachable step or section did not come out clean.
+    Failed,
+    /// A step handed control to a person and the walk stopped exactly there.
+    AwaitingOperator,
 }
 
 /// What a caller answers when the walk asks whether it may cross a section boundary.
@@ -148,8 +164,13 @@ pub trait StepRunner {
 /// derived from the tallies. Deriving it was the bug this split fixes: a workflow that retreats and
 /// then succeeds is a successful run, and a `clean()` that counted the failed attempt would call
 /// every retreat a failure and make the whole feature look broken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// `reached` is the one tally that may exceed `ran`: an operator step is reached and awaits a
+/// person, but has not run and is not failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Report {
+    /// Steps reached, including an operator step that is awaiting its person.
+    pub reached: usize,
     /// Steps that ran, counting a repeated step once per attempt.
     pub ran: usize,
     /// Of those, how many failed.
@@ -159,13 +180,31 @@ pub struct Report {
     /// How many times a group was re-entered.
     pub retreats: usize,
     /// Whether the flow came out clean.
-    outcome_clean: bool,
+    status: FlowStatus,
+}
+
+impl Default for Report {
+    fn default() -> Self {
+        Self {
+            reached: 0,
+            ran: 0,
+            failed: 0,
+            skipped: 0,
+            retreats: 0,
+            status: FlowStatus::Failed,
+        }
+    }
 }
 
 impl Report {
     /// `true` when the flow came out clean, whatever it took to get there.
     pub fn clean(&self) -> bool {
-        self.outcome_clean
+        self.status == FlowStatus::Completed
+    }
+
+    /// The terminal state, kept separate from the cumulative tallies.
+    pub fn status(&self) -> FlowStatus {
+        self.status
     }
 }
 
@@ -181,16 +220,35 @@ pub(crate) fn walk(
         steps,
     });
     let mut report = Report::default();
-    let failed = walk_group(root, plan, runner, sink, &mut report, &Handoff::new()).failed;
-    report.outcome_clean = !failed;
-    sink.emit(FlowEvent::FlowFinished {
-        flow: root.id.clone(),
-        ran: report.ran,
-        failed: report.failed,
-        skipped: report.skipped,
-        retreats: report.retreats,
-        clean: report.outcome_clean,
-    });
+    match walk_group(root, plan, runner, sink, &mut report, &Handoff::new()) {
+        Walked::Left(left) => {
+            report.status = if left.failed {
+                FlowStatus::Failed
+            } else {
+                FlowStatus::Completed
+            };
+            sink.emit(FlowEvent::FlowFinished {
+                flow: root.id.clone(),
+                ran: report.ran,
+                failed: report.failed,
+                skipped: report.skipped,
+                retreats: report.retreats,
+                clean: report.clean(),
+            });
+        }
+        Walked::Paused { path, reason } => {
+            report.status = FlowStatus::AwaitingOperator;
+            sink.emit(FlowEvent::FlowPaused {
+                flow: root.id.clone(),
+                path,
+                reason,
+                reached: report.reached,
+                failed: report.failed,
+                skipped: report.skipped,
+                retreats: report.retreats,
+            });
+        }
+    }
     report
 }
 
@@ -201,6 +259,17 @@ pub(crate) fn walk(
 struct Left {
     failed: bool,
     handoff: Handoff,
+}
+
+/// A group either left normally or stopped at an operator step inside it.
+enum Walked {
+    Left(Left),
+    Paused { path: String, reason: String },
+}
+
+enum Attempted {
+    Finished { failed: bool },
+    Paused { path: String, reason: String },
 }
 
 /// Walks one group, re-entering it while it does not come out clean and the document still allows
@@ -229,17 +298,20 @@ fn walk_group(
     sink: &mut dyn FlowSink,
     report: &mut Report,
     inherited: &Handoff,
-) -> Left {
+) -> Walked {
     let mut attempt = 1;
     // Written by whichever attempt turns out to be the last one, and read once, below it.
     let mut handoff;
     let mut broke_its_promise;
     let failed = loop {
         if let Gate::Refused { reason } = runner.entering(&plan.path, attempt) {
-            return refused_entry(group, plan, sink, report, attempt, &reason);
+            return Walked::Left(refused_entry(group, plan, sink, report, attempt, &reason));
         }
 
-        let ran_badly = attempt_group(group, plan, runner, sink, report, attempt, inherited);
+        let ran_badly = match attempt_group(group, plan, runner, sink, report, attempt, inherited) {
+            Attempted::Finished { failed } => failed,
+            Attempted::Paused { path, reason } => return Walked::Paused { path, reason },
+        };
         let last = attempt >= plan.attempts;
 
         // The handoff is asked for on the attempt that is about to leave — one that came out clean,
@@ -292,7 +364,7 @@ fn walk_group(
         exhausted: failed && attempt >= plan.attempts && plan.attempts > 1 && !broke_its_promise,
         gave: handoff.keys().cloned().collect(),
     });
-    Left { failed, handoff }
+    Walked::Left(Left { failed, handoff })
 }
 
 /// Collects what a group promised its siblings, and says whether it broke that promise.
@@ -369,7 +441,7 @@ fn attempt_group(
     report: &mut Report,
     attempt: u32,
     inherited: &Handoff,
-) -> bool {
+) -> Attempted {
     sink.emit(FlowEvent::GroupEntered {
         path: plan.path.clone(),
         layers: plan.layers.len(),
@@ -410,20 +482,31 @@ fn attempt_group(
             match node {
                 Node::Step(step) => {
                     sink.emit(FlowEvent::StepStarted { path: path.clone() });
+                    report.reached += 1;
                     let context = StepContext {
                         scope: plan.path.clone(),
                         attempt,
                         available: available.clone(),
                     };
-                    let outcome = runner.run(&path, step, &context);
-                    let failed = outcome == StepOutcome::Failed;
-                    report.ran += 1;
-                    if failed {
-                        report.failed += 1;
-                        broken.insert(id.clone());
-                        any_failed = true;
+                    match runner.run(&path, step, &context) {
+                        StepOutcome::Passed => {
+                            report.ran += 1;
+                            sink.emit(FlowEvent::StepFinished {
+                                path,
+                                failed: false,
+                            });
+                        }
+                        StepOutcome::Failed => {
+                            report.ran += 1;
+                            report.failed += 1;
+                            broken.insert(id.clone());
+                            any_failed = true;
+                            sink.emit(FlowEvent::StepFinished { path, failed: true });
+                        }
+                        StepOutcome::Paused { reason } => {
+                            return Attempted::Paused { path, reason };
+                        }
                     }
-                    sink.emit(FlowEvent::StepFinished { path, failed });
                 }
                 Node::Group(inner) => {
                     let inner_plan = plan
@@ -432,7 +515,13 @@ fn attempt_group(
                         .expect("every child group was planned with its parent");
                     // `walk_group` emits this group's own `GroupLeft`, because only it knows how
                     // many attempts it took and what it managed to hand over.
-                    let left = walk_group(inner, inner_plan, runner, sink, report, &available);
+                    let left = match walk_group(inner, inner_plan, runner, sink, report, &available)
+                    {
+                        Walked::Left(left) => left,
+                        Walked::Paused { path, reason } => {
+                            return Attempted::Paused { path, reason };
+                        }
+                    };
                     if left.failed {
                         broken.insert(id.clone());
                         any_failed = true;
@@ -450,7 +539,7 @@ fn attempt_group(
         }
     }
 
-    any_failed
+    Attempted::Finished { failed: any_failed }
 }
 
 /// Reports a node — and everything inside it, if it is a group — as skipped, and answers how many

@@ -441,8 +441,28 @@ impl<O: Write, E: Write> FlowSink for Renderer<O, E> {
                  retreat(s)",
                 if clean { "✓" } else { "✗" }
             )),
+            paused @ FlowEvent::FlowPaused { .. } => self.note(&flow_paused_line(&paused)),
         }
     }
+}
+
+fn flow_paused_line(event: &FlowEvent) -> String {
+    let FlowEvent::FlowPaused {
+        flow,
+        path,
+        reason,
+        reached,
+        failed,
+        skipped,
+        retreats,
+    } = event
+    else {
+        unreachable!("only a flow pause is rendered here")
+    };
+    format!(
+        "flow ‖ {flow} — awaiting operator at {path}: {reason} ({reached} reached, {failed} \
+         failed, {skipped} skipped, {retreats} retreat(s))"
+    )
 }
 
 /// The one line that says a declared tool does not exist on this machine, and why.
@@ -1087,6 +1107,34 @@ mod tests {
             lines[1]
         );
         assert!(err.is_empty(), "json mode keeps stderr clean: {err}");
+    }
+
+    #[test]
+    fn an_operator_pause_is_a_terminal_progress_line_and_a_typed_json_event() {
+        let event = FlowEvent::FlowPaused {
+            flow: "development".to_owned(),
+            path: "root.decompose".to_owned(),
+            reason: "review the decomposition".to_owned(),
+            reached: 3,
+            failed: 0,
+            skipped: 0,
+            retreats: 0,
+        };
+        let (out, err) = render_flow(vec![event.clone()], false);
+        assert!(out.is_empty());
+        assert!(
+            err.contains(
+                "flow ‖ development — awaiting operator at root.decompose: review the decomposition"
+            ),
+            "{err}"
+        );
+
+        let (out, err) = render_flow(vec![event], true);
+        assert!(err.is_empty());
+        let line: serde_json::Value = serde_json::from_str(out.trim()).expect("one event");
+        assert_eq!(line["kind"], serde_json::json!("flow-paused"));
+        assert_eq!(line["path"], serde_json::json!("root.decompose"));
+        assert_eq!(line["reached"], serde_json::json!(3));
     }
 
     #[test]

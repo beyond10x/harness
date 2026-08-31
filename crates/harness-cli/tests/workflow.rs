@@ -232,6 +232,24 @@ root:
             command: [sh, -c, \"exit 0\"]
 ";
 
+/// A person is the whole boundary: reaching it is a successful pause, not a model turn.
+const OPERATOR: &str = "\
+id: operator-handoff
+root:
+  id: root
+  nodes:
+    - id: review
+      run:
+        kind: operator
+        description: The change now belongs to a reviewer.
+        prompt: Review the change and record whether it is accepted.
+        scope: [\"**=denied\"]
+    - id: after-review
+      needs: [review]
+      run:
+        prompt: This must remain pending until the person resumes the workflow.
+";
+
 /// One section, two steps, the second needing the first — the shortest document that can show a
 /// ceiling binding *between* steps rather than inside one.
 const TWO_STEPS: &str = "\
@@ -2006,6 +2024,108 @@ fn a_command_step_is_one_call_through_the_gate_and_no_turn_of_the_model() {
                 && item["failed"] == true),
             "{wire:?}: with its result beside it: {items:?}"
         );
+    }
+}
+
+#[test]
+fn an_operator_step_pauses_with_exit_zero_and_contacts_neither_wire() {
+    for wire in WIRES {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let record = dir.path().join("requests.jsonl");
+        let fixture = wire.recording("flow-passes", Some(&record));
+        let workspace = workspace();
+        let flow = flow_file(dir.path(), "operator.yaml", OPERATOR);
+        let sessions = tempfile::tempdir().expect("a temporary directory");
+        let hooks = hooks_file(
+            dir.path(),
+            &serde_json::json!({
+                "on": "before-call",
+                "command": ["python3", "-c", "raise SystemExit('operator step called a hook')"],
+            }),
+        );
+
+        let output = walk(
+            &fixture,
+            wire,
+            &flow,
+            workspace.path(),
+            sessions.path(),
+            &[
+                "--json",
+                "--hooks",
+                hooks.to_str().expect("utf-8 hook path"),
+            ],
+        );
+
+        assert_eq!(output.status, Some(0), "{wire:?}: {}", output.stderr);
+        assert_eq!(requests(&record), 0, "{wire:?}: no model was contacted");
+        assert!(sessions_in(sessions.path()).is_empty(), "{wire:?}");
+        let events = events(&output);
+        assert_eq!(
+            steps_started(&events),
+            vec!["root.review"],
+            "{wire:?}: {:?}",
+            kinds(&events)
+        );
+        let paused = of_kind(&events, "flow-paused");
+        assert_eq!(paused.len(), 1, "{wire:?}: {events:?}");
+        assert_eq!(paused[0]["path"], serde_json::json!("root.review"));
+        assert_eq!(
+            paused[0]["reason"],
+            serde_json::json!("Review the change and record whether it is accepted.")
+        );
+        assert_eq!(paused[0]["reached"], serde_json::json!(1));
+        assert_eq!(paused[0]["failed"], serde_json::json!(0));
+        for absent in [
+            "step-finished",
+            "node-skipped",
+            "group-repeating",
+            "group-left",
+            "flow-finished",
+            "tool-requested",
+            "approval-required",
+            "hook-ran",
+        ] {
+            assert!(
+                of_kind(&events, absent).is_empty(),
+                "{wire:?}: `{absent}` must not follow an operator handoff: {events:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unknown_kinds_and_operator_steps_without_prompts_are_refused_by_plan() {
+    for (name, run, expected) in [
+        (
+            "unknown",
+            "        kind: delegate\n",
+            "unknown step kind `delegate`",
+        ),
+        (
+            "missing-prompt",
+            "        kind: operator\n",
+            "no non-empty `prompt`",
+        ),
+    ] {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let flow = flow_file(
+            dir.path(),
+            "flow.yaml",
+            &format!("id: {name}\nroot:\n  id: root\n  nodes:\n    - id: stop\n      run:\n{run}"),
+        );
+        let output = raw(&[
+            "workflow",
+            "plan",
+            "--flow",
+            flow.to_str().expect("utf-8 path"),
+            "--json",
+        ]);
+        assert_eq!(output.status, Some(1), "{}", output.stderr);
+        let refusal: Value = serde_json::from_str(output.stdout.trim()).expect("one refusal");
+        let reason = refusal["reason"].as_str().expect("a reason");
+        assert!(reason.contains("`root.stop`"), "{reason}");
+        assert!(reason.contains(expected), "{reason}");
     }
 }
 

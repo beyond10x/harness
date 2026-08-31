@@ -72,10 +72,16 @@ first two (§ 7 E1 is what fills the rest):
 
 | key | used as |
 |---|---|
+| `kind` | absent or `llm`: one model turn; `command`: one gated `run` call; `operator`: stop at this step and hand its `prompt` to a person |
 | `state` | the step's name in prose and in the record |
 | `summary` | the step's prompt when `prompt` is absent |
 | `prompt` | the step's prompt |
 | `context` | file paths **inside** the workspace, read like `--context` and named in the step input; a name that is absolute, that resolves outside the canonicalised workspace, or that is not there fails the step by name (`warning`, `code: "context-refused"`, naming the path and the workspace) with no model call, and the walk skips what needed it |
+
+`kind` is a closed vocabulary. An unknown word, a non-string kind, a malformed command, or an
+operator step with no non-empty `prompt` refuses the document in `workflow plan`, before a run is
+prepared. A producer adding a new kind can therefore never turn it into a paid model step by
+accident.
 
 **The step input** is one user turn: the flow's `--input`, then *"You are in step `<path>`, attempt
 `<n>` of section `<scope>`"*, then the handoffs in `available` rendered as *"Earlier sections
@@ -123,6 +129,7 @@ nothing still answers `outcome`; the nudge and the `answer` path are unchanged f
 | any budget stop — `MaxTurns`, `MaxOutputTokens`, `MaxInputTokens`, `MaxCost`, `Deadline`, `ProviderIncomplete` | `Failed`, and the reason is in the record |
 | `Cancelled` | the flow stops: what ran is filed, `flow-finished` is **not** emitted, exit 2 |
 | `LoopError` (a wire, credential or protocol failure) | **the flow aborts**, exit 1 — a broken wire is nobody's failed step, and a walk that recorded a network blip as `Failed` would misreport the plan |
+| `kind: operator` | `Paused { reason: prompt }`: terminal `flow-paused`, exit 0; the step is reached, not failed, and no downstream skip, group leave, retreat or `flow-finished` is emitted |
 
 **Budgets.** `max_turns`, `max_output_tokens`, `max_output_tokens_per_turn` bound each step, as
 each `run_in` counts them. `max_cost_microunits` and `max_duration_ms` bound the **flow**, and the
@@ -188,7 +195,7 @@ point, with `point: "transition"`.
 
 **Events.** `FlowEvent` already serialises with `kind` in kebab-case (`flow-started`,
 `group-entered`, `layer-ready`, `step-started`, `step-finished`, `node-skipped`,
-`group-repeating`, `handoff-incomplete`, `group-left`, `flow-finished`, and `transition-refused`
+`group-repeating`, `handoff-incomplete`, `group-left`, `flow-finished`, `flow-paused`, and `transition-refused`
 from § 3). Under `--json` they go on stdout in the same stream as the loop's events, one per line;
 a step's loop events (`started` … `finished`) appear between its `step-started` and
 `step-finished`. On stderr each renders as one line in the run's own style — `flow ▸ root.shape
@@ -205,11 +212,13 @@ validator exited `1`). A name may not contain a `.` — `FlowError::DottedName` 
 the pairs readable back; saved through `Session::save` as it closes, with
 what it cost; `--no-session` writes nothing; `--session-dir` is honoured. Under `--json` a
 `{"kind":"session", …}` line is emitted as each scope's session is filed — the same shape `run`
-prints last — and the last line of a finished flow is `flow-finished`. `--resume` is refused (§ 1);
+prints last — and the last line of a finished flow is `flow-finished`. A walk that reaches an
+operator step instead ends at `flow-paused { flow, path, reason, reached, failed, skipped,
+retreats }`; `reached` includes the operator step, which has no `step-finished`. `--resume` is refused (§ 1);
 resuming a **flow** is M2.
 
 **Exit status**, in the table `reference/cli.md` already has: `0` the flow came out clean
-(`Report::clean()`); `2` it finished and did not — a step failed, a section was skipped or
+(`Report::status() == Completed`) **or is awaiting an operator**; `2` it finished and did not — a step failed, a section was skipped or
 exhausted, or the run was cancelled — inspect `flow-finished`; `1` refused before it started, or
 aborted on a `LoopError`.
 
@@ -253,6 +262,11 @@ beside the group — or, under `--json`, the `Plan` itself; exit `0` valid, `1` 
   outcome: exit `0` passed, anything else failed by name (`workflow.rs`, *A `command` step is a
   call, not a turn*). What is still open is a toolset per step: a command runs under the run's own
   `--allow-program`, so a verifier the run does not publish is a refused step.
+- ~~**Operator steps.**~~ **Done (M2, 2026-08-31).** `run.kind: operator` with a non-empty prompt
+  returns the scheduler's typed `Paused` outcome before the step narrows scope, checks a budget or
+  reaches a tool, approval, call hook or provider. The pause propagates through every open group
+  without leaving or repeating it, emits one terminal `flow-paused`, and exits 0. Resume remains
+  the separate cursor work above: the pending tail is not reported as skipped.
 - **The metaharness projection of `flow.*`** into `trace-ir/1` families, or their listing under
   `CONTROL_PLANE_EVENTS`. Only when an eval asks for a native-flow record.
 - **Live evidence.** Everything below is `provider_emulated` until one authorized run walks the
@@ -292,6 +306,7 @@ Through the shipped binary, over **both** emulators, `provider_emulated`:
 | `a_transition_hook_that_refuses_an_enter_skips_the_section_by_name` | `enter` refused: no model call for that section, its steps `node-skipped`, exit 2 |
 | `a_hook_that_cannot_answer_a_transition_fails_closed` | a hook exiting 3: `Failed`, read as a refusal |
 | `the_projected_adp_workflow_walks_end_to_end` | `fixtures/adp-default.projected.yaml` over both emulators with a scenario answering every step `passed`: exit 0, one session per scope, `flow-finished` clean |
+| `an_operator_step_pauses_with_exit_zero_and_contacts_neither_wire` | both emulators record zero requests; one `flow-paused` names the path and prompt, the operator step is reached rather than failed, and no finish, skip, leave, retreat, tool, approval or call-hook event follows |
 | `workflow_plan_prints_the_layers_without_an_endpoint` | no `--base-url`, no credential, no socket |
 | `a_flow_that_does_not_validate_is_refused_before_any_session` | a cycle: exit 1, the `FlowError` text, no session directory written |
 | `a_wire_failure_aborts_the_flow_and_files_what_ran` | the emulator dies mid-step: exit 1, the sessions so far on disk |

@@ -62,13 +62,14 @@ behavior are not surprises. Replace the provider configuration with explicit end
 credential flags when you do not want a built-in default.
 
 Each section attempt files its own session unless `--no-session` is set. `--json` interleaves flow
-events with loop events, ending with `flow-finished` when the walk finishes.
+events with loop events, ending with `flow-finished` when the walk finishes or `flow-paused` when
+an `operator` step hands control to a person.
 
 ## Interpret the result
 
 | Status | Meaning |
 |---|---|
-| `0` | Every required section came out clean |
+| `0` | Every required section came out clean, or the walk is awaiting the operator named by `flow-paused` |
 | `2` | The flow finished but a step failed, skipped, exhausted, or was cancelled |
 | `1` | Configuration was refused or a loop error aborted a step |
 

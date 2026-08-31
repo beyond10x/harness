@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- `started.credential_source` now distinguishes `api-key`, `oauth` and `none`, plus whether an
+  explicitly named source was a file or environment variable. It still records no path, variable
+  name or secret, and provider-defaulted sources remain `provider:<name>`. The old flat `named`
+  value could not prove the hermetic claim that a run which declared no API key acquired none.
+
 ## [0.9.0] — 2026-08-31
 
 ### Added

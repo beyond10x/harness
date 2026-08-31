@@ -88,8 +88,10 @@ API-key and OAuth sources are mutually exclusive.
 
 Harness searches no ambient default. A **provider** may default a credential path — that is what
 makes `provider = "claude"` enough on its own — and a run that took one reports
-`credential_source: "provider:<name>"` rather than `"named"`, so the default is visible in the
-record rather than silent. A credential you name yourself always wins.
+`credential_source: "provider:<name>"`, so the default is visible in the record rather than
+silent. A credential you name yourself always wins and records its class and source kind — for
+example `"api-key:file"` or `"oauth:environment"` — without recording the path, variable name or
+secret. Naming none records `"none"`.
 
 ## Workspace and tools
 

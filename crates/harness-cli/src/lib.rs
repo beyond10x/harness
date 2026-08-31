@@ -1116,14 +1116,28 @@ impl RunOptions {
 
 /// What the record will say about where this run's credential came from.
 ///
-/// `provider:<name>` where a provider defaulted it, `named` where the operator pointed at it. The
-/// distinction is the whole of what makes a defaulted vendor path acceptable rather than the
-/// ambient fallback `resolve_credential` refuses.
+/// `provider:<name>` where a provider defaulted it; otherwise the credential class and the kind of
+/// source the operator named. The value carries no path, variable name or secret. Keeping
+/// `api-key`, `oauth` and `none` distinct is what lets an observer verify that a run which declared
+/// no API key did not quietly acquire one; the old flat `named` value proved only that some argv
+/// was involved.
 fn credential_source(options: &RunOptions) -> String {
-    options
-        .credential_from_provider
-        .as_ref()
-        .map_or_else(|| "named".to_owned(), |name| format!("provider:{name}"))
+    if let Some(name) = &options.credential_from_provider {
+        return format!("provider:{name}");
+    }
+    if options.api_key_file.is_some() {
+        return "api-key:file".to_owned();
+    }
+    if options.api_key_env.is_some() {
+        return "api-key:environment".to_owned();
+    }
+    if options.oauth_token_file.is_some() {
+        return "oauth:file".to_owned();
+    }
+    if options.oauth_token_env.is_some() {
+        return "oauth:environment".to_owned();
+    }
+    "none".to_owned()
 }
 
 /// The profiles that configured this run, in the loop's own shape.
@@ -3748,6 +3762,27 @@ mod tests {
             resolve_credential(&options(&[])).expect("declared"),
             Credential::Unnamed
         ));
+    }
+
+    #[test]
+    fn the_record_distinguishes_credential_class_without_naming_the_secret_source() {
+        assert_eq!(credential_source(&options(&[])), "none");
+        assert_eq!(
+            credential_source(&options(&["--api-key-file", "/run/secrets/key"])),
+            "api-key:file"
+        );
+        assert_eq!(
+            credential_source(&options(&["--api-key-env", "SECRET_NAME"])),
+            "api-key:environment"
+        );
+        assert_eq!(
+            credential_source(&options(&["--oauth-token-file", "/run/secrets/token"])),
+            "oauth:file"
+        );
+        assert_eq!(
+            credential_source(&options(&["--oauth-token-env", "TOKEN_NAME"])),
+            "oauth:environment"
+        );
     }
 
     #[test]

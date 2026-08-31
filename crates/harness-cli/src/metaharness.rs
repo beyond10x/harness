@@ -344,10 +344,12 @@ fn started(value: &Value, version: &str) -> Value {
         "model": value["model"],
         // Absent because this loop has none of them, not because nobody looked.
         "permission_mode": Value::Null,
-        // **Read from the record, not asserted.** It was the constant `"named"`, which was true
-        // while every credential was typed. A provider may default one now, and the difference
-        // between a default and the ambient fallback this harness refuses is entirely that the
-        // record says which — so a hardcoded value here would remove the only thing paying for it.
+        // **Read from the record, not asserted.** The value distinguishes API keys, OAuth and no
+        // credential without carrying a path, environment-variable name or secret. A provider may
+        // default one, and the difference between a default and the ambient fallback this harness
+        // refuses is entirely that the record says which — so a hardcoded value here would remove
+        // the only thing paying for it. `named` is only the compatibility answer for an older loop
+        // record which did not make that distinction.
         "credential_source": value
             .get("credential_source")
             .cloned()

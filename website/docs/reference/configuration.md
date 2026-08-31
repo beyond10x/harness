@@ -126,9 +126,10 @@ away: a run whose credential came from a provider reports
 "credential_source": "provider:claude"
 ```
 
-instead of the flat `"named"`, and `providers show` prints the path before a token is spent.
-Something is defaulted; nothing is silent. A credential you name yourself still wins, and still
-reports `"named"`.
+instead of a typed source such as `"api-key:file"`, and `providers show` prints the path before a
+token is spent. Something is defaulted; nothing is silent. A credential you name yourself still
+wins and reports its credential class plus `file` or `environment`; the path, variable name and
+secret never enter the record. Naming no credential reports `"none"`.
 
 If the file a provider names is not there, the run refuses at startup rather than failing at its
 first request.

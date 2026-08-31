@@ -72,6 +72,11 @@ Programs are an allowlist of executable names:
 
 Harness starts an argv directly. It never invokes a shell to reinterpret one string.
 
+For an executable outside the sandbox's ordinary `/usr`, `/bin`, `/lib`, `/lib64`, or workspace
+mounts, use `--driver /absolute/host/path`. Harness stages exactly that file read-only at
+`/toolchain/driver`, admits the mounted path, and reports its digest. The declaration admits the
+name and staged file for this run; it is not a general host-path mount.
+
 ## Build toolchains
 
 `--toolchain rust` mounts the operator's Rust toolchain read-only inside the sandbox. It points

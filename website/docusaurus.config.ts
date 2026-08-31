@@ -72,8 +72,8 @@ const config: Config = {
       },
       items: [
         {to: '/docs/getting-started', label: 'Get started', position: 'left'},
-        {to: '/docs/concepts/agent-loop', label: 'Agent loop', position: 'left'},
-        {to: '/docs/concepts/tools-and-approvals', label: 'Safety', position: 'left'},
+        {to: '/docs/guides/profiles', label: 'How-to', position: 'left'},
+        {to: '/docs/concepts/agent-loop', label: 'Concepts', position: 'left'},
         {to: '/docs/reference/cli', label: 'CLI', position: 'left'},
         {to: '/docs/status', label: 'Status', position: 'left'},
         {
@@ -90,9 +90,9 @@ const config: Config = {
           title: 'Learn',
           items: [
             {label: 'Start here', to: '/docs/'},
-            {label: 'Getting started', to: '/docs/getting-started'},
-            {label: 'The agent loop', to: '/docs/concepts/agent-loop'},
-            {label: 'Tools and approvals', to: '/docs/concepts/tools-and-approvals'},
+            {label: 'First read-only run', to: '/docs/getting-started'},
+            {label: 'First confined change', to: '/docs/tutorials/confined-change'},
+            {label: 'Configure providers', to: '/docs/guides/profiles'},
           ],
         },
         {
@@ -102,6 +102,7 @@ const config: Config = {
             {label: 'Confined workspaces', to: '/docs/guides/confinement'},
             {label: 'Structured runs', to: '/docs/guides/structured-runs'},
             {label: 'Workflows', to: '/docs/guides/workflows'},
+            {label: 'The agent loop', to: '/docs/concepts/agent-loop'},
             {label: 'Security boundary', to: '/docs/concepts/security-boundary'},
           ],
         },
@@ -110,12 +111,15 @@ const config: Config = {
           items: [
             {label: 'Command line', to: '/docs/reference/cli'},
             {label: 'Provider wires', to: '/docs/reference/wires'},
+            {label: 'Configuration', to: '/docs/reference/configuration'},
+            {label: 'Workflow format', to: '/docs/reference/workflows'},
             {label: 'Project status', to: '/docs/status'},
+            {label: 'Security policy', href: 'https://github.com/beyond10x/harness/security/policy'},
             {label: 'GitHub repository', href: 'https://github.com/beyond10x/harness'},
           ],
         },
       ],
-      copyright: `© ${new Date().getFullYear()} beyond10x · An effect is either gated or it did not happen.`,
+      copyright: `© ${new Date().getFullYear()} beyond10x · Publicly readable, proprietary source · An effect is either gated or it did not happen.`,
     },
     prism: {
       theme: prismThemes.github,

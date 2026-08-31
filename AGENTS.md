@@ -206,7 +206,10 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   place the loop starts **threads**, a group of delegates, keeps the operator's programs off them:
   a child asks the run's own thread, which holds the single `HookPort` the shell attached. *How
   many copies of my guard are running* must not depend on how many sub-tasks a model asked for.
-- **This repository is private.** Never commit credentials, tokens, key files or transcripts.
+- **This repository is public by explicit decision (atlas ADR 0008).** Public visibility is not an
+  open-source licence and does not make a development contract stable; the workspace remains
+  `LicenseRef-B10x-Proprietary`. Never commit credentials, tokens, key files or transcripts, and
+  never rely on repository privacy to contain one.
 
 ## Out of scope
 

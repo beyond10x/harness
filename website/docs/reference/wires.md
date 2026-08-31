@@ -37,9 +37,11 @@ Credential acquisition is separated from provider presentation. The caller names
 selected wire constructs the request headers required by its route. Transport code receives a
 finished URL, headers, body, and decoder and contains no vendor names or endpoint paths.
 
-Use API-key sources for a normal bearer route. Use the explicitly named OAuth source options for a
-subscription route. The latter can select a token from a JSON document and re-reads files on every
-attempt so an external owner can rotate them.
+Use API-key sources for a normal bearer route. OAuth sources can select a token from a JSON
+document and re-read files on every attempt so an external owner can rotate them. A built-in
+provider may supply a documented OAuth path; the `codex` provider may renew and atomically rewrite
+only the default it supplied before the first request. Explicitly named sources are never renewed
+or written. See [Configuration reference](./configuration.md#the-credential-is-defaulted-and-the-record-says-so).
 
 ## Retry behaviour
 

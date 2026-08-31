@@ -523,9 +523,10 @@ struct RunOptions {
     api_key_env: Option<String>,
     /// File holding a subscription OAuth token, for a route that takes one instead of an API key.
     ///
-    /// Named, like every other credential source here: there is no default path and no vendor
-    /// directory this looks in. The file is re-read on **every** call, so a token an owner outside
-    /// this process renews is picked up without restarting the run — nothing here renews one.
+    /// A path typed here is re-read on **every** call and is never renewed or written by Harness.
+    /// A selected built-in provider may instead supply a documented default path; `providers show`
+    /// prints it before a run. The `codex` provider may renew and atomically rewrite only its own
+    /// default source before the first request, and records that write even under `--quiet`.
     #[arg(long, conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_env"])]
     oauth_token_file: Option<PathBuf>,
     /// Name of an environment variable holding a subscription OAuth token.

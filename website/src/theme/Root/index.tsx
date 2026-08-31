@@ -37,7 +37,8 @@ export default function Root({children}: Props): ReactNode {
   }, [isDoc, location.pathname]);
 
   function returnToTop() {
-    window.scrollTo({top: 0, behavior: 'smooth'});
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({top: 0, behavior: reducedMotion ? 'auto' : 'smooth'});
   }
 
   return (

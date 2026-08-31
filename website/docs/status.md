@@ -27,13 +27,18 @@ provider wires run the same scenario suite against deterministic local HTTP endp
 
 ## Evidence labels
 
-Most model-wire evidence is `provider_emulated`: a deterministic local server is contacted over a
-real socket. This supports claims about bytes, bounds, retries, and loop behavior. It does not prove
-conformance with every live provider deployment.
+The current pinned request and stream fixtures are `provider_emulated`: a deterministic local
+server is contacted over a real socket. This supports claims about exact bytes, bounds, retries,
+and loop behavior. Those pins have not been promoted to `vendor_live`.
 
-Limited live-provider runs have happened and already found behavior the emulator did not: the first
-live run rejected the original workspace tool names on turn one. Live characterization remains a
-work item rather than a completed compatibility claim.
+Both subscription routes do have narrower, dated authorized observations. On 2026-08-29 an
+Anthropic Messages run completed a three-turn tool-using conversation against
+`api.anthropic.com`. On 2026-08-30 an OpenAI Responses run completed a two-turn tool-using
+conversation against the ChatGPT/Codex endpoint. Invalid-token controls on each route returned
+authorization failures. The first live route observation also exposed invalid workspace tool names
+that the emulator had accepted. These runs establish that the named routes authenticated and
+completed on those dates; they do not turn emulator-derived fixture bytes into live captures or
+promise conformance with every deployment.
 
 ## Important limitations
 

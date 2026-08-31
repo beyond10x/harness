@@ -24,14 +24,28 @@ than copying every help paragraph.
 |---|---|
 | `run` | Run one request to completion |
 | `chat` | Read one line at a time over the same local session |
+| `workflow` | Workflow command group |
 | `workflow plan` | Validate a workflow document and print what runs in what order, without an endpoint |
 | `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
 | `tools` | Print the catalogue, skills and agents this machine would publish, without a model call |
-| `profiles list\|show\|explain\|init` | Read the configured profiles, or write a starter config |
-| `providers list\|show` | Read the providers this build ships, and any the config overrides |
+| `profiles` | Profile command group |
+| `profiles list` | List configured profile names |
+| `profiles show` | Print one profile |
+| `profiles explain` | Resolve profile layers to argv without contacting a model |
+| `profiles init` | Write a commented starter configuration |
+| `providers` | Provider command group |
+| `providers list` | List built-in and overridden providers |
+| `providers show` | Print one effective provider, including credential and renewal facts |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
 | `events` | Convert a Harness JSONL record into `metaharness.event/1` |
+
+## Global options
+
+| Option | Meaning |
+|---|---|
+| `--help` | Print help for the selected command |
+| `--version` | Print the binary version |
 
 ## Profiles
 
@@ -43,7 +57,7 @@ A **provider** carries the endpoint, wire, model and credential source and grant
 collection ships built in. A **profile** carries `write`, the approval ceiling, the allow-list and
 the write scope, and nothing of that shape is compiled in. A typed flag beats both, and typing
 `--base-url` opts out of the provider bundle entirely. `session.started` names every profile that
-contributed with a digest of what it said. See [Profiles and providers](../guides/profiles.md).
+contributed with a digest of what it said. See [Configuration reference](./configuration.md).
 
 ## Endpoint and wire
 
@@ -79,6 +93,7 @@ record rather than silent. A credential you name yourself always wins.
 | `--workspace PATH` | Root visible to workspace tools; defaults to `.` |
 | `--surface flat\|verbs` | Publish entries directly or under three catalogue verbs |
 | `--context FILE` | Preload a file; repeatable |
+| `--instructions-file FILE` | Replace the built-in standing instruction with the named file |
 | `--no-project-instructions` | Omit `AGENTS.md` or `CLAUDE.md` from the standing instruction |
 | `--write-scope GLOB=SCOPE` | Restrict matching paths; repeatable, first match wins |
 | `--scope-announce stated\|silent` | Tell the model the write restrictions or test the gate silently |
@@ -110,6 +125,7 @@ may and may not do.
 | `--substrate-embedded` | Hold a local substrate driver in this process |
 | `--workspace-id ID` | Select a daemon workspace |
 | `--cgroup-root PATH` | Name a delegated cgroup root for embedded execution |
+| `--driver PATH` | Stage one host executable read-only at `/toolchain/driver` and admit that mounted path |
 | `--allow-program NAME` | Admit one executable program; repeatable |
 | `--toolchain rust` | Mount the Rust toolchain read-only |
 
@@ -158,7 +174,7 @@ object, and `workflow run` derives one schema per step for itself.
 | `--hooks FILE` | Load explicitly named operator hook programs |
 
 Under `workflow run`, `--hooks` also accepts `on: "transition"`, asked before a section is entered
-and after it leaves. See [Workflows](../guides/workflows.md).
+and after it leaves. See [Workflow reference](./workflows.md).
 
 ## Workflows
 
@@ -186,6 +202,9 @@ typing it is an unrecognised argument rather than a refusal. Step budgets
 
 Under `--json`, a refusal before the loop starts is one `{"kind":"refused","reason":"..."}` line
 and exit status 1.
+
+The `events` converter reads its Harness JSONL record from `--in FILE` and writes the projected
+record to `--out FILE`.
 
 ## Exit status
 

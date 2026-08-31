@@ -6,6 +6,10 @@ turn out, tool calls back, results in, next turn out.
 **[Read the public documentation](https://beyond10x.github.io/harness/)** for the quickstart,
 execution model, safety boundary, operational guides and reference.
 
+The source is publicly readable under the proprietary `LicenseRef-B10x-Proprietary` declaration.
+Public visibility is not an open-source licence or a stability promise. Report a suspected security
+issue through GitHub's private **Report a vulnerability** flow; see [`SECURITY.md`](SECURITY.md).
+
 The problem it removes: driving a vendor's harness means booting a vendor binary whose only job is
 to hold a loop, registering every tool through that vendor's mechanism, and living with whatever
 budgets that vendor happens to enforce. Owning the loop makes tool names, budgets, cost accounting
@@ -23,7 +27,7 @@ this, never the reverse.
 | observed by | [metaharness](https://github.com/beyond10x/metaharness) — its `b10x` adapter launches `b10x-harness run` and reads the `--json` record. Observed, not driven: the published toolset already *is* the policy |
 | confined by | [substrate](https://github.com/beyond10x/substrate) — embedded in-process, or over the daemon's socket |
 | reaches models through | any OpenAI-Responses endpoint, e.g. [llmgw](https://github.com/beyond10x/llmgw), or any Anthropic-Messages one |
-| mapped in | [atlas](https://github.com/beyond10x/atlas) |
+| mapped in | the private organisation architecture map |
 
 ## Status
 

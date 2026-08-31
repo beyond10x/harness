@@ -152,7 +152,7 @@ fn the_binary_reads_a_real_file_by_calling_the_tool_directly() {
         "the call is reported under the entry's own name: {}",
         output.stderr
     );
-    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert!(output.stderr.contains("← returned"), "{}", output.stderr);
     assert_eq!(output.stdout.trim(), "The file says: hello harness");
 }
 
@@ -171,7 +171,7 @@ fn the_binary_reads_a_real_file_through_a_real_tool_call() {
         output.stderr
     );
     assert!(
-        output.stderr.contains("← ok"),
+        output.stderr.contains("← returned"),
         "the result is reported: {}",
         output.stderr
     );
@@ -891,7 +891,7 @@ fn a_run_that_broke_on_the_wire_files_the_turn_it_had_already_bought() {
     );
     // Turn one really happened first: the tool was called and answered before the wire refused.
     assert!(output.stderr.contains("→ file_read"), "{}", output.stderr);
-    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert!(output.stderr.contains("← returned"), "{}", output.stderr);
 
     let session = only_session(sessions.path());
     assert_eq!(
@@ -948,7 +948,7 @@ fn a_run_that_broke_on_the_wire_files_what_it_bought_on_the_second_wire_too() {
     );
 
     assert_eq!(output.status, Some(1), "stdout: {}", output.stdout);
-    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert!(output.stderr.contains("← returned"), "{}", output.stderr);
 
     let session = only_session(sessions.path());
     assert_eq!(session["wire"], "anthropic-messages");
@@ -1300,7 +1300,7 @@ fn raising_the_ceiling_lets_a_write_through_on_the_second_wire_too() {
     );
 
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
-    assert!(output.stderr.contains("← ok"), "{}", output.stderr);
+    assert!(output.stderr.contains("← returned"), "{}", output.stderr);
     assert_eq!(
         fs::read_to_string(workspace.join("note.md")).expect("the file was written"),
         "written by the harness\n"

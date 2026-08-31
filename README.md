@@ -206,6 +206,11 @@ operations, published under one of two surfaces.
 | `file_edit` | `file.edit` | one exact piece of text, which must appear exactly once | a confined workspace |
 | `run` | `shell` | an argv over a **declared** program set — never a shell | a delegated cgroup |
 
+For `run`, the declaration matches `argv[0]`: the root executable Harness starts. Compilers,
+linkers and other descendants it starts are not matched again. They remain in the same sandbox,
+cgroup limits, no-network namespace and workspace boundary, and timeout or cancellation kills the
+whole process tree.
+
 Four entries with no backend, six with a confined workspace, seven inside a delegated cgroup. The
 catalogue is what the machine can perform, and a tool the machine cannot confine is one no surface
 ever lists — and one that was *asked for* and could not be admitted is reported beside the list it

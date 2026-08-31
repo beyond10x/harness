@@ -616,6 +616,10 @@ struct RunOptions {
     driver: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
     ///
+    /// The declaration is checked against `argv[0]`, the root executable Harness starts. Programs
+    /// that executable starts are not separately matched; they remain inside the same sandbox,
+    /// process limits, no-network namespace, workspace boundary and whole-tree timeout.
+    ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
     /// extra steps. A set nobody named means nobody wanted one.
     #[arg(long)]
@@ -964,6 +968,10 @@ struct ToolsOptions {
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
+    ///
+    /// The declaration is checked against `argv[0]`, the root executable Harness starts. Programs
+    /// that executable starts are not separately matched; they remain inside the same sandbox,
+    /// process limits, no-network namespace, workspace boundary and whole-tree timeout.
     ///
     /// Declared rather than open, because an argv whose program could be anything is a shell with
     /// extra steps. A set nobody named means nobody wanted one.

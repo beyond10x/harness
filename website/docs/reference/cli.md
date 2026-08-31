@@ -126,7 +126,7 @@ may and may not do.
 | `--workspace-id ID` | Select a daemon workspace |
 | `--cgroup-root PATH` | Name a delegated cgroup root for embedded execution |
 | `--driver PATH` | Stage one host executable read-only at `/toolchain/driver` and admit that mounted path |
-| `--allow-program NAME` | Admit one executable program; repeatable |
+| `--allow-program NAME` | Admit one root executable as `argv[0]`; repeatable. Descendants are not re-matched and remain confined with the root process |
 | `--toolchain rust\|go` | Mount the selected build toolchain read-only; mutable caches stay in the workspace |
 
 See [Confined workspaces](../guides/confinement.md) for prerequisites.

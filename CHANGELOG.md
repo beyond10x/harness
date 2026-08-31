@@ -15,6 +15,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Human progress renders a non-failed tool outcome as `← returned`, not `← ok`: a `run` tool may
+  successfully return an observation whose child exit status is nonzero. JSON events and their
+  `failed` field are unchanged.
+- CLI help and confinement documentation now state that `--allow-program` matches the root
+  executable in `argv[0]`. Descendants are not re-matched, but stay inside the same sandbox,
+  no-network namespace, resource limits, workspace boundary and whole-tree lifetime.
+
 - The public documentation now separates tutorials, task-oriented guides, concepts and exact
   reference; documents both built-in credential defaults and the `codex` provider's bounded
   pre-run renewal; covers every generated long CLI flag and command; distinguishes authorized live

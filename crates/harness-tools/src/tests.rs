@@ -95,6 +95,36 @@ fn output(outcome: &ToolOutcome) -> String {
 // --- the publication gate -----------------------------------------------------------------------
 
 #[test]
+fn typed_toolchain_tools_do_not_require_publishing_raw_run() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let providers = harness_toolchain::Registry::builtins()
+        .expect("built-ins")
+        .resolve(&root, Some(&["rust".to_owned()]))
+        .expect("installed Rust provider");
+    let programs = providers
+        .iter()
+        .flat_map(|provider| provider.programs.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    let catalogue = Catalogue::of_with_toolchains(Everything::at(&root, &programs), providers);
+    let names = catalogue
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"rust_test"), "{names:?}");
+    assert!(names.contains(&"toolchain_test"), "{names:?}");
+    assert!(
+        !names.contains(&"run"),
+        "internally admitted compilers do not widen raw argv execution: {names:?}"
+    );
+    let result = catalogue
+        .invoke("rust_test", &json!({}))
+        .expect("the typed call reaches the admitted cargo program");
+    assert_eq!(result["exit"], 0);
+}
+
+#[test]
 fn a_provider_that_cannot_write_contributes_no_writing_entry() {
     // The gate, in one assertion. The model is never told about a tool it cannot have, so it never
     // plans around one and never spends a turn being refused.
@@ -616,7 +646,7 @@ fn every_entry_a_catalogue_can_hold_answers_to_exactly_one_operation() {
     let catalogue = Catalogue::of(Everything::at(dir.path(), &["cargo"]));
     for entry in catalogue.entries() {
         assert_eq!(
-            operation_of(entry.name),
+            operation_of(&entry.name),
             Some(entry.operation),
             "`{}` reads as a different operation off the record than in the catalogue",
             entry.name

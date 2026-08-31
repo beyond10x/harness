@@ -60,6 +60,7 @@ mod agent;
 mod answer;
 mod approval;
 mod budget;
+mod context;
 mod delegate;
 mod event;
 mod hook;
@@ -84,12 +85,17 @@ pub use answer::{
 };
 pub use approval::{ApprovalDecision, ApprovalPort, ApproveAll, DenyAll};
 pub use budget::{Budget, BudgetError};
+pub use context::{
+    ContextCacheClass, ContextKind, ContextLayer, ContextManifestEntry, ContextPackage,
+    ContextTrust,
+};
 pub use delegate::{
     DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_PARALLEL, DELEGATE_MAX_TURNS,
     DELEGATE_PARALLEL_NOTE, DELEGATE_PREAMBLE, Delegation, MAX_DELEGATION_DEPTH,
 };
 pub use event::{
-    CredentialRenewal, LoopEvent, LoopSink, NullLoopSink, ProfileRef, VecLoopSink, Withheld,
+    CredentialRenewal, LoopEvent, LoopSink, NullLoopSink, ProfileRef, ToolchainRef, VecLoopSink,
+    Withheld,
 };
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
@@ -281,6 +287,8 @@ pub struct LoopConfig {
     pub model: String,
     /// The standing instruction for the run, sent separately from the person's input.
     pub instructions: String,
+    /// The typed sources from which `instructions` was rendered.
+    pub context: ContextPackage,
     pub budget: Budget,
     /// How the model is asked to sample. Sent on every turn, because a stateless loop replays the
     /// whole conversation each time and a value set once would otherwise apply only to the first.
@@ -331,6 +339,9 @@ pub struct LoopConfig {
     /// The profiles that configured this run, for its record. Acted on nowhere: what they set was
     /// already applied by the caller, and this is the sentence saying which file said it.
     pub profiles: Vec<ProfileRef>,
+
+    /// Declarative toolchain definitions used by this run, for its body-free record.
+    pub toolchains: Vec<ToolchainRef>,
 
     /// Where this run's credential came from, for the record: `named`, or `provider:<name>`.
     pub credential_source: String,
@@ -412,6 +423,7 @@ impl LoopConfig {
         Self {
             model: model.into(),
             instructions: instructions.into(),
+            context: ContextPackage::default(),
             budget: Budget::default(),
             sampling: Sampling::default(),
             prices: None,
@@ -422,12 +434,21 @@ impl LoopConfig {
             delegation: None,
             agents: None,
             profiles: Vec::new(),
+            toolchains: Vec::new(),
             credential_source: "named".to_owned(),
             credential_renewal: None,
             admits: None,
             skills: None,
             withheld: Vec::new(),
         }
+    }
+
+    /// Replaces the opaque instruction with a deterministic rendering of attributable layers.
+    #[must_use]
+    pub fn with_context(mut self, context: ContextPackage) -> Self {
+        self.instructions = context.render();
+        self.context = context;
+        self
     }
 
     /// States which declared tools this run's machine would not admit.
@@ -458,6 +479,13 @@ impl LoopConfig {
     #[must_use]
     pub fn with_profiles(mut self, profiles: Vec<ProfileRef>) -> Self {
         self.profiles = profiles;
+        self
+    }
+
+    /// Adds body-free toolchain provenance to the run record.
+    #[must_use]
+    pub fn with_toolchains(mut self, toolchains: Vec<ToolchainRef>) -> Self {
+        self.toolchains = toolchains;
         self
     }
 
@@ -1560,10 +1588,31 @@ fn refused_beside_the_answer(name: &harness_wire::ToolName) -> String {
 /// model made, and a reader counting [`LoopEvent::ToolRequested`] against the [`Item::ToolCall`]s
 /// of a finished run would otherwise find calls in the conversation the record never mentions, with
 /// no way to tell which of them went unreported.
-fn refuse_rest(calls: &[ToolCall], why: &str, state: &mut RunState, sink: &mut dyn LoopSink) {
+fn refuse_rest(
+    calls: &[ToolCall],
+    why: &str,
+    tools: &dyn ToolPort,
+    state: &mut RunState,
+    sink: &mut dyn LoopSink,
+) {
     for skipped in calls {
-        sink.emit(LoopEvent::ToolRequested(skipped.clone()));
+        sink.emit(requested(skipped, Some(tools)));
         complete(skipped, ToolOutcome::failed(why), state, sink);
+    }
+}
+
+/// The call as made plus facts that only its live dynamic port can resolve.
+fn requested(call: &ToolCall, tools: Option<&dyn ToolPort>) -> LoopEvent {
+    LoopEvent::ToolRequested {
+        call: call.clone(),
+        operation: tools.and_then(|tools| tools.operation(call)),
+        subjects: tools.map_or_else(Vec::new, |tools| {
+            tools
+                .subjects(call)
+                .into_iter()
+                .map(|subject| subject.as_str().to_owned())
+                .collect()
+        }),
     }
 }
 
@@ -1856,7 +1905,7 @@ impl<'a> AgentLoop<'a> {
     /// — the result comes back and is pushed nowhere — because a call no turn asked for belongs
     /// wherever the caller files it.
     pub fn call(&mut self, call: &ToolCall, sink: &mut dyn LoopSink) -> ToolOutcome {
-        sink.emit(LoopEvent::ToolRequested(call.clone()));
+        sink.emit(requested(call, Some(self.tools)));
         let deadline = self
             .config
             .budget
@@ -2038,6 +2087,8 @@ impl<'a> AgentLoop<'a> {
                 .map(Agents::names)
                 .unwrap_or_default(),
             profiles: self.config.profiles.clone(),
+            context: self.config.context.manifest(),
+            toolchains: self.config.toolchains.clone(),
             credential_source: self.config.credential_source.clone(),
         });
         self.announce_prices(priced, sink);
@@ -2735,6 +2786,7 @@ impl<'a> AgentLoop<'a> {
                 refuse_rest(
                     &calls[next..],
                     "the run was cancelled before this call ran",
+                    self.tools,
                     state,
                     sink,
                 );
@@ -2749,6 +2801,7 @@ impl<'a> AgentLoop<'a> {
                 refuse_rest(
                     &calls[next..],
                     "the run's deadline passed before this call ran",
+                    self.tools,
                     state,
                     sink,
                 );
@@ -2760,7 +2813,7 @@ impl<'a> AgentLoop<'a> {
             if let Some((at, refusal)) = answering.as_ref()
                 && *at != next
             {
-                refuse_rest(std::slice::from_ref(call), refusal, state, sink);
+                refuse_rest(std::slice::from_ref(call), refusal, self.tools, state, sink);
                 next += 1;
                 continue;
             }
@@ -2775,7 +2828,7 @@ impl<'a> AgentLoop<'a> {
                 let span = self.delegate_span(&owned, &calls[next..]);
                 let group = &calls[next..next + span];
                 for call in group {
-                    sink.emit(LoopEvent::ToolRequested(call.clone()));
+                    sink.emit(requested(call, None));
                 }
                 if let Some(stop) = self.run_owned(&owned, group, state, deadline, sink) {
                     // Only the answer ends a turn from in here, and nothing after it is read. The
@@ -2783,7 +2836,7 @@ impl<'a> AgentLoop<'a> {
                     // reason, and `answering` is `Some` here because only an answer stops a turn.
                     // An answer is never grouped, so `span` is one and the tail starts after it.
                     if let Some((_, refusal)) = answering.as_ref() {
-                        refuse_rest(&calls[next + span..], refusal, state, sink);
+                        refuse_rest(&calls[next + span..], refusal, self.tools, state, sink);
                     }
                     return Some(stop);
                 }
@@ -2804,7 +2857,7 @@ impl<'a> AgentLoop<'a> {
                 continue;
             }
 
-            sink.emit(LoopEvent::ToolRequested(call.clone()));
+            sink.emit(requested(call, Some(self.tools)));
             let result = self.invoke(call, deadline, sink);
             complete(call, result, state, sink);
             next += 1;
@@ -3639,14 +3692,14 @@ impl<'a> AgentLoop<'a> {
         // beside it are unaffected.
         if group.iter().any(|call| self.unadmitted(call).is_some()) {
             for call in group {
-                sink.emit(LoopEvent::ToolRequested(call.clone()));
+                sink.emit(requested(call, Some(self.tools)));
                 let result = self.invoke(call, deadline, sink);
                 complete(call, result, state, sink);
             }
             return;
         }
         for call in group {
-            sink.emit(LoopEvent::ToolRequested(call.clone()));
+            sink.emit(requested(call, Some(self.tools)));
         }
         // With the time left on the clock, for the reason `invoke` gives: the deadline check
         // between groups cannot reach into a group already running.

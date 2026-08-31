@@ -96,6 +96,14 @@ workspace. `GOENV=off`, `GOTOOLCHAIN=local` and `GOSUMDB=off` prevent operator c
 toolchain downloads from widening the declaration; the sandbox's unshared network prevents module
 lookup from reaching a proxy.
 
+`--toolchain auto` resolves built-in Rust, Go, Taskfile, npm and Yarn provider documents from
+root-relative markers; it never runs an unconfined discovery command. Rust and Go contribute typed
+lifecycle tools. Taskfile public tasks—including safe, static local includes—and root package
+scripts become enum-validated calls through `taskfile_run`, `npm_run` or `yarn_run`. Generic roles
+are published only when every active provider implements the role. `--toolchain-spec FILE` loads a
+custom provider only when the operator names it. The catalogue is frozen before turn one, and raw
+`run` cannot invoke internally admitted programs.
+
 ## Approval still applies
 
 Confinement decides what the machine can safely offer. Approval decides whether one offered call may

@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+harness-toolchain = { workspace = true }
 harness-tools = { workspace = true }
 harness-wire = { workspace = true }
 # **The one dependency on a sibling component, and both boundaries it crosses are argued in

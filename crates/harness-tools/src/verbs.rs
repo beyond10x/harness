@@ -164,7 +164,7 @@ impl Verbs {
     /// [`ToolPort::subjects`] is per-call rather than per-spec.
     fn subjects_of(&self, call: &ToolCall) -> Vec<Subject> {
         self.invoked_entry(call)
-            .map(|(entry, arguments)| entry.subjects(arguments))
+            .map(|(entry, arguments)| self.catalogue.subjects(&entry.name, arguments))
             .unwrap_or_default()
     }
 
@@ -212,7 +212,7 @@ impl Verbs {
             .iter()
             .map(|call| {
                 self.invoked_entry(call)
-                    .map(|(entry, arguments)| (entry.name, arguments))
+                    .map(|(entry, arguments)| (entry.name.as_str(), arguments))
             })
             .collect();
         let invocations: Vec<(&str, &Value)> = routed.iter().flatten().copied().collect();
@@ -273,6 +273,11 @@ impl ToolPort for Verbs {
         self.subjects_of(call)
     }
 
+    fn operation(&self, call: &ToolCall) -> Option<String> {
+        self.invoked_entry(call)
+            .map(|(entry, _)| entry.operation.to_owned())
+    }
+
     fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
         self.spec_invoked(call)
     }
@@ -328,6 +333,10 @@ impl ToolPort for Forked<'_> {
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.0.subjects_of(call)
+    }
+
+    fn operation(&self, call: &ToolCall) -> Option<String> {
+        self.0.operation(call)
     }
 
     fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {

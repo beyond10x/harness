@@ -327,16 +327,19 @@ fn a_command_line_the_document_says_has_no_positionals_has_two() {
         };
         // What the help page shows, as a driver would read it: `<NAME>` is demanded, `[NAME]` may
         // be left out.
-        let shown: Vec<(String, bool)> = positionals_in(&help_of(&path))
+        let shown: Vec<(String, bool, bool)> = positionals_in(&help_of(&path))
             .iter()
             .map(|placeholder| {
+                let multiple = placeholder.ends_with("...");
+                let placeholder = placeholder.strip_suffix("...").unwrap_or(placeholder);
                 (
                     placeholder.trim_matches(['<', '>', '[', ']']).to_owned(),
                     placeholder.starts_with('<'),
+                    multiple,
                 )
             })
             .collect();
-        let recorded: Vec<(String, bool)> = document["positionals"][&named]
+        let recorded: Vec<(String, bool, bool)> = document["positionals"][&named]
             .as_array()
             .unwrap_or_else(|| panic!("`{named}` has a positional list in the pinned document"))
             .iter()
@@ -344,6 +347,7 @@ fn a_command_line_the_document_says_has_no_positionals_has_two() {
                 (
                     row["name"].as_str().expect("a placeholder").to_owned(),
                     row["required"].as_bool().expect("a boolean"),
+                    row["multiple"].as_bool().expect("a boolean"),
                 )
             })
             .collect();

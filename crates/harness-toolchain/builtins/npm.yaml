@@ -1,0 +1,27 @@
+version: 1
+toolchains:
+  - name: npm
+    description: Root package.json scripts run with npm.
+    project:
+      all: [package.json]
+      none: [yarn.lock]
+      refuse-if-all: [package-lock.json, yarn.lock]
+    sandbox:
+      programs: [npm]
+      env:
+        HOME: "{workspace}"
+        NPM_CONFIG_CACHE: "{workspace}/.cache/npm"
+        NPM_CONFIG_OFFLINE: "true"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+    values:
+      - name: scripts
+        source: { kind: json-map-keys, path: package.json, pointer: /scripts }
+    tools:
+      - name: npm_run
+        description: Run one statically discovered package.json script with npm.
+        workspace-writes: true
+        parameters:
+          script: { kind: enum, required: true, values: scripts }
+          args: { kind: string-list, max-items: 128 }
+        commands:
+          - argv: [npm, run, { arg: script }, { rest: { arg: args, separator: -- } }]

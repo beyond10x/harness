@@ -299,7 +299,7 @@ impl LoopSink for BridgeSink {
             }
             // The tool round trip is owned by `BridgeTools`, which has to interleave a request and
             // its response; announcing it twice would desynchronise the client's call bookkeeping.
-            LoopEvent::ToolRequested(_)
+            LoopEvent::ToolRequested { .. }
             | LoopEvent::ToolCompleted { .. }
             | LoopEvent::ToolArgumentsDelta { .. }
             // The pinned notification set has no reasoning-summary item, and this server may not

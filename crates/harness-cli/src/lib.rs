@@ -22,15 +22,15 @@ mod workflow;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
 use harness_app_server::ServerConfig;
 use harness_loop::{
-    AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopCancel, LoopConfig, LoopStop,
-    RunLedger,
+    AgentLoop, ApprovalPort, ApproveAll, Budget, ContextCacheClass, ContextKind, ContextLayer,
+    ContextPackage, ContextTrust, DenyAll, LoopCancel, LoopConfig, LoopStop, RunLedger,
 };
 use harness_wire::{ModelPort, Risk, Sampling, StaticBearer};
 
@@ -354,6 +354,55 @@ enum ProvidersCommand {
     Show { name: String },
 }
 
+/// `toolchains <verb>` inspects the declarative provider registry without starting a model.
+#[derive(Debug, Subcommand)]
+enum ToolchainsCommand {
+    /// List built-ins and providers from explicitly named specification files.
+    List {
+        #[arg(long = "toolchain-spec", value_name = "FILE")]
+        specs: Vec<PathBuf>,
+    },
+    /// Show one validated provider definition and its body-free provenance.
+    Show {
+        name: String,
+        #[arg(long = "toolchain-spec", value_name = "FILE")]
+        specs: Vec<PathBuf>,
+    },
+    /// Validate one or more custom specification files against built-ins and each other.
+    Validate {
+        #[arg(required = true, value_name = "FILE")]
+        files: Vec<PathBuf>,
+    },
+}
+
+/// `context show` inspects the package without contacting a model.
+#[derive(Debug, Subcommand)]
+enum ContextCommand {
+    Show(ContextOptions),
+}
+
+#[derive(Debug, Args)]
+struct ContextOptions {
+    #[arg(long, default_value = ".")]
+    workspace: PathBuf,
+    #[arg(long)]
+    instructions_file: Option<PathBuf>,
+    #[arg(long, value_name = "FILE")]
+    context: Vec<PathBuf>,
+    #[arg(long)]
+    no_project_instructions: bool,
+    #[arg(long, value_name = "NAME")]
+    toolchain: Option<String>,
+    #[arg(long = "toolchain-spec", value_name = "FILE")]
+    toolchain_specs: Vec<PathBuf>,
+    /// Print the body-free manifest as JSON.
+    #[arg(long, conflicts_with = "body")]
+    json: bool,
+    /// Print the exact rendered instruction body sent to a model.
+    #[arg(long, conflicts_with = "json")]
+    body: bool,
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run one request to completion.
@@ -379,6 +428,12 @@ enum Command {
     /// Read the providers this build ships, and any the config overrides.
     #[command(subcommand)]
     Providers(ProvidersCommand),
+    /// Inspect and validate declarative toolchain providers.
+    #[command(subcommand)]
+    Toolchains(ToolchainsCommand),
+    /// Inspect attributable instruction layers without contacting a model.
+    #[command(subcommand)]
+    Context(ContextCommand),
     /// Serve one connection over the pinned Codex app-server JSON-RPC format, on stdio.
     ///
     /// Tools arrive from the client on `thread/start`; the workspace toolset is not published
@@ -588,7 +643,7 @@ struct RunOptions {
     /// processes.
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
-    /// Admit a build toolchain read-only inside the confined workspace: `rust` or `go`.
+    /// Admit one or more declarative toolchain providers read-only inside the confined workspace.
     ///
     /// Without one a confined run can execute anything whose implementation lives under `/usr` —
     /// an interpreter — and nothing whose compilers and package registry live in the operator's
@@ -596,11 +651,16 @@ struct RunOptions {
     /// the run's observation (substrate ADR 0010); the network stays unshared, so this brings a
     /// closure in and is not a way to reach out.
     ///
-    /// Declared rather than implied, because it is the one place a confined run is given something
-    /// substrate did not verify: there is no digest over a package registry. A run that does not
-    /// need a toolchain should not name one.
+    /// Built-ins include Rust, Go, Taskfile, npm and Yarn. Use `auto` for project-marker discovery
+    /// or a comma-separated provider list for an explicit selection. Declared rather than implied,
+    /// because it is the one place a confined run is given something substrate did not verify:
+    /// there is no digest over a package registry. A run that does not need a toolchain should not
+    /// name one.
     #[arg(long, value_name = "NAME")]
     toolchain: Option<String>,
+    /// Explicit operator-authored toolchain provider definitions. Repeatable and never discovered.
+    #[arg(long = "toolchain-spec", value_name = "FILE")]
+    toolchain_specs: Vec<PathBuf>,
     /// A program on this host, staged and admitted read-only so a confined `run` can execute it.
     ///
     /// **Allow-listing a program by absolute path admits its name, not its bytes.** The sandbox
@@ -986,6 +1046,9 @@ struct ToolsOptions {
     /// Admit a build toolchain read-only, so `tools` describes the run a `run` would get.
     #[arg(long, value_name = "NAME")]
     toolchain: Option<String>,
+    /// Explicit operator-authored toolchain provider definitions. Repeatable and never discovered.
+    #[arg(long = "toolchain-spec", value_name = "FILE")]
+    toolchain_specs: Vec<PathBuf>,
     /// A program on this host, staged and admitted read-only so a confined `run` can execute it.
     ///
     /// **Allow-listing a program by absolute path admits its name, not its bytes.** The sandbox
@@ -1215,6 +1278,27 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         }
         if options.allow_program.is_empty() {
             options.allow_program = wanted.allow_program.unwrap_or_default();
+        }
+        if options.toolchain.is_none()
+            && let Some(toolchains) = wanted.toolchains
+            && !toolchains.is_empty()
+        {
+            options.toolchain = Some(toolchains.join(","));
+        }
+        if options.toolchain_specs.is_empty()
+            && let Some(specs) = wanted.toolchain_specs
+        {
+            let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            options.toolchain_specs = specs
+                .into_iter()
+                .map(|spec| {
+                    if spec.is_absolute() {
+                        spec
+                    } else {
+                        base.join(spec)
+                    }
+                })
+                .collect();
         }
     }
     if options.approve_up_to.is_none()
@@ -1594,37 +1678,173 @@ fn sampling(options: &RunOptions) -> Sampling {
     }
 }
 
-/// The standing instruction for this run: the operator's file, or the default plus the catalogue.
-///
-/// An operator-named file is used **verbatim**, catalogue and all. Appending to it would be this
-/// function editing a document somebody wrote, and a run whose instruction is not the file it names
-/// is one nobody can reproduce from the file.
+fn push_file_context(
+    package: &mut ContextPackage,
+    id: String,
+    kind: ContextKind,
+    path: &Path,
+    label: &str,
+    captured_at: &str,
+) -> Result<(), String> {
+    let body = fs::read_to_string(path)
+        .map_err(|error| format!("reading {label}`{}`: {error}", path.display()))?;
+    package.push(
+        ContextLayer::new(
+            id,
+            kind,
+            ContextTrust::Operator,
+            ContextCacheClass::Session,
+            body,
+        )
+        .with_source(path.display().to_string())
+        .captured_at(captured_at),
+    );
+    Ok(())
+}
+
+fn push_environment_context(
+    package: &mut ContextPackage,
+    workspace: &Path,
+    no_project_instructions: bool,
+    captured_at: &str,
+) {
+    let mut environment = environment::discover(workspace, std::time::SystemTime::now());
+    if no_project_instructions {
+        environment.instructions = None;
+    }
+    package.push(
+        ContextLayer::new(
+            "environment.workspace",
+            ContextKind::Environment,
+            ContextTrust::Machine,
+            ContextCacheClass::Session,
+            format!("## Environment\n\n{}", environment.block),
+        )
+        .captured_at(captured_at),
+    );
+    if let Some(project) = environment.instructions {
+        let mut body = String::new();
+        if let Some(total) = project.truncated_at {
+            let _ = writeln!(
+                body,
+                "Only the first {} of {total} bytes are shown. The rest is not part of this layer.",
+                project.text.len()
+            );
+        }
+        body.push_str(&project.text);
+        package.push(
+            ContextLayer::new(
+                "project.instructions",
+                ContextKind::ProjectInstructions,
+                ContextTrust::Workspace,
+                ContextCacheClass::Session,
+                body,
+            )
+            .with_source(project.path.display().to_string())
+            .captured_at(captured_at),
+        );
+    }
+}
+
+fn push_toolchain_context(
+    package: &mut ContextPackage,
+    providers: &[harness_toolchain::ResolvedProvider],
+    captured_at: &str,
+) {
+    for provider in providers {
+        let exposed = provider
+            .facts
+            .iter()
+            .filter(|fact| fact.expose_to_model)
+            .map(|fact| format!("{}.{}={}", provider.name, fact.key, fact.value))
+            .collect::<Vec<_>>();
+        if exposed.is_empty() {
+            continue;
+        }
+        package.push(
+            ContextLayer::new(
+                format!("toolchain.{}", provider.name),
+                ContextKind::Toolchain,
+                ContextTrust::Machine,
+                ContextCacheClass::Session,
+                exposed.join("\n"),
+            )
+            .with_source(provider.provenance.source.clone())
+            .captured_at(captured_at),
+        );
+    }
+}
+
+/// The attributable instruction package for this run.
+fn instruction_package(
+    options: &RunOptions,
+    catalogue: &harness_tools::Catalogue,
+    context_files: &[PathBuf],
+    owned: Owned<'_>,
+    toolchains: &[harness_toolchain::ResolvedProvider],
+) -> Result<ContextPackage, String> {
+    let captured_at = environment::utc_rfc3339(unix_now());
+    let mut package = ContextPackage::new(vec![ContextLayer::new(
+        "harness.instructions",
+        ContextKind::HarnessInstructions,
+        ContextTrust::Harness,
+        ContextCacheClass::Session,
+        standing_instruction(
+            catalogue,
+            options.surface,
+            "",
+            options.scope_announce == ScopeAnnounce::Stated,
+            owned,
+        ),
+    )]);
+    if let Some(path) = &options.instructions_file {
+        push_file_context(
+            &mut package,
+            "operator.instructions".to_owned(),
+            ContextKind::OperatorInstructions,
+            path,
+            "",
+            &captured_at,
+        )?;
+    }
+    for (index, path) in context_files.iter().enumerate() {
+        push_file_context(
+            &mut package,
+            format!("operator.context.{index}"),
+            ContextKind::ProvidedContext,
+            path,
+            "the context file ",
+            &captured_at,
+        )?;
+    }
+    push_environment_context(
+        &mut package,
+        &options.workspace,
+        options.no_project_instructions,
+        &captured_at,
+    );
+    push_toolchain_context(&mut package, toolchains, &captured_at);
+    Ok(package)
+}
+
+#[cfg(test)]
 fn instructions(
     options: &RunOptions,
     catalogue: &harness_tools::Catalogue,
     context: &str,
     owned: Owned<'_>,
 ) -> Result<String, String> {
-    if let Some(path) = &options.instructions_file {
-        return fs::read_to_string(path)
-            .map_err(|error| format!("reading `{}`: {error}", path.display()));
+    let mut package = instruction_package(options, catalogue, &[], owned, &[])?;
+    if !context.is_empty() {
+        package.push(ContextLayer::new(
+            "operator.context.0",
+            ContextKind::ProvidedContext,
+            ContextTrust::Operator,
+            ContextCacheClass::Session,
+            context,
+        ));
     }
-    let mut text = standing_instruction(
-        catalogue,
-        options.surface,
-        context,
-        options.scope_announce == ScopeAnnounce::Stated,
-        owned,
-    );
-    // Last, after the tools, the scope and the given files: what the model needs first is what it
-    // can do, and where it is is what it needs in order to choose.
-    let mut environment = environment::discover(&options.workspace, std::time::SystemTime::now());
-    if options.no_project_instructions {
-        environment.instructions = None;
-    }
-    text.push_str("\n\n");
-    text.push_str(&environment.render());
-    Ok(text)
+    Ok(package.render())
 }
 
 /// A run that produced no answer, and which half of the harness it failed in.
@@ -1686,6 +1906,10 @@ struct Prepared {
 /// caller can state that the run never started rather than that it failed. A schema that is not an
 /// object schema and a hooks file this build cannot read are refusals of exactly that kind: both
 /// are read here, in this harness's own words, rather than at the far end of a paid turn.
+#[allow(
+    clippy::too_many_lines,
+    reason = "preflight keeps every refusal before model, session, and tool side effects"
+)]
 fn prepare(
     options: &RunOptions,
     answer: Option<harness_loop::OutputSchema>,
@@ -1705,7 +1929,12 @@ fn prepare(
         credential,
         &cancel,
     )?;
-    let confined_toolchain = toolchain(options.toolchain.as_deref(), options.driver.as_deref())?;
+    let confined_toolchain = toolchain(
+        options.toolchain.as_deref(),
+        &options.toolchain_specs,
+        options.driver.as_deref(),
+        &options.workspace,
+    )?;
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
@@ -1750,31 +1979,41 @@ fn prepare(
     run_budget
         .validate(priced)
         .map_err(|error| format!("budget refused: {error}"))?;
-    let config = LoopConfig::new(
-        options.model(),
-        instructions(
+    let config = LoopConfig::new(options.model(), "")
+        .with_context(instruction_package(
             options,
             tools.catalogue(),
-            &context(&options.context)?,
+            &options.context,
             owned,
-        )?,
-    )
-    .with_sampling(sampling(options))
-    .with_budget(run_budget)
-    .with_prices(run_prices)
-    .with_unattended_ceiling(ceiling(options))
-    // What makes compaction token-aware rather than a fixed 192 KiB of bytes.
-    .with_context_window(Some(options.context_window))
-    .with_output_schema(answer)
-    .with_delegation(delegation)
-    .with_skills(skills)
-    .with_agents(agents)
-    // Reported in the record and acted on nowhere: what the machine would not admit was already
-    // decided when the catalogue was built, and this is the sentence saying so.
-    .with_credential_source(credential_source(options))
-    .with_credential_renewal(renewed)
-    .with_profiles(applied_profiles(options))
-    .with_withheld(withheld_events(&withheld));
+            confined_toolchain.providers(),
+        )?)
+        .with_sampling(sampling(options))
+        .with_budget(run_budget)
+        .with_prices(run_prices)
+        .with_unattended_ceiling(ceiling(options))
+        // What makes compaction token-aware rather than a fixed 192 KiB of bytes.
+        .with_context_window(Some(options.context_window))
+        .with_output_schema(answer)
+        .with_delegation(delegation)
+        .with_skills(skills)
+        .with_agents(agents)
+        // Reported in the record and acted on nowhere: what the machine would not admit was already
+        // decided when the catalogue was built, and this is the sentence saying so.
+        .with_credential_source(credential_source(options))
+        .with_credential_renewal(renewed)
+        .with_profiles(applied_profiles(options))
+        .with_toolchains(
+            confined_toolchain
+                .providers()
+                .iter()
+                .map(|provider| harness_loop::ToolchainRef {
+                    name: provider.name.clone(),
+                    source: provider.provenance.source.clone(),
+                    sha256: provider.provenance.sha256.clone(),
+                })
+                .collect(),
+        )
+        .with_withheld(withheld_events(&withheld));
     // A hook is unconfined — it is the operator's own program — but it is not handed this run's
     // credential. The child would otherwise inherit the whole environment, including whichever
     // variable `--api-key-env` or `--oauth-token-env` named, and a hook that echoed it into its
@@ -2332,22 +2571,6 @@ fn write_scope(declarations: &[String]) -> Result<harness_tools::Scope, String> 
         .map(harness_tools::Scope::of)
 }
 
-/// The declared context files, read and labelled.
-///
-/// # Errors
-///
-/// Names the file that could not be read. A run given a smaller context than it was told to have is
-/// one nobody can reproduce from the declaration.
-fn context(files: &[PathBuf]) -> Result<String, String> {
-    let mut text = String::new();
-    for path in files {
-        let body = fs::read_to_string(path)
-            .map_err(|error| format!("reading the context file `{}`: {error}", path.display()))?;
-        let _ = write!(text, "\n\n--- {} ---\n{body}", path.display());
-    }
-    Ok(text)
-}
-
 /// The toolchain the caller declared, or none.
 ///
 /// # Errors
@@ -2357,21 +2580,40 @@ fn context(files: &[PathBuf]) -> Result<String, String> {
 /// worse way to find out.
 fn toolchain(
     name: Option<&str>,
+    specs: &[PathBuf],
     driver: Option<&std::path::Path>,
+    workspace: &std::path::Path,
 ) -> Result<harness_substrate::Toolchain, String> {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let goroot = std::env::var_os("GOROOT").map(std::path::PathBuf::from);
-    let path = std::env::var_os("PATH");
-    let toolchain = match name {
-        None => harness_substrate::Toolchain::default(),
-        Some("rust") => harness_substrate::Toolchain::rust(home.as_deref())?,
-        Some("go") => harness_substrate::Toolchain::go(goroot.as_deref(), path.as_deref())?,
-        Some(other) => {
-            return Err(format!(
-                "`{other}` is not a toolchain this build knows; there are `go` and `rust`"
-            ));
+    let mut registry = harness_toolchain::Registry::builtins()?;
+    for spec in specs {
+        registry.load_file(spec)?;
+    }
+    let providers = match name {
+        None => Vec::new(),
+        Some("auto") => {
+            let providers = registry.resolve(workspace, None)?;
+            if providers.is_empty() {
+                return Err(format!(
+                    "`--toolchain auto` found no matching provider in `{}`",
+                    workspace.display()
+                ));
+            }
+            providers
+        }
+        Some(list) => {
+            let selected = list
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if selected.is_empty() {
+                return Err("`--toolchain` names no provider".to_owned());
+            }
+            registry.resolve(workspace, Some(&selected))?
         }
     };
+    let toolchain = harness_substrate::Toolchain::from_providers(providers)?;
     // Composed rather than alternative: a run can want a compiler and the program that drives it,
     // and substrate admits four roots for exactly this kind of assembly.
     match driver {
@@ -2387,6 +2629,11 @@ fn toolchain(
 /// produces a run that can see the program and not start it.
 fn programs(declared: &[String], toolchain: &harness_substrate::Toolchain) -> Vec<String> {
     let mut programs = declared.to_vec();
+    for program in toolchain.programs() {
+        if !programs.contains(program) {
+            programs.push(program.clone());
+        }
+    }
     if let Some(driver) = toolchain.driver()
         && !programs.iter().any(|program| program == driver.program())
     {
@@ -2586,17 +2833,51 @@ fn published(
     };
     let read_only = || publish(harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()));
 
+    let active_toolchains = || toolchain.providers().to_vec();
+
     if *embedded {
         let workspace = adopted(&reading, workspace_name, *cgroup_root, toolchain)?;
         let confined = workspace.confined(programs.to_vec());
-        let withheld = confined.withheld().to_vec();
+        let mut withheld = confined.withheld().to_vec();
+        let active_toolchains = active_toolchains();
+        let admitted_toolchains = if harness_tools::Operations::programs(&confined).is_empty() {
+            if let Some(reason) = withheld
+                .iter()
+                .find(|item| item.tool == "run")
+                .map(|item| item.reason.clone())
+            {
+                withheld.extend(
+                    harness_tools::toolchain_entry_names(&active_toolchains)
+                        .into_iter()
+                        .map(|tool| harness_substrate::Withheld {
+                            tool,
+                            reason: reason.clone(),
+                        }),
+                );
+            }
+            Vec::new()
+        } else {
+            active_toolchains
+        };
         return Ok(Publication {
             tools: publish(
-                harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
-                    .scoped(scope.clone()),
+                harness_tools::Catalogue::of_with_toolchains(
+                    harness_tools::Split::new(reading, confined),
+                    admitted_toolchains,
+                )
+                .scoped(scope.clone()),
             ),
             withheld,
         });
+    }
+
+    if !toolchain.providers().is_empty() {
+        let boundary = if substrate.is_some() {
+            "a socket-backed substrate cannot receive this process's declared toolchain roots"
+        } else {
+            "toolchain tools require `--substrate-embedded` so every command is confined"
+        };
+        return Err(format!("`--toolchain` was refused: {boundary}"));
     }
 
     let Some(socket) = *substrate else {
@@ -2818,6 +3099,20 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
             for program in resolved.profile.allow_program.iter().flatten() {
                 println!("--allow-program {program}");
             }
+            for toolchain in resolved.profile.toolchains.iter().flatten() {
+                println!("--toolchain {toolchain}");
+            }
+            for spec in resolved.profile.toolchain_specs.iter().flatten() {
+                let base = std::path::Path::new(&source)
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let spec = if spec.is_absolute() {
+                    spec.clone()
+                } else {
+                    base.join(spec)
+                };
+                println!("--toolchain-spec {}", spec.display());
+            }
         }
     }
     Ok(())
@@ -2873,10 +3168,136 @@ fn providers_command(verb: &ProvidersCommand) -> Result<(), String> {
     Ok(())
 }
 
+/// `toolchains list|show|validate`, over the same registry a run resolves.
+fn toolchains_command(verb: &ToolchainsCommand) -> Result<(), String> {
+    let registry = |specs: &[PathBuf]| {
+        let mut registry = harness_toolchain::Registry::builtins()?;
+        for spec in specs {
+            registry.load_file(spec)?;
+        }
+        Ok::<_, String>(registry)
+    };
+    match verb {
+        ToolchainsCommand::List { specs } => {
+            for (provider, provenance) in registry(specs)?.definitions() {
+                println!(
+                    "{:<12} {:<24} {}",
+                    provider.name, provenance.source, provider.description
+                );
+            }
+        }
+        ToolchainsCommand::Show { name, specs } => {
+            let registry = registry(specs)?;
+            let (provider, provenance) = registry
+                .definitions()
+                .into_iter()
+                .find(|(provider, _)| provider.name == *name)
+                .ok_or_else(|| {
+                    format!(
+                        "`{name}` is not a toolchain this build knows; available providers: {}",
+                        registry.names().join(", ")
+                    )
+                })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "provider": provider,
+                    "provenance": provenance,
+                }))
+                .map_err(|error| error.to_string())?
+            );
+        }
+        ToolchainsCommand::Validate { files } => {
+            let registry = registry(files)?;
+            println!("valid: {}", registry.names().join(", "));
+        }
+    }
+    Ok(())
+}
+
+fn context_package(options: &ContextOptions) -> Result<ContextPackage, String> {
+    let captured_at = environment::utc_rfc3339(unix_now());
+    let catalogue =
+        harness_tools::Catalogue::of(harness_tools::LocalOperations::new(&options.workspace)?);
+    let mut package = ContextPackage::new(vec![ContextLayer::new(
+        "harness.instructions",
+        ContextKind::HarnessInstructions,
+        ContextTrust::Harness,
+        ContextCacheClass::Session,
+        standing_instruction(&catalogue, Surface::Flat, "", false, Owned::default()),
+    )]);
+    if let Some(path) = &options.instructions_file {
+        push_file_context(
+            &mut package,
+            "operator.instructions".to_owned(),
+            ContextKind::OperatorInstructions,
+            path,
+            "",
+            &captured_at,
+        )?;
+    }
+    for (index, path) in options.context.iter().enumerate() {
+        push_file_context(
+            &mut package,
+            format!("operator.context.{index}"),
+            ContextKind::ProvidedContext,
+            path,
+            "the context file ",
+            &captured_at,
+        )?;
+    }
+    push_environment_context(
+        &mut package,
+        &options.workspace,
+        options.no_project_instructions,
+        &captured_at,
+    );
+    let toolchain = toolchain(
+        options.toolchain.as_deref(),
+        &options.toolchain_specs,
+        None,
+        &options.workspace,
+    )?;
+    push_toolchain_context(&mut package, toolchain.providers(), &captured_at);
+    Ok(package)
+}
+
+fn context_command(verb: &ContextCommand) -> Result<(), String> {
+    let ContextCommand::Show(options) = verb;
+    let package = context_package(options)?;
+    if options.body {
+        println!("{}", package.render());
+    } else if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&package.manifest()).map_err(|error| error.to_string())?
+        );
+    } else {
+        for layer in package.manifest() {
+            let kind = serde_json::to_value(layer.kind).unwrap_or_default();
+            let trust = serde_json::to_value(layer.trust).unwrap_or_default();
+            println!(
+                "{}  kind={} trust={} bytes={} sha256={}",
+                layer.id,
+                kind.as_str().unwrap_or("unknown"),
+                trust.as_str().unwrap_or("unknown"),
+                layer.bytes,
+                layer.sha256
+            );
+        }
+    }
+    Ok(())
+}
+
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools_skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
     let tools_agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
-    let confined_toolchain = toolchain(options.toolchain.as_deref(), options.driver.as_deref())?;
+    let confined_toolchain = toolchain(
+        options.toolchain.as_deref(),
+        &options.toolchain_specs,
+        options.driver.as_deref(),
+        &options.workspace,
+    )?;
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let Publication { tools, withheld } = published(
         harness_tools::LocalOperations::new(&options.workspace)?,
@@ -2990,6 +3411,8 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
         Command::Tools(options) => reported(tools_command(options)),
         Command::Profiles(verb) => reported(profiles_command(verb)),
         Command::Providers(verb) => reported(providers_command(verb)),
+        Command::Toolchains(verb) => reported(toolchains_command(verb)),
+        Command::Context(verb) => reported(context_command(verb)),
         Command::AppServer(options) => reported(app_server_command(options)),
         Command::Events(options) => reported(events_command(options)),
         Command::Workflow(command) => workflow::dispatch(command),
@@ -3599,18 +4022,25 @@ mod tests {
     }
 
     #[test]
-    fn an_instruction_file_replaces_the_default() {
+    fn an_instruction_file_is_an_operator_layer_beside_the_harness_layer() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("instructions.md");
         fs::write(&path, "be terse").expect("write");
         let options = options(&["--instructions-file", path.to_str().expect("utf-8 path")]);
         let dir2 = tempfile::tempdir().expect("temporary directory");
-        // Verbatim, catalogue and all: appending to a document somebody wrote would make the run's
-        // instruction something the file alone cannot reproduce.
-        assert_eq!(
-            instructions(&options, &a_catalogue(dir2.path()), "", Owned::default())
-                .expect("readable"),
-            "be terse"
+        let rendered = instructions(&options, &a_catalogue(dir2.path()), "", Owned::default())
+            .expect("readable");
+        assert!(
+            rendered.contains("kind=\"harness_instructions\" trust=\"harness\""),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("kind=\"operator_instructions\" trust=\"operator\""),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("trust=\"operator\"") && rendered.contains("\nbe terse\n"),
+            "{rendered}"
         );
     }
 

@@ -187,6 +187,9 @@ name = "write"
 write = true
 approve-up-to = "high"
 allow-program = ["/usr/bin/git"]
+toolchains = ["rust", "taskfile"]
+# Paths resolve from this configuration file's directory and are never workspace-discovered.
+toolchain-specs = ["toolchains/company.yaml"]
 ```
 
 ```bash

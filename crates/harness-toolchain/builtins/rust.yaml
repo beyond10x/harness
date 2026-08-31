@@ -1,0 +1,101 @@
+version: 1
+toolchains:
+  - name: rust
+    description: Rust through the installed rustup stable toolchain, locked and offline.
+    project:
+      any: [Cargo.toml]
+    roots:
+      - name: rustup
+        mount: rustup
+        candidates:
+          - kind: env-dir
+            var: RUSTUP_HOME
+          - kind: home-dir
+            path: .rustup
+        require:
+          - path: toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo
+            kind: executable
+          - path: toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/multirust-channel-manifest.toml
+            kind: file
+    sandbox:
+      programs: [cargo, rustc, rustfmt]
+      env:
+        HOME: "{workspace}"
+        RUSTUP_HOME: "{mount:rustup}"
+        CARGO_HOME: "{workspace}/.cargo"
+        CARGO_TARGET_DIR: "{workspace}/target"
+        PATH: "{mount:rustup}/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/local/bin:/usr/bin:/bin"
+    facts:
+      - key: version
+        expose-to-model: true
+        source:
+          kind: toml-field
+          root: rustup
+          path: toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/multirust-channel-manifest.toml
+          section: pkg.rustc
+          key: version
+    tools:
+      - name: rust_check
+        description: Type-check the Rust workspace with the locked dependency graph, offline.
+        role: check
+        workspace-writes: true
+        parameters: &project_parameters
+          package: { kind: string }
+          release: { kind: boolean }
+        commands:
+          - argv: [cargo, check, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }]
+      - name: rust_build
+        description: Build the Rust workspace with the locked dependency graph, offline.
+        role: build
+        workspace-writes: true
+        parameters: *project_parameters
+        commands:
+          - argv: [cargo, build, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }]
+      - name: rust_test
+        description: Run Rust tests with the locked dependency graph, offline.
+        role: test
+        workspace-writes: true
+        parameters: *project_parameters
+        commands:
+          - argv: [cargo, test, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }]
+      - name: rust_clippy
+        description: Run Clippy offline and deny warnings.
+        workspace-writes: true
+        parameters: *project_parameters
+        commands:
+          - argv: [cargo, clippy, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }, --, -D, warnings]
+      - name: rust_fmt_check
+        description: Check Rust formatting without changing source files.
+        role: fmt-check
+        commands:
+          - argv: [cargo, fmt, --all, --, --check]
+      - name: rust_fmt
+        description: Format only the explicitly named Rust source files.
+        workspace-writes: true
+        parameters:
+          paths: { kind: workspace-path-list, required: true, min-items: 1, max-items: 128 }
+        writes: [paths]
+        commands:
+          - for-each: paths
+            argv: [rustfmt, { item: true }]
+      - name: rust_bench
+        description: Run Rust benchmarks offline.
+        workspace-writes: true
+        parameters: *project_parameters
+        commands:
+          - argv: [cargo, bench, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }]
+      - name: rust_run
+        description: Build and run one named Rust binary offline.
+        workspace-writes: true
+        parameters:
+          bin: { kind: string, required: true }
+          package: { kind: string }
+          release: { kind: boolean }
+          args: { kind: string-list, max-items: 128 }
+        commands:
+          - argv: [cargo, run, --locked, --offline, { option: { name: --package, arg: package } }, { flag: { name: --release, when: release } }, --bin, { arg: bin }, { rest: { arg: args, separator: -- } }]
+      - name: rust_fetch
+        description: Resolve the locked Rust dependency graph from the local cache only.
+        workspace-writes: true
+        commands:
+          - argv: [cargo, fetch, --locked, --offline]

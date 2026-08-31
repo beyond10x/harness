@@ -487,8 +487,12 @@ fn provider(facts: &Facts, script: Scripted, programs: &[&str]) -> ConfinedOpera
     )
 }
 
-fn entry_names(catalogue: &Catalogue) -> Vec<&'static str> {
-    catalogue.entries().iter().map(|entry| entry.name).collect()
+fn entry_names(catalogue: &Catalogue) -> Vec<String> {
+    catalogue
+        .entries()
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect()
 }
 
 #[test]
@@ -499,15 +503,18 @@ fn a_machine_that_cannot_confine_a_process_contributes_no_way_to_start_one() {
         Scripted::new(vec![]),
         &["cargo"],
     )));
-    assert!(entries.contains(&"file_write"), "{entries:?}");
-    assert!(!entries.contains(&"run"), "{entries:?}");
+    assert!(
+        entries.iter().any(|entry| entry == "file_write"),
+        "{entries:?}"
+    );
+    assert!(!entries.iter().any(|entry| entry == "run"), "{entries:?}");
 
     let entries = entry_names(&Catalogue::of(provider(
         &confined(),
         Scripted::new(vec![]),
         &["cargo"],
     )));
-    assert!(entries.contains(&"run"), "{entries:?}");
+    assert!(entries.iter().any(|entry| entry == "run"), "{entries:?}");
 }
 
 #[test]
@@ -722,7 +729,7 @@ fn a_run_with_no_declared_programs_is_not_offered_even_where_it_could_be() {
         Scripted::new(vec![]),
         &[],
     )));
-    assert!(!entries.contains(&"run"), "{entries:?}");
+    assert!(!entries.iter().any(|entry| entry == "run"), "{entries:?}");
 }
 
 #[test]
@@ -1252,132 +1259,36 @@ fn an_exec_identity_is_the_shape_substrate_admits() {
 }
 
 #[test]
-fn a_declared_rust_toolchain_never_mounts_the_operators_cargo_credential() {
-    // `~/.cargo` holds `credentials.toml` - a registry publishing token - beside the package
-    // cache. It was mounted whole for one commit, which handed every confined run the operator's
-    // credential. Nothing about a build needs it, and a confinement that leaks one is not a
-    // confinement.
-    let Ok(toolchain) = super::Toolchain::rust(
-        std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .as_deref(),
-    ) else {
-        // No toolchain on this machine; the rule below is still the rule.
-        return;
-    };
-    for root in toolchain.roots() {
-        assert!(
-            !root.host_path.ends_with("/.cargo"),
-            "`{}` would carry credentials.toml into the sandbox",
-            root.host_path
-        );
-    }
-    // And cargo's home is somewhere it may actually write: it takes a `.package-cache` lock there
-    // before doing anything, and against a read-only mount it blocks forever with no output.
-    assert_eq!(
-        toolchain.env().get("CARGO_HOME").map(String::as_str),
-        Some("/workspace/.cargo")
-    );
-}
-
-#[test]
-fn a_declared_go_toolchain_keeps_all_mutable_state_inside_the_workspace() {
-    let host = tempfile::tempdir().expect("a fake Go installation");
-    let bin = host.path().join("bin");
-    std::fs::create_dir(&bin).expect("a bin directory");
-    let program = bin.join("go");
-    std::fs::write(&program, b"not executed").expect("a go program");
-    let mut permissions = program.metadata().expect("program metadata").permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
-    std::fs::set_permissions(&program, permissions).expect("an executable program");
-
-    let toolchain = super::Toolchain::go(Some(host.path()), None).expect("the explicit GOROOT");
-    assert_eq!(toolchain.roots().len(), 1);
-    assert_eq!(toolchain.roots()[0].mount, "/toolchain/go");
-    assert_eq!(
-        std::path::Path::new(&toolchain.roots()[0].host_path),
-        host.path().canonicalize().expect("the canonical root")
-    );
-    assert_eq!(
-        toolchain.env(),
-        &std::collections::BTreeMap::from([
-            ("CGO_ENABLED".to_owned(), "0".to_owned()),
-            (
-                "GOCACHE".to_owned(),
-                "/workspace/.cache/go-build".to_owned()
-            ),
-            ("GOENV".to_owned(), "off".to_owned()),
-            ("GOMODCACHE".to_owned(), "/workspace/.go/pkg/mod".to_owned()),
-            ("GOPATH".to_owned(), "/workspace/.go".to_owned()),
-            ("GOROOT".to_owned(), "/toolchain/go".to_owned()),
-            ("GOSUMDB".to_owned(), "off".to_owned()),
-            ("GOTOOLCHAIN".to_owned(), "local".to_owned()),
+fn resolved_provider_data_crosses_to_substrate_without_provider_branches() {
+    let host = tempfile::tempdir().expect("a provider root");
+    let provider = harness_toolchain::ResolvedProvider {
+        name: "example".to_owned(),
+        description: "fixture".to_owned(),
+        roots: vec![harness_toolchain::ResolvedRoot {
+            name: "sdk".to_owned(),
+            host: host.path().canonicalize().expect("canonical root"),
+            mount: "/toolchain/example".to_owned(),
+        }],
+        env: std::collections::BTreeMap::from([
             ("HOME".to_owned(), "/workspace".to_owned()),
             (
                 "PATH".to_owned(),
-                "/toolchain/go/bin:/usr/local/bin:/usr/bin:/bin".to_owned(),
+                "/toolchain/example/bin:/usr/bin".to_owned(),
             ),
-        ])
-    );
-}
-
-#[test]
-fn a_go_toolchain_is_discovered_from_path_without_executing_it() {
-    let host = tempfile::tempdir().expect("a fake Go installation");
-    let bin = host.path().join("bin");
-    std::fs::create_dir(&bin).expect("a bin directory");
-    let program = bin.join("go");
-    std::fs::write(&program, b"not executed").expect("a go program");
-    let mut permissions = program.metadata().expect("program metadata").permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
-    std::fs::set_permissions(&program, permissions).expect("an executable program");
-
-    let toolchain = super::Toolchain::go(None, Some(bin.as_os_str())).expect("PATH discovery");
-    assert_eq!(toolchain.roots()[0].mount, "/toolchain/go");
-    assert_eq!(
-        std::path::Path::new(&toolchain.roots()[0].host_path),
-        host.path().canonicalize().expect("the canonical root")
-    );
-}
-
-#[test]
-fn a_declared_go_toolchain_fits_substrates_closed_non_secret_environment() {
-    let host = tempfile::tempdir().expect("a fake Go installation");
-    let bin = host.path().join("bin");
-    std::fs::create_dir(&bin).expect("a bin directory");
-    let program = bin.join("go");
-    std::fs::write(&program, b"not executed").expect("a go program");
-    let mut permissions = program.metadata().expect("program metadata").permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o500);
-    std::fs::set_permissions(&program, permissions).expect("an executable program");
-
-    let toolchain = super::Toolchain::go(Some(host.path()), None).expect("the explicit GOROOT");
-    for name in toolchain.env().keys() {
-        let lower = name.to_ascii_lowercase();
-        for forbidden in [
-            "authorization",
-            "bearer",
-            "credential",
-            "password",
-            "proxy",
-            "secret",
-            "token",
-        ] {
-            assert!(
-                !lower.contains(forbidden),
-                "`{name}` is refused by substrate's closed non-secret environment because it \
-                 contains `{forbidden}`"
-            );
-        }
-    }
-}
-
-#[test]
-fn an_undeclared_go_toolchain_is_refused_by_name() {
-    assert_eq!(
-        super::Toolchain::go(None, None).expect_err("there is no discovery source"),
-        "neither `GOROOT` nor `PATH` says where the Go toolchain is"
-    );
+        ]),
+        programs: vec!["example".to_owned()],
+        facts: Vec::new(),
+        tools: Vec::new(),
+        provenance: harness_toolchain::Provenance {
+            source: "builtin:fixture".to_owned(),
+            sha256: "00".repeat(32),
+        },
+    };
+    let toolchain = super::Toolchain::from_providers(vec![provider]).expect("neutral conversion");
+    assert_eq!(toolchain.roots()[0].mount, "/toolchain/example");
+    assert_eq!(toolchain.env()["HOME"], "/workspace");
+    assert_eq!(toolchain.programs(), ["example"]);
+    assert_eq!(toolchain.providers()[0].name, "example");
 }
 
 #[test]

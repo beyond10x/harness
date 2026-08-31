@@ -14,8 +14,8 @@ release.
 |---|---|
 | Provider turns | Streaming OpenAI Responses and Anthropic Messages projections |
 | Agent loop | Turn assembly, tool round trips, approvals, cancellation, compaction, and budgets |
-| Workspace tools | Bounded reads everywhere; writes, argv execution, and declared Rust or Go toolchains behind substrate capabilities |
-| Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `app-server`, and `events` |
+| Workspace tools | Bounded reads everywhere; writes, argv execution, and declarative Rust, Go, Taskfile, npm, Yarn, or explicitly loaded custom toolchains behind substrate capabilities |
+| Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `context show`, `app-server`, and `events` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
 | Advanced loop | Opt-in depth-one delegation, named agents and skills read from a Claude Code plugin layout, and operator hooks |

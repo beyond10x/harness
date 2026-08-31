@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 harness-cli = { package = "b10x-harness-cli", path = "../harness-cli" }
+harness-toolchain = { workspace = true }
 serde_json.workspace = true
 sha2.workspace = true
 

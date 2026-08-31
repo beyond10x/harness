@@ -1,0 +1,27 @@
+version: 1
+toolchains:
+  - name: yarn
+    description: Root package.json scripts run with Yarn classic.
+    project:
+      all: [package.json, yarn.lock]
+      none: [package-lock.json]
+      refuse-if-all: [package-lock.json, yarn.lock]
+    sandbox:
+      programs: [yarn]
+      env:
+        HOME: "{workspace}"
+        YARN_CACHE_FOLDER: "{workspace}/.cache/yarn"
+        YARN_ENABLE_NETWORK: "0"
+        PATH: "/usr/local/bin:/usr/bin:/bin"
+    values:
+      - name: scripts
+        source: { kind: json-map-keys, path: package.json, pointer: /scripts }
+    tools:
+      - name: yarn_run
+        description: Run one statically discovered package.json script with Yarn.
+        workspace-writes: true
+        parameters:
+          script: { kind: enum, required: true, values: scripts }
+          args: { kind: string-list, max-items: 128 }
+        commands:
+          - argv: [yarn, run, { arg: script }, { rest: { arg: args, separator: -- } }]

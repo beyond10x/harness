@@ -53,7 +53,11 @@ fn the_catalogue_follows_the_machine_and_the_entries_do_not_know_which_backend_t
         vec!["/bin/echo".to_owned()],
     ));
 
-    let names: Vec<&str> = catalogue.entries().iter().map(|entry| entry.name).collect();
+    let names: Vec<&str> = catalogue
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
     assert!(names.contains(&"file_write"), "{names:?}");
     assert_eq!(
         names.contains(&"run"),

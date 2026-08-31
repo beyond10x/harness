@@ -40,6 +40,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         {type: 'doc', id: 'reference/cli', label: 'Command line'},
+        {type: 'doc', id: 'reference/toolchains', label: 'Toolchains'},
         {type: 'doc', id: 'reference/wires', label: 'Provider wires'},
         {type: 'doc', id: 'reference/configuration', label: 'Provider and profile configuration'},
         {type: 'doc', id: 'reference/workflows', label: 'Workflow format and events'},

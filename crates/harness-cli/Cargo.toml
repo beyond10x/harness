@@ -23,6 +23,7 @@ harness-loop = { workspace = true }
 harness-messages = { workspace = true }
 harness-responses = { workspace = true }
 harness-substrate = { workspace = true }
+harness-toolchain = { workspace = true }
 harness-tools = { workspace = true }
 harness-wire = { workspace = true }
 clap = { workspace = true }

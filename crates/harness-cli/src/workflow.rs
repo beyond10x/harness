@@ -90,10 +90,12 @@ use harness_loop::{
 use harness_wire::{CallId, Item, ToolCall, ToolName, ToolOutcome};
 use serde_json::{Map, Value};
 
-use crate::{Prepared, Renderer, RunFailure, RunOptions, hooks, persist, transcript};
+use crate::{
+    Prepared, Renderer, RunFailure, RunOptions, apply_profiles, hooks, persist, transcript,
+};
 
 /// The two verbs a workflow has, beside `run`, `chat`, `sessions`, `tools` and the rest.
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub(crate) enum WorkflowCommand {
     /// Validate a workflow document and print what runs in what order. Contacts nothing.
     ///
@@ -108,7 +110,7 @@ pub(crate) enum WorkflowCommand {
     Run(Box<WorkflowRunOptions>),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct PlanOptions {
     /// The document: `.yaml`, `.yml` or `.json`, decided by extension and refused by name
     /// otherwise.
@@ -131,7 +133,7 @@ pub(crate) struct PlanOptions {
 /// [`RunOptions`] is flattened exactly as `chat` flattens it, so a workflow is bounded, confined,
 /// approved and recorded by the same flags a single run is — there is no second vocabulary for
 /// running the loop.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct WorkflowRunOptions {
     #[command(flatten)]
     pub(crate) options: RunOptions,
@@ -154,7 +156,17 @@ pub(crate) struct WorkflowRunOptions {
 pub(crate) fn dispatch(command: &WorkflowCommand) -> ExitCode {
     match command {
         WorkflowCommand::Plan(options) => planned(options),
-        WorkflowCommand::Run(command) => finished(walk(command), command.options.json),
+        WorkflowCommand::Run(command) => {
+            let mut command = command.as_ref().clone();
+            let outcome = match apply_profiles(&mut command.options) {
+                Err(refusal) => Err(RunFailure::Refused(refusal)),
+                Ok(profiles) => {
+                    command.options.applied_profiles = profiles;
+                    walk(&command)
+                }
+            };
+            finished(outcome, command.options.json)
+        }
     }
 }
 

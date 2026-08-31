@@ -7,6 +7,96 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- New immutable `2026-08-31` contracts for both provider wires pin the exact compact request bytes
+  sent (including the trailing line feed), every non-secret header name and value, terminal-sentinel
+  policy, failure and incomplete streams, and the complete accepted event inventory. Owning-crate
+  tests exercise the production encoders, header builders and decoders rather than a second test
+  serializer.
+- A Rust `cargo xtask` now owns the full gate, provider-contract validation, CLI-contract
+  validation and CLI pin generation. The independent validators check fixture bytes and digests,
+  accepted inventories and released-directory immutability against `origin/main`; planted defects
+  prove the checks fail. CI invokes `cargo xtask gate`, and the old shell gate is a logic-free
+  compatibility wrapper scheduled for removal after `0.6.0`.
+- Structured `answer` calls are independently validated against the exact JSON Schema published to
+  the model. An invalid schema refuses the run before its first request; invalid arguments become a
+  failed tool outcome so the model can correct them instead of completing with an unvalidated value.
+
+### Changed
+
+- Every model request now consumes the run's turn budget, including compaction summaries and
+  delegate requests. Summary work receives the remaining deadline and every remaining budget rather
+  than opening an uncounted request.
+- Neighbouring delegates run side by side only when the entire reachable surface is non-mutating
+  and needs no approval and no hook observes call order. Mutating, approval-bearing or hooked runs
+  use the sequential path in model order, preserving the same effects and observations.
+- `skill` is explicitly the third loop-owned tool beside `answer` and `delegate`. It reads only the
+  bounded immutable documents a caller loaded before the run, performs no ambient discovery, meets
+  the same approval/hook path, and is inherited unchanged by delegates.
+- The new `2026-08-31` CLI contract records that `workflow run` now applies profiles exactly once
+  and follows the same post-clap endpoint, model and session rules as `run`. The argv bytes are
+  unchanged from `2026-08-30.2`; the new cut pins the observable runtime correction without
+  rewriting a released directory.
+- Missing parent directories now produce the same named refusal in local, embedded-confined and
+  socket-confined workspaces. No adapter silently creates a directory the pinned substrate boundary
+  has no operation to create.
+- The generic HTTP crate is again transport-shaped only: source guards reject vendor, credential,
+  header and endpoint semantics. Callers supply opaque URLs, headers, bodies and decoders.
+- README, STATUS, ROADMAP, design 0002, the website and Rust API documentation now describe the
+  `0.5.0` tree, the current workspace-name grammar, local answer validation, conditional delegate
+  concurrency, Rust contract gates and all three loop-owned tools. STATUS no longer carries brittle
+  hand-maintained test counts, and strict rustdoc plus the website typecheck/build are release
+  evidence.
+- Website type checking is side-effect free and can no longer emit JavaScript copies that create
+  duplicate Docusaurus routes. Fixed transitive build dependencies are locked through compatible
+  overrides, including an integrity-pinned `image-size-next` replacement for the archived parser's
+  two unpatched infinite-loop advisories.
+
+### Fixed
+
+- HTTP redirects are disabled for streamed turns and bounded JSON exchanges, including credential
+  renewal. A redirect is a refused response and can no longer forward a wire-built secret header or
+  opaque request body to another origin.
+- Terminal approval prompts visibly escape C0 controls, DEL, ESC sequences, carriage returns and
+  newlines in model-controlled paths, edits and argv. One model call can no longer repaint or forge
+  the `/dev/tty` review question.
+- Bridge interrupt settlement reads through unrelated queued frames without repeatedly re-stashing
+  the same one. Unrelated messages keep their order and every interrupt is acknowledged before the
+  turn's terminal frame without a live-lock.
+- Session directories must be absolute, outside the workspace and restricted to mode `0700`; files
+  are atomically installed as `0600`, including when an existing directory was permissive. A
+  transcript cannot be filed into the tree it records or left world-readable.
+- Token and cost ceilings bind at equality and fail closed when usage needed to enforce them is
+  absent, when a model alias has no rate, or when cache-creation tokens have no price. Unknown
+  accounting remains absent in records rather than being invented as zero.
+- Opaque provider items survive compaction and replay verbatim. Unmodelled stream events, content
+  blocks and output items are preserved with warnings instead of being skipped, and cross-wire
+  replay remains a typed refusal.
+- Explicitly empty terminal output no longer resurrects streamed calls, missing tool arguments no
+  longer become `{}`, terminal error/incomplete state remains terminal, and the Messages decoder
+  stops at `message_stop` rather than accepting trailing events.
+- The metaharness record now reports the agents and skills offered, actual permission denials,
+  delegate attempts, nested delegated usage and cost, cache-creation input and observed model usage.
+  Facts that were not observed remain absent rather than hard-coded empty or zero.
+- Credential renewal omits failed authorization bodies from errors, rejects empty returned tokens,
+  preserves mode and unrelated bytes, and compares the source immediately before atomic replacement
+  so a concurrent owner update is refused rather than overwritten.
+- Cancellation now actively aborts requests waiting for headers and silent SSE bodies instead of
+  waiting for the transport timeout. Local hook and command timeouts terminate the process group so
+  descendants cannot retain pipes or keep running after their parent is killed.
+- `Retry-After` delta seconds and HTTP dates extend local exponential backoff without shortening it,
+  under a fixed maximum and the same cancellation token.
+- Bridge results over their byte bound are failed outcomes, not successful truncated answers.
+  Skill metadata refuses an oversized document before loading it; search reports every file skipped
+  at its size boundary; file reads mark every byte or character cut; and bounded JSON exchanges read
+  at most limit plus one. Edge, exact, multibyte and one-over tests pin each boundary.
+- Provider usage preserves unreported fields as `None`, including cache creation. Cache prices and
+  totals use the provider-reported model and checked arithmetic rather than silently pricing an
+  alias or overflowing.
+- The organisation former-brand token was removed from the substrate manifest comment, restoring
+  the harness tree to the atlas brand fence without adding a competing local policy.
+
 ## [0.5.0] — 2026-08-31
 
 ### Fixed

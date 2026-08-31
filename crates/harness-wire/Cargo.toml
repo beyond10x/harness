@@ -12,6 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Parses the standard HTTP-date alternative in Retry-After. The function receives both headers
+# and clock as values, so the wire crate still performs no I/O and reads no ambient time.
+httpdate = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

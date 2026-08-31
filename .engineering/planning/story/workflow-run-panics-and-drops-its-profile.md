@@ -2,12 +2,15 @@
 format: aep.planning-md/1
 id: story:workflow-run-panics-and-drops-its-profile
 kind: story
-status: draft
+status: implemented
 title: workflow run panics where every other verb refuses, and ignores the profile it was given
 summary: dispatch routes Command::Workflow past apply_profiles, so the run panics at exit 101 with no endpoint and -p is accepted and dropped.
 relations:
 - derived_from: epic:pinned-interfaces-honest
-revision: 1
+- derived_from: epic:full-review-remediation
+- informed_by: review-result:harness-0-5-0-full-review
+- serves: vision:b10x-owns-its-loop
+revision: 4
 ---
 ## Evidence
 

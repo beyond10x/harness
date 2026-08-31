@@ -213,6 +213,19 @@ pub trait ToolPort {
         self.specs().iter().map(|spec| spec.name.clone()).collect()
     }
 
+    /// The specs of everything a call over this port can reach, however it is published.
+    ///
+    /// [`ToolPort::reachable`] is enough to intersect a named grant. Scheduling needs the rest of
+    /// each spec: two delegates are observationally safe to run together only if no reachable
+    /// entry mutates or asks for approval. A verb surface therefore returns its catalogue entries,
+    /// not the route specs which hide them.
+    ///
+    /// Defaulted to the published specs for a flat surface. A port whose [`ToolPort::invoked`]
+    /// returns different entry specs must override this with the complete corresponding set.
+    fn reachable_specs(&self) -> Vec<ToolSpec> {
+        self.specs().to_vec()
+    }
+
     /// Every neutral operation this port can perform, whatever it publishes them as.
     ///
     /// # The question `specs()` stopped being able to answer

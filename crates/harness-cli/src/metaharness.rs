@@ -27,9 +27,9 @@
 //!
 //! Several fields other adapters populate are written **`null`**, because this loop has no such
 //! thing and inventing one would be a claim about a run nobody made: no `slash_commands`, no
-//! `skills`, no `agents`, no `mcp_servers`, no `permission_mode`. `hermetic.installed_plugins` is
-//! `[]` and that is a fact rather than an absence: this loop installs no plugins because there is
-//! no plugin mechanism for one to be installed into.
+//! `mcp_servers`, no `permission_mode`. Skills and agents are read from `Started`, including their
+//! empty lists. `hermetic.installed_plugins` is `[]` and that is a fact rather than an absence:
+//! this loop installs no plugins because there is no plugin mechanism for one to be installed into.
 //!
 //! `withheld` is `[]` on the same footing, and for a reason worth stating once: the loop skips its
 //! own `withheld` when empty, so an absent key on the input could be *nothing was withheld* or a
@@ -38,6 +38,7 @@
 //! build's — and this build writes the field whenever the loop reports one. So `[]` is the answer
 //! this build would give, and `null` would say *nobody looked* about a converter that did.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 
 use serde_json::{Value, json};
@@ -53,6 +54,58 @@ const ADAPTER: &str = "b10x";
 /// takes the existing word rather than coining a second one for the same thing.
 const ADAPTER_CLASS: &str = "direct_provider";
 
+#[derive(Default)]
+struct UsageTotal {
+    seen: bool,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_creation: u64,
+    cache_creation_complete: bool,
+}
+
+impl UsageTotal {
+    fn add(&mut self, value: &Value) {
+        if !self.seen {
+            self.cache_creation_complete = true;
+        }
+        self.seen = true;
+        self.input = self
+            .input
+            .saturating_add(value["input_tokens"].as_u64().unwrap_or(0));
+        self.output = self
+            .output
+            .saturating_add(value["output_tokens"].as_u64().unwrap_or(0));
+        self.cache_read = self
+            .cache_read
+            .saturating_add(value["cached_input_tokens"].as_u64().unwrap_or(0));
+        match value
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64)
+        {
+            Some(tokens) => self.cache_creation = self.cache_creation.saturating_add(tokens),
+            None => self.cache_creation_complete = false,
+        }
+    }
+
+    fn value(&self) -> Value {
+        if !self.seen {
+            return Value::Null;
+        }
+        json!({
+            "input_tokens": self.input,
+            "output_tokens": self.output,
+            "cache_read_input_tokens": self.cache_read,
+            "cache_creation_input_tokens": self.cache_creation_complete.then_some(self.cache_creation),
+            "service_tier": Value::Null,
+            "thinking_tokens": Value::Null,
+            "iterations": Value::Null,
+            "speed": Value::Null,
+            "cost_usd": Value::Null,
+        })
+    }
+}
+
 /// Reads a `--json` loop record and writes the metaharness stream for it.
 ///
 /// # Errors
@@ -61,6 +114,10 @@ const ADAPTER_CLASS: &str = "direct_provider";
 /// build knows is **carried across as `opaque`**, never dropped: the failure that costs most is a
 /// checker reporting *the tool was never called* when what happened is that it stopped being able
 /// to see tool calls.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one exhaustive event-kind state machine keeps aggregation and projection ordered"
+)]
 pub fn convert(
     input: &mut dyn BufRead,
     output: &mut dyn Write,
@@ -72,6 +129,12 @@ pub fn convert(
     // Summed as the record is read, so `session.ended` can state what the run cost. Stays `None`
     // when no turn was priced, and `None` becomes `null` rather than `0` downstream.
     let mut spent_micro_usd: Option<u64> = None;
+    let mut requests: BTreeMap<String, (Value, Value)> = BTreeMap::new();
+    let mut approvals: BTreeMap<String, String> = BTreeMap::new();
+    let mut permission_denials: Vec<Value> = Vec::new();
+    let mut subagents_spawned = 0_u64;
+    let mut usage = UsageTotal::default();
+    let mut model_usage: BTreeMap<String, UsageTotal> = BTreeMap::new();
     let mut emit = |output: &mut dyn Write, mut event: Value| -> std::io::Result<()> {
         sequence += 1;
         if let Some(object) = event.as_object_mut() {
@@ -98,7 +161,14 @@ pub fn convert(
         let mapped = match kind {
             "started" => started(&value, version),
             "text-delta" => json!({"event": "text", "text": value["text"]}),
-            "tool-requested" => json!({
+            "tool-requested" => {
+                if let Some(call_id) = value["call_id"].as_str() {
+                    requests.insert(
+                        scoped_call("", call_id),
+                        (value["name"].clone(), value["arguments"].clone()),
+                    );
+                }
+                json!({
                 "event": "tool.requested",
                 "call_id": value["call_id"],
                 "name": value["name"],
@@ -116,7 +186,8 @@ pub fn convert(
                 // Nothing decided this call at a seam, because nothing was in a position to: the
                 // toolset it was drawn from is the policy. `false` here is a fact about the arm.
                 "decision_required": false,
-            }),
+                })
+            }
             "tool-completed" => json!({
                 "event": "tool.result",
                 "call_id": value["call_id"],
@@ -139,6 +210,7 @@ pub fn convert(
                     continue;
                 }
                 let call = value["call_id"].as_str().unwrap_or("an unnamed call");
+                record_denial("", call, &requests, &mut approvals, &mut permission_denials);
                 json!({
                     "event": "warning",
                     "code": "approval-denied",
@@ -148,21 +220,30 @@ pub fn convert(
                     "message": format!("the approver denied {call}"),
                 })
             }
-            "usage" => json!({
-                "event": "usage",
-                "model": value["model"],
-                "usage": {
+            "usage" => {
+                usage.add(&value);
+                if let Some(model) = value["model"].as_str() {
+                    model_usage.entry(model.to_owned()).or_default().add(&value);
+                }
+                json!({
+                    "event": "usage",
+                    "model": value["model"],
+                    "usage": {
                     "input_tokens": value["input_tokens"],
                     "output_tokens": value["output_tokens"],
                     "cache_read_input_tokens": value["cached_input_tokens"],
-                    "cache_creation_input_tokens": Value::Null,
+                    "cache_creation_input_tokens": value
+                        .get("cache_creation_input_tokens")
+                        .cloned()
+                        .unwrap_or(Value::Null),
                     "service_tier": Value::Null,
                     "thinking_tokens": Value::Null,
                     "iterations": Value::Null,
                     "speed": Value::Null,
                     "cost_usd": Value::Null,
-                },
-            }),
+                    },
+                })
+            }
             // Folded into the run's total rather than mapped onto the `usage` line it follows: the
             // per-turn figure would have to reach an event already written, and buffering the
             // stream to backfill one field is a worse trade than carrying this line as it stands.
@@ -177,7 +258,14 @@ pub fn convert(
             }
             "finished" => {
                 ended = true;
-                finished(&value, spent_micro_usd)
+                finished(
+                    &value,
+                    spent_micro_usd,
+                    &permission_denials,
+                    subagents_spawned,
+                    &usage,
+                    &model_usage,
+                )
             }
             // A run that never started. It is terminal in exactly the way a finished run is —
             // there will be no more events — so it takes the class the stream already has.
@@ -202,7 +290,34 @@ pub fn convert(
             }),
             // Read, understood, and modelled by no `trace-ir/1` family. Emitting nothing here is
             // not the drop D4 forbids: D4 protects an event nobody could read, and these were read.
-            "tool-arguments-delta" | "approval-required" | "rates" => continue,
+            "approval-required" => {
+                if let (Some(call_id), Some(name)) =
+                    (value["call_id"].as_str(), value["name"].as_str())
+                {
+                    approvals.insert(scoped_call("", call_id), name.to_owned());
+                }
+                continue;
+            }
+            "delegate-started" => {
+                subagents_spawned = subagents_spawned.saturating_add(1);
+                continue;
+            }
+            "delegated" => {
+                let scope = value["call_id"].as_str().unwrap_or("delegate");
+                observe_nested(
+                    &value["event"],
+                    scope,
+                    &mut requests,
+                    &mut approvals,
+                    &mut permission_denials,
+                    &mut subagents_spawned,
+                    &mut usage,
+                    &mut model_usage,
+                    &mut spent_micro_usd,
+                );
+                continue;
+            }
+            "tool-arguments-delta" | "delegate-finished" | "rates" => continue,
             // A kind this build does not know, which is what `opaque` is for.
             _ => opaque(&line),
         };
@@ -269,7 +384,7 @@ fn started(value: &Value, version: &str) -> Value {
         // did. `slash_commands`, `agents` and `plugins` stay `null` because this loop genuinely
         // has no such concept to report yet, which is a different silence.
         "skills": value.get("skills").cloned().unwrap_or_else(|| json!([])),
-        "agents": Value::Null,
+        "agents": value.get("agents").cloned().unwrap_or_else(|| json!([])),
         "plugins": Value::Null,
         "mcp_servers": Value::Null,
         "inputs_digest": Value::Null,
@@ -282,7 +397,14 @@ fn started(value: &Value, version: &str) -> Value {
     })
 }
 
-fn finished(value: &Value, spent_micro_usd: Option<u64>) -> Value {
+fn finished(
+    value: &Value,
+    spent_micro_usd: Option<u64>,
+    permission_denials: &[Value],
+    subagents_spawned: u64,
+    usage: &UsageTotal,
+    model_usage: &BTreeMap<String, UsageTotal>,
+) -> Value {
     let stop = value.get("stop").cloned().unwrap_or(Value::Null);
     let kind = stop
         .get("kind")
@@ -319,11 +441,102 @@ fn finished(value: &Value, spent_micro_usd: Option<u64>) -> Value {
         // `total_cost_usd` is Claude Code's: neither provider returns a price, and both state one
         // anyway, because a subscription is not a reason for a run to be uncosted.
         "total_cost_usd": spent_micro_usd.map_or(Value::Null, dollars),
-        "permission_denials": [],
-        "subagents_spawned": 0,
-        "usage": Value::Null,
-        "model_usage": Value::Null,
+        "permission_denials": permission_denials,
+        "subagents_spawned": subagents_spawned,
+        "usage": usage.value(),
+        "model_usage": if model_usage.is_empty() {
+            Value::Null
+        } else {
+            Value::Object(model_usage
+                .iter()
+                .map(|(model, usage)| (model.clone(), usage.value()))
+                .collect())
+        },
     })
+}
+
+fn scoped_call(scope: &str, call: &str) -> String {
+    format!("{scope}\u{1f}{call}")
+}
+
+fn record_denial(
+    scope: &str,
+    call: &str,
+    requests: &BTreeMap<String, (Value, Value)>,
+    approvals: &mut BTreeMap<String, String>,
+    denials: &mut Vec<Value>,
+) {
+    let key = scoped_call(scope, call);
+    let (requested_name, input) = requests
+        .get(&key)
+        .cloned()
+        .unwrap_or((Value::Null, Value::Null));
+    denials.push(json!({
+        "tool_name": approvals.remove(&key).map_or(requested_name, Value::String),
+        "tool_use_id": call,
+        "tool_input": input,
+    }));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn observe_nested(
+    value: &Value,
+    scope: &str,
+    requests: &mut BTreeMap<String, (Value, Value)>,
+    approvals: &mut BTreeMap<String, String>,
+    denials: &mut Vec<Value>,
+    subagents: &mut u64,
+    usage: &mut UsageTotal,
+    model_usage: &mut BTreeMap<String, UsageTotal>,
+    spent_micro_usd: &mut Option<u64>,
+) {
+    match value["kind"].as_str().unwrap_or_default() {
+        "tool-requested" => {
+            if let Some(call) = value["call_id"].as_str() {
+                requests.insert(
+                    scoped_call(scope, call),
+                    (value["name"].clone(), value["arguments"].clone()),
+                );
+            }
+        }
+        "approval-required" => {
+            if let (Some(call), Some(name)) = (value["call_id"].as_str(), value["name"].as_str()) {
+                approvals.insert(scoped_call(scope, call), name.to_owned());
+            }
+        }
+        "approval-resolved" if value["approved"].as_bool() != Some(true) => {
+            let call = value["call_id"].as_str().unwrap_or("an unnamed call");
+            record_denial(scope, call, requests, approvals, denials);
+        }
+        "delegate-started" => *subagents = subagents.saturating_add(1),
+        "usage" => {
+            usage.add(value);
+            if let Some(model) = value["model"].as_str() {
+                model_usage.entry(model.to_owned()).or_default().add(value);
+            }
+        }
+        "cost" => {
+            if let Some(micro) = value["micro_usd"].as_u64() {
+                *spent_micro_usd = Some(spent_micro_usd.unwrap_or(0).saturating_add(micro));
+            }
+        }
+        "delegated" => {
+            let child = value["call_id"].as_str().unwrap_or("delegate");
+            let nested_scope = format!("{scope}/{child}");
+            observe_nested(
+                &value["event"],
+                &nested_scope,
+                requests,
+                approvals,
+                denials,
+                subagents,
+                usage,
+                model_usage,
+                spent_micro_usd,
+            );
+        }
+        _ => {}
+    }
 }
 
 /// The terminal record for a run that never started.
@@ -823,6 +1036,79 @@ mod tests {
         let events = convert_all(RUN);
         let ended = events.last().expect("terminal");
         assert_eq!(ended["total_cost_usd"], Value::Null);
+    }
+
+    #[test]
+    fn started_agents_and_terminal_accounting_are_observed_not_defaulted() {
+        let events = convert_all(
+            r#"{"kind":"started","model":"parent","published_tools":[],"skills":["review"],"agents":["auditor","tester"]}
+{"kind":"tool-requested","call_id":"write-1","name":"tool_invoke","arguments":{"name":"file_write","arguments":{"path":"notes.md","text":"x"}}}
+{"kind":"approval-required","call_id":"write-1","name":"file_write"}
+{"kind":"approval-resolved","call_id":"write-1","approved":false}
+{"kind":"delegate-started","call_id":"child-ok","task":"inspect"}
+{"kind":"delegate-finished","call_id":"child-ok","stop":{"kind":"completed"},"turns":1}
+{"kind":"delegate-started","call_id":"child-refused","task":"change"}
+{"kind":"delegate-finished","call_id":"child-refused","stop":{"kind":"provider-incomplete"},"turns":1}
+{"kind":"usage","model":"parent","input_tokens":10,"output_tokens":2,"cached_input_tokens":3,"cache_creation_input_tokens":4}
+{"kind":"finished","stop":{"kind":"completed"},"turns":4}"#,
+        );
+        assert_eq!(events[0]["skills"], json!(["review"]));
+        assert_eq!(events[0]["agents"], json!(["auditor", "tester"]));
+        let ended = events.last().expect("terminal");
+        assert_eq!(ended["subagents_spawned"], json!(2));
+        assert_eq!(ended["permission_denials"][0]["tool_name"], "file_write");
+        assert_eq!(ended["permission_denials"][0]["tool_use_id"], "write-1");
+        assert_eq!(
+            ended["permission_denials"][0]["tool_input"]["arguments"]["path"],
+            "notes.md"
+        );
+        assert_eq!(ended["usage"]["cache_creation_input_tokens"], json!(4));
+        assert_eq!(
+            ended["model_usage"]["parent"]["cache_creation_input_tokens"],
+            json!(4)
+        );
+    }
+
+    #[test]
+    fn nested_delegate_usage_cost_and_denials_are_aggregated_in_the_terminal_record() {
+        let events = convert_all(
+            r#"{"kind":"delegate-started","call_id":"child","task":"inspect"}
+{"kind":"delegated","call_id":"child","event":{"kind":"tool-requested","call_id":"run-1","name":"run","arguments":{"argv":["cargo","test"]}}}
+{"kind":"delegated","call_id":"child","event":{"kind":"approval-required","call_id":"run-1","name":"run"}}
+{"kind":"delegated","call_id":"child","event":{"kind":"approval-resolved","call_id":"run-1","approved":false}}
+{"kind":"delegated","call_id":"child","event":{"kind":"usage","model":"child-model","input_tokens":7,"output_tokens":5,"cached_input_tokens":2,"cache_creation_input_tokens":1}}
+{"kind":"delegated","call_id":"child","event":{"kind":"cost","model":"child-model","micro_usd":125000}}
+{"kind":"delegate-finished","call_id":"child","stop":{"kind":"completed"},"turns":1}
+{"kind":"finished","stop":{"kind":"completed"},"turns":2}"#,
+        );
+        assert!(
+            !events.iter().any(|event| event["event"] == "opaque"),
+            "delegated events are understood control-plane records: {events:?}"
+        );
+        let ended = events.last().expect("terminal");
+        assert_eq!(ended["subagents_spawned"], json!(1));
+        assert_eq!(ended["usage"]["input_tokens"], json!(7));
+        assert_eq!(ended["usage"]["cache_creation_input_tokens"], json!(1));
+        assert_eq!(
+            ended["model_usage"]["child-model"]["output_tokens"],
+            json!(5)
+        );
+        assert_eq!(ended["permission_denials"][0]["tool_name"], "run");
+        assert_eq!(
+            ended["permission_denials"][0]["tool_input"]["argv"][0],
+            "cargo"
+        );
+        assert_eq!(ended["total_cost_usd"], json!(0.125));
+    }
+
+    #[test]
+    fn no_accounting_data_stays_absent_and_only_observed_zeroes_are_zero() {
+        let events = convert_all(r#"{"kind":"finished","stop":{"kind":"completed"},"turns":0}"#);
+        let ended = events.last().expect("terminal");
+        assert_eq!(ended["usage"], Value::Null);
+        assert_eq!(ended["model_usage"], Value::Null);
+        assert_eq!(ended["permission_denials"], json!([]));
+        assert_eq!(ended["subagents_spawned"], json!(0));
     }
 }
 

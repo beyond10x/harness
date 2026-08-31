@@ -1,0 +1,31 @@
+{
+  "wire": "anthropic-messages",
+  "version": "2026-08-31",
+  "transport": "https-sse",
+  "endpoint": "POST {base_url}/messages",
+  "streaming": true,
+  "stateful": false,
+  "api_version": "2023-06-01",
+  "request_encoding": {"json": "compact", "trailing_newline": true},
+  "request_headers": {
+    "none": [{"name":"accept","value":"text/event-stream"},{"name":"content-type","value":"application/json"},{"name":"anthropic-version","value":"2023-06-01"}],
+    "api-key": [{"name":"accept","value":"text/event-stream"},{"name":"content-type","value":"application/json"},{"name":"anthropic-version","value":"2023-06-01"},{"name":"x-api-key","value":"<credential omitted>"}],
+    "oauth": [{"name":"accept","value":"text/event-stream"},{"name":"content-type","value":"application/json"},{"name":"anthropic-version","value":"2023-06-01"},{"name":"authorization","value":"<credential omitted>"},{"name":"anthropic-beta","value":"oauth-2025-04-20"}]
+  },
+  "terminal_sentinel": {"required": false, "terminal_event": "message_stop"},
+  "request_fields": ["max_tokens", "messages", "model", "output_config", "stream", "system", "temperature", "tool_choice", "tools", "top_p"],
+  "stream_events": ["content_block_delta", "content_block_start", "content_block_stop", "error", "message_delta", "message_start", "message_stop", "ping"],
+  "content_block_deltas": ["input_json_delta", "signature_delta", "text_delta", "thinking_delta"],
+  "output_items": ["redacted_thinking", "text", "thinking", "tool_use"],
+  "unmodelled_output_items": "preserved as opaque and reported as a warning",
+  "usage_fields": ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"],
+  "usage_is_disjoint": true,
+  "conformance": "provider_emulated",
+  "files": [
+    {"path":"fixtures/accepted-events.json","bytes":239,"sha256":"38987b31df02a13c557e64d7f5eba9c5f7623d5f775855f00d370ebd6d6e8ebe"},
+    {"path":"fixtures/error-stream.sse","bytes":90,"sha256":"6d620e7018d1c8f99e8e41922f953049615cf03b574a9f9cc1a9a44ffae43707"},
+    {"path":"fixtures/turn-request-oauth.json","bytes":1064,"sha256":"64f44e3b153ebc91882b04a8bd48b31551fdb846f8b4db98fb12b24ad6e5b9b9"},
+    {"path":"fixtures/turn-request.json","bytes":981,"sha256":"0cd0d374066dcd7711ee0f3b66202c942c821f61dd9529e1bf3b52555d24c767"},
+    {"path":"fixtures/turn-stream.sse","bytes":1241,"sha256":"d764589c8b6db19a6457259894ddae4c6f2e2d849eeb67ac2fdaabb4724b3db7"}
+  ]
+}

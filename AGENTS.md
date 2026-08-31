@@ -95,10 +95,10 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
     **A second cut on the same day takes a `.N` suffix**: `2026-08-29`, then `2026-08-29.1`, then
     `2026-08-29.2`. The scheme is date-based and cannot otherwise express two cuts in one day, and
     the alternative — dating a directory tomorrow — puts a false date on a pinned artefact.
-14. **Both halves must hold for each contract**: a Python checker verifies the manifest against its
+14. **Both halves must hold for each contract**: an independent Rust checker verifies the manifest against its
     fixtures, and a Rust test verifies the code produces exactly those bytes or holds exactly those
     constants. A change to what is sent, accepted or emitted re-pins the fixture *and* enters the
-    changelog. For `contracts/cli/` the two halves are `scripts/check-cli-contract.py` and
+    changelog. For `contracts/cli/` the two halves are `cargo xtask cli-contract` and
     `crates/harness-cli/src/contract.rs`, and the pinned document is **generated from clap's own
     definition** — a hand-written one would be a second description of the command line that
     drifts from the first.
@@ -173,22 +173,28 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   (atlas ADR 0001 § *Wire-visible identifiers*). Renaming either again is a **coordinated
   migration with an ADR in atlas**, done by cutting a new contract version — never by rewriting
   a released one (invariant 13).
-- **Two tools belong to the loop, not to the catalogue, and they meet the same gate.** `answer`
-  (structured output) and `delegate` (sub-agents) are published by `harness-loop` itself when a run
-  asks for them, resolved in `AgentLoop::run_calls` before the tool port sees a call, and never
-  batched or routed by bare name. A delegate runs a second `AgentLoop` over the **same** tool port,
-  approver, hooks and cancellation token, with the remainder of the parent's budget: delegation
-  widens nothing, and every call inside a delegate is gated on its own entry's envelope exactly as
-  the parent's calls are. Adding a third loop-owned tool is a design change (design 0002 § 0).
+- **Three tools belong to the loop, not to the catalogue, and they meet the same gate.** `answer`
+  (structured output), `delegate` (sub-agents) and `skill` (operator-supplied instructions) are
+  published by `harness-loop` itself only when a run asks for them, resolved in
+  `AgentLoop::run_calls` before the tool port sees a call, and never batched or routed by bare name.
+  A skill reads only the immutable documents the caller loaded before the run; it performs no
+  ambient discovery, and its result is bounded like every other tool result. A delegate runs a
+  second `AgentLoop` over the **same** tool port, approver, hooks and cancellation token, with the
+  remainder of the parent's budget: delegation widens nothing, and every call inside a delegate is
+  gated on its own entry's envelope exactly as the parent's calls are. Adding another loop-owned
+  tool is a design change (design 0002 § 0).
 
   **Neighbouring `delegate` calls of one turn may run side by side**, and that is an optimisation
   and never a difference in what a run can do. Each child gets a *fork* of the model port and of
   the tool port — the same endpoint, the same catalogue, entry for entry — and the approver, the
   operator's hooks and the event sink are **not** forked: there is one of each by nature, and a
   child on a worker thread reaches all three by asking the run's own thread, one question at a
-  time. Where a port will not fork, or the remaining token budget will not divide between the
-  children, the same delegates run **in order** and nothing else about the run changes. Adding a
-  path where a child gets a port the parent did not have would be widening by delegation.
+  time. They run side by side only when the whole reachable surface is non-mutating and needs no
+  approval, and no hook is attached: otherwise scheduling would change what one child can observe,
+  the order a person is asked, or the order a hook guards. Where that condition fails, a port will
+  not fork, or the remaining token budget will not divide, the same delegates run **in order** and
+  nothing else about the run changes. Adding a path where a child gets a port the parent did not
+  have would be widening by delegation.
 - **A hook narrows and never widens, and is never ambient.** `before-call` fires **after** the
   approver said yes; its block is one more refusal and it cannot approve, change or redirect a
   call. `stop` can keep a run working; it cannot end one. Hooks are named on the command line
@@ -215,14 +221,14 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 ## The gate
 
 ```console
-bash scripts/gate.sh
+cargo xtask gate
 ```
 
 `cargo test --workspace --locked`, `cargo fmt --all --check`,
-`cargo clippy --workspace --all-targets --locked -- -D warnings`,
-`python3 scripts/check-provider-wires.py`, `python3 scripts/check-app-server-profile.py`,
-`python3 scripts/check-cli-contract.py` — the contract checkers, one per pinned interface — and
-`python3 scripts/check-no-home-paths.py`. Two of them, `check-cli-contract.py` and
+`cargo clippy --workspace --all-targets --locked -- -D warnings`, strict rustdoc,
+`cargo xtask provider-contracts`, `python3 scripts/check-app-server-profile.py`,
+`cargo xtask cli-contract` — the contract checkers, one per pinned interface — and
+`python3 scripts/check-no-home-paths.py`. Two of them, the CLI contract checker and
 `check-no-home-paths.py`, run **twice**: `--self-test` first, on planted fixtures, then the tree.
 Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
 
@@ -241,10 +247,11 @@ account names real machines have. Two planning-store paths are exempt with the r
 the journal is append-only and committed, and editing it to satisfy a check would forge the record.
 `--self-test` is a gate step of its own, because a check that passed everything would look green.
 
-**`python3` must be available**: the wire fixtures are a standard-library HTTP server, driven as a
-real subprocess over a real socket. A missing interpreter is a failed gate, not a skipped check.
+**`python3` must be available** until the two untouched legacy checks move on their next material
+change: the app-server profile check and home-path check. A missing interpreter is a failed gate,
+not a skipped check.
 
-**CI is `.github/workflows/gate.yml`**, and it runs `scripts/gate.sh` itself rather than a copied
+**CI is `.github/workflows/gate.yml`**, and it runs `cargo xtask gate` itself rather than a copied
 step list, so the two cannot drift; a second job builds on the declared `rust-version`. It needs two
 repository secrets, `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY`, because the substrate dependency
 is a private repository and `GITHUB_TOKEN` cannot read it; without them the token step fails by name

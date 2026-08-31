@@ -13,6 +13,7 @@ mod envelope;
 mod id;
 mod item;
 mod port;
+mod retry_after;
 mod turn;
 
 pub use bearer::{Bearer, BearerSource, CredentialKind, StaticBearer};
@@ -25,6 +26,7 @@ pub use envelope::{AccessKind, Effect, Envelope, Idempotency, Risk, Subject};
 pub use id::{CallId, InvalidId, ToolName, WireId};
 pub use item::{Item, Refusal, ToolCall, ToolOutcome};
 pub use port::{ModelPort, StreamEvent, StreamSink, ToolPort, VecSink};
+pub use retry_after::retry_after;
 pub use turn::{
     Approval, Sampling, StopReason, ToolChoice, ToolSpec, TurnOutcome, TurnRequest, Usage,
 };

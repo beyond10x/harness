@@ -9,7 +9,7 @@ use harness_wire::{WireError, WireErrorCode};
 ///
 /// # Where this came from
 ///
-/// `harness-responses`, copied unchanged into `harness-messages`. Both arrived at the same table
+/// the first wire, copied unchanged into the second. Both arrived at the same table
 /// independently of any field name, which is what makes it transport-shaped: it reads the status
 /// line and nothing else.
 ///

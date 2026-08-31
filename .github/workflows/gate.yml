@@ -1,5 +1,5 @@
-# The gate, in CI. It runs `scripts/gate.sh` itself rather than a copied step list, so a pull
-# request and a tag are judged by the same script and the two cannot drift.
+# The gate, in CI. It runs the repository's Rust xtask rather than a copied step list, so a pull
+# request and a tag are judged by the same implementation and the two cannot drift.
 #
 # What differs from a laptop is the toolchain: `stable` here is whatever `stable` is on the day,
 # and a newer clippy can fail a commit that passed locally (AGENTS.md § The gate). A second job
@@ -66,7 +66,7 @@ jobs:
 
       # The script's own exit status, never a pipeline's.
       - name: Gate
-        run: bash scripts/gate.sh
+        run: cargo xtask gate
 
   msrv:
     name: MSRV 1.97

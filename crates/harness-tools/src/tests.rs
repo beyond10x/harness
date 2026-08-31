@@ -186,6 +186,13 @@ fn a_tool_invoke_naming_a_read_is_pure_at_the_default_ceiling_and_so_can_be_batc
         write.envelope.mutates(),
         "a write ends a batch group, which is why the same route cannot carry one"
     );
+    assert!(
+        verbs
+            .reachable_specs()
+            .iter()
+            .any(|spec| spec.name.as_str() == "file_write" && spec.envelope.mutates()),
+        "scheduling sees the catalogue entry behind the otherwise read-only route"
+    );
 }
 
 #[test]
@@ -472,17 +479,18 @@ fn a_read_only_provider_and_an_unconfined_one_differ_only_in_what_they_admit() {
 }
 
 #[test]
-fn an_unconfined_write_creates_the_file_and_the_directories_over_it() {
+fn an_unconfined_write_refuses_missing_parents_like_a_confined_write() {
     let dir = tree();
     let local = LocalOperations::unconfined(dir.path(), Vec::new()).expect("opens");
 
-    local
+    let refusal = local
         .file_write("docs/notes/one.md", "written\n")
-        .expect("the write lands");
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("docs/notes/one.md")).expect("on disk"),
-        "written\n"
+        .expect_err("the absent parent is refused");
+    assert!(
+        refusal.contains("parent directory that does not exist"),
+        "{refusal}"
     );
+    assert!(!dir.path().join("docs").exists());
 }
 
 #[test]

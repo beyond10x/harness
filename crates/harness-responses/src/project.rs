@@ -171,7 +171,9 @@ fn function_call_to_item(value: &Value) -> Result<Item, WireError> {
     let raw = value
         .get("arguments")
         .and_then(Value::as_str)
-        .unwrap_or("{}");
+        .ok_or_else(|| {
+            WireError::protocol(format!("function call `{call_id}` has no `arguments`"))
+        })?;
     if raw.len() > MAX_TOOL_ARGUMENT_BYTES {
         return Err(WireError::too_large(format!(
             "arguments of call `{call_id}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound"
@@ -179,12 +181,16 @@ fn function_call_to_item(value: &Value) -> Result<Item, WireError> {
     }
     // A half-parsed argument blob must never reach a tool: the tool would act on a value the model
     // did not send.
-    let arguments: Value =
-        serde_json::from_str(if raw.is_empty() { "{}" } else { raw }).map_err(|error| {
-            WireError::protocol(format!(
-                "arguments of call `{call_id}` are not JSON: {error}"
-            ))
-        })?;
+    let arguments: Value = serde_json::from_str(raw).map_err(|error| {
+        WireError::protocol(format!(
+            "arguments of call `{call_id}` are not JSON: {error}"
+        ))
+    })?;
+    if !arguments.is_object() {
+        return Err(WireError::protocol(format!(
+            "arguments of call `{call_id}` are not a JSON object"
+        )));
+    }
     Ok(Item::ToolCall(ToolCall {
         call_id: id(call_id, "call id")?,
         name: ToolName::new(name)
@@ -605,19 +611,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_arguments_mean_an_empty_object() {
+    fn empty_or_missing_arguments_refuse_instead_of_inventing_an_empty_object() {
         let value = json!({
             "type": "function_call",
             "call_id": "call-1",
             "name": "now",
             "arguments": "",
         });
-        let Item::ToolCall(call) =
-            output_item_to_item(&wire(), &value, &mut no_warn()).expect("decodes")
-        else {
-            panic!("a function call decodes to a tool call");
-        };
-        assert_eq!(call.arguments, json!({}));
+        assert!(output_item_to_item(&wire(), &value, &mut no_warn()).is_err());
+        let mut missing = value;
+        missing.as_object_mut().expect("object").remove("arguments");
+        assert!(output_item_to_item(&wire(), &missing, &mut no_warn()).is_err());
     }
 
     #[test]

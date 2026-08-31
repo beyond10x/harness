@@ -5,7 +5,7 @@
 //!
 //! # Why this is a crate rather than a module inside a wire
 //!
-//! `harness-responses` was written first, and `harness-messages` copied five things out of it
+//! The first wire was written first, and the second copied five things out of it
 //! **unchanged**: bounded server-sent-event framing, the retry rule, the back-off, the witnessed
 //! sink that makes the retry rule safe, and the HTTP status mapping. The copy compiled and passed
 //! the second wire's suite without a line altered, which is the evidence that none of it is
@@ -35,9 +35,12 @@ mod status;
 mod transport;
 mod witness;
 
-pub use exchange::{JsonExchange, JsonPost, MAX_EXCHANGE_BODY_BYTES};
+pub use exchange::{FailureBody, JsonExchange, JsonPost, MAX_EXCHANGE_BODY_BYTES};
 pub use retry::RetryPolicy;
 pub use sse::{Framing, MAX_EVENT_BYTES, MAX_STREAM_BYTES, SseEvent, SseReader};
 pub use status::status_error;
-pub use transport::{Headers, HttpTransport, Settings, StreamingPost};
+pub use transport::{
+    Headers, HttpTransport, ResponseHeaders, ServerDelayDecoder, Settings, StreamingPost,
+    encode_json_body,
+};
 pub use witness::WitnessedSink;

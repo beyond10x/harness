@@ -456,7 +456,7 @@ impl Client {
     /// — no `sandbox`, so no `require`, no snapshot, no limits. Whether a daemon then ran that
     /// unconfined or refused it was the daemon's choice, and a harness whose whole argument is *a
     /// tool this machine cannot confine does not exist* cannot leave that decision elsewhere. The
-    /// request is built by [`crate::confined_exec_input`], the same function the embedded driver
+    /// request is built by `crate::confined_exec_input`, the same function the embedded driver
     /// calls, so the two paths cannot ask for different things.
     ///
     /// # Errors

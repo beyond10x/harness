@@ -891,10 +891,10 @@ fn the_transition_payload_is_exactly_the_documented_document() {
 }
 
 #[test]
-fn a_flow_cost_ceiling_bounds_the_walk_not_the_step() {
-    // `--max-cost-microunits` is a ceiling on the **walk**. Set to exactly one step's price, the
-    // first step runs and the second never starts: the walk has nothing left, and the step says so
-    // without buying a turn to find out.
+fn a_flow_cost_ceiling_binds_at_equality_without_starting_another_step() {
+    // `--max-cost-microunits` is a ceiling on the **walk**. At exactly one request's price, that
+    // request is observed and the first step stops at the binding ceiling. No second step starts:
+    // equality binds rather than granting one unbudgeted continuation.
     for wire in WIRES {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let record = dir.path().join("requests.jsonl");
@@ -928,32 +928,30 @@ fn a_flow_cost_ceiling_bounds_the_walk_not_the_step() {
         );
         let events = events(&output);
         let finished = of_kind(&events, "step-finished");
-        assert_eq!(finished.len(), 2, "{wire:?}: {finished:?}");
+        assert_eq!(finished.len(), 1, "{wire:?}: {finished:?}");
         assert_eq!(finished[0]["path"], "root.one", "{wire:?}");
         assert_eq!(
-            finished[0]["failed"], false,
-            "{wire:?}: the first step had the whole ceiling: {}",
+            finished[0]["failed"], true,
+            "{wire:?}: equality binds the step which observed the spend: {}",
             finished[0]
         );
-        assert_eq!(finished[1]["path"], "root.two", "{wire:?}");
-        assert_eq!(finished[1]["failed"], true, "{wire:?}: {}", finished[1]);
 
         let warned = of_kind(&events, "warning")
             .into_iter()
-            .find(|event| event["code"] == "flow-budget")
-            .unwrap_or_else(|| panic!("{wire:?}: no flow-budget warning in {:?}", kinds(&events)));
+            .find(|event| event["code"] == "step-stopped")
+            .unwrap_or_else(|| panic!("{wire:?}: no step-stopped warning in {:?}", kinds(&events)));
         let message = warned["message"].as_str().expect("a message");
         assert!(
-            message.contains("--max-cost-microunits 16"),
+            message.contains("limit_micro_usd: 16"),
             "{wire:?}: the ceiling is named: {message}"
         );
         assert!(
-            message.contains("spent 16"),
+            message.contains("spent_micro_usd: 16"),
             "{wire:?}: and what went: {message}"
         );
         assert!(
-            message.contains("`root.two`"),
-            "{wire:?}: and which step did not start: {message}"
+            message.contains("`root.one`"),
+            "{wire:?}: and which step reached the binding ceiling: {message}"
         );
 
         // The whole claim, at the far end of the socket: one step, one request.
@@ -965,7 +963,7 @@ fn a_flow_cost_ceiling_bounds_the_walk_not_the_step() {
         let last = events.last().expect("a terminal event");
         assert_eq!(last["kind"], "flow-finished", "{wire:?}: {last}");
         assert_eq!(last["clean"], false, "{wire:?}: {last}");
-        assert_eq!(last["ran"], 2, "{wire:?}: {last}");
+        assert_eq!(last["ran"], 1, "{wire:?}: {last}");
         assert_eq!(last["failed"], 1, "{wire:?}: {last}");
     }
 }

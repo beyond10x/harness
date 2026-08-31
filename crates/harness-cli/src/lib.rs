@@ -72,9 +72,10 @@ called by its own name; there is no other way to act, and there is nothing to di
 
 /// The tools the **loop** owns for this run, when it was asked for them.
 ///
-/// Neither is a catalogue entry and no `ToolPort` ever sees either, so the surface rendered from
-/// the catalogue cannot name them: `answer` performs no operation on a machine, and `delegate`
-/// performs whatever this run's own tools perform, through this run's own gate.
+/// None is a catalogue entry and no `ToolPort` ever sees one, so the surface rendered from the
+/// catalogue cannot name them: `answer` performs no operation on a machine, `delegate` performs
+/// whatever this run's own tools perform through this run's own gate, and `skill` returns one of
+/// the immutable instruction documents the caller loaded before the run.
 #[derive(Debug, Default, Clone, Copy)]
 struct Owned<'a> {
     /// The delegate tool's name, under `--delegate`.
@@ -135,9 +136,9 @@ fn standing_instruction(
             catalogue.brief()
         ),
     };
-    // The two tools the loop owns are not in the catalogue and cannot be rendered from it, so
-    // they are named here — one line each. Their own descriptions carry the rest, and repeating
-    // those here would send the same words twice per turn.
+    // The loop-owned tools are not in the catalogue and cannot be rendered from it, so their
+    // planning information is named here. Their specs carry the rest, and repeating those words
+    // here would send them twice per turn.
     if let Some(name) = owned.delegate {
         let _ = write!(
             text,
@@ -839,9 +840,10 @@ struct RunOptions {
     /// harness did before this flag existed.
     ///
     /// A **ceiling and not a promise**. Delegates run side by side only where the run's model and
-    /// tool ports will hand out a second handle on themselves and the remaining token budget
-    /// divides between the children; where either does not hold, the same delegates run in order
-    /// and nothing else about the run changes.
+    /// tool ports will hand out a second handle on themselves, the remaining token budget divides
+    /// between the children, no hook observes call order, and every reachable entry is
+    /// non-mutating and needs no approval. Where any condition does not hold, the same delegates
+    /// run in order and nothing else about the run changes.
     ///
     /// **At least one**, refused here for the reason `--delegate-turns` is: a bound that admits
     /// nothing is refused where it is written.
@@ -1979,10 +1981,11 @@ fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
     if options.no_session {
         return Ok(None);
     }
-    match &options.session_dir {
-        Some(path) => Ok(Some(path.clone())),
-        None => transcript::default_dir(transcript::Instead::NameOneOrFileNothing).map(Some),
-    }
+    let path = match &options.session_dir {
+        Some(path) => path.clone(),
+        None => transcript::default_dir(transcript::Instead::NameOneOrFileNothing)?,
+    };
+    transcript::outside_workspace(&path, &options.workspace).map(Some)
 }
 
 /// The session this run continues, or a new one.

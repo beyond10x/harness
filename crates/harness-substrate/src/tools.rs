@@ -258,8 +258,14 @@ impl Operations for ConfinedOperations {
             if !(within_limit && within_ceiling) {
                 break;
             }
-            let shown: String = line.chars().take(MAX_READ_LINE_CHARS).collect();
-            if line.chars().count() > MAX_READ_LINE_CHARS {
+            let byte_ceiling_cut = kept == 0 && weight > ceiling;
+            let visible = if byte_ceiling_cut {
+                utf8_prefix(line, ceiling.saturating_sub(1))
+            } else {
+                line
+            };
+            let shown: String = visible.chars().take(MAX_READ_LINE_CHARS).collect();
+            if byte_ceiling_cut || visible.chars().count() > MAX_READ_LINE_CHARS {
                 cut.push(number);
             }
             let _ = writeln!(text, "{number:>6}\t{shown}");
@@ -420,4 +426,14 @@ impl Operations for ConfinedOperations {
     fn writes(&self) -> bool {
         self.writes
     }
+}
+
+/// The longest UTF-8 prefix of `text` no larger than `bytes`.
+fn utf8_prefix(text: &str, bytes: u64) -> &str {
+    let ceiling = usize::try_from(bytes).unwrap_or(usize::MAX).min(text.len());
+    let mut end = ceiling;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }

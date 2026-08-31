@@ -334,7 +334,7 @@ fn demanded_by(
     let mut supplied: BTreeSet<String> = BTreeSet::new();
     loop {
         let output = invoke(&with(document, command, values, &supplied), machine);
-        if output.status == Some(0) {
+        if matches!(output.status, Some(0 | 2)) {
             break;
         }
         let named: BTreeSet<String> = flags_named_in(document, command, &output.stderr)
@@ -357,7 +357,7 @@ fn demanded_by(
         let mut without = demanded.clone();
         without.remove(candidate);
         let output = invoke(&with(document, command, values, &without), machine);
-        if output.status == Some(0) {
+        if matches!(output.status, Some(0 | 2)) {
             demanded = without;
         } else if !flags_named_in(document, command, &output.stderr).contains(candidate) {
             unnamed.insert(candidate.clone());
@@ -563,13 +563,11 @@ fn measure_demands(
 /// with neither `XDG_STATE_HOME` nor `HOME` — because `--session-dir` is only demanded on the
 /// second, and a driver in a container is exactly the reader this document is written for.
 ///
-/// **`workflow run` is measured and comes back [`Demand::Stuck`].** It flattens the same options
-/// and records the same rows, and `workflow::dispatch` never calls `apply_profiles`, so the command
-/// line the document describes aborts at `RunOptions::base_url`'s `expect` with exit `101` and a
-/// panic message naming no flag. A consumer cannot repair that from the document, so the table may
-/// not promise a refusal by name there — and this case fails if it does. The binary's half is
-/// `story:workflow-run-panics-and-drops-its-profile`; when it lands, `workflow run` starts coming
-/// back [`Demand::Ran`] and this case will require its rows.
+/// Exit `2` counts as having run: it is the documented outcome for a walk that reached the model
+/// but did not produce every promised answer. The distinction this measurement needs is between a
+/// pre-run refusal (`1`) and a command which reached its work (`0` or `2`). In particular,
+/// `workflow run` now applies profiles and reaches the endpoint instead of panicking before the
+/// walk, so its post-clap requirements are measured exactly like `run`'s.
 #[test]
 fn the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not() {
     let document = pinned_document();

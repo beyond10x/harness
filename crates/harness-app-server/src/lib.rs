@@ -8,7 +8,7 @@
 //! drives this harness with no new bridge code and no dependency in either direction.
 //!
 //! The loop underneath is the same one the embedded and command-line shells run. Only
-//! [`session::BridgeTools`] differs: in-process a tool call is a function call, here it is a
+//! `session::BridgeTools` differs: in-process a tool call is a function call, here it is a
 //! round trip back to the client.
 
 mod inventory;
@@ -644,6 +644,7 @@ fn terminal_status(stop: &LoopStop) -> &'static str {
         | LoopStop::MaxInputTokens { .. }
         | LoopStop::MaxOutputTokens { .. }
         | LoopStop::MaxCost { .. }
+        | LoopStop::BudgetUnobservable { .. }
         | LoopStop::Deadline { .. }
         | LoopStop::ProviderIncomplete { .. }
         | LoopStop::Unstructured { .. } => "failed",

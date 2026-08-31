@@ -1030,68 +1030,33 @@ fn a_caller_named_byte_ceiling_answers_the_same_lines_of_a_crlf_file_in_every_wo
     );
 }
 
-/// A write to a path whose parent directory does not exist yet is **not** one answer today.
+/// A write whose parent directory does not exist is refused without leaving anything behind.
 ///
-/// # This case pins a difference instead of asserting the contract, on purpose
-///
-/// The one write a model makes constantly — a new module, a new test, a new document under a
-/// directory the tree does not have yet. `LocalOperations` creates the parents and has its own test
-/// saying so (`harness-tools/src/local.rs`,
-/// `a_new_file_under_directories_that_do_not_exist_yet_still_writes`); the confined route answers
-/// `resource.not-found` and writes nothing. `Split` executes through its confined half, and `Split`
-/// is what `harness-cli` composes, so this is a live difference a run sees between
-/// `--substrate-embedded` and without it — not a latent one.
-///
-/// It is pinned rather than closed because closing it is not this unit's change and neither
-/// direction is small. Making the confined route create its parents needs a directory route on
-/// `Backend`, which carries five operations and has two implementations and a wire contract behind
-/// it. Making the unconfined provider stop creating them removes documented, tested behaviour that
-/// real runs use. **Story: `story:a-confined-write-makes-its-own-parents`.**
-///
-/// **When this case goes red, do not widen it.** Red here means one of the two sides moved. If the
-/// confined route learned to create parents, delete this case and let
-/// `a_write_puts_exactly_those_bytes_there_in_every_workspace` be asked of `deep/down/new.txt`
-/// instead — the contract is then assertable and this pin is in the way. If the unconfined provider
-/// stopped creating them, the same. Anything else is a regression in whichever side changed.
+/// Substrate's pinned contract has no directory-creation operation. Creating the parents locally
+/// made this call depend on whether the CLI selected its confined backend: local runs wrote the
+/// file while confined and split runs refused it. The common answer is therefore the narrower one
+/// until a separately admitted directory operation exists. **Story:
+/// `story:a-confined-write-makes-its-own-parents`.**
 fn a_write_under_a_directory_that_does_not_exist_yet(workspace: &Workspace) -> Result<(), String> {
     let outcome = workspace
         .operations
         .file_write("deep/down/new.txt", FIVE_LINES);
     let on_disk = workspace.on_disk("deep/down/new.txt");
-    // What each does **today**, read off the implementations and not off the trait.
-    let creates_parents = workspace.name == "LocalOperations";
-    let held = if creates_parents {
-        outcome.is_ok() && on_disk.as_deref() == Some(FIVE_LINES)
-    } else {
-        // **`is_none`, and not "the bytes are not the ones asked for".** The note above says this
-        // route writes *nothing*, and a comparison against `FIVE_LINES` does not say that: a write
-        // that made `deep/down/` and left half a file in it answers `Err` and is not `FIVE_LINES`,
-        // so it read to this pin as a clean refusal. A partial write is the one failure a pin on a
-        // write path exists to catch.
-        outcome.is_err() && on_disk.is_none()
-    };
+    let held = outcome.is_err() && on_disk.is_none();
     if held {
         return Ok(());
     }
     Err(format!(
-        "this workspace {} create the parents of a new file and left {} at `deep/down/new.txt`, \
-         and now the outcome is {outcome:?} with {on_disk:?} there — see \
-         `story:a-confined-write-makes-its-own-parents` and this case's own note before changing \
-         anything here",
-        if creates_parents { "did" } else { "did not" },
-        if creates_parents {
-            "the file it was given"
-        } else {
-            "nothing"
-        },
+        "this workspace must refuse a file whose parent does not exist and leave nothing at \
+         `deep/down/new.txt`, but answered {outcome:?} with {on_disk:?} there — see \
+         `story:a-confined-write-makes-its-own-parents`",
     ))
 }
 
 #[test]
 fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_workspace() {
     every_workspace(
-        "a new file under a new directory is the commonest write there is, and today one workspace \
-         does it where two refuse — this case holds that split still and exactly:",
+        "a file write never creates an undeclared parent-directory effect, in every workspace:",
         a_write_under_a_directory_that_does_not_exist_yet,
     );
 }
@@ -1474,69 +1439,69 @@ fn the_comparison_refuses_to_report_agreement_between_one_workspace_and_itself()
 ///
 /// Exactly the shape a write that created its parents, wrote some of the bytes and then hit
 /// substrate's refusal would leave: a file on disk that is not what was asked for, and an `Err`.
-struct LeavesAPartialFile(LocalOperations);
+struct LeavesAPartialFile {
+    operations: LocalOperations,
+    tree: PathBuf,
+}
 
 impl Operations for LeavesAPartialFile {
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
         let partial: String = text.chars().take(5).collect();
-        let _ = self.0.file_write(path, &partial);
+        let target = self.tree.join(path);
+        std::fs::create_dir_all(target.parent().expect("the partial file's parent"))
+            .expect("the divergent provider creates parents");
+        std::fs::write(target, partial).expect("the divergent provider leaves bytes");
         Err("workspace.file-write: resource.not-found".to_owned())
     }
 
     fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
-        self.0.file_read(path, window)
+        self.operations.file_read(path, window)
     }
 
     fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
-        self.0.file_edit(path, old, new)
+        self.operations.file_edit(path, old, new)
     }
 
     fn dir_list(&self, path: &str) -> Result<Value, String> {
-        self.0.dir_list(path)
+        self.operations.dir_list(path)
     }
 
     fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
-        self.0.search(pattern, path, options)
+        self.operations.search(pattern, path, options)
     }
 
     fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
-        self.0.find(glob, path, max_results)
+        self.operations.find(glob, path, max_results)
     }
 
     fn run(&self, argv: &[String]) -> Result<Value, Refused> {
-        self.0.run(argv)
+        self.operations.run(argv)
     }
 
     fn lands(&self, path: &str) -> Result<String, String> {
-        self.0.lands(path)
+        self.operations.lands(path)
     }
 
     fn programs(&self) -> &[String] {
-        self.0.programs()
+        self.operations.programs()
     }
 
     fn writes(&self) -> bool {
-        self.0.writes()
+        self.operations.writes()
     }
 }
 
-/// The parent-directory pin passes a confined workspace that left a partial file behind.
-///
-/// The pin's own note says the confined route "answers `resource.not-found` and **writes
-/// nothing**", and the two halves it checks are `outcome.is_ok()` and
-/// `on_disk(..) == Some(FIVE_LINES)`. A write that created `deep/down/` and left the wrong bytes in
-/// it satisfies both: the outcome is an `Err` as expected, and the file on disk is not `FIVE_LINES`
-/// so `landed` is `false` as expected. The half that says *nothing is on disk* is not asserted, and
-/// a partial write is the one failure a pin on a write path exists to catch.
+/// The common parent-directory rule notices a provider that reports refusal after a partial write.
 #[test]
 fn the_parent_directory_pin_notices_a_write_that_left_something_behind() {
     let (root, tree) = tree();
     let partial = vec![Workspace {
-        // The pin branches on this name, so this is the workspace it holds to *not writing*.
         name: "ConfinedOperations",
-        operations: Box::new(LeavesAPartialFile(
-            LocalOperations::unconfined(&tree, Vec::new()).expect("the workspace opens"),
-        )),
+        operations: Box::new(LeavesAPartialFile {
+            operations: LocalOperations::unconfined(&tree, Vec::new())
+                .expect("the workspace opens"),
+            tree: tree.clone(),
+        }),
         tree,
         _root: root,
     }];
@@ -1545,8 +1510,7 @@ fn the_parent_directory_pin_notices_a_write_that_left_something_behind() {
     assert!(
         outcome.is_err(),
         "the write left `{left_behind:?}` at `deep/down/new.txt` and reported a failure, and the \
-         pin answered {outcome:?} — it holds `on_disk(..) == Some(FIVE_LINES)` and not `nothing is \
-         on disk`, so a partial write reads to it as a clean refusal"
+         conformance check answered {outcome:?}"
     );
 }
 

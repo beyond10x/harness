@@ -7,3 +7,6 @@
 # neither, and fails with an authentication error that names nothing.
 [net]
 git-fetch-with-cli = true
+
+[alias]
+xtask = "run --quiet --package b10x-harness-xtask --"

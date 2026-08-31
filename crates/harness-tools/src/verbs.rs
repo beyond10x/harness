@@ -261,6 +261,14 @@ impl ToolPort for Verbs {
         self.catalogue.names()
     }
 
+    fn reachable_specs(&self) -> Vec<ToolSpec> {
+        self.catalogue
+            .entries()
+            .iter()
+            .map(crate::Entry::spec)
+            .collect()
+    }
+
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.subjects_of(call)
     }
@@ -307,6 +315,15 @@ impl ToolPort for Forked<'_> {
     /// The same entries: a fork confines a child exactly as this port confines its parent.
     fn reachable(&self) -> Vec<ToolName> {
         self.0.catalogue.names()
+    }
+
+    fn reachable_specs(&self) -> Vec<ToolSpec> {
+        self.0
+            .catalogue
+            .entries()
+            .iter()
+            .map(crate::Entry::spec)
+            .collect()
     }
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {

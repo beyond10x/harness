@@ -8,7 +8,7 @@
 //!
 //! # What the second wire cost, and where
 //!
-//! The projection is in [`project`] and is entirely this wire's own: role-alternating messages
+//! The projection is in `project` and is entirely this wire's own: role-alternating messages
 //! instead of a flat input array, content blocks instead of output items, an argument object
 //! instead of encoded argument text, disjoint token counts instead of nested ones, and a required
 //! output bound where the first wire had an optional one. The credential's *presentation* is this
@@ -45,6 +45,26 @@ pub use project::{
 
 /// Identifies this projection. Opaque items carry it and may not be replayed into another wire.
 pub const WIRE: &str = "anthropic-messages";
+
+/// Every event discriminator the decoder interprets rather than preserving as unknown.
+pub const ACCEPTED_STREAM_EVENTS: &[&str] = &[
+    "content_block_delta",
+    "content_block_start",
+    "content_block_stop",
+    "error",
+    "message_delta",
+    "message_start",
+    "message_stop",
+    "ping",
+];
+
+/// Every content-block delta discriminator the decoder interprets.
+pub const ACCEPTED_CONTENT_BLOCK_DELTAS: &[&str] = &[
+    "input_json_delta",
+    "signature_delta",
+    "text_delta",
+    "thinking_delta",
+];
 
 /// The API version this adapter is pinned to. Sent on every request.
 ///
@@ -189,13 +209,33 @@ fn request_headers(credential: Option<(&Bearer, CredentialKind)>) -> Headers {
 
 /// The header names one request carries for a given credential presentation.
 ///
-/// Derived from [`request_headers`] with a placeholder, so the contract pins the names the code
+/// Derived from `request_headers` with a placeholder, so the contract pins the names the code
 /// actually sends rather than a list beside it. No credential is involved.
 pub fn header_names(credential: Option<CredentialKind>) -> Vec<&'static str> {
     let placeholder = Bearer::new("placeholder");
     request_headers(credential.map(|kind| (&placeholder, kind)))
         .into_iter()
         .map(|(name, _)| name)
+        .collect()
+}
+
+/// Every header and non-secret value for one credential presentation.
+///
+/// Credential values are replaced before this function returns. The rest is built by the same
+/// function a live request uses, so the wire contract pins the version and feature headers rather
+/// than a second list kept beside production.
+pub fn contract_headers(credential: Option<CredentialKind>) -> Headers {
+    let placeholder = Bearer::new("contract-placeholder");
+    request_headers(credential.map(|kind| (&placeholder, kind)))
+        .into_iter()
+        .map(|(name, value)| {
+            let value = if matches!(name, API_KEY_HEADER | OAUTH_HEADER) {
+                "<credential omitted>".to_owned()
+            } else {
+                value
+            };
+            (name, value)
+        })
         .collect()
 }
 
@@ -285,11 +325,13 @@ impl MessagesClient {
     ) -> Result<TurnOutcome, WireError> {
         let url = self.endpoint.messages_url();
         let headers = || self.headers();
+        let server_delay = harness_wire::retry_after;
         let post = StreamingPost {
             wire: WIRE,
             url: &url,
             body,
             headers: &headers,
+            server_delay: &server_delay,
         };
         self.http.stream_turn(&post, sink, |reader, sink| {
             drain(reader, &self.wire, model, sink)
@@ -403,8 +445,12 @@ impl<'a> TurnDecoder<'a> {
                 sink.emit(StreamEvent::Warning {
                     code: "unknown-stream-event".to_owned(),
                     message: format!(
-                        "stream event `{kind}` is outside the pinned subset and was skipped"
+                        "stream event `{kind}` is outside the pinned subset and was preserved but not interpreted"
                     ),
+                });
+                self.items.push(Item::Opaque {
+                    wire: self.wire.clone(),
+                    payload: event.clone(),
                 });
             }
         }
@@ -522,8 +568,12 @@ impl<'a> TurnDecoder<'a> {
                 sink.emit(StreamEvent::Warning {
                     code: "unknown-stream-event".to_owned(),
                     message: format!(
-                        "content block delta `{kind}` is outside the pinned subset and was skipped"
+                        "content block delta `{kind}` is outside the pinned subset and was preserved but not interpreted"
                     ),
+                });
+                self.items.push(Item::Opaque {
+                    wire: self.wire.clone(),
+                    payload: event.clone(),
                 });
             }
         }
@@ -580,6 +630,17 @@ impl<'a> TurnDecoder<'a> {
     fn finish(self) -> Result<TurnOutcome, WireError> {
         if !self.complete {
             return Err(ended_before_a_terminal_message());
+        }
+        if !self.blocks.is_empty() {
+            let open = self
+                .blocks
+                .keys()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(WireError::protocol(format!(
+                "the terminal message left content block(s) {open} open"
+            )));
         }
         let has_tool_calls = self.items.iter().any(|item| item.as_tool_call().is_some());
         // Rebuilt into the shape a non-streamed message has, so one function reads usage on both
@@ -740,6 +801,9 @@ fn drain<R: std::io::BufRead>(
     let mut decoder = TurnDecoder::new(wire, model);
     while let Some(payload) = reader.next_payload()? {
         decoder.apply(&payload, sink)?;
+        if decoder.complete {
+            return decoder.finish();
+        }
     }
     decoder.finish()
 }
@@ -1012,6 +1076,34 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_message_stops_reading_before_trailing_bytes() {
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"model\":\"test-model\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+            "data: {not json}\n\n",
+        );
+        let mut sink = VecSink::new();
+        let outcome = decode_stream("test-model", body.as_bytes(), &mut sink)
+            .expect("bytes after the terminal event are not part of this turn");
+        assert_eq!(outcome.stop_reason, StopReason::EndTurn);
+        assert_eq!(outcome.usage.expect("usage").output_tokens, 1);
+    }
+
+    #[test]
+    fn a_terminal_message_with_an_open_content_block_refuses() {
+        let (outcome, _) = drive(&[
+            message_start(&json!({"input_tokens": 1, "output_tokens": 0})),
+            json!({"type": "content_block_start", "index": 7, "content_block": {"type": "text", "text": "partial"}}),
+            json!({"type": "message_stop"}),
+        ]);
+        let error = outcome.expect_err("an open block is a contradictory terminal message");
+        assert_eq!(error.code, WireErrorCode::Protocol);
+        assert!(error.message.contains('7'), "{error}");
+        assert!(!error.retriable, "the same contradiction is final");
+    }
+
+    #[test]
     fn a_stream_that_dies_mid_way_is_reported_as_worth_another_attempt() {
         // Through `decode_stream`, the same entry point a live turn uses, on bytes that stop in
         // the middle of a frame. This is the failure a network blip on turn twenty produces, and
@@ -1058,7 +1150,7 @@ mod tests {
             json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
             json!({"type": "message_stop"}),
         ]);
-        assert!(outcome.is_ok());
+        let outcome = outcome.expect("unknown state is preserved");
         assert!(
             sink.events().iter().any(|event| matches!(
                 event,
@@ -1067,6 +1159,11 @@ mod tests {
             "{:?}",
             sink.events()
         );
+        assert!(outcome.items.iter().any(|item| matches!(
+            item,
+            Item::Opaque { payload, .. }
+                if payload["type"] == json!("message_something_new")
+        )));
     }
 
     #[test]

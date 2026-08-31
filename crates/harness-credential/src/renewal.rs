@@ -44,7 +44,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harness_http::{JsonExchange, JsonPost};
+use harness_http::{FailureBody, JsonExchange, JsonPost};
 use serde_json::{Value, json};
 
 /// Where a credential store keeps the things a renewal reads and writes.
@@ -141,20 +141,40 @@ pub fn renew_if_stale(
             who: &format!("the authorization server at {}", endpoint.url),
             url: &endpoint.url,
             body: &request,
+            failure_body: FailureBody::Omit,
         })
         .map_err(|error| error.message)?;
 
     let new_access = answer
         .get("access_token")
         .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             format!(
                 "the authorization server at {} answered without an `access_token`",
                 endpoint.url
             )
         })?;
-    let new_refresh = answer.get("refresh_token").and_then(Value::as_str);
-    let new_id_token = answer.get("id_token").and_then(Value::as_str);
+    let new_refresh = answer
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    if answer.get("refresh_token").is_some() && new_refresh.is_none() {
+        return Err(format!(
+            "the authorization server at {} answered with an empty or non-string refresh token",
+            endpoint.url
+        ));
+    }
+    let new_id_token = answer
+        .get("id_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    if answer.get("id_token").is_some() && new_id_token.is_none() {
+        return Err(format!(
+            "the authorization server at {} answered with an empty or non-string id token",
+            endpoint.url
+        ));
+    }
 
     // Ordered so that the values most likely to be unique are spliced first; every one of them is
     // checked for uniqueness anyway, so the order is a readability choice and not a correctness
@@ -178,7 +198,7 @@ pub fn renew_if_stale(
 
     let (rewritten, byte_preserving) = rewrite(&text, &parsed, &edits)?;
     verify(&rewritten, &edits, document)?;
-    write_atomically(&document.path, &rewritten)?;
+    write_atomically_if_unchanged(&document.path, &text, &rewritten)?;
 
     Ok(Some(Renewed {
         expires_unix: expiry_of(new_access),
@@ -355,8 +375,44 @@ fn verify(
 /// A temporary file in the **same directory** — so the rename is within one filesystem and is
 /// therefore atomic — carrying the original's permissions, flushed to disk before the rename. A
 /// credential file caught half-written is its owner locked out of their own account.
+#[cfg(test)]
 fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
+    write_atomically_if_unchanged(
+        path,
+        &std::fs::read_to_string(path).map_err(|error| {
+            format!(
+                "reading the current `{}` before writing it: {error}",
+                path.display()
+            )
+        })?,
+        contents,
+    )
+}
+
+/// Atomically replaces `path` only when it still contains the bytes the caller read.
+///
+/// The network round trip occurs before this function. Re-reading immediately before the rename
+/// prevents a concurrent owner or another renewal from being overwritten with a document derived
+/// from stale bytes.
+fn write_atomically_if_unchanged(
+    path: &Path,
+    expected: &str,
+    contents: &str,
+) -> Result<(), String> {
     use std::io::Write as _;
+
+    let current = std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "re-reading `{}` before replacing it: {error}",
+            path.display()
+        )
+    })?;
+    if current != expected {
+        return Err(format!(
+            "`{}` changed while its renewal request was in flight, so the newer document was not overwritten",
+            path.display()
+        ));
+    }
 
     let directory = path.parent().ok_or_else(|| {
         format!(
@@ -562,6 +618,19 @@ mod tests {
     /// is sent, what comes back, and what lands on disk. A hand-stubbed transport would prove the
     /// splice and nothing about the request.
     fn one_shot_endpoint(answer: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+        endpoint_after_request("200 OK", answer, || {})
+    }
+
+    /// A one-shot endpoint with a caller-controlled effect after it has received the request and
+    /// before it sends the response.
+    fn endpoint_after_request<F>(
+        status: &str,
+        answer: &str,
+        after_request: F,
+    ) -> (String, std::sync::mpsc::Receiver<String>)
+    where
+        F: FnOnce() + Send + 'static,
+    {
         use std::io::{BufRead as _, Read as _, Write as _};
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
@@ -570,6 +639,7 @@ mod tests {
             listener.local_addr().expect("bound")
         );
         let (sender, receiver) = std::sync::mpsc::channel();
+        let status = status.to_owned();
         let answer = answer.to_owned();
         std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("one connection");
@@ -587,15 +657,26 @@ mod tests {
             let mut body = vec![0_u8; length];
             reader.read_exact(&mut body).expect("the body");
             let _ = sender.send(String::from_utf8_lossy(&body).into_owned());
+            after_request();
             let mut stream = reader.into_inner();
             let _ = write!(
                 stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{answer}",
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{answer}",
                 answer.len()
             );
             let _ = stream.flush();
         });
         (url, receiver)
+    }
+
+    fn stale_document(path: PathBuf) -> AuthDocument {
+        AuthDocument {
+            path,
+            access_pointer: "/tokens/access_token".to_owned(),
+            refresh_pointer: "/tokens/refresh_token".to_owned(),
+            id_token_pointer: None,
+            renewed_at_pointer: None,
+        }
     }
 
     #[test]
@@ -734,5 +815,100 @@ mod tests {
         )
         .expect_err("there is nothing to present");
         assert!(error.contains("/tokens/refresh_token"), "{error}");
+    }
+
+    #[test]
+    fn a_failed_exchange_never_quotes_its_response_body() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("auth.json");
+        let stale = jwt(1_000);
+        let before = serde_json::to_string(&json!({
+            "tokens": {"access_token": stale, "refresh_token": "synthetic-request-secret"}
+        }))
+        .expect("JSON");
+        std::fs::write(&path, &before).expect("write");
+        let (url, _sent) = endpoint_after_request(
+            "400 Bad Request",
+            r#"{"detail":"synthetic-response-secret"}"#,
+            || {},
+        );
+        let error = renew_if_stale(
+            &stale_document(path.clone()),
+            &TokenEndpoint {
+                url,
+                client_id: "synthetic-client".to_owned(),
+            },
+            1_788_000_000,
+            Duration::from_mins(15),
+            "2026-08-31T00:00:00Z",
+        )
+        .expect_err("the exchange refuses");
+        assert!(error.contains("400"), "{error}");
+        assert!(!error.contains("synthetic-response-secret"), "{error}");
+        assert!(!error.contains("synthetic-request-secret"), "{error}");
+        assert_eq!(std::fs::read_to_string(path).expect("read"), before);
+    }
+
+    #[test]
+    fn an_empty_returned_credential_refuses_before_writing() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("auth.json");
+        let stale = jwt(1_000);
+        let before = serde_json::to_string(&json!({
+            "tokens": {"access_token": stale, "refresh_token": "synthetic-refresh"}
+        }))
+        .expect("JSON");
+        std::fs::write(&path, &before).expect("write");
+        let (url, _sent) = one_shot_endpoint(r#"{"access_token":""}"#);
+        let error = renew_if_stale(
+            &stale_document(path.clone()),
+            &TokenEndpoint {
+                url,
+                client_id: "synthetic-client".to_owned(),
+            },
+            1_788_000_000,
+            Duration::from_mins(15),
+            "2026-08-31T00:00:00Z",
+        )
+        .expect_err("empty access token refuses");
+        assert!(error.contains("access_token"), "{error}");
+        assert_eq!(std::fs::read_to_string(path).expect("read"), before);
+    }
+
+    #[test]
+    fn a_document_changed_during_exchange_is_not_overwritten() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("auth.json");
+        let stale = jwt(1_000);
+        let fresh = jwt(2_000_000_000);
+        let before = serde_json::to_string(&json!({
+            "tokens": {"access_token": stale, "refresh_token": "synthetic-refresh"}
+        }))
+        .expect("JSON");
+        let concurrent = serde_json::to_string(&json!({
+            "tokens": {"access_token": "concurrent-owner-value", "refresh_token": "concurrent-refresh"}
+        }))
+        .expect("JSON");
+        std::fs::write(&path, &before).expect("write");
+        let changed_path = path.clone();
+        let changed_bytes = concurrent.clone();
+        let (url, _sent) = endpoint_after_request(
+            "200 OK",
+            &format!(r#"{{"access_token":"{fresh}"}}"#),
+            move || std::fs::write(changed_path, changed_bytes).expect("concurrent write"),
+        );
+        let error = renew_if_stale(
+            &stale_document(path.clone()),
+            &TokenEndpoint {
+                url,
+                client_id: "synthetic-client".to_owned(),
+            },
+            1_788_000_000,
+            Duration::from_mins(15),
+            "2026-08-31T00:00:00Z",
+        )
+        .expect_err("a stale rewrite refuses");
+        assert!(error.contains("changed while"), "{error}");
+        assert_eq!(std::fs::read_to_string(path).expect("read"), concurrent);
     }
 }

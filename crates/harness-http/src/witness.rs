@@ -29,7 +29,7 @@ use harness_wire::{StreamEvent, StreamSink};
 ///
 /// # Where this came from
 ///
-/// `harness-responses`, copied unchanged into `harness-messages`. Nothing in it is vendor-shaped:
+/// the first wire, copied unchanged into the second. Nothing in it is route-shaped:
 /// it counts emissions, which the neutral [`StreamSink`] already defines.
 pub struct WitnessedSink<'a> {
     inner: &'a mut dyn StreamSink,

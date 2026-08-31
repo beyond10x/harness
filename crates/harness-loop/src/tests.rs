@@ -1034,16 +1034,21 @@ fn an_input_token_ceiling_stops_the_loop() {
         ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
     )
     .budgeted(Budget {
-        max_input_tokens: Some(5),
+        max_input_tokens: Some(10),
         ..Budget::default()
     });
     let (outcome, _) = harness.run();
     assert_eq!(
         outcome.expect("bound binds").stop,
         LoopStop::MaxInputTokens {
-            limit: 5,
+            limit: 10,
             reported: 10
         }
+    );
+    assert_eq!(
+        harness.model.seen.len(),
+        1,
+        "equality binds before another turn"
     );
 }
 
@@ -1057,16 +1062,21 @@ fn an_output_token_ceiling_stops_the_loop() {
         ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
     )
     .budgeted(Budget {
-        max_output_tokens: Some(2),
+        max_output_tokens: Some(5),
         ..Budget::default()
     });
     let (outcome, _) = harness.run();
     assert_eq!(
         outcome.expect("bound binds").stop,
         LoopStop::MaxOutputTokens {
-            limit: 2,
+            limit: 5,
             reported: 5
         }
+    );
+    assert_eq!(
+        harness.model.seen.len(),
+        1,
+        "equality binds before another turn"
     );
 }
 
@@ -1322,6 +1332,31 @@ fn unreported_usage_stays_unknown_rather_than_zero() {
             .iter()
             .any(|event| matches!(event, LoopEvent::Usage(_))),
         "an unreported turn must produce no usage event"
+    );
+}
+
+#[test]
+fn a_token_ceiling_stops_by_name_when_a_turn_omits_usage() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(TurnOutcome {
+            stop_reason: StopReason::EndTurn,
+            items: vec![Item::assistant("no usage here")],
+            usage: None,
+        })]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .budgeted(Budget {
+        max_input_tokens: Some(100),
+        ..Budget::default()
+    });
+    let (outcome, _) = harness.run();
+
+    assert_eq!(
+        outcome.expect("an unobservable budget is an outcome").stop,
+        LoopStop::BudgetUnobservable {
+            name: "max_input_tokens".to_owned(),
+            reason: "a model request omitted usage".to_owned(),
+        }
     );
 }
 
@@ -2547,8 +2582,8 @@ fn a_conversation_whose_weight_is_text_is_summarised_and_the_task_survives_it() 
     assert_replayable(&summarising.items, "the summary request");
     assert_eq!(summarising.instructions, super::SUMMARY_INSTRUCTION);
     assert_eq!(
-        outcome.turns, 2,
-        "a summary is overhead the loop chose, not a turn the model spent on the task"
+        outcome.turns, 3,
+        "every model request consumes the run's turn budget, including a summary"
     );
     assert_eq!(
         outcome.total_tokens(),
@@ -2821,7 +2856,7 @@ fn a_spend_ceiling_the_summary_turn_crosses_ends_the_run_before_the_next_turn() 
         2,
         "the turn the summary made room for never started"
     );
-    assert_eq!(outcome.turns, 1);
+    assert_eq!(outcome.turns, 2, "the summary is the second model request");
 }
 
 #[test]
@@ -3746,7 +3781,7 @@ fn an_answer_call_is_the_run_s_result_and_ends_it() {
     assert_eq!(
         outcome.structured,
         Some(json!({"verdict": "green", "notes": ["one"]})),
-        "the arguments are the answer, parsed by nobody and validated by nobody"
+        "the locally validated arguments are the answer"
     );
     assert!(
         harness.tools.calls.is_empty(),
@@ -3994,6 +4029,34 @@ fn arguments_that_are_not_an_object_are_refused_back_to_the_model_rather_than_ac
             .as_str()
             .unwrap_or_default()
             .contains("not an object"),
+        "{output}"
+    );
+    assert_eq!(outcome.structured, Some(json!({"verdict": "green"})));
+}
+
+#[test]
+fn an_answer_that_misses_its_schema_is_refused_back_to_the_model() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "answer", json!({"notes": []}))])),
+            Ok(asks_for(&[(
+                "call-2",
+                "answer",
+                json!({"verdict": "green"}),
+            )])),
+        ]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .answering_in(verdict_schema());
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("the model repairs the answer on the next turn");
+
+    let (failed, output) = result_of(&outcome, "call-1");
+    assert!(failed);
+    assert!(
+        output
+            .as_str()
+            .is_some_and(|text| text.contains("published schema")),
         "{output}"
     );
     assert_eq!(outcome.structured, Some(json!({"verdict": "green"})));
@@ -4335,8 +4398,8 @@ fn a_delegate_runs_a_whole_second_loop_and_the_parent_reads_only_its_report() {
 
     assert_eq!(outcome.stop, LoopStop::Completed);
     assert_eq!(
-        outcome.turns, 2,
-        "`turns` counts the parent's turns; the child's are in its own report"
+        outcome.turns, 4,
+        "`turns` is the whole run's spend, including the child's model requests"
     );
     assert_eq!(
         result_of(&outcome, "call-1"),
@@ -4593,7 +4656,7 @@ fn a_delegate_gets_what_is_left_of_the_parents_token_ceiling_and_the_parent_gets
 }
 
 #[test]
-fn a_parent_with_nothing_left_refuses_the_delegate_without_starting_a_child() {
+fn a_parent_with_nothing_left_stops_before_starting_a_child() {
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
             Ok(asks_for(&[(
@@ -4612,19 +4675,19 @@ fn a_parent_with_nothing_left_refuses_the_delegate_without_starting_a_child() {
         ..Budget::default()
     });
     let (outcome, sink) = harness.run();
-    let outcome = outcome.expect("a refusal the model can act on is not an error");
-
-    let (failed, output) = result_of(&outcome, "call-1");
-    assert!(failed);
+    let outcome = outcome.expect("a budget that binds is an outcome");
     assert_eq!(
-        output,
-        json!("the run's budget has no room for a delegate: max_input_tokens"),
-        "named by name, and before a turn was spent finding out"
+        outcome.stop,
+        LoopStop::MaxInputTokens {
+            limit: 10,
+            reported: 10,
+        },
+        "the exact ceiling binds before an effectful child is started"
     );
     assert_eq!(
         harness.model.seen.len(),
-        2,
-        "both turns are the parent's: no child ever ran"
+        1,
+        "the exact token ceiling binds after the first turn and no child ever ran"
     );
     assert!(
         !sink
@@ -5961,6 +6024,7 @@ impl ModelPort for ForkedModel {
 struct SharedTools {
     specs: Vec<ToolSpec>,
     calls: Arc<Mutex<Vec<ToolCall>>>,
+    state: Arc<Mutex<Option<String>>>,
     envelope: Option<Envelope>,
     forkable: bool,
 }
@@ -5970,6 +6034,7 @@ impl SharedTools {
         Self {
             specs,
             calls: Arc::new(Mutex::new(Vec::new())),
+            state: Arc::new(Mutex::new(None)),
             envelope: None,
             forkable: true,
         }
@@ -5984,9 +6049,14 @@ impl SharedTools {
         Self {
             specs: self.specs.clone(),
             calls: Arc::clone(&self.calls),
+            state: Arc::clone(&self.state),
             envelope: self.envelope.clone(),
             forkable: self.forkable,
         }
+    }
+
+    fn state(&self) -> Option<String> {
+        self.state.lock().expect("the shared tool state").clone()
     }
 }
 
@@ -6006,8 +6076,25 @@ impl ToolPort for SharedTools {
         })
     }
 
+    fn reachable_specs(&self) -> Vec<ToolSpec> {
+        self.specs
+            .iter()
+            .cloned()
+            .map(|published| match &self.envelope {
+                Some(envelope) => ToolSpec {
+                    envelope: envelope.clone(),
+                    ..published
+                },
+                None => published,
+            })
+            .collect()
+    }
+
     fn call(&mut self, call: &ToolCall) -> ToolOutcome {
         self.calls.lock().expect("the call log").push(call.clone());
+        if let Some(value) = call.arguments.get("value").and_then(Value::as_str) {
+            *self.state.lock().expect("the shared tool state") = Some(value.to_owned());
+        }
         ToolOutcome::ok(json!({"read": call.name.as_str()}))
     }
 
@@ -6086,6 +6173,41 @@ fn two_delegates_of_one_turn_run_at_the_same_time() {
     );
 }
 
+#[test]
+fn delegates_run_in_order_when_any_reachable_tool_can_mutate() {
+    let siblings = Siblings::expecting(2);
+    let mut model = SharedModel::new(asks_for_two_delegates_writing_in_order(), &siblings);
+    let mut mutating = spec("write", Approval::NotRequired);
+    mutating.envelope = Envelope {
+        effects: vec![Effect::Write],
+        risk: Risk::Low,
+        idempotency: Idempotency::Idempotent,
+        access: Vec::new(),
+    };
+    let mut tools = SharedTools::new(vec![mutating]);
+    let (outcome, sink) = run_ports(
+        &mut model,
+        &mut tools,
+        &mut DenyAll,
+        delegating_config(Delegation::default()),
+    );
+    let outcome = outcome.expect("effectful reach takes the sequential path");
+    assert_ran_in_order(&outcome, &siblings, &sink);
+    assert_eq!(
+        tools.state().as_deref(),
+        Some("right"),
+        "the second child observes the same state and its model-order write is final"
+    );
+    let values: Vec<String> = tools
+        .calls
+        .lock()
+        .expect("the call log")
+        .iter()
+        .filter_map(|call| call.arguments["value"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(values, ["left", "right"], "effects keep model order");
+}
+
 /// The same turn, with the two children served by the parent's own port because nothing forked.
 ///
 /// A run of delegates in order holds one port for the whole of each child, so the script reads as
@@ -6097,6 +6219,52 @@ fn asks_for_two_delegates_run_in_order() -> Vec<Result<TurnOutcome, WireError>> 
             ("call-2", "delegate", json!({"task": "right"})),
         ])),
         Ok(answer("done: left")),
+        Ok(answer("done: right")),
+        Ok(answer("both reported")),
+    ]
+}
+
+/// Two sequential children that each exercise the same approval-gated reachable operation.
+fn asks_for_two_delegates_reading_in_order() -> Vec<Result<TurnOutcome, WireError>> {
+    vec![
+        Ok(asks_for(&[
+            ("call-1", "delegate", json!({"task": "left"})),
+            ("call-2", "delegate", json!({"task": "right"})),
+        ])),
+        Ok(asks_for(&[(
+            "child-left-read",
+            "read",
+            json!({"path": "left"}),
+        )])),
+        Ok(answer("done: left")),
+        Ok(asks_for(&[(
+            "child-right-read",
+            "read",
+            json!({"path": "right"}),
+        )])),
+        Ok(answer("done: right")),
+        Ok(answer("both reported")),
+    ]
+}
+
+/// Two children that make conflicting writes to the tool port's one shared state.
+fn asks_for_two_delegates_writing_in_order() -> Vec<Result<TurnOutcome, WireError>> {
+    vec![
+        Ok(asks_for(&[
+            ("call-1", "delegate", json!({"task": "left"})),
+            ("call-2", "delegate", json!({"task": "right"})),
+        ])),
+        Ok(asks_for(&[(
+            "child-left-write",
+            "write",
+            json!({"value": "left"}),
+        )])),
+        Ok(answer("done: left")),
+        Ok(asks_for(&[(
+            "child-right-write",
+            "write",
+            json!({"value": "right"}),
+        )])),
         Ok(answer("done: right")),
         Ok(answer("both reported")),
     ]
@@ -6241,8 +6409,7 @@ fn a_call_between_two_delegates_is_a_barrier_and_they_do_not_group() {
 }
 
 #[test]
-fn a_budget_that_will_not_divide_between_the_children_runs_them_in_order_rather_than_refusing_them()
-{
+fn a_budget_that_will_not_divide_runs_delegates_in_order_and_binds_on_the_first_child() {
     let siblings = Siblings::expecting(2);
     let mut model = SharedModel::new(asks_for_two_delegates_run_in_order(), &siblings);
     let mut tools = SharedTools::new(Vec::new());
@@ -6262,8 +6429,15 @@ fn a_budget_that_will_not_divide_between_the_children_runs_them_in_order_rather_
     );
     let outcome = outcome.expect("the run ends on its budget rather than failing");
     assert!(
-        !result_of(&outcome, "call-1").0,
-        "the first child had the whole remainder and reported"
+        result_of(&outcome, "call-1").0,
+        "the first child spent beyond the one-token remainder and reports its bound"
+    );
+    assert_eq!(
+        outcome.stop,
+        LoopStop::MaxInputTokens {
+            limit: 11,
+            reported: 20,
+        }
     );
 }
 
@@ -6307,9 +6481,9 @@ fn a_child_that_panics_is_a_failed_result_and_its_siblings_finish() {
 }
 
 #[test]
-fn a_child_on_its_own_thread_is_gated_by_the_runs_own_approver() {
+fn delegates_run_in_order_when_a_reachable_tool_needs_approval() {
     let siblings = Siblings::expecting(2);
-    let mut model = SharedModel::new(asks_for_two_delegates(), &siblings).children_reading_first();
+    let mut model = SharedModel::new(asks_for_two_delegates_reading_in_order(), &siblings);
     let mut tools =
         SharedTools::new(vec![spec("read", Approval::NotRequired)]).enveloped(Envelope {
             effects: vec![Effect::Read],
@@ -6327,12 +6501,15 @@ fn a_child_on_its_own_thread_is_gated_by_the_runs_own_approver() {
     );
     let outcome = outcome.expect("the run completes");
 
-    assert_eq!(siblings.peak(), 2, "the children did run side by side");
+    assert_eq!(
+        siblings.peak(),
+        0,
+        "approval is an ordered observation, so neither child gets a forked port"
+    );
     assert_eq!(
         approvals.asked.len(),
         2,
-        "one decision per child, taken by the run's own approver on the run's own thread — two \
-         approvers would be two gates, and a person cannot answer two prompts at once"
+        "one decision per child, in model order through the run's one approver"
     );
     assert_eq!(result_of(&outcome, "call-1").1["text"], json!("done: left"));
 }

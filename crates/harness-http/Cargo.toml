@@ -11,10 +11,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
-# Deliberately three. `harness-wire` for the neutral error, sink and cancellation types; `reqwest`
-# for the one blocking POST; `serde_json` for the frame payloads. A fourth dependency here would be
-# a fourth thing every wire below carries.
+# Four direct edges and no fourth-party package: `harness-wire` for the neutral error, sink and
+# cancellation types; `reqwest` for HTTP; `serde_json` for frame payloads; and `tokio`, already in
+# reqwest's graph, so a cancelled blocking port can drop asynchronous network work immediately.
 [dependencies]
 harness-wire = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }

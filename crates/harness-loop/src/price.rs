@@ -64,6 +64,10 @@ pub struct ModelRates {
     pub input_usd_per_mtok: f64,
     /// Input tokens the provider served from its prompt cache.
     pub cached_input_usd_per_mtok: f64,
+    /// Input tokens the provider wrote into its prompt cache, when that route reports them as a
+    /// separately billed class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_usd_per_mtok: Option<f64>,
     /// Output tokens, including any reasoning tokens the provider billed as output.
     pub output_usd_per_mtok: f64,
 }
@@ -76,6 +80,7 @@ pub struct ModelRates {
 pub struct Rates {
     input: u64,
     cached_input: u64,
+    cache_creation_input: Option<u64>,
     output: u64,
 }
 
@@ -149,6 +154,15 @@ impl RateCard {
                     });
                 }
             }
+            if let Some(value) = rates.cache_creation_input_usd_per_mtok
+                && pico_per_token(value).is_none()
+            {
+                return Err(RateCardError::BadRate {
+                    model: model.clone(),
+                    field: "cache_creation_input_usd_per_mtok",
+                    value,
+                });
+            }
         }
         Ok(card)
     }
@@ -160,6 +174,10 @@ impl RateCard {
         Some(Rates {
             input: pico_per_token(written.input_usd_per_mtok)?,
             cached_input: pico_per_token(written.cached_input_usd_per_mtok)?,
+            cache_creation_input: match written.cache_creation_input_usd_per_mtok {
+                Some(rate) => Some(pico_per_token(rate)?),
+                None => None,
+            },
             output: pico_per_token(written.output_usd_per_mtok)?,
         })
     }
@@ -183,9 +201,21 @@ impl RateCard {
         // Cached tokens are a subset of `input_tokens` on this wire, so charging both figures at
         // the input rate would bill the cached ones twice — at the dearer rate, which is the
         // direction that flatters nothing and misleads a comparison.
-        let uncached = u128::from(usage.input_tokens.saturating_sub(usage.cached_input_tokens));
+        let created = usage.cache_creation_input_tokens.unwrap_or(0);
+        let creation_rate = match (created, rates.cache_creation_input) {
+            (0, _) => 0,
+            (_, Some(rate)) => rate,
+            (_, None) => return None,
+        };
+        let uncached = u128::from(
+            usage
+                .input_tokens
+                .saturating_sub(usage.cached_input_tokens)
+                .saturating_sub(created),
+        );
         let pico = uncached * u128::from(rates.input)
             + u128::from(usage.cached_input_tokens) * u128::from(rates.cached_input)
+            + u128::from(created) * u128::from(creation_rate)
             + u128::from(usage.output_tokens) * u128::from(rates.output);
         Some(to_micro(pico))
     }
@@ -302,6 +332,38 @@ mod tests {
             200_000 * 1_250_000 / 1_000_000 + 800_000 * 125_000 / 1_000_000
         );
         assert_eq!(priced, 350_000, "$0.35, not $1.35");
+    }
+
+    #[test]
+    fn cache_creation_tokens_require_and_use_their_own_declared_rate() {
+        let reported = Usage {
+            cache_creation_input_tokens: Some(400_000),
+            ..usage(1_000_000, 100_000, 0)
+        };
+        assert_eq!(
+            card().price(&reported),
+            None,
+            "a distinct billed class with no declared rate is not silently charged as ordinary input"
+        );
+
+        let card = RateCard::parse(
+            r#"{
+                "source": "a table the operator read",
+                "as_of": "2026-08-24",
+                "models": {"m": {
+                    "input_usd_per_mtok": 1.0,
+                    "cached_input_usd_per_mtok": 0.1,
+                    "cache_creation_input_usd_per_mtok": 2.0,
+                    "output_usd_per_mtok": 10.0
+                }}
+            }"#,
+        )
+        .expect("a card with a cache-creation rate");
+        assert_eq!(
+            card.price(&reported),
+            Some(500_000 + 10_000 + 800_000),
+            "fresh, cache-read and cache-created tokens are disjoint billed classes"
+        );
     }
 
     #[test]

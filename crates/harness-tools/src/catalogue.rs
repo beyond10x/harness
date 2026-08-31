@@ -512,7 +512,7 @@ impl Catalogue {
     ///
     /// The loop hands over the whole batchable prefix of a turn, and a model that opens with two
     /// hundred reads used to get two hundred OS threads and two hundred concurrent tree scans. The
-    /// batch is run [`MAX_BATCH_THREADS`] at a time, each chunk under its own scope, and the
+    /// batch is run `MAX_BATCH_THREADS` at a time, each chunk under its own scope, and the
     /// answers concatenated in the order the calls came in.
     #[must_use]
     pub fn invoke_batch(

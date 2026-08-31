@@ -265,6 +265,22 @@ impl LocalOperations {
         }))
     }
 
+    /// Opens one resolved file and returns the metadata every read reply carries.
+    fn open_read(
+        &self,
+        relative: &str,
+    ) -> Result<(PathBuf, u64, std::io::BufReader<fs::File>), String> {
+        let target = self.resolve(relative)?;
+        if !target.is_file() {
+            return Err(format!("`{relative}` is not a file"));
+        }
+        let bytes = fs::metadata(&target)
+            .map_err(|error| format!("`{relative}`: {error}"))?
+            .len();
+        let file = fs::File::open(&target).map_err(|error| format!("`{relative}`: {error}"))?;
+        Ok((target, bytes, std::io::BufReader::new(file)))
+    }
+
     /// One window of one file, as numbered lines.
     ///
     /// # Why the reply is `cat -n` and not the file's own bytes
@@ -301,16 +317,7 @@ impl LocalOperations {
                  line. `{relative}` was not read."
             ));
         }
-        let target = self.resolve(relative)?;
-        if !target.is_file() {
-            return Err(format!("`{relative}` is not a file"));
-        }
-        let bytes = fs::metadata(&target)
-            .map_err(|error| format!("`{relative}`: {error}"))?
-            .len();
-        let mut reader = std::io::BufReader::new(
-            fs::File::open(&target).map_err(|error| format!("`{relative}`: {error}"))?,
-        );
+        let (target, bytes, mut reader) = self.open_read(relative)?;
 
         let mut text = String::new();
         let mut cut = Vec::new();
@@ -321,6 +328,7 @@ impl LocalOperations {
         let mut last: u64 = 0;
         let mut closed = false;
         let mut counting_bounded = false;
+        let mut byte_ceiling_cut = false;
         while let Some(line) = next_line(&mut reader, MAX_READ_LINE_BYTES)
             .map_err(|error| format!("`{relative}`: {error}"))?
         {
@@ -348,14 +356,23 @@ impl LocalOperations {
                 closed = true;
                 continue;
             }
-            let content = String::from_utf8_lossy(&line.kept);
+            let shown_bytes = if kept == 0 && weight > ceiling {
+                byte_ceiling_cut = true;
+                let allowed = usize::try_from(ceiling.saturating_sub(1))
+                    .unwrap_or(usize::MAX)
+                    .min(line.kept.len());
+                &line.kept[..whole_prefix(&line.kept[..allowed])]
+            } else {
+                &line.kept
+            };
+            let content = String::from_utf8_lossy(shown_bytes);
             let shown: String = content.chars().take(MAX_READ_LINE_CHARS).collect();
-            if !line.whole || content.chars().count() > MAX_READ_LINE_CHARS {
+            if byte_ceiling_cut || !line.whole || content.chars().count() > MAX_READ_LINE_CHARS {
                 cut.push(total);
             }
             let _ = writeln!(text, "{total:>6}\t{shown}");
             kept += 1;
-            answered_bytes += weight;
+            answered_bytes = answered_bytes.saturating_add(weight.min(ceiling));
             last = total;
         }
 
@@ -387,7 +404,7 @@ impl LocalOperations {
             //
             // `true` as well when the line count was bounded: the scan stopped before the end, so
             // whether the window reached the last line is not known here.
-            "truncated": counting_bounded || last < total || !cut.is_empty(),
+            "truncated": counting_bounded || byte_ceiling_cut || last < total || !cut.is_empty(),
             "text": text,
             // So a window is never mistaken for the whole file. `to` is one below `from` when the
             // window answered nothing at all, which is only an empty file read from line 1.
@@ -483,8 +500,11 @@ impl LocalOperations {
                  links. Name the file itself."
             ));
         }
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("`{relative}`: {error}"))?;
+        if target.parent().is_some_and(|parent| !parent.is_dir()) {
+            return Err(format!(
+                "`{relative}` has a parent directory that does not exist; create the directory by \
+                 an admitted operation before writing the file"
+            ));
         }
         fs::write(&target, text).map_err(|error| format!("`{relative}`: {error}"))?;
         Ok(json!({"path": self.display(&target), "bytes": text.len()}))
@@ -544,6 +564,13 @@ impl LocalOperations {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            // A private process group makes the timeout cover descendants that inherited the
+            // output pipes, not only the shell directly returned by `spawn`.
+            command.process_group(0);
+        }
         // `var_os`, not `var`: a value that is not UTF-8 is still the value, and `var` would drop
         // it without a word.
         for name in INHERITED_ENV
@@ -580,7 +607,7 @@ impl LocalOperations {
             }
             if Instant::now() >= deadline {
                 killed = true;
-                let _ = child.kill();
+                terminate(&mut child);
                 break child
                     .wait()
                     .map_err(|error| Refused::from(format!("`{program}`: {error}")))?;
@@ -631,36 +658,14 @@ impl LocalOperations {
         // was asked for, because a cap the reader cannot see is a bound they will not work around.
         let asked_context = options.context.unwrap_or(0);
         let context = usize::try_from(asked_context.min(MAX_SEARCH_CONTEXT)).unwrap_or(usize::MAX);
-        // Compiled once, before anything is walked. A pattern that does not compile is refused
-        // **with the regex crate's own words**: "no matches" for a broken pattern would read as
-        // *this string is not in the tree*, which is a different and wrong answer.
-        //
-        // **Both size limits are set rather than left at the crate's defaults.** The pattern comes
-        // from the model, and the default 10 MiB compiled program plus a 2 MiB lazy-DFA cache is a
-        // quantity of this process's memory a single `(a{1000}){1000}` can ask for. A megabyte each
-        // compiles every pattern a search of a tree has ever needed, and one over it is refused by
-        // name with the crate's own words rather than allocating first and asking later.
-        let expression = if options.regex {
-            Some(
-                regex::RegexBuilder::new(pattern)
-                    .size_limit(1 << 20)
-                    .dfa_size_limit(1 << 20)
-                    .build()
-                    .map_err(|error| {
-                        format!(
-                            "`{pattern}` is not a regular expression this build can compile: \
-                             {error}"
-                        )
-                    })?,
-            )
-        } else {
-            None
-        };
+        let expression = search_expression(pattern, options.regex)?;
         let filter = options.glob.as_deref().map(PathGlob::compile).transpose()?;
         let root = self.resolve(relative)?;
 
         let mut matches = Vec::new();
         let mut truncated = false;
+        let mut skipped_large_files = 0_u64;
+        let mut skipped_large_paths = Vec::new();
         let boundary = self.root.clone();
         let depth_bound_reached = walk(&root, &boundary, 0, &mut |file| {
             if matches.len() >= limit {
@@ -675,6 +680,11 @@ impl LocalOperations {
                 return true;
             };
             if metadata.len() > MAX_GREP_FILE_BYTES {
+                skipped_large_files = skipped_large_files.saturating_add(1);
+                if skipped_large_paths.len() < 20 {
+                    skipped_large_paths.push(shown);
+                }
+                truncated = true;
                 return true;
             }
             let Ok(text) = fs::read_to_string(file) else {
@@ -722,6 +732,8 @@ impl LocalOperations {
             // descending at [`MAX_GREP_DEPTH`] answered a subset of the tree, and a reply that said
             // nothing about it reads exactly like one that searched everything.
             "depth_bound_reached": depth_bound_reached,
+            "skipped_large_files": skipped_large_files,
+            "skipped_large_paths": skipped_large_paths,
         });
         // Echoed only when they were asked for, so a reader of the record can tell a literal
         // search from a regular expression without holding the call beside the answer.
@@ -790,6 +802,40 @@ impl LocalOperations {
             "depth_bound_reached": depth_bound_reached,
         }))
     }
+}
+
+/// Compiles a model-supplied regular expression once, before walking anything.
+///
+/// Both program limits are explicit: the crate defaults would let one pattern choose far more
+/// memory. A compile failure is named instead of being misreported as an empty search result.
+fn search_expression(pattern: &str, enabled: bool) -> Result<Option<regex::Regex>, String> {
+    if !enabled {
+        return Ok(None);
+    }
+    regex::RegexBuilder::new(pattern)
+        .size_limit(1 << 20)
+        .dfa_size_limit(1 << 20)
+        .build()
+        .map(Some)
+        .map_err(|error| {
+            format!("`{pattern}` is not a regular expression this build can compile: {error}")
+        })
+}
+
+#[cfg(unix)]
+fn terminate(child: &mut std::process::Child) {
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+
+    if let Ok(pid) = i32::try_from(child.id()) {
+        let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
+    }
+    let _ = child.kill();
+}
+
+#[cfg(not(unix))]
+fn terminate(child: &mut std::process::Child) {
+    let _ = child.kill();
 }
 
 /// A match's line, cut at [`MAX_MATCH_CHARS`] on a character boundary.
@@ -1247,15 +1293,16 @@ mod tests {
     }
 
     #[test]
-    fn a_new_file_under_directories_that_do_not_exist_yet_still_writes() {
+    fn a_new_file_under_directories_that_do_not_exist_yet_is_refused_without_side_effects() {
         let inside = workspace();
-        writing(inside.path())
+        let refusal = writing(inside.path())
             .file_write("new/dir/file.txt", "hello")
-            .expect("the write lands");
-        assert_eq!(
-            fs::read_to_string(inside.path().join("new/dir/file.txt")).expect("the file is read"),
-            "hello"
+            .expect_err("a missing parent is refused");
+        assert!(
+            refusal.contains("parent directory that does not exist"),
+            "{refusal}"
         );
+        assert!(!inside.path().join("new").exists());
     }
 
     #[test]
@@ -1302,6 +1349,24 @@ mod tests {
             json!(1024 / 7),
             "as many whole lines as the byte ceiling holds, and not one past it"
         );
+    }
+
+    #[test]
+    fn a_first_line_over_the_requested_byte_window_is_visibly_truncated() {
+        let inside = workspace();
+        fs::write(inside.path().join("one.txt"), "abcdefghij\n").expect("written");
+        let value = reading(inside.path())
+            .file_read(
+                "one.txt",
+                ReadWindow {
+                    max_bytes: Some(4),
+                    ..ReadWindow::whole()
+                },
+            )
+            .expect("the bounded first line is answered");
+        assert_eq!(value["truncated"], json!(true));
+        assert_eq!(value["truncated_lines"], json!([1]));
+        assert_eq!(value["text"], json!("     1\tabc\n"));
     }
 
     #[test]
@@ -1410,6 +1475,67 @@ mod tests {
     }
 
     #[test]
+    fn search_names_large_files_it_did_not_inspect() {
+        let inside = workspace();
+        fs::write(
+            inside.path().join("large.txt"),
+            format!(
+                "needle{}",
+                "x".repeat(
+                    usize::try_from(MAX_GREP_FILE_BYTES).expect("the search bound fits usize")
+                )
+            ),
+        )
+        .expect("large file");
+        let value = reading(inside.path())
+            .search("needle", ".", &SearchOptions::default())
+            .expect("search answers incompletely");
+        assert_eq!(value["matches"], json!([]));
+        assert_eq!(value["truncated"], json!(true));
+        assert_eq!(value["skipped_large_files"], json!(1));
+        assert_eq!(value["skipped_large_paths"], json!(["large.txt"]));
+    }
+
+    #[test]
+    fn search_checks_the_large_file_bound_in_bytes_at_both_edges() {
+        let inside = workspace();
+        let limit = usize::try_from(MAX_GREP_FILE_BYTES).expect("the search bound fits usize");
+        for (name, total) in [("below.txt", limit - 1), ("exact.txt", limit)] {
+            let prefix = "needle ";
+            fs::write(
+                inside.path().join(name),
+                format!("{prefix}{}", "x".repeat(total - prefix.len())),
+            )
+            .expect("bounded file");
+        }
+        let prefix = "needle é";
+        fs::write(
+            inside.path().join("multibyte.txt"),
+            format!("{prefix}{}", "x".repeat(limit - prefix.len())),
+        )
+        .expect("bounded multibyte file");
+        fs::write(
+            inside.path().join("over.txt"),
+            format!("needle {}", "x".repeat(limit + 1 - "needle ".len())),
+        )
+        .expect("over-bound file");
+
+        let value = reading(inside.path())
+            .search("needle", ".", &SearchOptions::default())
+            .expect("search answers and marks the skipped file");
+        let paths = value["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .map(|hit| hit["path"].as_str().expect("path"))
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["below.txt", "exact.txt", "multibyte.txt"]);
+        assert_eq!(value["skipped_large_files"], json!(1));
+        assert_eq!(value["skipped_large_paths"], json!(["over.txt"]));
+        assert_eq!(value["truncated"], json!(true));
+    }
+
+    #[test]
     fn a_link_to_a_directory_is_listed_as_neither_a_file_nor_a_directory() {
         let inside = workspace();
         fs::write(inside.path().join("a.txt"), "x").expect("the file is written");
@@ -1479,6 +1605,35 @@ mod tests {
             .expect("the program runs");
         assert_eq!(value["timed_out"], json!(false));
         assert_eq!(value["timeout_ms"], json!(MAX_RUN_SECONDS * 1000));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timeout_kills_descendants_that_hold_the_output_pipes() {
+        let shell = Path::new("/bin/sh");
+        if !shell.exists() {
+            return;
+        }
+        let inside = workspace();
+        let operations = LocalOperations::unconfined(inside.path(), vec!["/bin/sh".to_owned()])
+            .expect("the workspace opens");
+
+        let started = Instant::now();
+        let value = operations
+            .run_within(
+                &[
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    "sleep 30 & wait".to_owned(),
+                ],
+                Some(Duration::from_millis(200)),
+            )
+            .expect("the process group is stopped");
+        assert_eq!(value["timed_out"], json!(true));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a descendant kept a pipe open after the direct child was killed"
+        );
     }
 
     #[test]

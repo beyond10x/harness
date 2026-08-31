@@ -362,7 +362,10 @@ fn tool_use_to_item(value: &Value) -> Result<Item, WireError> {
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| WireError::protocol(format!("tool call `{call_id}` has no name")))?;
-    let arguments = value.get("input").cloned().unwrap_or_else(|| json!({}));
+    let arguments = value
+        .get("input")
+        .cloned()
+        .ok_or_else(|| WireError::protocol(format!("tool call `{call_id}` has no `input`")))?;
     if harness_wire::exceeds(&arguments, MAX_TOOL_ARGUMENT_BYTES) {
         return Err(WireError::too_large(format!(
             "arguments of call `{call_id}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound"
@@ -397,10 +400,7 @@ fn tool_use_to_item(value: &Value) -> Result<Item, WireError> {
 pub fn usage_from_message(message: &Value, model: &str) -> Option<Usage> {
     let usage = message.get("usage")?.as_object()?;
     let input = usage.get("input_tokens")?.as_u64()?;
-    let output = usage
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let output = usage.get("output_tokens")?.as_u64()?;
     let cached = usage
         .get("cache_read_input_tokens")
         .and_then(Value::as_u64)
@@ -798,6 +798,13 @@ mod tests {
     }
 
     #[test]
+    fn a_tool_call_with_no_input_refuses_instead_of_inventing_an_empty_object() {
+        let value = json!({"type": "tool_use", "id": "toolu_1", "name": "t"});
+        let error = block_to_item(&wire(), &value, &mut no_warn()).expect_err("missing refuses");
+        assert!(error.message.contains("no `input`"), "{}", error.message);
+    }
+
+    #[test]
     fn absent_usage_stays_absent_and_never_becomes_zero() {
         assert_eq!(usage_from_message(&json!({}), "m"), None);
         assert_eq!(usage_from_message(&json!({"usage": null}), "m"), None);
@@ -835,6 +842,14 @@ mod tests {
         let usage = usage_from_message(&message, "m").expect("usage was reported");
         assert_eq!(usage.cache_creation_input_tokens, None);
         assert_eq!(usage.input_tokens, 5);
+    }
+
+    #[test]
+    fn a_partial_usage_object_stays_absent_instead_of_inventing_zero_output() {
+        assert_eq!(
+            usage_from_message(&json!({"usage": {"input_tokens": 5}}), "m"),
+            None
+        );
     }
 
     #[test]

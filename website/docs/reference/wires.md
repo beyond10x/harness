@@ -52,9 +52,11 @@ attempt. See [Sessions and events](../guides/sessions-and-events.md).
 
 ## Contracts and evidence
 
-Provider-wire contracts pin an exact request fixture and accepted stream fixture under
-`contracts/provider-wires/<wire>/<version>/`. A Python checker verifies each manifest against its
-fixtures, while Rust tests verify that the implementation produces and accepts those same bytes.
+Provider-wire contracts pin exact request bytes, non-secret header values, terminal policy, and the
+full accepted event inventory under `contracts/provider-wires/<wire>/<version>/`. The independent
+`cargo xtask provider-contracts` validator checks each manifest, fixture, digest, inventory and
+released-version immutability, while tests in the wire crates exercise the production encoder,
+header builder and decoder against those same bytes.
 
 Most current evidence comes from deterministic local provider emulators. It proves the projection,
 transport, and loop scenarios against a real socket; it is not a claim that every live service

@@ -24,7 +24,7 @@ Use `tools` with the same confinement flags you plan to give `run`:
 
 ```bash
 b10x-harness tools \
-  --workspace /work/ws_example \
+  --workspace /work/project_1 \
   --substrate-embedded
 ```
 
@@ -36,9 +36,9 @@ The output is the actual catalogue admitted on that machine, not an aspirational
 Embedded mode adopts the directory passed as `--workspace`; it does not create or copy it. The
 workspace's parent becomes the substrate root, and reads and writes land in the same tree.
 
-The directory name must be `ws_` followed by alphanumerics or underscores, for example
-`/work/ws_example`. A differently named directory is refused before the loop starts rather than
-silently falling back to read-only.
+The directory name is one non-empty path component containing only ASCII letters, digits, `_` or
+`-`. It may not be `.` or `..` or begin with `-`; `/work/project_1` is valid. A name outside that
+grammar is refused before the loop starts rather than silently falling back to read-only.
 
 With a guarded workspace but no admitted execution capability, the catalogue has six tools: the
 four reads plus `file_write` and `file_edit`.

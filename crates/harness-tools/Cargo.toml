@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 globset = { workspace = true }
 harness-wire = { workspace = true }
+nix = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -4,17 +4,14 @@
 //!
 //! [`crate::HttpTransport`] exists for a *turn*: it frames server-sent events, it retries while
 //! the far side has not answered, and it needs a [`crate::Framing`] to know what ends a stream.
-//! A credential exchange has none of that shape — one small JSON body, one small JSON answer, no
-//! stream to frame — and giving it a framing it does not use would be a parameter that means
-//! nothing at the only call site that supplies it.
+//! A bounded document exchange has none of that shape — one small JSON body, one small JSON
+//! answer, no stream to frame — and giving it a framing it does not use would be a parameter that
+//! means nothing at the call sites that supply it.
 //!
 //! # It does not retry, and that is the point
 //!
-//! An authorization server that rotates a refresh token has already spent the old one by the time
-//! it answers. A second attempt with the same body therefore cannot succeed, and a first attempt
-//! whose *answer* was lost has left the caller holding a credential the server no longer honours —
-//! so a blind retry turns one recoverable failure into two. One attempt, and the failure is
-//! reported with the status the far side gave.
+//! A caller may be sending a non-idempotent document. The transport cannot prove that repeating it
+//! is safe, so it makes one attempt and reports the status the far side gave.
 //!
 //! Like everything else here it names no vendor: the caller supplies the URL, the body and a word
 //! for who is being spoken to.
@@ -29,10 +26,21 @@ use crate::status::status_error;
 
 /// How much of an answer is read before it is refused as implausible for this shape of request.
 ///
-/// A token response is a few hundred bytes. A megabyte of it is a proxy's error page, a captive
-/// portal or something else that is not the authorization server, and reading it all into memory
-/// to find that out helps nobody.
+/// Documents using this exchange are expected to be small. Reading an unbounded proxy error page
+/// or unrelated response into memory to discover that it is the wrong shape helps nobody.
 pub const MAX_EXCHANGE_BODY_BYTES: usize = 64 * 1024;
+
+/// Whether a failed response's body may be quoted in the resulting error.
+///
+/// The transport cannot know whether a response contains sensitive material, so the caller makes
+/// the disclosure decision explicitly on every exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureBody {
+    /// Omit the response body and report only the peer and status.
+    Omit,
+    /// Include the body after enforcing [`MAX_EXCHANGE_BODY_BYTES`].
+    IncludeBounded,
+}
 
 /// One request/response exchange, as its caller needs it.
 pub struct JsonPost<'a> {
@@ -44,9 +52,11 @@ pub struct JsonPost<'a> {
     pub url: &'a str,
     /// The request body, sent as JSON.
     ///
-    /// **This may carry a secret** — a refresh token is one. It is held for as long as it takes to
-    /// become a request and is never logged, never echoed into an error, and never retried.
+    /// The transport treats it as opaque: it is held only long enough to build the request and is
+    /// never logged, echoed into an error, or retried.
     pub body: &'a Value,
+    /// Whether a failing response body is safe to disclose.
+    pub failure_body: FailureBody,
 }
 
 /// A blocking client for a single request and its answer.
@@ -64,9 +74,10 @@ impl JsonExchange {
     pub fn new() -> Result<Self, WireError> {
         let http = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            // Shorter than a turn's, deliberately: this request produces a few hundred bytes and
-            // an authorization server that has not answered in thirty seconds is not going to.
+            // Shorter than a streamed turn's, deliberately: this request produces one bounded
+            // document rather than a long-lived stream.
             .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| WireError::transport(format!("building the HTTP client: {error}")))?;
         Ok(Self { http })
@@ -91,19 +102,29 @@ impl JsonExchange {
             })
             .map_err(not_retriable)?;
         let status = response.status();
-        let mut body = String::new();
+        if !status.is_success() && post.failure_body == FailureBody::Omit {
+            return Err(not_retriable(status_error(post.who, status, "")));
+        }
+        let mut body = Vec::new();
         let read = response
-            .take(MAX_EXCHANGE_BODY_BYTES as u64)
-            .read_to_string(&mut body);
+            .take(MAX_EXCHANGE_BODY_BYTES as u64 + 1)
+            .read_to_end(&mut body);
+        if body.len() > MAX_EXCHANGE_BODY_BYTES {
+            return Err(not_retriable(WireError::too_large(format!(
+                "{}'s answer passed the {MAX_EXCHANGE_BODY_BYTES} byte bound",
+                post.who
+            ))));
+        }
         if !status.is_success() {
+            let body = String::from_utf8_lossy(&body);
             return Err(not_retriable(status_error(post.who, status, body.trim())));
         }
         read.map_err(|error| {
             WireError::transport(format!("reading {}'s answer: {error}", post.who))
         })
         .map_err(not_retriable)?;
-        serde_json::from_str(&body).map_err(|error| {
-            // The body is *not* quoted here. A successful token response is entirely secret.
+        serde_json::from_slice(&body).map_err(|error| {
+            // The body is not quoted here. Its sensitivity is the caller's to know, not ours.
             WireError::new(
                 WireErrorCode::Refused,
                 format!(
@@ -132,17 +153,47 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn exchange_body(body: Vec<u8>) -> Result<Value, WireError> {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let url = format!("http://{}/document", listener.local_addr().expect("addr"));
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("a request");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("request bytes");
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("headers");
+            stream.write_all(&body).expect("body");
+        });
+        let exchange = JsonExchange::new().expect("the client builds");
+        let request = json!({});
+        let result = exchange.post(&JsonPost {
+            who: "the document endpoint",
+            url: &url,
+            body: &request,
+            failure_body: FailureBody::IncludeBounded,
+        });
+        server.join().expect("server finished");
+        result
+    }
+
     #[test]
     fn a_transport_failure_is_never_offered_for_retry() {
         // Nothing answers on port 1. What is under test is the `retriable` flag, not the failure:
-        // a retried refresh presents a token the server may already have rotated away.
+        // the generic exchange cannot prove that repeating an opaque document is safe.
         let exchange = JsonExchange::new().expect("the client builds");
         let body = json!({});
         let error = exchange
             .post(&JsonPost {
-                who: "the authorization server",
-                url: "http://127.0.0.1:1/oauth/token",
+                who: "the document endpoint",
+                url: "http://127.0.0.1:1/document",
                 body: &body,
+                failure_body: FailureBody::IncludeBounded,
             })
             .expect_err("nothing is listening");
         assert_eq!(error.code, WireErrorCode::Transport);
@@ -154,21 +205,94 @@ mod tests {
 
     #[test]
     fn the_url_is_named_and_the_body_is_not() {
-        // The body of this request is a refresh token. An error message carrying it would put a
-        // live credential in a log, a terminal and a session file at once.
+        // Request bodies are opaque to this crate and never enter its errors.
         let exchange = JsonExchange::new().expect("the client builds");
-        let body = json!({"refresh_token": "synthetic-not-a-real-token"});
+        let body = json!({"opaque": "synthetic-private-value"});
         let error = exchange
             .post(&JsonPost {
-                who: "the authorization server",
-                url: "http://127.0.0.1:1/oauth/token",
+                who: "the document endpoint",
+                url: "http://127.0.0.1:1/document",
                 body: &body,
+                failure_body: FailureBody::IncludeBounded,
             })
             .expect_err("nothing is listening");
         assert!(error.message.contains("127.0.0.1:1"), "{error}");
         assert!(
-            !error.message.contains("synthetic-not-a-real-token"),
+            !error.message.contains("synthetic-private-value"),
             "the request body reached an error message: {error}"
         );
+    }
+
+    #[test]
+    fn a_redirect_is_a_response_and_never_a_second_request() {
+        use std::io::{Read as _, Write as _};
+
+        let target = std::net::TcpListener::bind("127.0.0.1:0").expect("target port");
+        target.set_nonblocking(true).expect("nonblocking target");
+        let target_url = format!(
+            "http://{}/elsewhere",
+            target.local_addr().expect("target addr")
+        );
+        let source = std::net::TcpListener::bind("127.0.0.1:0").expect("source port");
+        let source_url = format!(
+            "http://{}/document",
+            source.local_addr().expect("source addr")
+        );
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = source.accept().expect("source request");
+            let mut bytes = [0_u8; 4096];
+            let _ = stream.read(&mut bytes).expect("request bytes");
+            write!(
+                stream,
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .expect("redirect");
+        });
+
+        let exchange = JsonExchange::new().expect("the client builds");
+        let body = json!({"opaque": "must-not-cross-origins"});
+        let error = exchange
+            .post(&JsonPost {
+                who: "the document endpoint",
+                url: &source_url,
+                body: &body,
+                failure_body: FailureBody::Omit,
+            })
+            .expect_err("redirects are refused");
+        server.join().expect("source finished");
+        assert_eq!(error.code, WireErrorCode::Refused, "{error}");
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            matches!(target.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "a redirect reached the second origin"
+        );
+    }
+
+    #[test]
+    fn an_answer_one_byte_over_the_limit_is_refused() {
+        let error = exchange_body(vec![b'x'; MAX_EXCHANGE_BODY_BYTES + 1])
+            .expect_err("limit plus one refuses");
+        assert_eq!(error.code, WireErrorCode::TooLarge, "{error}");
+        assert!(error.message.contains("65536"), "{error}");
+    }
+
+    #[test]
+    fn valid_json_at_both_edges_and_with_multibyte_text_is_accepted() {
+        for total in [MAX_EXCHANGE_BODY_BYTES - 1, MAX_EXCHANGE_BODY_BYTES] {
+            let body = format!("\"{}\"", "x".repeat(total - 2)).into_bytes();
+            assert_eq!(body.len(), total);
+            let value = exchange_body(body).expect("the byte bound is inclusive");
+            assert_eq!(value.as_str().expect("string").len(), total - 2);
+        }
+        let body = format!(
+            "\"{}é\"",
+            "x".repeat(MAX_EXCHANGE_BODY_BYTES - 2 - 'é'.len_utf8())
+        )
+        .into_bytes();
+        assert_eq!(body.len(), MAX_EXCHANGE_BODY_BYTES);
+        let value = exchange_body(body).expect("whole multibyte JSON at the bound");
+        let text = value.as_str().expect("string");
+        assert!(text.ends_with('é'));
+        assert!(!text.contains('\u{fffd}'));
     }
 }

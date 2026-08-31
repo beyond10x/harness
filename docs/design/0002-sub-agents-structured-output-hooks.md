@@ -19,12 +19,12 @@ silent (invariants 8, 9).
 
 ---
 
-## 0. What the three have in common: tools the loop owns
+## 0. The tools the loop owns
 
-Two of the three are tools the model calls, and neither is a catalogue entry. `answer` performs no
-neutral operation on a machine; `delegate` performs whatever the run's own tools perform, through
-the run's own gate. They belong to the **loop**, not to `harness-tools`, and a `ToolPort` never sees
-them:
+Three opt-in tools are not catalogue entries. `answer` performs no neutral operation on a machine;
+`delegate` performs whatever the run's own tools perform through the run's own gate; `skill`
+returns one immutable instruction document the caller loaded before the run. They belong to the
+**loop**, not to `harness-tools`, and a `ToolPort` never sees them:
 
 - `AgentLoop::request` appends their specs to the port's `specs()` for every turn, under the same
   `MAX_TOOLS` bound and the same duplicate-name check — a port that already publishes a tool of
@@ -37,8 +37,10 @@ them:
   provider replaying a call without its result is a hard error on the next turn and a session that
   cannot be resumed.
 
-Both are **opt-in per run** (`LoopConfig::output_schema`, `LoopConfig::delegation`, both `None`
-by default). Every invocation written before this change means what it did.
+All three are **opt-in per run** (`LoopConfig::output_schema`, `LoopConfig::delegation`,
+`LoopConfig::skills`, all `None` by default). Every invocation written before them means what it
+did. Each is resolved through its own published spec, approval decision and hook path before it
+acts; loop ownership is not a route around the gate.
 
 ---
 
@@ -84,10 +86,25 @@ tool's `input_schema` must be one on both wires, and a refusal before the run be
 | the model ends a turn in prose with no `answer` call | one user item — *"Finish by calling `answer` with the result; nothing else is read."* — and one more turn, at most [`MAX_ANSWER_NUDGES`] = 1 times **per ending**; the nudge is a turn like any other and is charged to every ceiling. A `stop` hook that sends the run back to work (§ 3) starts a new ending, so the count is reset: a run that answered, was told to go on and then replied in prose is asked once more rather than ending `Unstructured` unasked |
 | still prose | `LoopStop::Unstructured { asked_again: 1 }` — **not** `Completed`: a consumer that piped stdout to `jq` and got prose with exit 0 would be the silent failure invariant 8 forbids |
 
-The loop parses nothing and validates nothing against the schema: what the provider accepted as
-tool arguments is what the caller gets. Validation in the loop is **milestone M3**, and it is not
-free — a JSON Schema validator is a dependency this workspace has argued against once already
-(`Cargo.toml`, the note above `globset`).
+The loop validates the arguments locally against the declared JSON Schema before accepting an
+answer. A mismatch is a failed `ToolOutcome` carrying the validation path and the run continues, so
+the model learns that its attempted answer did not finish the run. This is deliberately independent
+of provider-side tool validation: an endpoint accepting malformed arguments cannot turn them into a
+successful structured result. The schema is compiled during preparation so an invalid schema
+refuses the run before the first provider request; each proposed answer is validated from that same
+immutable schema.
+
+### Skills — loaded instructions, not ambient discovery
+
+`Skills` is a caller-owned value containing a name, description and bounded body for every skill.
+The CLI may construct it from explicitly named `--skills-dir` and `--plugin-dir` paths, but the loop
+never walks a directory or reads a file. Descriptions go in the standing instruction; bodies remain
+behind the `skill` tool so a stateless run does not pay to replay every unused document on every
+turn. A call names one enumerated skill and receives that exact body as a bounded tool result.
+
+The spec declares an idempotent, low-risk filesystem read because the document originated in a
+file, even though the call itself reads only the immutable in-memory value. The same value is
+cloned into delegates: delegation adds no skill and cannot observe a later filesystem change.
 
 ### On the command line
 
@@ -132,9 +149,9 @@ files to answer one question costs the parent one tool result, not forty reads i
 
 ### Side by side (M4, shipped)
 
-A turn that asked for three delegates paid three whole child runs of latency back to back. Nothing
-about them required it: a delegate starts from an empty conversation, so no child can read what
-another produced and there is no ordering between them to preserve.
+A turn that asked for three delegates paid three whole child runs of latency back to back. Their
+fresh conversations alone do not make concurrency safe: a child can still write what its neighbour
+reads, approvals have a human-visible order, and hooks observe call order.
 
 **Neighbouring `delegate` calls of one turn form a group**, capped at `Delegation::max_parallel`
 (default 4). Neighbouring and not gathered from the whole turn, exactly as a batch of pure tool
@@ -151,12 +168,13 @@ at what that call did.
 | **a share of the token budget** | `(limit − spent) / children`. Tokens add up, so a group cannot promise the whole remainder to each of four children |
 | **the whole of the wall clock** | wall clock does *not* add up: four children running at the same moment take one child's worth of it. The same figure a batch of tool calls is handed |
 
-**Running side by side is an optimisation and never a difference in what a run can do.** Where a
-port will not fork, where `max_parallel` is 1, or where the remainder will not divide, the same
-delegates run **in order** — the same children, the same gate, the same results in the same order.
-Order is in fact the more accurate accounting: each child is carved on what the one before it
-actually spent. That is what concurrency costs here, and it is paid in budget precision rather than
-in reach.
+**Running side by side is an optimisation and never a difference in what a run can observe.** The
+group is concurrent only when every reachable tool is non-mutating and needs no approval at this
+run's ceiling, and no hook is attached. Where that condition fails, a port will not fork,
+`max_parallel` is 1, or the remainder will not divide, the same delegates run **in order** — the
+same children, the same gate, the same results in model order. Order is also more accurate
+accounting: each child is carved on what the one before it actually spent. Concurrency pays in
+budget precision, never in reach or observable effect ordering.
 
 A child on a worker thread that cannot reach the run's thread **fails closed**: an approval nobody
 gave is a denial and a hook that could not be consulted did not say yes. A child that panics is a
@@ -277,7 +295,8 @@ run sees which hook decided what.
 
 - `command` is an **argv, never a shell string** — the same rule `run` has.
 - `tools` filters by the **invoked entry's** name (`file_write`, not `tool_invoke`); absent means
-  every call — the loop's own `answer` and `delegate` included, consulted with their own spec.
+  every call — the loop's own `answer`, `delegate` and `skill` included, consulted with their own
+  spec.
 - The hook reads one JSON document on stdin — `{ "hook", "call": {call_id, name, arguments},
   "entry", "outcome"?, "text"?, "workspace" }` — and answers with its exit status: `0` proceed,
   `2` block with the reason from `{"reason": …}` on stdout or else from stderr, anything else
@@ -298,8 +317,8 @@ run sees which hook decided what.
 
 | crate | change |
 |---|---|
-| `harness-loop` | `OutputSchema`, `Delegation`, `HookPort`/`HookDecision`/`HookPoint`/`NoHooks`; `LoopConfig::{output_schema, delegation}`; `AgentLoop::with_hooks`; `LoopStop::Unstructured`; `LoopOutcome::structured`; events `Answered`, `DelegateStarted`, `DelegateFinished`, `Delegated`, `HookRan`; the owned-tool resolution in `run_calls`; the nudge and the stop hook in `drive`; the nested loop |
-| `harness-cli` | `--output-schema`, `--delegate`, `--delegate-turns`, `--hooks`; `hooks.rs` (file, protocol, process); renderer arms; session field; the argv pin `contracts/cli/b10x-harness/2026-08-29` **updated in place** — it is unreleased, and invariant 13 immutability starts at release |
+| `harness-loop` | `OutputSchema`, `Delegation`, `Skills`, `HookPort`/`HookDecision`/`HookPoint`/`NoHooks`; `LoopConfig::{output_schema, delegation, skills}`; `AgentLoop::with_hooks`; `LoopStop::Unstructured`; `LoopOutcome::structured`; events `Answered`, `DelegateStarted`, `DelegateFinished`, `Delegated`, `HookRan`; the owned-tool resolution in `run_calls`; local answer-schema validation; the nudge and the stop hook in `drive`; the nested loop |
+| `harness-cli` | `--output-schema`, `--delegate`, `--delegate-turns`, `--skills-dir`, `--plugin-dir`, `--hooks`; the explicit skill loader; `hooks.rs` (file, protocol, process); renderer arms; session field; dated argv pins cut without rewriting released versions |
 | `harness-app-server` | ignores the new events; publishes none of the three (the client mediates its own tools; hooks and delegation there are the client's) |
 | `harness-wire` | for § 1 and § 3, **nothing**: no new field and no new event, because the answer travels as a tool call, which is the reason § 1 chose it. For M4, one defaulted method on each of `ModelPort` and `ToolPort` — `fork`, answering `None` unless the port can be run beside itself |
 
@@ -309,8 +328,8 @@ run sees which hook decided what.
   ones nothing here confines (design 0001 § 2). metaharness is the MCP side of this family.
 - **Multimodal input.** `Item::UserText` is text; an image item is a new neutral value on both
   wires and a new contract version each. Nothing that measures this harness has asked for it.
-- **Provider-native structured output (M2), schema validation in the loop (M3), delegate trees
-  (M4).** Each waits for the evidence that the shipped path is not enough. *Parallel* delegates
+- **Provider-native structured output (M2), delegate trees (M4).** Each waits for evidence that the
+  shipped path is not enough. Local schema validation (M3) is implemented. *Parallel* delegates
   were the other half of M4 and shipped once a run showed the need — see § 2. Trees did not: each
   level is a context nobody can read afterwards, and that argument is untouched by concurrency.
 

@@ -12,6 +12,7 @@ members = [
     "crates/harness-tools",
     "crates/harness-app-server",
     "crates/harness-cli",
+    "crates/harness-xtask",
 ]
 
 [workspace.package]
@@ -43,6 +44,16 @@ ctrlc = "3.5.2"
 # subtly different answer to *does this path match `crates/**/*.rs`* on every machine that reads a
 # run, and a hand-rolled regex engine is not a thing anyone should write twice.
 globset = "0.4.19"
+# Parses the standard HTTP date forms a peer may use in `Retry-After`. Reimplementing its three
+# legacy grammars would make retry timing depend on a partial parser at the security boundary.
+httpdate = "1.0.3"
+# Structured output is not trusted merely because a provider accepted tool arguments. This is the
+# draft-aware local validator that makes the exact schema published also decide whether `answer`
+# completed; default features are off so no network or command-line surfaces arrive with it.
+jsonschema = { version = "0.52.1", default-features = false }
+# Hook and command timeouts stop the whole process group, not only the direct child. Unix process
+# groups and signals are OS primitives; this narrow feature set avoids hand-written unsafe FFI.
+nix = { version = "0.31.3", features = ["process", "signal"] }
 regex = "1.13"
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
@@ -52,6 +63,10 @@ serde_json = "1"
 serde_yaml_ng = "0.10"
 sha2 = "0.11.0"
 tempfile = "3.23"
+# `harness-http` exposes a blocking port to the loop but uses reqwest's asynchronous client behind
+# it so cancellation can drop an in-flight request or silent response body. Tokio is already in
+# reqwest's graph; this direct edge enables only the current-thread runtime, timer and select macro.
+tokio = { version = "1.53", features = ["rt", "time", "macros"] }
 # The config format the operator hand-edits: `~/.config/b10x/harness.toml`. Taken rather than
 # hand-parsed because a profile is executable policy and a half-read one grants what nobody wrote —
 # the same reason `serde_json` is here and a JSON parser is not.

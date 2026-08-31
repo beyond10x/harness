@@ -6,7 +6,7 @@
 //!
 //! # Where this came from
 //!
-//! `harness-responses`, and byte-for-byte from `harness-messages`, which copied it when the second
+//! the first wire, and byte-for-byte from the second, which copied it when that
 //! wire was built. Framing is not vendor-shaped: `data:`, comments, the blank-line terminator and
 //! the two bounds are the same on both routes, and neither reader ever looked inside a payload.
 //!
@@ -118,7 +118,11 @@ impl<R: BufRead> SseReader<R> {
                 .take(MAX_EVENT_BYTES as u64 + 1)
                 .read_line(&mut line)
                 .map_err(|error| {
-                    WireError::transport(format!("reading the event stream: {error}"))
+                    if self.cancelled() {
+                        WireError::cancelled()
+                    } else {
+                        WireError::transport(format!("reading the event stream: {error}"))
+                    }
                 })?;
             if line.len() > MAX_EVENT_BYTES {
                 return Err(WireError::too_large(format!(

@@ -1,12 +1,12 @@
 ---
 title: Status and limitations
-description: What Harness 0.1.0 can do today and which claims are not yet earned.
+description: What Harness 0.5.0 can do today and which claims are not yet earned.
 ---
 
 # Status and limitations
 
-Harness is pre-v1. Version `0.1.0` was tagged on 2026-08-24; this documentation also describes the
-unreleased work present on `main` as of 2026-08-29.
+Harness is pre-v1. Version `0.5.0` was tagged on 2026-08-31; this documentation also describes the
+unreleased remediation in the repository tree on that date.
 
 ## Available now
 
@@ -44,20 +44,13 @@ work item rather than a completed compatibility claim.
   tool port.
 - **No realtime media or provider-side session state.** Local sessions replay a stateless
   conversation.
-- **Structured output is not independently schema-validated by the loop.** The schema is offered as
-  the `answer` tool input shape.
-- **Delegation is depth one and sequential.** Delegates cannot create delegate trees or run in
-  parallel.
-- **A named agent's toolset narrows only under the `flat` surface.** Under `verbs` the call names
-  `tool_invoke` and the entry is decided inside the port, so named agents are a flat-surface feature
-  for now.
+- **Delegation is depth one.** Neighbouring delegates may run concurrently only on a non-mutating,
+  approval-free surface with no hooks; delegates cannot create delegate trees.
 - **The skill and agent frontmatter reader is deliberately small.** Top-level `key: value` only;
   any other key refuses the run by name rather than being skipped.
 - **Hooks are host programs, not sandboxed tools.** They must be explicitly named and trusted.
 - **Bridge mode lacks live external-client evidence.** The implemented profile is contract-tested,
   but no real external bridge has driven it yet.
-- **Bridge compaction does not yet receive the command line's `--context-window`.** It retains the
-  older fixed byte rule.
 - **Confinement is host-dependent.** A missing kernel, cgroup, or substrate capability withholds the
   related tool rather than emulating it.
 - **No production embedder yet.** The library boundary exists, but no other component currently
@@ -68,8 +61,7 @@ work item rather than a completed compatibility claim.
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
 profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
 means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
-a second cut on one day takes a `.N` suffix: `2026-08-29.3` is the third argv cut of that day and
-the current one.
+a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-08-31`.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

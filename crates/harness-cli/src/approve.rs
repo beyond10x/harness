@@ -228,7 +228,12 @@ fn describe(call: &ToolCall, spec: &ToolSpec) -> String {
             if let Some(path) = path
                 && let Some(text) = arguments.get("text").and_then(Value::as_str)
             {
-                return format!("{name}  {path}  ({} bytes)", text.len());
+                return format!(
+                    "{}  {}  ({} bytes)",
+                    bounded(name),
+                    bounded(path),
+                    text.len()
+                );
             }
         }
         FILE_EDIT_ENTRY => {
@@ -237,7 +242,9 @@ fn describe(call: &ToolCall, spec: &ToolSpec) -> String {
                 && let Some(new) = arguments.get("new").and_then(Value::as_str)
             {
                 return format!(
-                    "{name}  {path}\n{}{}",
+                    "{}  {}\n{}{}",
+                    bounded(name),
+                    bounded(path),
                     preview(old, "- "),
                     preview(new, "+ ")
                 );
@@ -246,26 +253,32 @@ fn describe(call: &ToolCall, spec: &ToolSpec) -> String {
         RUN_ENTRY => {
             if let Some(argv) = arguments.get("argv").and_then(Value::as_array) {
                 let words: Vec<&str> = argv.iter().filter_map(Value::as_str).collect();
-                return format!("{name}  {}", bounded(&words.join(" ")));
+                return format!("{}  {}", bounded(name), bounded(&words.join(" ")));
             }
         }
         _ => {
             if let Some(path) = path {
-                return format!("{name}  {path}");
+                return format!("{}  {}", bounded(name), bounded(path));
             }
         }
     }
-    format!("{name}  {}", bounded(&arguments.to_string()))
+    format!("{}  {}", bounded(name), bounded(&arguments.to_string()))
 }
 
 /// The first few lines of one side of an edit, each prefixed, saying how many were left out.
 fn preview(text: &str, marker: &str) -> String {
     let mut rendered = String::new();
     let total = text.lines().count();
-    for line in text.lines().take(EDIT_PREVIEW_LINES) {
+    for line in text.split_inclusive('\n').take(EDIT_PREVIEW_LINES) {
+        let (line, ended) = line
+            .strip_suffix('\n')
+            .map_or((line, false), |line| (line, true));
         rendered.push_str("  ");
         rendered.push_str(marker);
         rendered.push_str(&bounded(line));
+        if ended {
+            rendered.push_str("\\n");
+        }
         rendered.push('\n');
     }
     if total > EDIT_PREVIEW_LINES {
@@ -280,12 +293,30 @@ fn preview(text: &str, marker: &str) -> String {
 /// Counted in characters rather than bytes so the cut lands on a character boundary; the figures
 /// are stated because a bound that is not stated reads exactly like a complete value.
 fn bounded(text: &str) -> String {
-    let total = text.chars().count();
+    let visible = visible(text);
+    let total = visible.chars().count();
     if total <= MAX_ARGUMENT_CHARS {
-        return text.to_owned();
+        return visible;
     }
-    let kept: String = text.chars().take(MAX_ARGUMENT_CHARS).collect();
+    let kept: String = visible.chars().take(MAX_ARGUMENT_CHARS).collect();
     format!("{kept}…  (first {MAX_ARGUMENT_CHARS} of {total} characters)")
+}
+
+/// Renders terminal control characters as inert, reviewable text.
+fn visible(text: &str) -> String {
+    let mut rendered = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\n' => rendered.push_str("\\n"),
+            '\r' => rendered.push_str("\\r"),
+            '\t' => rendered.push_str("\\t"),
+            character if character.is_control() => {
+                let _ = write!(rendered, "\\u{{{:x}}}", u32::from(character));
+            }
+            character => rendered.push(character),
+        }
+    }
+    rendered
 }
 
 #[cfg(test)]
@@ -488,6 +519,26 @@ mod tests {
     }
 
     #[test]
+    fn model_controlled_terminal_controls_are_rendered_as_inert_text() {
+        let mut approver = terminal("n\n");
+        let _ = approver.decide(
+            &invoke(
+                "run",
+                &json!({"argv": ["safe", "line\nforged\r\u{1b}[2J\u{7}"]}),
+            ),
+            &spec("run"),
+        );
+        let prompt = shown(&approver);
+        assert!(
+            prompt.contains(r"line\nforged\r\u{1b}[2J\u{7}"),
+            "{prompt:?}"
+        );
+        assert!(!prompt.contains('\r'), "{prompt:?}");
+        assert!(!prompt.contains('\u{1b}'), "{prompt:?}");
+        assert!(!prompt.contains('\u{7}'), "{prompt:?}");
+    }
+
+    #[test]
     fn the_prompt_for_an_edit_shows_both_sides_and_counts_what_it_left_out() {
         let mut approver = terminal("n\n");
         let _ = approver.decide(
@@ -499,6 +550,10 @@ mod tests {
         );
         let prompt = shown(&approver);
         assert!(prompt.contains("- one"), "{prompt}");
+        assert!(
+            prompt.contains(r"one\n"),
+            "the source newline is visible: {prompt}"
+        );
         assert!(prompt.contains("- three"), "{prompt}");
         assert!(prompt.contains("+ ONE"), "{prompt}");
         assert!(prompt.contains("1 more lines"), "{prompt}");

@@ -115,6 +115,16 @@ pub fn skills_in(directory: &Path) -> Result<Vec<Skill>, String> {
 /// Names the file and what is wrong with it: no frontmatter, an unterminated block, a key this
 /// build does not read, or a missing `name` or `description`.
 pub fn skill_at(document: &Path) -> Result<Skill, String> {
+    let bytes = fs::metadata(document)
+        .map_err(|error| format!("reading metadata for `{}`: {error}", document.display()))?
+        .len();
+    if bytes > harness_wire::MAX_TOOL_RESULT_BYTES as u64 {
+        return Err(format!(
+            "the skill document `{}` is {bytes} bytes, over the {} byte result bound; it was refused before being read",
+            document.display(),
+            harness_wire::MAX_TOOL_RESULT_BYTES
+        ));
+    }
     let text = fs::read_to_string(document)
         .map_err(|error| format!("reading `{}`: {error}", document.display()))?;
     let named = |message: String| format!("the skill document `{}`: {message}", document.display());
@@ -238,6 +248,46 @@ mod tests {
         );
         let error = skill_at(&document).expect_err("refused");
         assert!(error.contains("never closes"), "{error}");
+    }
+
+    #[test]
+    fn an_oversized_skill_is_refused_before_its_body_is_loaded() {
+        let root = tempfile::tempdir().expect("a root");
+        let document = write(
+            root.path(),
+            "large",
+            &format!(
+                "---\nname: large\ndescription: d\n---\n{}",
+                "x".repeat(harness_wire::MAX_TOOL_RESULT_BYTES)
+            ),
+        );
+        let error = skill_at(&document).expect_err("oversized refuses");
+        assert!(error.contains("result bound"), "{error}");
+        assert!(error.contains("before being read"), "{error}");
+    }
+
+    #[test]
+    fn the_skill_byte_bound_accepts_both_edges_and_whole_multibyte_text() {
+        let root = tempfile::tempdir().expect("a root");
+        let prefix = "---\nname: bounded\ndescription: d\n---\n";
+        for total in [
+            harness_wire::MAX_TOOL_RESULT_BYTES - 1,
+            harness_wire::MAX_TOOL_RESULT_BYTES,
+        ] {
+            let text = format!("{prefix}{}", "x".repeat(total - prefix.len()));
+            assert_eq!(text.len(), total);
+            let document = write(root.path(), &format!("ascii-{total}"), &text);
+            let skill = skill_at(&document).expect("the bound is inclusive");
+            assert_eq!(skill.body.len(), total - prefix.len());
+        }
+
+        let body_bytes = harness_wire::MAX_TOOL_RESULT_BYTES - prefix.len();
+        let text = format!("{prefix}{}é", "x".repeat(body_bytes - 'é'.len_utf8()));
+        assert_eq!(text.len(), harness_wire::MAX_TOOL_RESULT_BYTES);
+        let document = write(root.path(), "multibyte", &text);
+        let skill = skill_at(&document).expect("a whole multibyte character at the bound");
+        assert!(skill.body.ends_with('é'));
+        assert!(!skill.body.contains('\u{fffd}'));
     }
 
     #[test]

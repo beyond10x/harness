@@ -34,6 +34,28 @@ pub use project::request_body;
 /// Identifies this projection. Opaque items carry it and may not be replayed into another wire.
 pub const WIRE: &str = "openai-responses";
 
+/// Every event discriminator the decoder interprets rather than preserving as unknown.
+pub const ACCEPTED_STREAM_EVENTS: &[&str] = &[
+    "error",
+    "response.completed",
+    "response.content_part.added",
+    "response.content_part.done",
+    "response.created",
+    "response.failed",
+    "response.function_call_arguments.delta",
+    "response.function_call_arguments.done",
+    "response.in_progress",
+    "response.incomplete",
+    "response.output_item.added",
+    "response.output_item.done",
+    "response.output_text.delta",
+    "response.output_text.done",
+    "response.reasoning_summary_part.added",
+    "response.reasoning_summary_part.done",
+    "response.reasoning_summary_text.delta",
+    "response.reasoning_summary_text.done",
+];
+
 /// What this client calls itself on the wire.
 ///
 /// Its own name and not a vendor's. A route that serves several clients is entitled to know which
@@ -221,11 +243,13 @@ impl ResponsesClient {
     ) -> Result<TurnOutcome, WireError> {
         let url = self.endpoint.responses_url();
         let headers = || self.headers();
+        let server_delay = harness_wire::retry_after;
         let post = StreamingPost {
             wire: WIRE,
             url: &url,
             body,
             headers: &headers,
+            server_delay: &server_delay,
         };
         self.http.stream_turn(&post, sink, |reader, sink| {
             drain(reader, &self.wire, model, sink)
@@ -243,24 +267,8 @@ impl ResponsesClient {
     /// Whatever the bearer source refuses with, or [`WireErrorCode::Unauthorized`] when it
     /// answered with nothing.
     fn headers(&self) -> Result<Headers, WireError> {
-        let mut headers = vec![
-            ("accept", "text/event-stream".to_owned()),
-            ("content-type", "application/json".to_owned()),
-            // Who is calling and which conversation this turn belongs to. Named honestly: this is
-            // not codex and does not claim to be, and the endpoint is reached with a credential the
-            // caller pointed us at. What the headers buy is a conversation the far end can
-            // recognise across turns, which is what a prompt cache is keyed on.
-            ("originator", ORIGINATOR.to_owned()),
-            ("session-id", self.session.clone()),
-            (
-                "x-client-request-id",
-                format!(
-                    "{}-{}",
-                    self.session,
-                    self.requests.fetch_add(1, Ordering::Relaxed)
-                ),
-            ),
-        ];
+        let request = self.requests.fetch_add(1, Ordering::Relaxed);
+        let mut headers = request_headers(&self.session, request);
         // Held only for as long as it takes to become a header, and dropped before the send that
         // can block — the same custody the credential had before it became optional.
         if let Some(source) = &self.bearer {
@@ -275,6 +283,24 @@ impl ResponsesClient {
         }
         Ok(headers)
     }
+}
+
+fn request_headers(session: &str, request: u64) -> Headers {
+    vec![
+        ("accept", "text/event-stream".to_owned()),
+        ("content-type", "application/json".to_owned()),
+        ("originator", ORIGINATOR.to_owned()),
+        ("session-id", session.to_owned()),
+        ("x-client-request-id", format!("{session}-{request}")),
+    ]
+}
+
+/// Every non-secret header and value a request carries, using caller-fixed request metadata.
+///
+/// This is the production builder used by [`ResponsesClient`], exposed so the wire contract can
+/// pin dynamic values without fetching or representing a credential.
+pub fn contract_headers(session: &str, request: u64) -> Headers {
+    request_headers(session, request)
 }
 
 /// A stream that stopped before the response reached a terminal state.
@@ -303,6 +329,9 @@ struct TurnDecoder<'a> {
     /// `item_id` -> `call_id`, so an arguments delta can name the call a reader is watching.
     calls: BTreeMap<String, harness_wire::CallId>,
     streamed: Vec<Item>,
+    /// Opaque state that must survive even when a terminal object explicitly replaces the
+    /// modelled streamed output.
+    unmodelled: Vec<Item>,
     terminal: Option<Value>,
 }
 
@@ -313,6 +342,7 @@ impl<'a> TurnDecoder<'a> {
             model,
             calls: BTreeMap::new(),
             streamed: Vec::new(),
+            unmodelled: Vec::new(),
             terminal: None,
         }
     }
@@ -362,7 +392,11 @@ impl<'a> TurnDecoder<'a> {
                     for (code, message) in warnings {
                         sink.emit(StreamEvent::Warning { code, message });
                     }
-                    self.streamed.push(decoded?);
+                    let decoded = decoded?;
+                    if matches!(decoded, Item::Opaque { .. }) {
+                        self.unmodelled.push(decoded.clone());
+                    }
+                    self.streamed.push(decoded);
                 }
             }
             Some("response.completed" | "response.incomplete") => {
@@ -398,9 +432,15 @@ impl<'a> TurnDecoder<'a> {
                 sink.emit(StreamEvent::Warning {
                     code: "unknown-stream-event".to_owned(),
                     message: format!(
-                        "stream event `{kind}` is outside the pinned subset and was skipped"
+                        "stream event `{kind}` is outside the pinned subset and was preserved but not interpreted"
                     ),
                 });
+                let item = Item::Opaque {
+                    wire: self.wire.clone(),
+                    payload: event.clone(),
+                };
+                self.streamed.push(item.clone());
+                self.unmodelled.push(item);
             }
         }
         Ok(())
@@ -438,13 +478,18 @@ impl<'a> TurnDecoder<'a> {
             |code: String, message: String| sink.emit(StreamEvent::Warning { code, message });
         // The terminal object is authoritative when it carries output; the streamed items are the
         // fallback for a server that reports completion without repeating them.
-        let items = match terminal.get("output").and_then(Value::as_array) {
-            Some(output) if !output.is_empty() => output
+        let mut items = match terminal.get("output").and_then(Value::as_array) {
+            Some(output) => output
                 .iter()
                 .map(|value| project::output_item_to_item(self.wire, value, &mut warn))
                 .collect::<Result<Vec<_>, _>>()?,
-            _ => self.streamed,
+            None => self.streamed,
         };
+        for item in self.unmodelled {
+            if !items.contains(&item) {
+                items.push(item);
+            }
+        }
         let has_tool_calls = items.iter().any(|item| item.as_tool_call().is_some());
         Ok(TurnOutcome {
             stop_reason: project::stop_reason(&terminal, has_tool_calls),
@@ -787,7 +832,7 @@ mod tests {
             json!({"type": "response.something_new", "data": 1}),
             json!({"type": "response.completed", "response": {"status": "completed", "output": []}}),
         ]);
-        assert!(outcome.is_ok());
+        let outcome = outcome.expect("unknown state is preserved");
         assert!(
             sink.events().iter().any(|event| matches!(
                 event,
@@ -796,6 +841,25 @@ mod tests {
             "{:?}",
             sink.events()
         );
+        assert!(outcome.items.iter().any(|item| matches!(
+            item,
+            Item::Opaque { payload, .. }
+                if payload["type"] == json!("response.something_new")
+        )));
+    }
+
+    #[test]
+    fn an_explicitly_empty_terminal_output_does_not_resurrect_a_streamed_call() {
+        let (outcome, _) = drive(&[
+            json!({"type": "response.output_item.done", "item": {
+                "type": "function_call", "call_id": "call-1", "name": "read",
+                "arguments": "{}"
+            }}),
+            json!({"type": "response.completed", "response": {
+                "status": "completed", "output": []
+            }}),
+        ]);
+        assert!(outcome.expect("terminal is authoritative").items.is_empty());
     }
 
     #[test]

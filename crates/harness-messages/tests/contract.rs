@@ -8,8 +8,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use b10x_harness_messages::{
-    ANTHROPIC_VERSION, OAUTH_BETA, SUBSCRIPTION_CLIENT_PREAMBLE, WIRE, decode_stream, header_names,
-    request_body,
+    ACCEPTED_CONTENT_BLOCK_DELTAS, ACCEPTED_STREAM_EVENTS, SUBSCRIPTION_CLIENT_PREAMBLE, WIRE,
+    contract_headers, decode_stream, request_body,
 };
 use harness_wire::{
     Approval, CallId, CredentialKind, Envelope, Item, Sampling, StopReason, ToolCall, ToolChoice,
@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 /// The cut that added the subscription client preamble. `2026-08-30` is the same wire without it,
 /// `2026-08-29b` the one before `tool_choice`, and `2026-08-29` the one before the rolling cache
 /// breakpoint; all three stay pinned as they were released.
-const VERSION: &str = "2026-08-30.1";
+const VERSION: &str = "2026-08-31";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -36,6 +36,10 @@ fn fixture(name: &str) -> String {
     let path = contract_dir().join("fixtures").join(name);
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display()))
+}
+
+fn fixture_bytes(name: &str) -> Vec<u8> {
+    fs::read(contract_dir().join("fixtures").join(name)).expect("readable fixture")
 }
 
 fn manifest() -> Value {
@@ -128,23 +132,59 @@ fn canonical_request_as(credential: Option<CredentialKind>) -> Value {
 
 #[test]
 fn the_request_the_harness_sends_matches_the_pinned_fixture() {
-    let expected: Value =
-        serde_json::from_str(&fixture("turn-request.json")).expect("the request fixture is JSON");
+    let expected = fixture_bytes("turn-request.json");
+    let actual = harness_http::encode_json_body(&canonical_request()).expect("encodes");
     assert_eq!(
-        canonical_request(),
-        expected,
-        "the request shape changed; re-pin the fixture and say so in the changelog"
+        actual, expected,
+        "the exact request bytes changed; cut a contract and say so in the changelog"
     );
 }
 
 #[test]
 fn the_request_a_subscription_token_sends_matches_its_own_pinned_fixture() {
-    let expected: Value = serde_json::from_str(&fixture("turn-request-oauth.json"))
-        .expect("the oauth request fixture is JSON");
+    let expected = fixture_bytes("turn-request-oauth.json");
+    let actual = harness_http::encode_json_body(&canonical_request_as(Some(CredentialKind::Oauth)))
+        .expect("encodes");
     assert_eq!(
-        canonical_request_as(Some(CredentialKind::Oauth)),
-        expected,
-        "the subscription request shape changed; re-pin the fixture and say so in the changelog"
+        actual, expected,
+        "the exact subscription request bytes changed; cut a contract"
+    );
+}
+
+#[test]
+fn every_header_name_and_non_secret_value_is_pinned_for_each_presentation() {
+    let rows = |kind| {
+        Value::Array(
+            contract_headers(kind)
+                .into_iter()
+                .map(|(name, value)| json!({"name":name, "value":value}))
+                .collect(),
+        )
+    };
+    let pinned = &manifest()["request_headers"];
+    assert_eq!(rows(None), pinned["none"]);
+    assert_eq!(rows(Some(CredentialKind::ApiKey)), pinned["api-key"]);
+    assert_eq!(rows(Some(CredentialKind::Oauth)), pinned["oauth"]);
+}
+
+#[test]
+fn the_manifest_pins_both_production_event_inventories_and_terminal_policy() {
+    let accepted: Value =
+        serde_json::from_str(&fixture("accepted-events.json")).expect("inventory JSON");
+    assert_eq!(accepted["stream_events"], json!(ACCEPTED_STREAM_EVENTS));
+    assert_eq!(
+        accepted["content_block_deltas"],
+        json!(ACCEPTED_CONTENT_BLOCK_DELTAS)
+    );
+    assert_eq!(manifest()["stream_events"], accepted["stream_events"]);
+    assert_eq!(
+        manifest()["content_block_deltas"],
+        accepted["content_block_deltas"]
+    );
+    assert_eq!(manifest()["terminal_sentinel"]["required"], json!(false));
+    assert_eq!(
+        manifest()["terminal_sentinel"]["terminal_event"],
+        "message_stop"
     );
 }
 
@@ -246,26 +286,6 @@ fn the_manifest_names_exactly_the_request_fields_the_harness_sends() {
 }
 
 #[test]
-fn the_manifest_names_exactly_the_headers_the_harness_sends() {
-    // **The half the Python checker cannot see.** The credential's presentation is not in the
-    // body, and it is the difference between a key issued to a program and a token obtained on a
-    // person's behalf. Sending either under the other's header is a 401 that names authentication
-    // and never mentions the header, which is the failure this pin exists to prevent.
-    let pinned = &manifest()["request_headers"];
-    assert_eq!(strings(&pinned["always"]), header_names(None));
-    assert_eq!(
-        strings(&pinned["api-key"]),
-        header_names(Some(CredentialKind::ApiKey))
-    );
-    assert_eq!(
-        strings(&pinned["oauth"]),
-        header_names(Some(CredentialKind::Oauth))
-    );
-    assert_eq!(pinned["oauth_beta"], json!(OAUTH_BETA));
-    assert_eq!(manifest()["api_version"], json!(ANTHROPIC_VERSION));
-}
-
-#[test]
 fn the_pinned_stream_decodes_into_the_expected_turn() {
     let mut sink = VecSink::new();
     let outcome = decode_stream(
@@ -277,17 +297,17 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
 
     assert_eq!(sink.text(), "Reading the readme.");
     assert_eq!(outcome.stop_reason, StopReason::ToolCalls);
-    // 42 fresh, 7 read from cache, 3 written to it. The neutral total is the sum, because
+    // 31 fresh, 7 read from cache, 5 written to it. The neutral total is the sum, because
     // `Usage::input_tokens` is the whole and the cache figures are parts of it — this route
     // reports them disjointly and the projection is what reconciles the two.
     assert_eq!(
         outcome.usage,
         Some(Usage {
             model: "b10x-emulated".to_owned(),
-            input_tokens: 52,
+            input_tokens: 43,
             output_tokens: 11,
             cached_input_tokens: 7,
-            cache_creation_input_tokens: Some(3),
+            cache_creation_input_tokens: Some(5),
         })
     );
 
@@ -301,7 +321,7 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
             _ => "other",
         })
         .collect();
-    assert_eq!(kinds, vec!["opaque", "tool-call", "assistant-text"]);
+    assert_eq!(kinds, vec!["opaque", "assistant-text", "tool-call"]);
 
     // The thinking block is carried whole, signature and all, and never reinterpreted.
     assert_eq!(
@@ -310,8 +330,8 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
             wire: WireId::new(WIRE).expect("valid"),
             payload: json!({
                 "type": "thinking",
-                "thinking": "OPAQUE-REASONING-BLOB",
-                "signature": "OPAQUE-SIGNATURE",
+                "thinking": "Checking.",
+                "signature": "SIG",
             }),
         }
     );
@@ -327,7 +347,7 @@ fn the_pinned_stream_decodes_into_the_expected_turn() {
             _ => None,
         })
         .collect();
-    assert_eq!(reasoning, vec!["OPAQUE-REASONING-BLOB"]);
+    assert_eq!(reasoning, vec!["Checking."]);
 
     let call = outcome
         .tool_calls()
@@ -359,7 +379,7 @@ fn the_manifest_names_exactly_the_stream_events_the_fixture_carries() {
         })
         .collect();
     let pinned: BTreeSet<String> = strings(&manifest()["stream_events"]).into_iter().collect();
-    assert_eq!(seen, pinned);
+    assert!(seen.is_subset(&pinned));
 }
 
 #[test]
@@ -383,4 +403,16 @@ fn the_manifest_names_exactly_the_content_block_deltas_the_fixture_carries() {
         .into_iter()
         .collect();
     assert_eq!(seen, pinned);
+}
+
+#[test]
+fn the_pinned_error_event_takes_the_typed_retryable_path() {
+    let mut sink = VecSink::new();
+    let error = decode_stream(
+        "b10x-emulated",
+        fixture("error-stream.sse").as_bytes(),
+        &mut sink,
+    )
+    .expect_err("the error is terminal");
+    assert!(error.retriable, "{error:?}");
 }

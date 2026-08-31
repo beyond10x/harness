@@ -80,7 +80,7 @@ that the second wire was the evidence rather than a guess acting on itself.
 
 **Acted on: `crates/harness-http`.** That half is one crate beneath both wires, and each wire is now
 its projection, its URL and its headers over `harness_http::HttpTransport` — neither depends on
-`reqwest`. No behaviour moved with it: the two pinned contract suites, `check-provider-wires.py` and
+`reqwest`. No behaviour moved with it: the two pinned contract suites, the provider contract checker and
 both `provider_emulated` suites pass with no fixture, manifest or case edited. The extraction found
 exactly **one** real difference between the two copies, and it is now named instead of implied —
 the first route ends its stream with `data: [DONE]` and the second has no sentinel at all, so
@@ -189,9 +189,8 @@ publication gate lives in `Catalogue::of` alone; and `ToolPort` has one implemen
 `harness-substrate::Client` behind the same `ConfinedOperations`, so it is a deployment choice and
 not a different set of things the model may do. The shared conformance suite is
 `crates/harness-substrate/tests/conformance.rs`: 34 cases asked of all three implementations, run
-from `scripts/gate.sh` as its own named step. **All three exit conditions are now met** — with two
-differences it found and pinned rather than closed,
-`story:a-confined-write-makes-its-own-parents` and `story:one-spelling-of-a-path-in-every-workspace`.
+from `cargo xtask gate` as its own named step. **All three exit conditions are now met**; the
+missing-parent case is now a uniform named refusal across all three implementations.
 
 The original text follows, since it is what the shape was argued from.
 

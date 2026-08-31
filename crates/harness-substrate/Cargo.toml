@@ -34,8 +34,8 @@ harness-wire = { workspace = true }
 # and moving them buys a driver that adopts an operator-named directory and then refuses the first
 # write into it with `workspace.path-escape`, because `0.2.1`'s `validate_root_name` still wants
 # `ws_`. Nothing in this crate's suite covers that, so a rollback would look green. `0.2.1` earns
-# its mention only as the first release without the former brand's capsule hash domain: at `0.2.0`
-# that was `daemonloom.execution-capsule.v1`, inline at `crates/substrate-wire/src/lib.rs:1482`.
+# its mention only as the first release after the capsule hash-domain migration; the former bytes
+# are intentionally not copied into this repository.
 substrate-host = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 substrate-wire = { git = "https://github.com/beyond10x/substrate", tag = "0.2.2", version = "0.2.2" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`

@@ -2,12 +2,14 @@
 format: aep.planning-md/1
 id: story:answer-schema-validated-locally
 kind: story
-status: draft
+status: implemented
 title: Answer arguments are validated locally against the requested schema
 summary: Implement design 0002 milestone M3 so a permissive endpoint cannot complete with an answer outside --output-schema.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+- derived_from: epic:full-review-remediation
+- informed_by: review-result:harness-0-5-0-full-review
+revision: 4
 ---
 ## Context
 

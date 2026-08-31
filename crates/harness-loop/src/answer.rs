@@ -50,6 +50,8 @@ pub enum OutputSchemaError {
          `\"type\": \"object\"` at the top level — and this one is {0}"
     )]
     NotAnObject(String),
+    #[error("the output schema is not a valid, locally resolvable JSON Schema: {0}")]
+    Invalid(String),
 }
 
 impl OutputSchema {
@@ -89,6 +91,8 @@ impl OutputSchema {
         if !is_object_schema {
             return Err(OutputSchemaError::NotAnObject(describe(&schema)));
         }
+        jsonschema::validator_for(&schema)
+            .map_err(|error| OutputSchemaError::Invalid(error.to_string()))?;
         Ok(Self {
             name,
             description: description.into(),
@@ -113,6 +117,20 @@ impl OutputSchema {
                 access: Vec::new(),
             },
         }
+    }
+
+    /// Validates one proposed answer locally against the exact schema that was published.
+    ///
+    /// # Errors
+    ///
+    /// Returns the validator's bounded diagnostic when the value does not satisfy the schema, or
+    /// when the immutable schema can no longer be compiled.
+    pub fn validate(&self, answer: &Value) -> Result<(), String> {
+        let validator = jsonschema::validator_for(&self.schema)
+            .map_err(|error| format!("the published schema no longer compiles: {error}"))?;
+        validator
+            .validate(answer)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -162,5 +180,30 @@ mod tests {
             let error = OutputSchema::new(schema).expect_err("refused");
             assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn an_invalid_schema_is_refused_before_it_is_published() {
+        let error = OutputSchema::new(json!({
+            "type": "object",
+            "required": "not-an-array",
+        }))
+        .expect_err("an invalid schema refuses");
+        assert!(matches!(error, OutputSchemaError::Invalid(_)), "{error}");
+    }
+
+    #[test]
+    fn a_proposed_answer_is_checked_against_required_fields_and_types() {
+        let schema = OutputSchema::new(json!({
+            "type": "object",
+            "properties": {"verdict": {"type": "string"}},
+            "required": ["verdict"],
+        }))
+        .expect("schema");
+        schema
+            .validate(&json!({"verdict": "green"}))
+            .expect("valid answer");
+        assert!(schema.validate(&json!({})).is_err());
+        assert!(schema.validate(&json!({"verdict": 7})).is_err());
     }
 }

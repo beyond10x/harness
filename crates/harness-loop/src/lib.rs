@@ -26,7 +26,7 @@
 //! All three fire for the loop's own tools as well ([`OutputSchema`], [`Delegation`]), with each
 //! tool's own spec as the entry — a `before-call` declaration with no tool filter means *every*
 //! call. The one place a point does **not** fire is the end of a delegate: `stop` is about the
-//! run's ending, and a child's ending is not one (see [`AgentLoop::stop_hook`]).
+//! run's ending, and a child's ending is not one (see `AgentLoop::stop_hook`).
 //!
 //! **The loop spawns no process.** [`HookPort`] is a seam exactly as [`ApprovalPort`] is; the
 //! implementation that runs a process — the argv, the timeout, the stdout bound, the file naming
@@ -35,10 +35,10 @@
 //! hook fires exactly once per call.
 //!
 //! It does start **threads**, in one place: a turn's `delegate` calls may run side by side
-//! ([`AgentLoop::delegates_side_by_side`]). That is not a hole in the sentence above — a hook is
+//! (`AgentLoop::delegates_side_by_side`). That is not a hole in the sentence above — a hook is
 //! still asked once per call, still by the shell's own [`HookPort`], and still on this thread. A
 //! child on a worker thread reaches the approver, the hooks and the record by asking this one
-//! ([`parallel`]), so there is exactly one of each however many children there are.
+//! (`parallel`), so there is exactly one of each however many children there are.
 
 //! # The two tools the loop owns
 //!
@@ -125,6 +125,12 @@ pub enum LoopStop {
         limit_micro_usd: u64,
         spent_micro_usd: u64,
     },
+    /// A declared ceiling could no longer be observed after a provider omitted or contradicted
+    /// the accounting needed to enforce it.
+    BudgetUnobservable {
+        name: String,
+        reason: String,
+    },
     Deadline {
         limit_ms: u64,
     },
@@ -171,8 +177,8 @@ pub struct LoopOutcome {
     pub cost_micro_usd: Option<u64>,
     /// The answer in the shape [`LoopConfig::output_schema`] asked for, when the model gave one.
     ///
-    /// The arguments of the `answer` call, exactly as the provider accepted them — parsed by
-    /// nobody here and validated against the schema by nobody here (design 0002 § 1, M3).
+    /// The arguments of the `answer` call, after local validation against the exact schema the
+    /// loop published.
     /// [`None`] on a run that asked for no schema, and on one that stopped
     /// [`LoopStop::Unstructured`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -357,7 +363,7 @@ pub struct LoopConfig {
     /// The two are the same list under a flat surface and are not under a verb surface, where what
     /// is published is `tool_search`, `tool_describe`, `tool_invoke` and what is *reached* is the
     /// catalogue behind them. [`harness_wire::ToolPort::reachable`] is the port's answer to which
-    /// vocabulary is which, and [`AgentLoop::routes`] is the difference: while a run's grant holds
+    /// vocabulary is which, and `AgentLoop::routes` is the difference: while a run's grant holds
     /// a name its port does not publish, the port's published names are admitted as routes — an
     /// agent granted `file_read` and refused `tool_invoke` would have been granted nothing at all.
     ///
@@ -365,14 +371,14 @@ pub struct LoopConfig {
     ///
     /// A route exists to carry a call to a granted entry. With no entry granted it leads nowhere,
     /// and all it can still do is let a child that was admitted none of the catalogue enumerate it.
-    /// So [`AgentLoop::needs_routes`] is false for an empty grant and such a run publishes nothing
+    /// So `AgentLoop::needs_routes` is false for an empty grant and such a run publishes nothing
     /// and admits nothing — which is the answer a flat surface already gave, and the acceptance
     /// this whole narrowing is written against forbids the two surfaces differing.
     ///
     /// Enforced by one predicate, *admitted or a route*, asked at every site that can put a call
-    /// on the port: [`AgentLoop::port_specs`] filters the published toolset by it, and
-    /// [`AgentLoop::unadmitted`] answers it for [`AgentLoop::invoke`], [`AgentLoop::batchable`] and
-    /// [`AgentLoop::run_batch`] alike, reading [`harness_wire::ToolPort::invoked`] so that the name
+    /// on the port: `AgentLoop::port_specs` filters the published toolset by it, and
+    /// `AgentLoop::unadmitted` answers it for `AgentLoop::invoke`, `AgentLoop::batchable` and
+    /// `AgentLoop::run_batch` alike, reading [`harness_wire::ToolPort::invoked`] so that the name
     /// judged is the entry's and not the verb's. Two chokepoints would be two chances to disagree,
     /// and so would two vocabularies — and a batched call that skipped the check was, for one
     /// commit, exactly such a second chance.
@@ -585,6 +591,10 @@ struct RunState {
     output_total: u64,
     /// Absent until a turn is priced, so a run nobody could price never reports a figure.
     cost_total: Option<u64>,
+    /// At least one model request omitted token accounting.
+    usage_unobservable: bool,
+    /// At least one model request could not be priced completely.
+    cost_unobservable: bool,
     /// What the last **conversation** turn reported as its input, for the compaction trigger.
     ///
     /// Not `usage.last()`: a summary turn is charged to the same run but its input count measures
@@ -617,6 +627,8 @@ impl RunState {
             input_total: 0,
             output_total: 0,
             cost_total: None,
+            usage_unobservable: false,
+            cost_unobservable: false,
             reported_input: None,
             text: String::new(),
             structured: None,
@@ -640,17 +652,29 @@ impl RunState {
         sink: &mut dyn LoopSink,
     ) {
         let Some(reported) = usage else {
+            self.usage_unobservable = true;
+            if prices.is_some() {
+                self.cost_unobservable = true;
+                self.cost_total = None;
+            }
             return;
         };
         self.input_total = self.input_total.saturating_add(reported.input_tokens);
         self.output_total = self.output_total.saturating_add(reported.output_tokens);
         sink.emit(LoopEvent::Usage(reported.clone()));
-        if let Some(micro_usd) = prices.and_then(|card| card.price(&reported)) {
-            self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(micro_usd));
-            sink.emit(LoopEvent::Cost {
-                model: reported.model.clone(),
-                micro_usd,
-            });
+        if let Some(card) = prices {
+            if let Some(micro_usd) = card.price(&reported) {
+                if !self.cost_unobservable {
+                    self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(micro_usd));
+                    sink.emit(LoopEvent::Cost {
+                        model: reported.model.clone(),
+                        micro_usd,
+                    });
+                }
+            } else {
+                self.cost_unobservable = true;
+                self.cost_total = None;
+            }
         }
         self.usage.push(reported);
     }
@@ -702,9 +726,14 @@ impl RunState {
     /// Absent cost stays absent — a child nobody could price does not turn an unpriced parent into
     /// a run that cost zero.
     fn absorb_child(&mut self, child: &mut Self) {
+        self.turns = self.turns.saturating_add(child.turns);
         self.input_total = self.input_total.saturating_add(child.input_total);
         self.output_total = self.output_total.saturating_add(child.output_total);
-        if let Some(spent) = child.cost_total {
+        self.usage_unobservable |= child.usage_unobservable;
+        self.cost_unobservable |= child.cost_unobservable;
+        if self.cost_unobservable {
+            self.cost_total = None;
+        } else if let Some(spent) = child.cost_total {
             self.cost_total = Some(self.cost_total.unwrap_or(0).saturating_add(spent));
         }
         self.usage.append(&mut child.usage);
@@ -1736,13 +1765,14 @@ fn load_skill(skills: &Skills, call: &ToolCall) -> ToolOutcome {
 
 /// Answers the run's own `answer` call: the arguments **are** the answer.
 ///
-/// Nothing here parses or validates them against the schema — what the provider accepted as tool
-/// arguments is what the caller gets (design 0002 § 1, M3).
-///
 /// Returns the outcome the model reads and, with it, whether the run ends here. Recording is the
 /// caller's, because an owned call meets the `after-call` hook between the outcome and the record
 /// exactly as a port call does.
-fn accept_answer(call: &ToolCall, state: &mut RunState) -> (ToolOutcome, Option<LoopStop>) {
+fn accept_answer(
+    call: &ToolCall,
+    schema: &OutputSchema,
+    state: &mut RunState,
+) -> (ToolOutcome, Option<LoopStop>) {
     if !call.arguments.is_object() {
         // A failed outcome rather than a stop: the run has not answered, and the model is the one
         // that can fix it on the next turn.
@@ -1750,6 +1780,15 @@ fn accept_answer(call: &ToolCall, state: &mut RunState) -> (ToolOutcome, Option<
             ToolOutcome::failed(format!(
                 "the arguments of `{}` must be a JSON object in the shape its schema gives, and \
                  these are not an object; call it again with one",
+                call.name
+            )),
+            None,
+        );
+    }
+    if let Err(error) = schema.validate(&call.arguments) {
+        return (
+            ToolOutcome::failed(format!(
+                "the arguments of `{}` do not match its published schema: {error}; call it again with a valid object",
                 call.name
             )),
             None,
@@ -1805,7 +1844,7 @@ impl<'a> AgentLoop<'a> {
     ///
     /// A workflow's `command` step is a program the document names — a verifier, a validator — and
     /// not a question for a model (`harness-cli` design 0003 § 6, M2). Nothing is sent to the
-    /// provider. The call is the caller's, and it runs through [`AgentLoop::invoke`]'s stages in
+    /// provider. The call is the caller's, and it runs through `AgentLoop::invoke`'s stages in
     /// their order — published or routed, the argument bound, the approver, the operator's
     /// `before-call` hook, the tool, the result bound, the `after-call` hook — and leaves the
     /// record a model's call leaves: `ToolRequested`, then `ToolCompleted`, with a `Warning` naming
@@ -1864,7 +1903,7 @@ impl<'a> AgentLoop<'a> {
     /// whatever there is.
     ///
     /// The spend is handed back for the same reason the conversation is, and this is the same
-    /// defect [`RunState::absorb_child`] fixes one level down for a delegate: those nineteen turns
+    /// defect `RunState::absorb_child` fixes one level down for a delegate: those nineteen turns
     /// were billed, their [`LoopEvent::Usage`] and [`LoopEvent::Cost`] events are already in the
     /// record the caller streamed, and a session file holding the conversation but not the figures
     /// would report a failed run as free.
@@ -2052,7 +2091,7 @@ impl<'a> AgentLoop<'a> {
 
             // Before the request is built, so the turn that pays for a compaction is the one
             // that benefits from it.
-            if let Some(stop) = self.compact_run(state, sink) {
+            if let Some(stop) = self.compact_run(state, deadline, sink) {
                 return Ok(stop);
             }
             // A summary turn is charged to the run like any other, so a ceiling it crosses binds
@@ -2063,6 +2102,10 @@ impl<'a> AgentLoop<'a> {
             if let Some(stop) = self.stop_after_tokens(state) {
                 return Ok(stop);
             }
+            // Compaction may itself have spent the final turn or crossed the deadline.
+            if let Some(stop) = self.stop_before_turn(state, deadline) {
+                return Ok(stop);
+            }
             state.turns += 1;
             sink.emit(LoopEvent::TurnStarted { turn: state.turns });
             let outcome = match self.attempt_turn(state, deadline, sink)? {
@@ -2071,6 +2114,11 @@ impl<'a> AgentLoop<'a> {
             };
 
             let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
+            // The request itself may have exhausted a ceiling or made its accounting
+            // unobservable. Do not execute effects from that request before honoring the bound.
+            if let Some(stop) = self.stop_after_tokens(state) {
+                return Ok(stop);
+            }
             let stop = if calls.is_empty() {
                 Some(terminal_stop(stop_reason))
             } else {
@@ -2338,9 +2386,30 @@ impl<'a> AgentLoop<'a> {
 
     /// Token ceilings bind after a turn, because that is when the provider reports.
     fn stop_after_tokens(&self, state: &RunState) -> Option<LoopStop> {
+        if self.config.budget.max_cost_microunits.is_some() && state.cost_unobservable {
+            return Some(LoopStop::BudgetUnobservable {
+                name: "max_cost_microunits".to_owned(),
+                reason: "a model request omitted usage or reported usage the declared rate card cannot price"
+                    .to_owned(),
+            });
+        }
+        if state.usage_unobservable {
+            if self.config.budget.max_input_tokens.is_some() {
+                return Some(LoopStop::BudgetUnobservable {
+                    name: "max_input_tokens".to_owned(),
+                    reason: "a model request omitted usage".to_owned(),
+                });
+            }
+            if self.config.budget.max_output_tokens.is_some() {
+                return Some(LoopStop::BudgetUnobservable {
+                    name: "max_output_tokens".to_owned(),
+                    reason: "a model request omitted usage".to_owned(),
+                });
+            }
+        }
         if let (Some(limit), Some(spent)) =
             (self.config.budget.max_cost_microunits, state.cost_total)
-            && spent > limit
+            && spent >= limit
         {
             return Some(LoopStop::MaxCost {
                 limit_micro_usd: limit,
@@ -2348,7 +2417,7 @@ impl<'a> AgentLoop<'a> {
             });
         }
         if let Some(limit) = self.config.budget.max_input_tokens
-            && state.input_total > limit
+            && state.input_total >= limit
         {
             return Some(LoopStop::MaxInputTokens {
                 limit,
@@ -2356,7 +2425,7 @@ impl<'a> AgentLoop<'a> {
             });
         }
         if let Some(limit) = self.config.budget.max_output_tokens
-            && state.output_total > limit
+            && state.output_total >= limit
         {
             return Some(LoopStop::MaxOutputTokens {
                 limit,
@@ -2386,7 +2455,12 @@ impl<'a> AgentLoop<'a> {
     /// Returns a stop only when the caller cancelled inside the summary turn. A summary that fails
     /// on the wire is a warning: the conversation is merely larger than wanted, and ending the run
     /// over that would reintroduce the defect this exists to remove.
-    fn compact_run(&mut self, state: &mut RunState, sink: &mut dyn LoopSink) -> Option<LoopStop> {
+    fn compact_run(
+        &mut self,
+        state: &mut RunState,
+        deadline: Option<Instant>,
+        sink: &mut dyn LoopSink,
+    ) -> Option<LoopStop> {
         let Some(window) = self.config.context_window else {
             compact(&mut state.items, sink);
             return None;
@@ -2412,6 +2486,9 @@ impl<'a> AgentLoop<'a> {
         let mut summarised = 0_usize;
         let mut summary_turn = false;
         if measure(&state.items) > target {
+            if let Some(stop) = self.stop_before_turn(state, deadline) {
+                return Some(stop);
+            }
             match self.summarise(state, target, sink) {
                 Summarised::Cancelled => return Some(cancelled()),
                 Summarised::Folded(count) => {
@@ -2465,9 +2542,9 @@ impl<'a> AgentLoop<'a> {
     /// [`Item::user`] beginning with [`SUMMARY_MARKER`], so nothing downstream mistakes the
     /// harness's own words for a person's.
     ///
-    /// The turn is counted against the run's tokens, budget and bill like any other, because the
-    /// provider charged for it like any other. It does **not** advance `turns`: that number bounds
-    /// the model's progress on the task, and compaction is overhead the loop chose.
+    /// The turn is counted against the run's turn, token and spend ceilings like any other,
+    /// because every model request consumes the same finite budget regardless of why the loop
+    /// made it.
     fn summarise(
         &mut self,
         state: &mut RunState,
@@ -2502,6 +2579,8 @@ impl<'a> AgentLoop<'a> {
             // satisfy; `validate` refuses exactly that.
             tool_choice: harness_wire::ToolChoice::Auto,
         };
+        state.turns = state.turns.saturating_add(1);
+        sink.emit(LoopEvent::TurnStarted { turn: state.turns });
         let outcome = {
             let mut quiet = Quiet(sink);
             match self.model.turn(&request, &mut quiet) {
@@ -2544,11 +2623,17 @@ impl<'a> AgentLoop<'a> {
             return Summarised::Failed;
         }
 
+        let opaque: Vec<Item> = state.items[FIRST_KEPT_ITEM..end]
+            .iter()
+            .filter(|item| matches!(item, Item::Opaque { .. }))
+            .cloned()
+            .collect();
         let tail = state.items.split_off(end);
         state.items.truncate(FIRST_KEPT_ITEM);
         state
             .items
             .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
+        state.items.extend(opaque);
         state.items.extend(tail);
         Summarised::Folded(end - FIRST_KEPT_ITEM)
     }
@@ -2784,9 +2869,9 @@ impl<'a> AgentLoop<'a> {
 
         // Stage two: the tools themselves, over the calls the gate let through.
         let mut ran: VecDeque<(ToolOutcome, Option<LoopStop>)> = match owned {
-            Owned::Answer(_) => admitted
+            Owned::Answer(schema) => admitted
                 .iter()
-                .map(|call| accept_answer(call, state))
+                .map(|call| accept_answer(call, schema, state))
                 .collect(),
             Owned::Skill(skills) => admitted
                 .iter()
@@ -3071,6 +3156,7 @@ impl<'a> AgentLoop<'a> {
     ) -> Vec<ToolOutcome> {
         if calls.len() > 1
             && delegation.runs_side_by_side()
+            && self.parallel_delegation_is_observationally_safe()
             && let Some(results) =
                 self.delegates_side_by_side(delegation, calls, state, deadline, sink)
         {
@@ -3080,6 +3166,26 @@ impl<'a> AgentLoop<'a> {
             .iter()
             .map(|call| self.delegate(delegation, call, state, deadline, sink))
             .collect()
+    }
+
+    /// Whether child scheduling can change no effect, approval, or hook observation.
+    ///
+    /// This is deliberately a surface-wide condition. A child chooses its own calls after it
+    /// starts, so checking only the `delegate` call says nothing about whether one child may write
+    /// what its neighbour reads. If any reachable entry can mutate or ask a person, the delegates
+    /// run in model order. A hook also observes call order and therefore takes the sequential path.
+    fn parallel_delegation_is_observationally_safe(&self) -> bool {
+        self.hooks.is_none()
+            && self
+                .tools
+                .reachable_specs()
+                .into_iter()
+                .filter(|spec| self.config.admits.is_none() || self.admits(&spec.name))
+                .all(|spec| {
+                    !spec.envelope.mutates()
+                        && spec.approval != Approval::Required
+                        && !spec.envelope.needs_approval(self.config.unattended_ceiling)
+                })
     }
 
     /// Runs a second loop to completion inside this tool call, and returns what it reported.
@@ -3341,14 +3447,13 @@ impl<'a> AgentLoop<'a> {
 
     /// The remainder of this run's budget, as the budget of one of `share` delegates.
     ///
-    /// Every ceiling the parent set — turns and the clock excepted — is carved to
+    /// Every ceiling the parent set — the clock excepted — is carved to
     /// `(limit − spent so far) / share`, because a delegate spends the run's budget rather than
     /// one of its own and the parent absorbs what it spent when the call returns.
     ///
-    /// Turns are the first exception: the child gets [`Delegation::max_turns`] of its own, so a
-    /// child that loops does not spend the parent's remaining fifty turns finding out. The
-    /// per-turn output offer is passed through rather than carved, because it bounds one turn and
-    /// is not a total to divide.
+    /// Turns are capped by both [`Delegation::max_turns`] and the child's share of the parent's
+    /// remainder. The per-turn output offer is passed through rather than carved, because it
+    /// bounds one turn and is not a total to divide.
     ///
     /// # The clock is the second exception, and dividing it would be wrong
     ///
@@ -3384,8 +3489,14 @@ impl<'a> AgentLoop<'a> {
             )
             .unwrap_or(u64::MAX)
         });
+        let turns = divided(
+            remainder(self.config.budget.max_turns, state.turns, "max_turns")?,
+            share,
+            "max_turns",
+        )?
+        .map_or(delegation.max_turns, |left| left.min(delegation.max_turns));
         Ok(Budget {
-            max_turns: Some(delegation.max_turns),
+            max_turns: Some(turns),
             max_input_tokens: divided(
                 remainder(
                     self.config.budget.max_input_tokens,

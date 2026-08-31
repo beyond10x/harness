@@ -2,7 +2,7 @@
 //!
 //! # Where this came from
 //!
-//! `harness-responses`, and byte-for-byte from `harness-messages`, which copied it unchanged when
+//! the first wire, and byte-for-byte from the second, which copied it unchanged when
 //! the second wire was built. Nothing in it names a vendor: it decides on
 //! [`WireError::retriable`], a count and a clock, all three of which are neutral. That is why the
 //! copy was possible, and why it is one thing now.
@@ -14,7 +14,7 @@ use harness_wire::{Cancel, WireError};
 /// How many attempts one turn gets, and how the pauses between them grow.
 ///
 /// A value rather than a set of constants because it is the thing the two wires must be shown to
-/// agree about: `crates/harness-messages/tests/transport.rs` compares what each one asks for.
+/// agree about: the cross-wire transport test compares what each one asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryPolicy {
     /// Attempts in total, the first included.

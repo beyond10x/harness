@@ -27,7 +27,7 @@ this, never the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.1.0` (2026-08-24).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.5.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |
@@ -35,7 +35,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `openai-responses` wire | implemented, streaming, pinned by contract |
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
-| sub-agents (`delegate`), structured output (`answer`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
+| sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
 | command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
@@ -49,16 +49,16 @@ behaves. The wire contract pins are still emulator-derived.
 
 ## Build, test, run
 
-The gate is **`bash scripts/gate.sh`**. Green here is the bar for main.
+The gate is **`cargo xtask gate`**. Green here is the bar for main.
 
 | step | command |
 |---|---|
 | tests | `cargo test --workspace --locked` |
 | format | `cargo fmt --all --check` |
 | lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
-| provider-wire pins | `python3 scripts/check-provider-wires.py` |
+| provider-wire pins | `cargo xtask provider-contracts` |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
-| command-line argv pin | `python3 scripts/check-cli-contract.py` |
+| command-line argv pin | `cargo xtask cli-contract --self-test`, then `cargo xtask cli-contract` |
 | absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
 | brand | org-wide, from the atlas checkout: `bash ../atlas/scripts/check-org-brand.sh harness` |
 
@@ -80,7 +80,7 @@ credential it was not pointed at, so a run can always be explained afterwards.
 |---|---|
 | `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations` and — only when there is one — `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
-| `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — a directory not called `ws_…`, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
+| `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — an invalid one-component workspace name, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
 | `--approve <mode>` | who decides a call above the ceiling. `auto` (the default) asks a person over `/dev/tty` when there is a terminal and stdin and stderr are one, and otherwise says so in one line and refuses; `prompt` asks or refuses the run by name; `deny` refuses and tells the model; `all` approves |
 | `--yes` | the same as `--approve all`, and what every unattended invocation already says. It wins when both are given; it does not combine with `--approve-up-to` |
@@ -167,12 +167,12 @@ same record covers `file_write` and `file_edit` when a confinement was named and
 no `workspace.guarded-io`.
 
 The workspace is **adopted, not created**: `--workspace` is the tree, its parent becomes substrate's
-root, and reads and writes land in the same place. The directory must therefore be named
-`ws_something` — substrate's guarded filesystem will not represent any other name — and one that is
-not refuses the run by name rather than quietly running read-only:
+root, and reads and writes land in the same place. Its directory name must be one non-empty path
+component of ASCII letters, digits, `_` or `-`, not `.` or `..` and not beginning with `-`. A name
+outside that grammar refuses the run rather than quietly running read-only:
 
 ```text
-error: `--substrate-embedded` cannot adopt `not_a_ws`: the directory must be named `ws_` followed by alphanumerics and underscores, because substrate's guarded filesystem represents no other name. Rename it, or drop the flag for a read-only run.
+error: `--substrate-embedded` cannot adopt `-project`: the directory name must be one non-empty ASCII path component using letters, digits, `_` or `-`, and it may not begin with `-`.
 ```
 
 `--toolchain rust` mounts the operator's `~/.rustup` read-only inside the sandbox and points
@@ -254,9 +254,9 @@ unattended run toward rewriting whole files when the narrower edit was the safer
 over `/dev/tty` when there is one to ask, and a refusal — stated in one line before the run — when
 there is not. `--yes` (`--approve all`) is the declared unattended run.
 
-## Sub-agents, structured output, hooks
+## Sub-agents, structured output, skills, hooks
 
-Three things every comparable harness has, added on 2026-08-29 under one rule: **nothing reaches a
+Four opt-in extensions under one rule: **nothing reaches a
 tool without the gate, nothing widens what a turn admits, and nothing refuses silently.** The
 argument is [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md); each is off
 unless a run asks for it.
@@ -265,20 +265,21 @@ unless a run asks for it.
 |---|---|---|
 | structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it **and the turn that ask opens is held to that tool at the provider** — one turn per run, never any other; if it still does not, the run stops `unstructured` and exits 2 — never a success status over prose |
 | sub-agents | `--delegate` (`--delegate-turns N`, default 20; `--delegate-parallel N`, default 4) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and a share of the parent's remaining budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate. **Neighbouring `delegate` calls of one turn run side by side** — each child gets a fork of the model and tool ports, while the approver, the hooks and the record stay single and are asked from the run's own thread. `--delegate-parallel 1` runs them one at a time |
+| skills | `--skills-dir <DIR>` or `--plugin-dir <DIR>` | a tool named `skill` returns one operator-supplied instruction document by name. Descriptions are present in the standing instruction; bounded bodies are loaded before the run and returned only on demand. The loop performs no filesystem discovery and a delegate receives the same immutable set. |
 | hooks | `--hooks <FILE>` | the operator's own programs, run as an argv (never a shell) at three moments: `before-call` (after approval; exit 2 refuses the call, a hook that fails refuses it too), `after-call` (a note the model reads beside the result), `stop` (exit 2 keeps the run working with the reason, at most three times). Named on the command line, **never discovered in the workspace** |
 
-None of the three is a catalogue entry or touches `harness-wire`: `answer` and `delegate` are tools
-the **loop** owns, resolved before the tool port ever sees a call, and a hook is a port like the
-approver, with the process-running half in the shell. A delegate's tool calls meet exactly the gate
-the parent's do; a hook can refuse what the gate allowed and can allow nothing the gate refused.
+None is a catalogue entry or touches `harness-wire`: `answer`, `delegate` and `skill` are tools the
+**loop** owns, resolved before the tool port ever sees a call, and a hook is a port like the approver,
+with the process-running half in the shell. A delegate's tool calls meet exactly the gate the
+parent's do; a hook can refuse what the gate allowed and can allow nothing the gate refused.
 
-Running delegates side by side changes how long a turn takes and nothing else: where a port will
-not hand out a second handle on itself, or the remaining token budget will not divide between the
-children, the same delegates run in order and reach the same results in the same order.
+Running delegates side by side changes how long a turn takes and nothing else. It is permitted only
+when the reachable surface is non-mutating and needs no approval and no hook is attached; otherwise,
+when a port will not fork, or when the remaining token budget will not divide, the same delegates
+run in order and reach the same results in the same order.
 
-Provider-native structured output (constrained decoding on the wire), schema validation in the loop
-and delegate *trees* are labelled later milestones in the design, each waiting on a live run that
-shows the shipped path is not enough.
+Provider-native structured output (constrained decoding on the wire) and delegate *trees* remain
+later milestones. The loop now validates every `answer` locally against its declared JSON Schema.
 
 ## Workflows
 
@@ -408,7 +409,7 @@ reading two files side by side.
 | `crates/harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST`. No vendor name, field name or header name |
 | `crates/harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers |
 | `crates/harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under |
-| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the two tools it owns itself (`answer`, `delegate`) and the hook port |
+| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the three tools it owns itself (`answer`, `delegate`, `skill`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-tools` | one catalogue, published flat or under three verbs |
@@ -421,13 +422,15 @@ reading two files side by side.
 | `contracts/app-server-profile/` | the JSON-RPC subset served, per dated pin |
 | `contracts/cli/` | the argv surface accepted, per dated pin — generated from clap, never written by hand |
 | `docs/design/` | component design documents |
-| `scripts/` | `gate.sh` and the checks it runs |
+| `crates/harness-xtask` | the executable gate and the independent provider and CLI contract validators |
+| `scripts/` | compatibility entry points and the two legacy checks not yet touched by this change |
 
 ## Evidence
 
-Every contract pin is checked **from both directions** — a Python checker verifies the manifest
-against its fixtures, and a Rust test verifies the code produces those bytes or holds those
-constants. Neither half is sufficient alone.
+Every contract pin is checked **from both directions** — an independent checker verifies the
+manifest against its fixtures, and a Rust test in the owning crate verifies the code produces those
+bytes or holds those constants. The provider and CLI checkers run through `cargo xtask`; the
+app-server profile checker remains the existing Python program. Neither half is sufficient alone.
 
 These suites drive real processes over real sockets and pipes:
 

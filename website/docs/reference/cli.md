@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-08-29.3`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-08-31`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -154,6 +154,7 @@ object, and `workflow run` derives one schema per step for itself.
 |---|---|
 | `--delegate` | Publish one fresh-context sub-agent tool; with agents offered, a call may name one |
 | `--delegate-turns N` | Cap one delegate; default `20`, minimum `1` |
+| `--delegate-parallel N` | Cap neighbouring delegates that may run together; default `4`, minimum `1` |
 | `--hooks FILE` | Load explicitly named operator hook programs |
 
 Under `workflow run`, `--hooks` also accepts `on: "transition"`, asked before a section is entered

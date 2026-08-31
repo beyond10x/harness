@@ -6,7 +6,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use b10x_harness_responses::{WIRE, decode_stream, request_body};
+use b10x_harness_responses::{
+    ACCEPTED_STREAM_EVENTS, WIRE, contract_headers, decode_stream, request_body,
+};
 use harness_wire::{
     Approval, CallId, Envelope, Item, Sampling, StopReason, ToolCall, ToolChoice, ToolName,
     ToolOutcome, ToolSpec, TurnRequest, Usage, VecSink, WireId,
@@ -15,7 +17,7 @@ use serde_json::{Value, json};
 
 /// The cut that added `tool_choice`. `2026-08-22` is the same wire without it, and `2026-08-21`
 /// the one before the prompt-cache key; both stay pinned as they were released.
-const VERSION: &str = "2026-08-30";
+const VERSION: &str = "2026-08-31";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,6 +33,10 @@ fn fixture(name: &str) -> String {
     let path = contract_dir().join("fixtures").join(name);
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("reading `{}`: {error}", path.display()))
+}
+
+fn fixture_bytes(name: &str) -> Vec<u8> {
+    fs::read(contract_dir().join("fixtures").join(name)).expect("readable fixture")
 }
 
 fn manifest() -> Value {
@@ -102,13 +108,32 @@ fn canonical_request() -> Value {
 
 #[test]
 fn the_request_the_harness_sends_matches_the_pinned_fixture() {
-    let expected: Value =
-        serde_json::from_str(&fixture("turn-request.json")).expect("the request fixture is JSON");
+    let expected = fixture_bytes("turn-request.json");
+    let actual = harness_http::encode_json_body(&canonical_request()).expect("encodes");
     assert_eq!(
-        canonical_request(),
-        expected,
-        "the request shape changed; re-pin the fixture and say so in the changelog"
+        actual, expected,
+        "the exact request bytes changed; cut a contract and say so in the changelog"
     );
+}
+
+#[test]
+fn every_non_secret_request_header_and_value_is_pinned() {
+    let mut actual = contract_headers("b10x-session-fixture", 7)
+        .into_iter()
+        .map(|(name, value)| json!({"name": name, "value": value}))
+        .collect::<Vec<_>>();
+    actual.push(json!({"name":"authorization", "value":"<credential omitted>"}));
+    assert_eq!(Value::Array(actual), manifest()["request_headers"]);
+}
+
+#[test]
+fn the_manifest_pins_the_production_event_inventory_and_terminal_sentinel() {
+    let accepted: Value =
+        serde_json::from_str(&fixture("accepted-events.json")).expect("inventory JSON");
+    assert_eq!(accepted["stream_events"], json!(ACCEPTED_STREAM_EVENTS));
+    assert_eq!(manifest()["stream_events"], accepted["stream_events"]);
+    assert_eq!(manifest()["terminal_sentinel"]["required"], json!(true));
+    assert_eq!(manifest()["terminal_sentinel"]["bytes"], "data: [DONE]\n\n");
 }
 
 #[test]
@@ -199,5 +224,24 @@ fn the_manifest_names_exactly_the_stream_events_the_fixture_carries() {
         .iter()
         .map(|value| value.as_str().expect("a string").to_owned())
         .collect();
-    assert_eq!(seen, pinned);
+    assert!(seen.is_subset(&pinned));
+}
+
+#[test]
+fn the_pinned_incomplete_and_failure_events_take_their_typed_paths() {
+    let mut sink = VecSink::new();
+    let incomplete = decode_stream(
+        "b10x-emulated",
+        fixture("incomplete-stream.sse").as_bytes(),
+        &mut sink,
+    )
+    .expect("incomplete is a terminal turn");
+    assert_eq!(incomplete.stop_reason, StopReason::MaxOutputTokens);
+
+    for fixture_name in ["failed-stream.sse", "error-stream.sse"] {
+        let mut sink = VecSink::new();
+        let failure = decode_stream("b10x-emulated", fixture(fixture_name).as_bytes(), &mut sink)
+            .expect_err("the pinned failure is typed");
+        assert!(failure.retriable, "{fixture_name}: {failure:?}");
+    }
 }

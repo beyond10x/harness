@@ -89,7 +89,11 @@ impl Wire {
     /// Returns [`TransportError`] when the connection is gone or the frame never arrives.
     pub fn settle_interrupts(&self, control: &TurnControl) -> Result<(), TransportError> {
         while control.owes() {
-            let message = self.next_frame_within(INTERRUPT_SETTLE_TIMEOUT)?;
+            // Settlement must make progress on the underlying queue. Reading through
+            // `next_frame_within` would immediately pop the unrelated frame we just stashed,
+            // serve it, stash it again, and repeat forever without reaching the interrupt behind
+            // it.
+            let message = self.reader.next_within(INTERRUPT_SETTLE_TIMEOUT)?;
             self.serve_control(message, control)?;
         }
         Ok(())
@@ -459,24 +463,29 @@ fn decode_tool_result(result: Option<&Value>) -> ToolOutcome {
         .get("success")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let text: String = result
+    let mut text = String::new();
+    let mut oversized = false;
+    for part in result
         .get("contentItems")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("text").and_then(Value::as_str))
-                .collect()
-        })
-        .unwrap_or_default();
-    let text = if text.len() > MAX_TOOL_RESPONSE_BYTES {
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("text").and_then(Value::as_str))
+    {
+        if text.len().saturating_add(part.len()) > MAX_TOOL_RESPONSE_BYTES {
+            oversized = true;
+            break;
+        }
+        text.push_str(part);
+    }
+    let text = if oversized {
         format!("the client's answer passed the {MAX_TOOL_RESPONSE_BYTES} byte bound")
     } else {
         text
     };
     ToolOutcome {
         output: Value::String(text),
-        failed: !success,
+        failed: !success || oversized,
         // The client's own refusals are the client's own gate (`AGENTS.md` § *Safety envelope*,
         // bridge mode). Naming one here would be this side claiming a decision it did not make.
         refusal: None,
@@ -577,6 +586,34 @@ fn decode_one_tool(entry: &Value) -> Result<ToolSpec, (i64, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::InterruptWatch;
+    use std::io::Cursor;
+
+    struct IgnoreInterrupt;
+
+    impl InterruptWatch for IgnoreInterrupt {
+        fn interrupted(&self) {}
+    }
+
+    #[test]
+    fn interrupt_settlement_reads_past_an_unrelated_frame_without_livelocking() {
+        let input = concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"turn/interrupt\"}\n"
+        );
+        let reader = Reader::spawn(Cursor::new(input.as_bytes()), Box::new(IgnoreInterrupt));
+        let wire = Wire::new(Writer::new(Box::new(Vec::new())), reader);
+        let control = TurnControl::new();
+        control.decoded();
+
+        wire.settle_interrupts(&control)
+            .expect("the interrupt behind an unrelated response settles");
+        assert!(!control.owes());
+        assert!(matches!(
+            wire.next_frame().expect("the unrelated frame was preserved"),
+            Incoming::Response { id, .. } if id == json!(7)
+        ));
+    }
 
     #[test]
     fn a_registration_becomes_a_publishable_tool() {
@@ -678,7 +715,49 @@ mod tests {
             "contentItems": [{"type": "inputText", "text": "x".repeat(MAX_TOOL_RESPONSE_BYTES + 1)}],
         })));
         let text = outcome.output.as_str().expect("text");
+        assert!(outcome.failed);
         assert!(text.contains("bound"), "{text}");
         assert!(text.len() < MAX_TOOL_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn an_answer_at_the_bound_is_complete_and_the_next_byte_is_a_failure() {
+        let at = decode_tool_result(Some(&json!({
+            "success": true,
+            "contentItems": [{"text": "x".repeat(MAX_TOOL_RESPONSE_BYTES)}],
+        })));
+        assert!(!at.failed);
+        assert_eq!(
+            at.output.as_str().expect("text").len(),
+            MAX_TOOL_RESPONSE_BYTES
+        );
+
+        let over = decode_tool_result(Some(&json!({
+            "success": true,
+            "contentItems": [
+                {"text": "x".repeat(MAX_TOOL_RESPONSE_BYTES)},
+                {"text": "y"},
+            ],
+        })));
+        assert!(over.failed);
+    }
+
+    #[test]
+    fn a_multibyte_answer_at_the_bound_is_not_split_or_failed() {
+        let prefix = "é";
+        let text = format!(
+            "{prefix}{}",
+            "x".repeat(MAX_TOOL_RESPONSE_BYTES - prefix.len())
+        );
+        assert_eq!(text.len(), MAX_TOOL_RESPONSE_BYTES);
+        let outcome = decode_tool_result(Some(&json!({
+            "success": true,
+            "contentItems": [{"text": text}],
+        })));
+        assert!(!outcome.failed);
+        let output = outcome.output.as_str().expect("text");
+        assert_eq!(output.len(), MAX_TOOL_RESPONSE_BYTES);
+        assert!(output.starts_with('é'));
+        assert!(!output.contains('\u{fffd}'));
     }
 }

@@ -25,6 +25,7 @@
 //! flags is one nobody can reproduce. The caller re-derives it, and the difference is visible in
 //! the flags rather than hidden in the file.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -172,8 +173,9 @@ impl Session {
     /// `<id>.json`, because a run interrupted mid-write would otherwise leave a half-session that
     /// parses as far as it goes and resumes into a conversation missing its end.
     ///
-    /// A directory this call creates is created `0700` on unix — a transcript is whatever the
-    /// model read. An existing directory's mode is left as the operator set it.
+    /// The directory is forced to `0700` and the temporary file to `0600` on unix — a transcript
+    /// is whatever the model read, and an existing permissive directory is not a reason to expose
+    /// a new one.
     ///
     /// # Errors
     ///
@@ -188,14 +190,13 @@ impl Session {
                     dir.display()
                 )
             })?;
-            restrict(dir)?;
         }
+        restrict(dir)?;
         let text = serde_json::to_string_pretty(self)
             .map_err(|error| format!("encoding session `{}`: {error}", self.id))?;
         let temporary = dir.join(format!("{}.json.tmp", self.id));
         let path = dir.join(format!("{}.json", self.id));
-        fs::write(&temporary, text)
-            .map_err(|error| format!("writing `{}`: {error}", temporary.display()))?;
+        write_private(&temporary, text.as_bytes())?;
         if let Err(error) = fs::rename(&temporary, &path) {
             let _ = fs::remove_file(&temporary);
             return Err(format!(
@@ -355,7 +356,15 @@ pub fn default_dir(instead: Instead) -> Result<PathBuf, String> {
     if let Some(state) = std::env::var_os("XDG_STATE_HOME")
         && !state.is_empty()
     {
-        return Ok(PathBuf::from(state).join("b10x-harness").join("sessions"));
+        let state = PathBuf::from(state);
+        if !state.is_absolute() {
+            return Err(format!(
+                "`XDG_STATE_HOME` is relative (`{}`), so it cannot name an out-of-workspace state directory; {}",
+                state.display(),
+                instead.flags()
+            ));
+        }
+        return Ok(state.join("b10x-harness").join("sessions"));
     }
     if let Some(home) = std::env::var_os("HOME")
         && !home.is_empty()
@@ -371,6 +380,66 @@ pub fn default_dir(instead: Instead) -> Result<PathBuf, String> {
          sessions in; {}",
         instead.flags()
     ))
+}
+
+/// Resolves a possibly not-yet-created directory and refuses one inside `workspace`.
+///
+/// Existing ancestors are canonicalized, so a symlink cannot disguise an in-workspace target.
+///
+/// # Errors
+///
+/// Names a relative or unresolvable path, an unresolvable workspace, or a directory which resolves
+/// inside the workspace.
+pub fn outside_workspace(dir: &Path, workspace: &Path) -> Result<PathBuf, String> {
+    let workspace = workspace.canonicalize().map_err(|error| {
+        format!(
+            "resolving workspace `{}` before placing sessions: {error}",
+            workspace.display()
+        )
+    })?;
+    let mut candidate = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("resolving the current directory for sessions: {error}"))?
+            .join(dir)
+    };
+    let mut missing: Vec<OsString> = Vec::new();
+    while !candidate.exists() {
+        let name = candidate.file_name().ok_or_else(|| {
+            format!(
+                "session directory `{}` has no existing ancestor",
+                dir.display()
+            )
+        })?;
+        missing.push(name.to_owned());
+        candidate = candidate
+            .parent()
+            .ok_or_else(|| {
+                format!(
+                    "session directory `{}` has no existing ancestor",
+                    dir.display()
+                )
+            })?
+            .to_path_buf();
+    }
+    candidate = candidate.canonicalize().map_err(|error| {
+        format!(
+            "resolving session directory ancestor `{}`: {error}",
+            candidate.display()
+        )
+    })?;
+    for component in missing.into_iter().rev() {
+        candidate.push(component);
+    }
+    if candidate.starts_with(&workspace) {
+        return Err(format!(
+            "session directory `{}` is inside workspace `{}`; transcripts must be written outside the workspace",
+            candidate.display(),
+            workspace.display()
+        ));
+    }
+    Ok(candidate)
 }
 
 /// Seconds since the epoch, or zero on a clock set before it.
@@ -414,6 +483,31 @@ fn restrict(dir: &Path) -> Result<(), String> {
             dir.display()
         )
     })
+}
+
+#[cfg(unix)]
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|error| {
+            format!(
+                "creating private session file `{}`: {error}",
+                path.display()
+            )
+        })?;
+    file.write_all(bytes)
+        .map_err(|error| format!("writing `{}`: {error}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    fs::write(path, bytes).map_err(|error| format!("writing `{}`: {error}", path.display()))
 }
 
 #[cfg(not(unix))]
@@ -506,6 +600,48 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec![format!("{}.json", saved.id)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_restricts_an_existing_directory_and_the_session_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755))
+            .expect("make the pre-existing directory permissive");
+        let path = session().save(directory.path()).expect("the session saves");
+
+        assert_eq!(
+            fs::metadata(directory.path())
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(path)
+                .expect("session metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn a_session_directory_inside_the_workspace_is_refused_before_creation() {
+        let workspace = tempfile::tempdir().expect("a temporary workspace");
+        let inside = workspace.path().join(".state/sessions");
+        let error = outside_workspace(&inside, workspace.path()).expect_err("inside refuses");
+        assert!(error.contains("inside workspace"), "{error}");
+        assert!(!inside.exists(), "validation writes nothing");
+
+        let outside = tempfile::tempdir().expect("an outside parent");
+        let resolved = outside_workspace(&outside.path().join("sessions"), workspace.path())
+            .expect("outside is valid");
+        assert!(resolved.starts_with(outside.path().canonicalize().expect("canonical")));
     }
 
     #[test]

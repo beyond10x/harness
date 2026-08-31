@@ -11,8 +11,8 @@
 //! reads its record.
 //!
 //! So the argv surface is pinned the same way, from both directions (`AGENTS.md` invariant 14): a
-//! Python checker verifies the manifest against the file, and
-//! [`the_pinned_argv_contract_is_what_this_binary_defines`] verifies that clap's own definition
+//! Rust xtask checker verifies the manifest against the file, and
+//! `the_pinned_argv_contract_is_what_this_binary_defines` verifies that clap's own definition
 //! still produces exactly those bytes. Changing a flag's shape is a **new version directory**
 //! (invariant 13), never an edit of a released one.
 //!
@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-08-30.2";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-08-31";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -519,7 +519,7 @@ mod tests {
 
     /// The Rust half of the contract: the code produces exactly the pinned bytes.
     ///
-    /// The Python half — `scripts/check-cli-contract.py` — verifies the manifest against the file.
+    /// The independent half — `cargo xtask cli-contract` — verifies the manifest against the file.
     /// Neither is sufficient alone: a checker alone pins a document nothing produces, and this
     /// alone pins a document nothing else can verify was not edited alongside the code.
     #[test]
@@ -559,7 +559,7 @@ mod tests {
     /// Every released version is still pinned beside the current one.
     ///
     /// A released contract version is immutable (`AGENTS.md` invariant 13), and *immutable* is a
-    /// claim about the directory as much as about its bytes: `scripts/check-cli-contract.py` walks
+    /// claim about the directory as much as about its bytes: `cargo xtask cli-contract` walks
     /// whatever directories exist, so an older one that was deleted rather than kept would take its
     /// verification with it and the checker would go on printing a pass. `2026-08-29.1` is on
     /// `main` and consumers pin it; it stays, unchanged, beside `.2`.
@@ -579,7 +579,8 @@ mod tests {
                 "2026-08-29.3",
                 "2026-08-30",
                 "2026-08-30.1",
-                "2026-08-30.2"
+                "2026-08-30.2",
+                "2026-08-31"
             ],
             "a released version may be superseded and never removed"
         );
@@ -1371,7 +1372,7 @@ mod tests {
     /// A flag that eats no word holds no default but the one clap gives every bare flag.
     ///
     /// [`flags`] drops a bare flag's default because a built `ArgAction::SetTrue` carries the
-    /// built-in `"false"`, which is not a word a consumer may type after it — and the Python half
+    /// built-in `"false"`, which is not a word a consumer may type after it — and the xtask half
     /// refuses a bare flag that declares one. `ArgAction::SetFalse` would carry a real default of
     /// `"true"` that a driver needs, and the row would say `null` **silently**, because `default`
     /// is a field the move diff compares. Nothing in this build sets it; this is the guard that

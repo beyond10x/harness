@@ -52,9 +52,9 @@ The constraint is sent on that one turn and no other. Holding every turn to `ans
 that answers before it does any work, and on one route the field sits outside the prompt cache — so
 one turn per run, on a run that was otherwise about to report nothing.
 
-The provider receives the schema as the tool's argument schema. Harness currently does not perform
-an independent JSON Schema validation pass after the call. Treat that as a current limitation when
-the result crosses a trust boundary.
+The provider receives the schema as the tool's argument schema, and Harness independently validates
+the proposed answer against the same schema. Invalid arguments become a failed tool outcome and the
+run continues; an invalid schema refuses the run before the first provider request.
 
 ## Offer skills on demand
 
@@ -93,6 +93,11 @@ The delegate receives:
 It reports `{stop, turns, text}` once to the parent. Delegation is depth one: a delegate cannot
 delegate again. Child events are wrapped as `delegated` so a consumer cannot confuse child text
 with the parent answer.
+
+Neighbouring delegate calls may run side by side up to `--delegate-parallel N` (default `4`) only
+when every reachable tool is non-mutating and needs no approval and no hook is attached. A mutating
+surface, approvals, hooks, a port that cannot fork, or a budget that cannot divide takes the same
+delegates through the sequential path in model order.
 
 ### Name an agent {#name-an-agent}
 

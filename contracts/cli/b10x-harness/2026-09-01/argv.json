@@ -1,0 +1,2520 @@
+{
+  "arguments": {
+    "app-server": [
+      {
+        "conflicts_with": [
+          "--api-key-file",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--base-url",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "BASE_URL"
+      },
+      {
+        "conflicts_with": [],
+        "default": "128000",
+        "long": "--context-window",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CONTEXT_WINDOW"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-turns",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_TURNS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--model",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODEL"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--oauth-token-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-env"
+        ],
+        "default": null,
+        "long": "--oauth-token-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--oauth-token-pointer",
+        "required": false,
+        "requires": [
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "POINTER"
+      },
+      {
+        "conflicts_with": [],
+        "default": "openai-responses",
+        "long": "--wire",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WIRE"
+      }
+    ],
+    "b10x-harness": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--version",
+        "required": false,
+        "requires": [],
+        "short": "-V",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "chat": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--agents-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--allow-program",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ALLOW_PROGRAM"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-file",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "auto",
+        "long": "--approve",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [
+          "--yes"
+        ],
+        "default": null,
+        "long": "--approve-up-to",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "RISK"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--base-url",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "BASE_URL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--cgroup-root",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CGROUP_ROOT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--context",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "128000",
+        "long": "--context-window",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CONTEXT_WINDOW"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--delegate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "4",
+        "long": "--delegate-parallel",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": "20",
+        "long": "--delegate-turns",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--driver",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": "direct",
+        "long": "--execution-path",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--hooks",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--instructions-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INSTRUCTIONS_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--json",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-cost-microunits",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_COST_MICROUNITS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-duration-ms",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_DURATION_MS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens-per-turn",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS_PER_TURN"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-turns",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_TURNS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--model",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODEL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--no-project-instructions",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--resume"
+        ],
+        "default": null,
+        "long": "--no-session",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--oauth-token-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-env"
+        ],
+        "default": null,
+        "long": "--oauth-token-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--oauth-token-pointer",
+        "required": false,
+        "requires": [
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "POINTER"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--plugin-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--prices",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PRICES"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--process-write-subtree",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--profile",
+        "required": false,
+        "requires": [],
+        "short": "-p",
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--quiet",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--reasoning-effort",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "REASONING_EFFORT"
+      },
+      {
+        "conflicts_with": [
+          "--no-session"
+        ],
+        "default": null,
+        "long": "--resume",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": "stated",
+        "long": "--scope-announce",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--session-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--skills-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [
+          "--substrate-embedded"
+        ],
+        "default": null,
+        "long": "--substrate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SUBSTRATE"
+      },
+      {
+        "conflicts_with": [
+          "--substrate"
+        ],
+        "default": null,
+        "long": "--substrate-embedded",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "flat",
+        "long": "--surface",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SURFACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--temperature",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TEMPERATURE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--top-p",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TOP_P"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--wire",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WIRE"
+      },
+      {
+        "conflicts_with": [],
+        "default": ".",
+        "long": "--workspace",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "default",
+        "long": "--workspace-id",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE_ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--write-scope",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "GLOB=SCOPE"
+      },
+      {
+        "conflicts_with": [
+          "--approve-up-to"
+        ],
+        "default": null,
+        "long": "--yes",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "context": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "context show": [
+      {
+        "conflicts_with": [
+          "--json"
+        ],
+        "default": null,
+        "long": "--body",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--context",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--instructions-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INSTRUCTIONS_FILE"
+      },
+      {
+        "conflicts_with": [
+          "--body"
+        ],
+        "default": null,
+        "long": "--json",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--no-project-instructions",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": ".",
+        "long": "--workspace",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE"
+      }
+    ],
+    "events": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--in",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "IN"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--out",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OUT"
+      }
+    ],
+    "profiles": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "profiles explain": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--profile",
+        "required": false,
+        "requires": [],
+        "short": "-p",
+        "takes_value": true,
+        "value_name": "NAME"
+      }
+    ],
+    "profiles init": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "profiles list": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "profiles show": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers list": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "providers show": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "run": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--agents-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--allow-program",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ALLOW_PROGRAM"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-file",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "auto",
+        "long": "--approve",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [
+          "--yes"
+        ],
+        "default": null,
+        "long": "--approve-up-to",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "RISK"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--base-url",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "BASE_URL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--cgroup-root",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CGROUP_ROOT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--context",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "128000",
+        "long": "--context-window",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CONTEXT_WINDOW"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--delegate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "4",
+        "long": "--delegate-parallel",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": "20",
+        "long": "--delegate-turns",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--driver",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": "direct",
+        "long": "--execution-path",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--hooks",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--input",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INPUT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--instructions-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INSTRUCTIONS_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--json",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-cost-microunits",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_COST_MICROUNITS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-duration-ms",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_DURATION_MS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens-per-turn",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS_PER_TURN"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-turns",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_TURNS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--model",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODEL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--no-project-instructions",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--resume"
+        ],
+        "default": null,
+        "long": "--no-session",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--oauth-token-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-env"
+        ],
+        "default": null,
+        "long": "--oauth-token-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--oauth-token-pointer",
+        "required": false,
+        "requires": [
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "POINTER"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--output-schema",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--plugin-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--prices",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PRICES"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--process-write-subtree",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--profile",
+        "required": false,
+        "requires": [],
+        "short": "-p",
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--quiet",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--reasoning-effort",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "REASONING_EFFORT"
+      },
+      {
+        "conflicts_with": [
+          "--no-session"
+        ],
+        "default": null,
+        "long": "--resume",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": "stated",
+        "long": "--scope-announce",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--session-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--skills-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [
+          "--substrate-embedded"
+        ],
+        "default": null,
+        "long": "--substrate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SUBSTRATE"
+      },
+      {
+        "conflicts_with": [
+          "--substrate"
+        ],
+        "default": null,
+        "long": "--substrate-embedded",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "flat",
+        "long": "--surface",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SURFACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--temperature",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TEMPERATURE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--top-p",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TOP_P"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--wire",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WIRE"
+      },
+      {
+        "conflicts_with": [],
+        "default": ".",
+        "long": "--workspace",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "default",
+        "long": "--workspace-id",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE_ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--write-scope",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "GLOB=SCOPE"
+      },
+      {
+        "conflicts_with": [
+          "--approve-up-to"
+        ],
+        "default": null,
+        "long": "--yes",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "sessions": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--session-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      }
+    ],
+    "toolchains": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "toolchains list": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      }
+    ],
+    "toolchains show": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      }
+    ],
+    "toolchains validate": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "tools": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--agents-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--allow-program",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ALLOW_PROGRAM"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--cgroup-root",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CGROUP_ROOT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--driver",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--plugin-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--process-write-subtree",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--skills-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [
+          "--substrate-embedded"
+        ],
+        "default": null,
+        "long": "--substrate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SUBSTRATE"
+      },
+      {
+        "conflicts_with": [
+          "--substrate"
+        ],
+        "default": null,
+        "long": "--substrate-embedded",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "flat",
+        "long": "--surface",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SURFACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": ".",
+        "long": "--workspace",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "default",
+        "long": "--workspace-id",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE_ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--write-scope",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "GLOB=SCOPE"
+      }
+    ],
+    "workflow": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      }
+    ],
+    "workflow plan": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--flow",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--json",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-attempts",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      }
+    ],
+    "workflow run": [
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--agents-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--allow-program",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ALLOW_PROGRAM"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-file",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--api-key-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "API_KEY_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "auto",
+        "long": "--approve",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [
+          "--yes"
+        ],
+        "default": null,
+        "long": "--approve-up-to",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "RISK"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--base-url",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "BASE_URL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--cgroup-root",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CGROUP_ROOT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--context",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "128000",
+        "long": "--context-window",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "CONTEXT_WINDOW"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--delegate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "4",
+        "long": "--delegate-parallel",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": "20",
+        "long": "--delegate-turns",
+        "required": false,
+        "requires": [
+          "--delegate"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--driver",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": "direct",
+        "long": "--execution-path",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--flow",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--help",
+        "required": false,
+        "requires": [],
+        "short": "-h",
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--hooks",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--input",
+        "required": true,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INPUT"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--instructions-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "INSTRUCTIONS_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--json",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-attempts",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "N"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-cost-microunits",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_COST_MICROUNITS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-duration-ms",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_DURATION_MS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-output-tokens-per-turn",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_OUTPUT_TOKENS_PER_TURN"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--max-turns",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MAX_TURNS"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--model",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODEL"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--no-project-instructions",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--resume"
+        ],
+        "default": null,
+        "long": "--no-session",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-file"
+        ],
+        "default": null,
+        "long": "--oauth-token-env",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_ENV"
+      },
+      {
+        "conflicts_with": [
+          "--api-key-env",
+          "--api-key-file",
+          "--oauth-token-env"
+        ],
+        "default": null,
+        "long": "--oauth-token-file",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "OAUTH_TOKEN_FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--oauth-token-pointer",
+        "required": false,
+        "requires": [
+          "--oauth-token-env",
+          "--oauth-token-file"
+        ],
+        "short": null,
+        "takes_value": true,
+        "value_name": "POINTER"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--plugin-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--prices",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PRICES"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--process-write-subtree",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--profile",
+        "required": false,
+        "requires": [],
+        "short": "-p",
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--quiet",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--reasoning-effort",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "REASONING_EFFORT"
+      },
+      {
+        "conflicts_with": [
+          "--no-session"
+        ],
+        "default": null,
+        "long": "--resume",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": "stated",
+        "long": "--scope-announce",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "MODE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--session-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "PATH"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--skills-dir",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "DIR"
+      },
+      {
+        "conflicts_with": [
+          "--substrate-embedded"
+        ],
+        "default": null,
+        "long": "--substrate",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SUBSTRATE"
+      },
+      {
+        "conflicts_with": [
+          "--substrate"
+        ],
+        "default": null,
+        "long": "--substrate-embedded",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      },
+      {
+        "conflicts_with": [],
+        "default": "flat",
+        "long": "--surface",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "SURFACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--temperature",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TEMPERATURE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "NAME"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--toolchain-spec",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "FILE"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--top-p",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "TOP_P"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--wire",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WIRE"
+      },
+      {
+        "conflicts_with": [],
+        "default": ".",
+        "long": "--workspace",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE"
+      },
+      {
+        "conflicts_with": [],
+        "default": "default",
+        "long": "--workspace-id",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "WORKSPACE_ID"
+      },
+      {
+        "conflicts_with": [],
+        "default": null,
+        "long": "--write-scope",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": true,
+        "value_name": "GLOB=SCOPE"
+      },
+      {
+        "conflicts_with": [
+          "--approve-up-to"
+        ],
+        "default": null,
+        "long": "--yes",
+        "required": false,
+        "requires": [],
+        "short": null,
+        "takes_value": false,
+        "value_name": null
+      }
+    ]
+  },
+  "positionals": {
+    "app-server": [],
+    "b10x-harness": [],
+    "chat": [],
+    "context": [],
+    "context show": [],
+    "events": [],
+    "profiles": [],
+    "profiles explain": [],
+    "profiles init": [],
+    "profiles list": [],
+    "profiles show": [
+      {
+        "multiple": false,
+        "name": "NAME",
+        "required": true
+      }
+    ],
+    "providers": [],
+    "providers list": [],
+    "providers show": [
+      {
+        "multiple": false,
+        "name": "NAME",
+        "required": true
+      }
+    ],
+    "run": [],
+    "sessions": [],
+    "toolchains": [],
+    "toolchains list": [],
+    "toolchains show": [
+      {
+        "multiple": false,
+        "name": "NAME",
+        "required": true
+      }
+    ],
+    "toolchains validate": [
+      {
+        "multiple": true,
+        "name": "FILE",
+        "required": true
+      }
+    ],
+    "tools": [],
+    "workflow": [],
+    "workflow plan": [],
+    "workflow run": []
+  },
+  "product": "b10x-harness",
+  "subcommands": [
+    "app-server",
+    "chat",
+    "context",
+    "context show",
+    "events",
+    "profiles",
+    "profiles explain",
+    "profiles init",
+    "profiles list",
+    "profiles show",
+    "providers",
+    "providers list",
+    "providers show",
+    "run",
+    "sessions",
+    "toolchains",
+    "toolchains list",
+    "toolchains show",
+    "toolchains validate",
+    "tools",
+    "workflow",
+    "workflow plan",
+    "workflow run"
+  ]
+}

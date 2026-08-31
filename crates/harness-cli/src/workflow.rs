@@ -1954,6 +1954,8 @@ mod tests {
     fn a_toolset(dir: &Path, run: &[&str]) -> crate::Published {
         let toolchain = harness_substrate::Toolchain::default();
         let declared: Vec<String> = run.iter().map(|rule| (*rule).to_owned()).collect();
+        let process_workspace_access = harness_substrate::process_workspace_access(&[])
+            .expect("an empty process write scope is read-only");
         crate::published(
             harness_tools::LocalOperations::unconfined(dir, Vec::new())
                 .expect("the workspace opens"),
@@ -1966,6 +1968,7 @@ mod tests {
                 workspace_id: "ws_test",
                 programs: &[],
                 toolchain: &toolchain,
+                process_workspace_access,
                 scope: crate::write_scope(&declared).expect("the run's own rules read"),
             },
         )

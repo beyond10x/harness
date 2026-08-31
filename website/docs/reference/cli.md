@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-08-31.1`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-09-01`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -104,6 +104,7 @@ secret. Naming none records `"none"`.
 | `--no-project-instructions` | Omit `AGENTS.md` or `CLAUDE.md` from the standing instruction |
 | `--write-scope GLOB=SCOPE` | Restrict matching paths; repeatable, first match wins |
 | `--scope-announce stated\|silent` | Tell the model the write restrictions or test the gate silently |
+| `--execution-path direct\|metaharness` | Tell the model whether this native loop was launched directly or as a metaharness comparison arm; grants no authority |
 
 ## Skills and agents
 
@@ -134,6 +135,7 @@ may and may not do.
 | `--cgroup-root PATH` | Name a delegated cgroup root for embedded execution |
 | `--driver PATH` | Stage one host executable read-only at `/toolchain/driver` and admit that mounted path |
 | `--allow-program NAME` | Admit one root executable as `argv[0]`; repeatable. Descendants are not re-matched and remain confined with the root process |
+| `--process-write-subtree DIR` | Give confined child processes exact write access to one workspace-relative directory; repeatable. With none, their workspace is read-only |
 | `--toolchain auto\|NAME[,NAME...]` | Discover matching providers or select providers explicitly |
 | `--toolchain-spec FILE` | Load an additive custom provider document explicitly; repeatable and never workspace-discovered |
 

@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-08-31.1";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-09-01";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -581,7 +581,8 @@ mod tests {
                 "2026-08-30.1",
                 "2026-08-30.2",
                 "2026-08-31",
-                "2026-08-31.1"
+                "2026-08-31.1",
+                "2026-09-01"
             ],
             "a released version may be superseded and never removed"
         );

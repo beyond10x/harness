@@ -16,8 +16,8 @@ budgets that vendor happens to enforce. Owning the loop makes tool names, budget
 and approval decisions ours.
 
 It is deliberately small and carries no bridges to vendor binaries. **It depends on one other
-component in `beyond10x` — [substrate](https://github.com/beyond10x/substrate), pinned by git
-revision — and on nothing that could embed it.** The arrow points inward — something else embeds
+component in `beyond10x` — [substrate](https://github.com/beyond10x/substrate), pinned by released
+git tag — and on nothing that could embed it.** The arrow points inward — something else embeds
 this, never the reverse.
 
 ## Where it sits
@@ -31,7 +31,7 @@ this, never the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.9.1` (2026-08-31).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.10.0` (2026-09-01).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |
@@ -85,6 +85,8 @@ credential it was not pointed at, so a run can always be explained afterwards.
 | `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations` and — only when there is one — `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
 | `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — an invalid one-component workspace name, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
+| `--process-write-subtree <DIR>` | repeatable exact write authority for confined child processes. With none, `run` sees the adopted workspace read-only; this is separate from file-tool `--write-scope` |
+| `--execution-path <direct\|metaharness>` | model-visible machine context describing whether this native loop was launched directly or as a metaharness arm; it grants no authority |
 | `--cgroup-root` | the containing slice, when running inside a delegated cgroup |
 | `--approve <mode>` | who decides a call above the ceiling. `auto` (the default) asks a person over `/dev/tty` when there is a terminal and stdin and stderr are one, and otherwise says so in one line and refuses; `prompt` asks or refuses the run by name; `deny` refuses and tells the model; `all` approves |
 | `--yes` | the same as `--approve all`, and what every unattended invocation already says. It wins when both are given; it does not combine with `--approve-up-to` |

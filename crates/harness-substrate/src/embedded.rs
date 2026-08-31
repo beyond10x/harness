@@ -55,7 +55,7 @@ use substrate_wire::{
     WorkspaceCreateInput, WorkspaceSource,
 };
 
-use crate::{Backend, Facts, SubstrateError};
+use crate::{Backend, Facts, ProcessWorkspaceAccess, SubstrateError};
 
 /// One execution's identity, in the shape substrate admits.
 ///
@@ -307,6 +307,7 @@ impl Backend for Embedded {
         let input = WorkspaceCreateInput {
             source: WorkspaceSource::Empty(EmptySource::Empty),
             labels: substrate_wire::Labels::new(),
+            storage: None,
             lease_ttl_ms: Some(lease_ttl_ms),
         };
         let outcome = self
@@ -412,6 +413,7 @@ impl Backend for Embedded {
         &self,
         workspace: &str,
         argv: &[String],
+        workspace_access: &ProcessWorkspaceAccess,
         remaining: Option<Duration>,
     ) -> Result<Value, SubstrateError> {
         let root_name = self
@@ -434,6 +436,7 @@ impl Backend for Embedded {
                 set: self.toolchain.env().clone(),
             },
             self.toolchain.roots().to_vec(),
+            workspace_access.clone(),
             remaining,
         );
         // **substrate's own shape, which this never had.** `admit` requires `^ex_[A-Za-z0-9_]+$`

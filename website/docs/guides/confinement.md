@@ -92,8 +92,9 @@ The confined process has no network. Seed only the package cache the task needs 
 
 `--toolchain go` mounts the installation named by `GOROOT`, or the one containing the first `go`
 on `PATH`, read-only at `/toolchain/go`. Go's build cache, module cache and `GOPATH` live inside the
-workspace. `GOENV=off`, `GOTOOLCHAIN=local`, `GOPROXY=off` and `GOSUMDB=off` prevent operator
-configuration, toolchain downloads and module-network fallback from widening the declaration.
+workspace. `GOENV=off`, `GOTOOLCHAIN=local` and `GOSUMDB=off` prevent operator configuration and
+toolchain downloads from widening the declaration; the sandbox's unshared network prevents module
+lookup from reaching a proxy.
 
 ## Approval still applies
 

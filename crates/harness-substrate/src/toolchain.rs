@@ -158,7 +158,6 @@ impl Toolchain {
             ("GOCACHE", "/workspace/.cache/go-build"),
             ("GOENV", "off"),
             ("GOTOOLCHAIN", "local"),
-            ("GOPROXY", "off"),
             ("GOSUMDB", "off"),
             ("CGO_ENABLED", "0"),
             ("PATH", "/toolchain/go/bin:/usr/local/bin:/usr/bin:/bin"),

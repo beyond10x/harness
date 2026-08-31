@@ -88,7 +88,7 @@ mod run;
 
 pub use event::{FlowEvent, FlowSink, Moment, VecFlowSink};
 pub use plan::{Layer, Plan};
-pub use run::{Gate, Handoff, Report, StepContext, StepOutcome, StepRunner};
+pub use run::{FlowStatus, Gate, Handoff, Report, StepContext, StepOutcome, StepRunner};
 
 /// Names one node. Unique among its siblings, and a path from the root names it globally.
 pub type NodeId = String;
@@ -328,9 +328,9 @@ impl Flow {
     ///
     /// # Errors
     ///
-    /// Returns a [`FlowError`] when the document does not validate. A step that *fails* is not an
-    /// error here — it is a [`StepOutcome`] the walk acts on, because a workflow that could not
-    /// represent a failed step would need one anyway.
+    /// Returns a [`FlowError`] when the document does not validate. A step that *fails* or pauses
+    /// for an operator is not an error here — each is a [`StepOutcome`] the walk acts on, because
+    /// a workflow that could not represent either would need both anyway.
     pub fn run(
         &self,
         runner: &mut dyn StepRunner,

@@ -35,7 +35,7 @@ struct Always(StepOutcome);
 
 impl StepRunner for Always {
     fn run(&mut self, _path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
-        self.0
+        self.0.clone()
     }
 }
 
@@ -280,6 +280,69 @@ fn a_walk_runs_every_step_in_plan_order_and_nests_its_report() {
         })
         .collect();
     assert_eq!(entered, vec!["root", "root.shape"]);
+}
+
+#[test]
+fn an_operator_step_pauses_the_walk_without_finishing_or_skipping_anything_after_it() {
+    struct PausesAt;
+
+    impl StepRunner for PausesAt {
+        fn run(&mut self, path: &str, _step: &Step, _cx: &StepContext) -> StepOutcome {
+            if path == "root.shape.specify" {
+                StepOutcome::Paused {
+                    reason: "approve the specification".to_owned(),
+                }
+            } else {
+                StepOutcome::Passed
+            }
+        }
+    }
+
+    let flow = flow(NESTED);
+    let mut sink = VecFlowSink::new();
+    let report = flow.run(&mut PausesAt, &mut sink).expect("valid");
+
+    assert_eq!(report.status(), FlowStatus::AwaitingOperator);
+    assert_eq!(
+        report.reached, 2,
+        "receive finished and specify was reached"
+    );
+    assert_eq!(report.ran, 1, "an awaiting step has not run");
+    assert_eq!(report.failed, 0);
+    assert_eq!(report.skipped, 0, "the rest is pending, not skipped");
+    assert_eq!(report.retreats, 0);
+    assert_eq!(
+        sink.steps_started(),
+        vec!["root.receive", "root.shape.specify"]
+    );
+    assert!(matches!(
+        sink.events().last(),
+        Some(FlowEvent::FlowPaused {
+            flow,
+            path,
+            reason,
+            reached: 2,
+            failed: 0,
+            skipped: 0,
+            retreats: 0,
+        }) if flow == "root"
+            && path == "root.shape.specify"
+            && reason == "approve the specification"
+    ));
+    assert!(!sink.events().iter().any(|event| matches!(
+        event,
+        FlowEvent::StepFinished { path, .. } if path == "root.shape.specify"
+    )));
+    assert!(!sink.events().iter().any(|event| matches!(
+        event,
+        FlowEvent::GroupLeft { path, .. } if path == "root.shape" || path == "root"
+    )));
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| matches!(event, FlowEvent::FlowFinished { .. }))
+    );
 }
 
 #[test]

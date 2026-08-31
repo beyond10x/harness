@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-08-31
+
+### Added
+
+- Workflow `operator` steps now stop at the person the document names: a non-empty prompt produces
+  one terminal `flow-paused` event and exit 0, with the step reached rather than failed and the
+  pending tail left pending. The handoff makes no provider, tool, approval or call-hook request and
+  files no invented session. Unknown kinds and malformed operator steps are refused by
+  `workflow plan` before a run is prepared.
+
 ## [0.7.1] — 2026-08-31
 
 ### Changed

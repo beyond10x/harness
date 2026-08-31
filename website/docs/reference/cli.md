@@ -210,7 +210,7 @@ record to `--out FILE`.
 
 | Status | Caller action | Under `workflow run` |
 |---|---|---|
-| `0` | Consume the completed answer | The flow came out clean |
+| `0` | Consume the completed answer, or inspect a typed handoff | The flow came out clean, or stopped at an `operator` step with terminal `flow-paused` |
 | `2` | Inspect the named stop: a budget, cancellation, or unstructured result bound the run | The flow finished and did not come out clean: a failed step, a skipped or exhausted section, or a cancelled run. Inspect `flow-finished` |
 | `1` | Treat it as a configuration, credential, confinement, transport, or protocol failure | Refused before the flow started, or aborted mid-step on a loop error |
 

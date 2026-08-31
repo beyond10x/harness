@@ -117,6 +117,19 @@ pub enum FlowEvent {
         retreats: usize,
         clean: bool,
     },
+    /// The walk reached a step whose work belongs to a person.
+    ///
+    /// Terminal like [`FlowEvent::FlowFinished`], but not a failure: no step-finished, group-left,
+    /// repeat or skip event follows it. `reached` includes the operator step itself.
+    FlowPaused {
+        flow: String,
+        path: String,
+        reason: String,
+        reached: usize,
+        failed: usize,
+        skipped: usize,
+        retreats: usize,
+    },
 }
 
 /// Where a walk reports.

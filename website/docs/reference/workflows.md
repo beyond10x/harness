@@ -42,11 +42,12 @@ A group may add `repeat: {max: N}` — run this section again while it does not 
 `gives`, the list of names it promises to hand its siblings when it leaves. Nothing else crosses a
 group boundary.
 
-Each step carries a `run` payload the notation never reads. Harness reads five keys of it, all
+Each step carries a `run` payload the notation never reads. Harness reads these keys of it, all
 optional:
 
 | Key | Used as |
 |---|---|
+| `kind` | Absent or `llm`: one model turn; `command`: one gated `run` call; `operator`: pause and hand its prompt to a person |
 | `state` | The step's name in prose and in the record |
 | `summary` | The step's prompt when `prompt` is absent |
 | `prompt` | The step's prompt |
@@ -55,6 +56,10 @@ optional:
 
 Documents are read as YAML (`.yaml`, `.yml`) or JSON (`.json`), decided by the extension. Any other
 extension is refused by name.
+
+The kind vocabulary is closed. An unknown word, a non-string kind, a malformed command, or an
+operator step without a non-empty prompt is refused by `workflow plan`; none silently falls
+through to a model turn.
 
 ## Plan a document without an endpoint
 
@@ -186,6 +191,23 @@ warning says which. A `command` step whose `command` is missing, empty or not a 
 an error and not a turn: a document that meant to run a verifier is never quietly asked a model
 about it instead.
 
+### An `operator` step is a handoff, not a turn
+
+```yaml
+- id: review
+  run:
+    kind: operator
+    prompt: Review the change and record whether it is accepted.
+```
+
+Reaching this step emits one terminal `flow-paused` carrying the flow, path, prompt and tallies,
+then exits `0`. The operator step is counted as `reached`, not failed; it has no `step-finished`.
+The pending tail is not called skipped, and no open group is left, repeated or handed off. The
+step returns before scope narrowing or a budget check and reaches no tool, approval, call hook or
+provider. It writes no session because there was no conversation. `--resume` still refuses: a flow
+cursor that can continue the pending tail is separate work, so the pause is an honest handoff and
+not a claim that the workflow completed.
+
 ### How a step reports: the derived schema
 
 Every step runs under an output schema the runner derives. The model never sees a schema file, and
@@ -288,6 +310,7 @@ line, each with a kebab-case `kind`:
 | `group-left` | A section ended; carries `failed`, what it gave, attempts used, and `exhausted` |
 | `transition-refused` | A `transition` hook refused, with `path`, `moment`, `attempt` and `reason`. Emitted before the consequence |
 | `flow-finished` | The walk ended; carries `ran`, `failed`, `skipped`, `retreats` and `clean` |
+| `flow-paused` | The walk reached an `operator` step; terminal, with `flow`, `path`, `reason`, `reached`, `failed`, `skipped` and `retreats` |
 
 A `hook-ran` event records each transition hook with `point: "transition"`, as it does for the other
 points. On stderr the same events render one line each in the run's own style:
@@ -323,7 +346,8 @@ Each session is saved as its scope closes, with what that scope cost, in the usu
 it ran sections, so `b10x-harness sessions` lists every attempt that happened, retreats included.
 
 Under `--json` a `{"kind":"session", …}` line is emitted as each scope's session is filed — the same
-shape `run` prints last — and `flow-finished` is the last line of a finished flow.
+shape `run` prints last — and `flow-finished` is the last line of a finished flow. `flow-paused` is
+the last line of a walk awaiting a person.
 
 `--resume` is refused. A crashed flow leaves its per-scope sessions and its record on disk, but
 nothing turns them back into a cursor yet.
@@ -332,7 +356,7 @@ nothing turns them back into a cursor yet.
 
 | Status | Meaning |
 |---|---|
-| `0` | The flow came out clean |
+| `0` | The flow came out clean, or is awaiting the operator named by `flow-paused` |
 | `2` | It finished and did not: a step failed, a section was skipped or exhausted, or the run was cancelled. Inspect `flow-finished` |
 | `1` | Refused before it started — a document that does not validate, a refused flag, a credential — or aborted mid-step on a loop error |
 

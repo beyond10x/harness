@@ -256,8 +256,10 @@ neutral value on both wires that nothing measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 
-**Status: in progress — design 0003; M1 shipped in `0.2.0`; of M2, command steps landed
-(2026-08-30): a `kind: command` step is one `run` call through the run's gate, no model turn.**
+**Status: in progress — design 0003; M1 shipped in `0.2.0`; of M2, command and operator steps
+landed.** A `kind: command` step is one `run` call through the run's gate, no model turn
+(2026-08-30). A `kind: operator` step is a typed successful pause with terminal `flow-paused`, no
+provider call and no invented failure or downstream skip (2026-08-31). Flow resume remains open.
 
 `crates/harness-flow` is 1,891 lines and 27 tests: a DAG of sub-trees, a group as a context scope,
 `Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and

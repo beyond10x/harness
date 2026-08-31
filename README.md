@@ -31,7 +31,7 @@ this, never the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.7.1` (2026-08-31).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.8.0` (2026-08-31).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |
@@ -317,7 +317,7 @@ extension), `--input <TEXT>` (the task, given to every step beside its own promp
 `--max-attempts <N>`, which overrides every `repeat.max` — the root's included — for a document
 that carries none.
 
-**A step is one turn — or one call.** Every model step runs under an output schema the runner
+**A step is one turn, one call, or a handoff.** Every model step runs under an output schema the runner
 derives — the model never sees a schema file — and finishes by calling `answer` with
 `outcome: passed` or `outcome: failed`,
 an optional `note`, and `gives` when its enclosing group promised names. `gives` is the only thing
@@ -329,6 +329,13 @@ that recorded a network blip as `failed` would misreport the plan. A step whose 
 `kind: command` is not a turn at all: its argv is one `run` call through the same gate a model's
 call meets — published, approver, `before-call`, tool, `after-call` — filed into the section's
 conversation, exit `0` passed and everything else failed by name.
+
+A step whose `run.kind` is `operator` is the boundary a model must not cross: its non-empty
+`prompt` becomes the reason on one terminal `flow-paused` event, the step is counted as reached
+rather than failed, and the process exits `0`. Nothing after it is called skipped, no open group
+is left or retreated, no session is invented, and that step reaches neither budget, scope, tool,
+approval, call hook nor provider. An unknown kind and an operator step without a prompt are refused
+by `workflow plan`, so neither can silently become a model turn.
 
 **A group is a conversation.** Steps sharing a scope continue the same items; a step in another
 group starts from the handoffs of the siblings that came out **clean** — rendered as *"Earlier
@@ -347,7 +354,7 @@ the [workflows guide](website/docs/guides/workflows.md).
 with the attempt it is on — `….root.2.implement-to-review.3.verify.1` — filed with what it cost as
 the scope closes. `--no-session` writes nothing; `--resume` is refused, because a flow names its
 own sessions and resuming a *flow* is a later milestone. Exit status reads as it does everywhere
-else: `0` the flow came out clean, `2` it finished and did not — a failed step, a skipped or
+else: `0` the flow came out clean or is awaiting an operator, `2` it finished and did not — a failed step, a skipped or
 exhausted section, a cancelled run — `1` refused before it started, or aborted mid-step.
 
 **What stays outside: the governor.** Guards, evidence and transition budgets are

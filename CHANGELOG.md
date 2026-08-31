@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-08-31
+
+### Changed
+
+- Corrected the source and workflow-runner status rows to match the released substrate `0.2.2`
+  tag boundary and the workflow M1 release in harness `0.2.0`; the substrate manifest comment now
+  describes its tag pin rather than the superseded revision-pin wording.
+
 ## [0.7.0] — 2026-08-31
 
 ### Added

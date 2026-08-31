@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: story:public-repository-controls-are-on
 kind: story
-status: active
+status: implemented
 title: Public repository controls are on
 summary: Reporting, scanning, push protection, dependency updates, and public discovery are configured and verified.
 tags:
@@ -11,7 +11,7 @@ tags:
 relations:
 - derived_from: epic:public-site-is-accurate-live-and-governed
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 # Story: Public repository controls are on
 

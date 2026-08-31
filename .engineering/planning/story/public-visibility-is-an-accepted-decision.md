@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: story:public-visibility-is-an-accepted-decision
 kind: story
-status: active
+status: implemented
 title: Public visibility is an accepted decision
 summary: Atlas and Harness agree that Harness is public, proprietary, and not a stability claim.
 tags:
@@ -11,7 +11,7 @@ tags:
 relations:
 - derived_from: epic:public-site-is-accurate-live-and-governed
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 # Story: Public visibility is an accepted decision
 

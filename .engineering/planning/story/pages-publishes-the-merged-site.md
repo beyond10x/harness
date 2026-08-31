@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: story:pages-publishes-the-merged-site
 kind: story
-status: active
+status: implemented
 title: Pages publishes the merged site
 summary: Enable and verify the Actions-built public site at the advertised URL.
 tags:
@@ -10,7 +10,7 @@ tags:
 relations:
 - derived_from: epic:public-site-is-accurate-live-and-governed
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 # Story: Pages publishes the merged site
 

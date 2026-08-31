@@ -119,20 +119,18 @@ function RunPanel(): ReactNode {
         <span>run / 018c…9f</span>
         <span className={styles.live}><i /> streaming</span>
       </div>
-      <div className={styles.wirePicker} role="tablist" aria-label="Preview a provider wire">
+      <div className={styles.wirePicker} role="group" aria-label="Preview a provider wire">
         <span>PROVIDER WIRE</span>
         <div>
           <button
             type="button"
-            role="tab"
-            aria-selected={wire === 'responses'}
+            aria-pressed={wire === 'responses'}
             onClick={() => setWire('responses')}>
             Responses
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected={wire === 'messages'}
+            aria-pressed={wire === 'messages'}
             onClick={() => setWire('messages')}>
             Messages
           </button>
@@ -205,7 +203,7 @@ export default function Home(): ReactNode {
               <div className={styles.metrics} aria-label="Harness at a glance">
                 <div><strong>2</strong><span>provider wires</span></div>
                 <div><strong>3</strong><span>shells, one loop</span></div>
-                <div><strong>0</strong><span>ambient credentials</span></div>
+                <div><strong>1</strong><span>source named in every run record</span></div>
               </div>
             </div>
             <RunPanel />

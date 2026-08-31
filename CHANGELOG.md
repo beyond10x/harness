@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- The public documentation now separates tutorials, task-oriented guides, concepts and exact
+  reference; documents both built-in credential defaults and the `codex` provider's bounded
+  pre-run renewal; covers every generated long CLI flag and command; distinguishes authorized live
+  route observations from emulator-derived wire pins; and states the proprietary source-visible
+  licence boundary.
+- The landing page uses button semantics for its wire preview, honors reduced motion, raises small
+  control text and touch targets, and collapses to one column on narrow phones. A Rust website
+  contract in `cargo xtask gate` now rejects stale release/CLI versions, undocumented generated
+  argv, and links from public docs into private planning or internal design material.
+
+### Fixed
+
+- `run --help` no longer says every OAuth source is explicitly named and never renewed. It now
+  distinguishes read-only explicit sources from provider-defaulted sources and the `codex`
+  provider's reported, atomic pre-run renewal.
+
 ## [0.6.0] — 2026-08-31
 
 ### Added

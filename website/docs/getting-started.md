@@ -1,129 +1,81 @@
 ---
-title: Getting started
-description: Build Harness and make a first read-only run against a model endpoint.
+title: First read-only run
+description: Build Harness, inspect what it can do, and make one bounded read-only run.
 ---
 
-# Getting started
+# First read-only run
 
-This path builds Harness from a source checkout and makes one read-only run. It changes no file and
-starts no process.
+This tutorial builds Harness from source, inspects the exact tool catalogue, and makes one run that
+can read one workspace but cannot write a file or start a process.
 
-## Before you begin
+## Prerequisites
 
-You need:
+You need Rust 1.97 or newer and access to an endpoint serving either the OpenAI Responses or
+Anthropic Messages API. Harness has no published crate or prebuilt binary yet.
 
-- Rust 1.97 or newer;
-- a model endpoint that serves the OpenAI Responses or Anthropic Messages API;
-- the exact model identifier that endpoint expects;
-- a bearer credential, if the endpoint requires one.
-
-There is no published crate or prebuilt binary yet. From the repository root, build the command:
+From the repository root:
 
 ```bash
 cargo build --release --locked -p b10x-harness-cli
 ./target/release/b10x-harness --version
 ```
 
-The rest of this guide uses `b10x-harness` as shorthand for
-`./target/release/b10x-harness`.
+The remaining commands use `b10x-harness` as shorthand for that built binary.
 
-## Inspect the toolset first
-
-Ask the command what a default run would publish:
+## 1. Inspect the safe default
 
 ```bash
 b10x-harness tools --workspace .
 ```
 
-Without a named substrate boundary, the answer contains four read-only entries: `file_read`,
-`dir_list`, `search`, and `find`. This command contacts no model endpoint.
+The JSON answer contains `file_read`, `dir_list`, `search`, and `find`. It contains no write or
+execution tool and contacts no model endpoint. Treat this command as the preflight for every new
+machine or confinement setup.
 
-## Name the credential source
+## 2. Choose how connection facts are supplied
 
-Harness does not search ambient default variables or vendor configuration directories. Point it at
-the source you intend it to read:
+Harness supports two explicit, inspectable paths.
+
+### Use your own endpoint and named credential
+
+This is the portable path. Name the exact environment variable Harness may read:
 
 ```bash
 export MY_MODEL_TOKEN='replace-me'
 ```
 
-Then pass `--api-key-env MY_MODEL_TOKEN`. A file is equally explicit:
-`--api-key-file /path/to/token`.
+Then pass `--base-url`, `--model`, and `--api-key-env MY_MODEL_TOKEN`. A file source is
+`--api-key-file /path/to/token`; do not put the credential value itself in argv.
 
-:::warning Shell history and environment
+### Select a built-in provider
 
-Do not put a real token directly in the command line. An environment variable avoids the shell's
-argument history, but it may still be visible to processes with permission to inspect your
-environment. Use the credential mechanism appropriate to your machine.
+A provider supplies a tested bundle of endpoint, wire, model, and credential-source facts. Inspect
+the bundle before using it:
+
+```bash
+b10x-harness providers list
+b10x-harness providers show claude
+```
+
+Provider-declared credential paths are defaults, not ambient fallback: the selected provider names
+the path, `providers show` prints it before a request, and the run records
+`credential_source: "provider:<name>"`. The `codex` provider can also renew and atomically rewrite
+its own default credential before the first request when it is near expiry. A credential source you
+name with a flag is read only and never renewed by Harness.
+
+See [Configure providers and profiles](./guides/profiles.md) before using a built-in provider.
+
+:::warning Credential handling
+
+Environment variables can be visible to processes allowed to inspect your environment. Credential
+files and provider stores have their own permissions and rotation rules. Use the source appropriate
+to your machine, and never paste a real token into a command, fixture, issue, or transcript.
 
 :::
 
-## Make the first run
+## 3. Make the run
 
-```bash
-b10x-harness run \
-  --base-url https://gateway.example/v1 \
-  --model model-alias \
-  --api-key-env MY_MODEL_TOKEN \
-  --workspace . \
-  --input "Map this repository. Name the evidence behind each claim."
-```
-
-:::tip Typing this once is enough
-
-The endpoint, wire, model and credential do not vary between runs against the same provider. Put
-them in `~/.config/b10x/harness.toml` and every later run drops them:
-
-```bash
-b10x-harness profiles init     # writes a starter config, prints its path
-b10x-harness run --workspace . --input "Map this repository."
-```
-
-See [Profiles and providers](guides/profiles.md).
-
-:::
-
-`--base-url` is the endpoint origin plus API prefix. With the default `openai-responses` wire,
-Harness sends turns to `POST {base-url}/responses`.
-
-To use the other wire:
-
-```bash
-b10x-harness run \
-  --wire anthropic-messages \
-  --base-url https://gateway.example/v1 \
-  --model model-alias \
-  --api-key-env MY_MODEL_TOKEN \
-  --workspace . \
-  --input "Which files define the public command line?"
-```
-
-That wire sends turns to `POST {base-url}/messages`. A session cannot be resumed on a different
-wire because it may contain opaque provider items.
-
-## Read the output
-
-For a normal run:
-
-- stdout is the model's answer;
-- stderr carries progress, tool calls, approvals, usage, cost, warnings, and the session ID;
-- the default session directory is `$XDG_STATE_HOME/b10x-harness/sessions`, falling back to
-  `$HOME/.local/state/b10x-harness/sessions`.
-
-Exit status distinguishes three outcomes:
-
-| Status | Meaning |
-|---|---|
-| `0` | The model completed the run |
-| `2` | A run happened, then stopped for a named bound or outcome |
-| `1` | The harness could not start or continue the run |
-
-Use `--no-session` when the run must leave no transcript on the machine. Use `--json` when another
-program should consume the event stream rather than prose.
-
-## Put a ceiling on the run
-
-Start automation with explicit bounds:
+With an explicitly named endpoint:
 
 ```bash
 b10x-harness run \
@@ -134,18 +86,37 @@ b10x-harness run \
   --max-turns 12 \
   --max-output-tokens 12000 \
   --max-duration-ms 180000 \
-  --input "Explain the build and test path."
+  --input "Map this repository. Name the evidence behind each claim."
 ```
 
-A cost ceiling also needs a dated `--prices` rate card. Harness refuses an unmeasurable spend limit
-instead of accepting one it cannot enforce.
+With a configured default provider, the same task is:
 
-## Continue from here
+```bash
+b10x-harness run --workspace . --input "Map this repository."
+```
 
-- [Tools and approvals](./concepts/tools-and-approvals.md) explains what changes when effects are
-  enabled.
-- [Sessions and events](./guides/sessions-and-events.md) covers resume, chat, JSONL, and retry
-  semantics.
-- [Confined workspaces](./guides/confinement.md) is the prerequisite for file writes and process
-  execution.
-- [Command-line reference](./reference/cli.md) maps the commands and option groups.
+The raw-endpoint path defaults to `openai-responses`, which sends to
+`POST {base-url}/responses`. Add `--wire anthropic-messages` to send to
+`POST {base-url}/messages` instead.
+
+## 4. Verify the outcome
+
+For a normal run:
+
+- stdout is the final model answer;
+- stderr carries progress, calls, usage, warnings, cost when priced, and the session ID;
+- the session is stored outside the workspace under the user's state directory.
+
+Exit status is `0` when the model completed, `2` when work ran and met a named stop, and `1` when
+Harness could not start or continue the run. `--json` replaces prose stdout with JSON Lines.
+`--no-session` retains no conversation on the machine.
+
+The limits above are deliberately explicit. A cost ceiling additionally needs a dated `--prices`
+rate card; Harness refuses an unmeasurable spend limit rather than pretending it binds.
+
+## Next steps
+
+- [First confined change](./tutorials/confined-change.md) adds write capability through substrate.
+- [Tools and approvals](./concepts/tools-and-approvals.md) explains the two gates on an effect.
+- [Resume and consume events](./guides/sessions-and-events.md) covers sessions and JSONL.
+- [Command-line reference](./reference/cli.md) lists the complete public surface.

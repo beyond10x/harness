@@ -76,4 +76,9 @@ Harness is tagged `0.6.0` and changing quickly. The provider wires and command-l
 pinned by repository contracts, but live-provider and external-bridge characterization is still
 limited. See [Status and limitations](./status.md) before adopting it.
 
+The source is publicly readable under `LicenseRef-B10x-Proprietary`. Public visibility is not an
+open-source licence or a stability promise. See the repository
+[security policy](https://github.com/beyond10x/harness/security/policy) for private vulnerability
+reporting.
+
 :::

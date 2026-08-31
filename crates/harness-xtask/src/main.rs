@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 
 mod cli_contract;
 mod provider_contract;
+mod website_contract;
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo xtask")]
@@ -27,6 +28,8 @@ enum Task {
         #[arg(long)]
         self_test: bool,
     },
+    /// Verify the public website against shipped versions and the generated CLI surface.
+    WebsiteContract,
     /// Generate a new immutable command-line contract from clap.
     PinCli {
         /// Date-based contract version, for example `2026-08-31`.
@@ -45,6 +48,7 @@ fn main() -> ExitCode {
         Task::ProviderContracts => provider_contract::check(&root),
         Task::CliContract { self_test: true } => cli_contract::self_test(),
         Task::CliContract { self_test: false } => cli_contract::check(&root),
+        Task::WebsiteContract => website_contract::check(&root),
         Task::PinCli { version } => cli_contract::pin(&root, &version),
     };
     match result {
@@ -88,6 +92,7 @@ fn gate(root: &Path) -> Result<(), String> {
     provider_contract::check(root)?;
     cli_contract::self_test()?;
     cli_contract::check(root)?;
+    website_contract::check(root)?;
     check_http_boundary(root)?;
 
     // These two pre-existing checkers were not changed by this wave. They remain until their own

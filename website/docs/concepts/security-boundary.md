@@ -9,17 +9,24 @@ Harness controls the agent loop. It is not by itself a sandbox, a credential bro
 multi-tenant service. This page separates the protections it provides from the responsibilities of
 the system around it.
 
-## Credentials are named, not discovered
+## Credential sources are inspectable
 
-The command line reads a credential only from a source the invocation names:
+An explicit command-line source is always honored as written:
 
 - `--api-key-file` or `--api-key-env` for a bearer API key;
 - `--oauth-token-file` or `--oauth-token-env` for a subscription OAuth token;
 - `--oauth-token-pointer` when that OAuth source is a JSON document.
 
-There is no default environment-variable name, vendor directory, or implicit token lookup. OAuth
-files are re-read on every model call so a separate owner can rotate the token; Harness does not
-renew one.
+Harness does not search arbitrary environment names or vendor directories. A selected built-in
+provider can, however, name a documented credential default. `providers show <name>` prints that
+source before a request, and the run records `credential_source: "provider:<name>"` rather than
+hiding the default behind `named`.
+
+Explicit OAuth files are re-read on every model call so a separate owner can rotate them; Harness
+never writes one. The `codex` provider is the narrow exception: when it supplied its own default
+source and that token is near expiry, Harness can renew it and atomically rewrite that provider
+store before the first request. The write is reported on stderr and as `credential-renewed`, even
+under `--quiet`. See [Configuration reference](../reference/configuration.md).
 
 Credentials are not written to sessions or added to errors. A credential source is asked at call
 time, and the short-lived bearer value has redacted debug output.
@@ -92,7 +99,7 @@ and durable audit/storage components around Harness. Those are not provided by t
 Before using Harness for consequential work, answer these questions explicitly:
 
 - Which endpoint receives workspace content, and under which data-retention policy?
-- Which credential source is named, who can inspect it, and who rotates it?
+- Which credential source is explicit or provider-defaulted, who can inspect it, and who rotates it?
 - Are sessions permitted, where are they written, and how are they removed?
 - Which capabilities does `b10x-harness tools` say this machine actually admitted?
 - Which risk ceiling and approver apply to unattended calls?

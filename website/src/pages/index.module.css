@@ -176,8 +176,8 @@
 .commandWrap > span {
   display: block;
   margin: 0 0 0.55rem;
-  color: rgba(244, 245, 237, 0.42);
-  font: 700 0.61rem/1 var(--ifm-font-family-monospace);
+  color: rgba(244, 245, 237, 0.68);
+  font: 700 0.7rem/1.25 var(--ifm-font-family-monospace);
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
@@ -206,7 +206,7 @@
   border: 0;
   color: rgba(244, 245, 237, 0.72);
   background: transparent;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -219,7 +219,7 @@
   color: rgba(244, 245, 237, 0.68);
   background: rgba(244, 245, 237, 0.035);
   cursor: pointer;
-  font: 750 0.62rem/1 var(--ifm-font-family-monospace);
+  font: 750 0.72rem/1 var(--ifm-font-family-monospace);
   letter-spacing: 0.05em;
   transition: color 160ms ease, background 160ms ease;
 }
@@ -262,8 +262,8 @@
 }
 
 .metrics span {
-  color: rgba(244, 245, 237, 0.48);
-  font-size: 0.7rem;
+  color: rgba(244, 245, 237, 0.7);
+  font-size: 0.75rem;
   letter-spacing: 0.04em;
 }
 
@@ -290,9 +290,9 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 0.8rem 1rem;
-  color: rgba(244, 245, 237, 0.42);
+  color: rgba(244, 245, 237, 0.68);
   font-family: var(--ifm-font-family-monospace);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   letter-spacing: 0.08em;
 }
 
@@ -310,8 +310,8 @@
 }
 
 .wirePicker > span {
-  color: rgba(244, 245, 237, 0.36);
-  font: 750 0.56rem/1 var(--ifm-font-family-monospace);
+  color: rgba(244, 245, 237, 0.68);
+  font: 750 0.7rem/1 var(--ifm-font-family-monospace);
   letter-spacing: 0.1em;
 }
 
@@ -324,18 +324,18 @@
 }
 
 .wirePicker button {
-  min-height: 1.75rem;
-  padding: 0.35rem 0.55rem;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
   border: 0;
   border-radius: 0.16rem;
-  color: rgba(244, 245, 237, 0.4);
+  color: rgba(244, 245, 237, 0.72);
   background: transparent;
   cursor: pointer;
-  font: 700 0.56rem/1 var(--ifm-font-family-monospace);
+  font: 700 0.7rem/1 var(--ifm-font-family-monospace);
   transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
 }
 
-.wirePicker button[aria-selected='true'] {
+.wirePicker button[aria-pressed='true'] {
   color: #f4f5ed;
   background: rgba(90, 215, 255, 0.12);
   box-shadow: inset 0 0 0 1px rgba(90, 215, 255, 0.2);
@@ -390,8 +390,8 @@
 }
 
 .panelModel small {
-  color: rgba(244, 245, 237, 0.42);
-  font-size: 0.65rem;
+  color: rgba(244, 245, 237, 0.68);
+  font-size: 0.72rem;
 }
 
 .trace {
@@ -407,7 +407,7 @@
   gap: 0.7rem;
   padding: 1rem 0;
   border-bottom: 1px solid rgba(244, 245, 237, 0.08);
-  color: rgba(244, 245, 237, 0.38);
+  color: rgba(244, 245, 237, 0.65);
 }
 
 .trace li > span {
@@ -427,7 +427,7 @@
 }
 
 .trace li small {
-  font-size: 0.65rem;
+  font-size: 0.72rem;
 }
 
 .trace li b {
@@ -976,6 +976,43 @@
 
   .ladder b {
     text-align: left;
+  }
+}
+
+@media screen and (max-width: 420px) {
+  .hero {
+    padding-top: 3rem;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(2.45rem, 13vw, 3.4rem);
+  }
+
+  .actions,
+  .primaryAction,
+  .secondaryAction {
+    width: 100%;
+  }
+
+  .metrics,
+  .pathwaysGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pathwaysGrid a,
+  .pathwaysGrid a:nth-child(3) {
+    border-top: 1px solid var(--h-line);
+    border-left: 0;
+  }
+
+  .wirePicker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wirePicker > div,
+  .wirePicker button {
+    width: 100%;
   }
 }
 

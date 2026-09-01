@@ -1,7 +1,6 @@
-# Builds the public Docusaurus site under website/ on every documentation pull request and deploys
-# the built artifact from main. GitHub Pages must use "GitHub Actions" as its source; serving the
-# repository's /docs directory would expose internal designs instead of this public projection.
-name: Publish documentation
+# Atlas-classified former Pages workflow: repository-owned validation only; deployment authority is forbidden.
+# Builds the public Docusaurus source on every pull request; Website owns public delivery.
+name: Documentation validation
 
 on:
   push:
@@ -10,9 +9,6 @@ on:
       - .github/workflows/pages.yml
       - website/**
   pull_request:
-    paths:
-      - .github/workflows/pages.yml
-      - website/**
   workflow_dispatch:
 
 permissions:
@@ -41,9 +37,6 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
 
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
-
       - name: Install locked dependencies
         working-directory: website
         run: npm ci --ignore-scripts
@@ -55,26 +48,3 @@ jobs:
       - name: Build website
         working-directory: website
         run: npm run build
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with:
-          path: website/build
-
-  deploy:
-    name: Deploy GitHub Pages
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

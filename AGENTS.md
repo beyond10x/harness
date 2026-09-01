@@ -312,3 +312,11 @@ The three commits before this repository became canonical (`fc676ec`, `14f53f4`,
 the bot's former name, and two of them carry b10x-bot's own app ID (`316511680`) under it. A
 `.mailmap` would put the former brand back in the tree and fail the org fence, and history is not
 rewritten, so the record stands as it is.
+
+<!-- b10x-docs-operations:start -->
+## Public documentation operations
+
+This repository owns the public source and presentation allowlist in `b10x.docs.yaml`; the unified [beyond10x Website](https://beyond10x.github.io/docs/harness/) passively collects those declared files from the exact commit in `website/sources.lock.json`. Atlas owns discovery grouping/order; Website and Docs System own rendering, shared components, search, and feeds. Do not add a standalone docs deployer or put App credentials in this public repository. If Atlas catalogs a former Pages workflow, that file remains repository-owned validation: preserve its bespoke checks while keeping exact read-only permissions, an unconditional pull-request trigger, and no deployment primitives. Project Pages at `/harness/` is only the generated redirect façade in `.github/workflows/b10x-docs-pages.yml`.
+
+From a complete organization workspace, run `cargo run --manifest-path atlas/Cargo.toml -- docs reconcile --workspace . --check` to verify the contract. Keep internal plans, stories, ADRs, decisions, worklogs, security material, and research out of the public allowlist unless a repository authority explicitly declares them public.
+<!-- b10x-docs-operations:end -->

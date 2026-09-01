@@ -514,3 +514,9 @@ These suites drive real processes over real sockets and pipes:
 - [`docs/design/0001-tool-envelope-and-substrate-confinement.md`](docs/design/0001-tool-envelope-and-substrate-confinement.md)
 - [`docs/design/0002-sub-agents-structured-output-hooks.md`](docs/design/0002-sub-agents-structured-output-hooks.md)
 - [`AGENTS.md`](AGENTS.md) — working agreements and invariants for anyone changing this repo.
+
+<!-- b10x-docs:start -->
+## Documentation
+
+[Harness documentation](https://beyond10x.github.io/docs/harness/) · [Start](https://beyond10x.github.io/) · [Ecosystem](https://beyond10x.github.io/ecosystem/) · [Impact](https://beyond10x.github.io/changes/) · [Releases](https://beyond10x.github.io/releases/)
+<!-- b10x-docs:end -->

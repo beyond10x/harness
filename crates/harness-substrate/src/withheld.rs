@@ -22,7 +22,7 @@
 //!
 //! # Why the reason carries a hint about cgroups
 //!
-//! The exec facts are reported by substrate's probe as a block — `exec.argv-only`,
+//! The core confinement facts are reported by substrate's probe as a block — `exec.argv-only`,
 //! `exec.cgroup-limits` and the rest are all `exec.then_some(…)` in `substrate-host`'s
 //! `probe::probe` — and the term of that conjunction that fails on a developer machine is
 //! `probe_cgroup`, which reads the probing process's own `/proc/self/cgroup`. A login shell sits in
@@ -142,11 +142,20 @@ impl Facts {
             })
             .copied()
             .collect();
+        if !missing.is_empty() {
+            return format!(
+                "`exec.cgroup-limits` must state `cpu`, `memory` and `processes` true and this \
+                 machine says {} — no `{}`. {CGROUP_HINT}",
+                describe(limits),
+                missing.join("`, no `")
+            );
+        }
+        let resource_usage = self.get("exec.resource-usage");
         format!(
-            "`exec.cgroup-limits` must state `cpu`, `memory` and `processes` true and this machine \
-             says {} — no `{}`. {CGROUP_HINT}",
-            describe(limits),
-            missing.join("`, no `")
+            "`exec.resource-usage` must be an object because this client requests that measurement \
+             on every run, and this machine says {}. substrate withholds the fact until every \
+             required cgroup v2 counter, including block I/O, is available.",
+            describe(resource_usage)
         )
     }
 

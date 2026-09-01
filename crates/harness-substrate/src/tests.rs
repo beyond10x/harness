@@ -21,6 +21,17 @@ fn confined() -> Facts {
             "exec.argv-only": true,
             "exec.cgroup-kill": true,
             "exec.cgroup-limits": {"cpu": true, "memory": true, "processes": true},
+            "exec.resource-usage": {
+                "wall_time": true,
+                "cpu_time": true,
+                "memory_current": true,
+                "memory_peak": true,
+                "processes_current": true,
+                "processes_peak": true,
+                "process_limit_hits": true,
+                "memory_oom_kills": true,
+                "block_io": true
+            },
             "exec.output-limit-bytes": 65_536,
             "exec.signals": ["SIGTERM", "SIGKILL"],
         }
@@ -61,6 +72,23 @@ fn a_machine_with_a_delegated_cgroup_root_admits_execution_and_one_without_does_
     // on the second machine gets the write tools and not the `run` tool.
     assert!(confined().holds_workspaces());
     assert!(unconfined().holds_workspaces());
+}
+
+#[test]
+fn a_machine_without_the_measurement_every_run_requests_withholds_run() {
+    let mut facts = confined();
+    facts.facts.remove("exec.resource-usage");
+
+    assert!(!facts.confines_execution());
+    let withheld = facts.withheld(&declared(), true);
+    assert_eq!(withheld.len(), 1, "{withheld:?}");
+    assert_eq!(withheld[0].tool, "run");
+    assert_eq!(
+        withheld[0].reason,
+        "`exec.resource-usage` must be an object because this client requests that measurement on \
+         every run, and this machine says nothing. substrate withholds the fact until every \
+         required cgroup v2 counter, including block I/O, is available."
+    );
 }
 
 #[test]

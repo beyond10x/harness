@@ -115,7 +115,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "b10x-harness-app-server"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-responses",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-cli"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-credential",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-credential"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-http",
  "b10x-harness-wire",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-flow"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-wire",
  "serde",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-http"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-wire",
  "reqwest",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-wire",
  "jsonschema",
@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-messages"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-credential",
  "b10x-harness-http",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-responses"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-http",
  "b10x-harness-loop",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-substrate"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-toolchain",
  "b10x-harness-tools",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-toolchain"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "regex",
  "serde",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-tools"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-toolchain",
  "b10x-harness-wire",
@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "httpdate",
  "serde",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-xtask"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "b10x-harness-cli",
  "b10x-harness-toolchain",
@@ -286,8 +286,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-host"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/substrate?tag=0.4.0#31340a6771cd1207f78d515d938ae0b697bd68f9"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/substrate?tag=0.5.0#fcb48e5b503be32ce4749e7d8ac7a15331637354"
 dependencies = [
  "async-trait",
  "b10x-substrate-wire",
@@ -309,8 +309,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-wire"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/substrate?tag=0.4.0#31340a6771cd1207f78d515d938ae0b697bd68f9"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/substrate?tag=0.5.0#fcb48e5b503be32ce4749e7d8ac7a15331637354"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -601,7 +601,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1412,7 +1412,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1607,7 +1607,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1877,10 +1877,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

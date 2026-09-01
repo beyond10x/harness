@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-09-01
+
+### Changed
+
+- The confined process boundary now pins released Substrate `0.5.0`, preserving exact workspace
+  access and resource-measurement admission across the standalone SDK and session-route migration.
+
 ## [0.10.1] — 2026-09-01
 
 - Move the external plugin compatibility check to the independently released Agentplugins

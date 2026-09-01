@@ -22,12 +22,13 @@ harness-wire = { workspace = true }
 #
 # **Pinned by a released git tag, never by path.** A `path` into a sibling checkout builds against
 # whatever happens to be checked out there, and `--locked` cannot lock it — the gate was green
-# against a tree no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.4.0`
-# (2026-09-01, merge revision `31340a6`): the release whose applied record carries exact
-# read-only/scoped/read-write workspace authority and resource usage. Both version requirements are
-# exact so a resolver cannot silently substitute a later contract for the one tested here.
-substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", tag = "0.4.0", version = "=0.4.0" }
-substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", tag = "0.4.0", version = "=0.4.0" }
+# against a tree no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.5.0`
+# (2026-09-01, merge revision `fcb48e5`): the standalone SDK and session-route release whose
+# applied record carries exact read-only/scoped/read-write workspace authority and resource usage.
+# Both version requirements are exact so a resolver cannot silently substitute a later contract
+# for the one tested here.
+substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", tag = "0.5.0", version = "=0.5.0" }
+substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", tag = "0.5.0", version = "=0.5.0" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

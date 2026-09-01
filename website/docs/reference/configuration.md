@@ -144,7 +144,7 @@ request.
 That is a bigger step than defaulting a path, so it is bounded the same way — by being readable and
 by being said:
 
-```console
+```shell-session
 $ b10x-harness providers show codex
 ...
 renews               yes, when the token is within 15 minutes of expiring
@@ -155,7 +155,7 @@ refresh-pointer      /tokens/refresh_token
 
 and a run that actually renewed says so, on stderr and in the record, **even under `--quiet`**:
 
-```
+```text
 renewed [codex] /home/you/.codex/auth.json, valid to 2026-09-18, refresh token rotated
 ```
 
@@ -236,7 +236,7 @@ b10x-harness profiles explain -p write
 prints the argv the configuration expands to, and which profile set each key, without contacting
 anything:
 
-```
+```text
 profile default <- /home/you/.config/b10x/harness.toml (0d8a9892b1f6)
 profile write <- /home/you/.config/b10x/harness.toml (37550c38dd29)
 --base-url https://api.anthropic.com/v1

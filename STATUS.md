@@ -1,6 +1,6 @@
 # Status
 
-Observed on 2026-09-01 for release `0.10.0`. Current evidence is the repository-owned
+Observed on 2026-09-01 for release `0.10.1`. Current evidence is the repository-owned
 `cargo xtask gate`; historical live-provider observations remain dated in the rows that carry them.
 
 | Area | State | Next evidence |

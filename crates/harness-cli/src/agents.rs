@@ -462,18 +462,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the sibling agentplugins checkout; exercised by upstream-agentplugins.yml"]
     fn the_real_agents_this_repository_ships_against_read() {
-        // The one that would have caught a parser written to a format nobody uses. Skipped where
-        // the sibling checkout is not present, because this repository does not own those files.
+        // The one that catches a parser written to a format nobody uses. The dedicated upstream
+        // workflow checks out the independently released marketplace beside this repository.
         // Relative to this crate, never an absolute path from whoever wrote the test: an
         // absolute one is a personal directory published in a public repository, and it makes the
         // test pass on exactly one machine.
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../engineering-protocols/integrations/claude-code/agents");
+            .join("../../../agentplugins/plugins/aep-planning/agents");
         let shipped = shipped.as_path();
-        if !shipped.is_dir() {
-            return;
-        }
+        assert!(shipped.is_dir(), "missing {}", shipped.display());
         let agents = agents_in(shipped).expect("the shipped agents read");
         let names: Vec<&str> = agents.iter().map(|agent| agent.name.as_str()).collect();
         // Named, not counted. The sibling's roster is that repository's to grow, and pinning it
@@ -543,7 +542,7 @@ mod plugin_tests {
         fs::create_dir_all(plugin.join(".claude-plugin")).expect("a manifest directory");
         fs::write(
             plugin.join(MANIFEST),
-            r#"{"name": "engineering-protocols", "version": "0.1.0"}"#,
+            r#"{"name": "aep-planning", "version": "0.1.0"}"#,
         )
         .expect("a manifest");
         write(
@@ -554,7 +553,7 @@ mod plugin_tests {
 
         let qualified = agents_in_plugin(&plugin).expect("reads");
         assert_eq!(qualified.len(), 1);
-        assert_eq!(qualified[0].name, "engineering-protocols:decomposer");
+        assert_eq!(qualified[0].name, "aep-planning:decomposer");
 
         // The same tree read as a plain agents directory keeps the document's own name: a
         // directory handed to a `--agents-dir` is not a plugin and has no namespace to take.

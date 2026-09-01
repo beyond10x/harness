@@ -132,7 +132,7 @@ Done since, and it is the Anthropic half of this phase's exit:
 - **one authorized run, 2026-08-29.** `b10x-harness run --wire anthropic-messages` against
   `https://api.anthropic.com/v1` on `claude-haiku-4-5-20251001`, reading a subscription token from a
   named file at a named JSON pointer: three turns, two tool calls, completed. The same route also ran
-  end to end under `metaharness run b10x` and under `protocol drive`, which is what the flags were
+  end to end under `metaharness run b10x` and under `aep drive`, which is what the flags were
   for;
 - **the header shapes are discriminated against the route itself, not asserted.** A deliberately
   invalid token to the same endpoint answers `401 authentication_error`. Without that control the
@@ -265,44 +265,44 @@ provider call and no invented failure or downstream skip (2026-08-31). Flow resu
 `Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and
 `Flow::run` walking a validated plan against a caller's `StepRunner`. Every `StepRunner` that
 exists is in its own `tests.rs`; no crate in `harness-cli` depends on it. On the other side of the
-boundary, engineering-protocols already projects into it — `protocol workflow flow --id adp/default/2
+boundary, AEP already projects into it — `aep workflow flow --id adp/default/2
 --map …` emits `fixtures/adp-default.projected.yaml`, and that document plans and retreats here.
 The projection says what it is: **an ordering, not a government.** Guards, the `declined` outcome
 and every early exit are dropped, and the retreat bound is a number on the command line because the
 source bounds a retreat with the engine's iteration budget.
 
 **Why the runner has to live here, and not stay a process-per-step driver.** Today a workflow runs
-this loop in exactly one way: `protocol drive run` in engineering-protocols spawns the binary once
+this loop in exactly one way: `aep drive run` in AEP spawns the binary once
 per `llm` step, through `metaharness run b10x`, with the step's prompt, `--context` files,
 `--write-scope` and `--allow-program`, and nothing else. The loop never sees the graph; every step
 starts cold; a retreat is the engine re-entering a state and paying for the context again.
 metaharness is the right spawner for a *vendor* harness — a scratch home, a copied plugin tree, a
 hook channel, a retained transcript — and for this loop it adds an argv and an attestation, which its
 own adapter says in as many words. Phase 5's consumer embeds this loop as a library. A driver that
-is a process tree of `protocol drive` → `metaharness` → `b10x-harness` per step cannot be embedded,
+is a process tree of `aep drive` → `metaharness` → `b10x-harness` per step cannot be embedded,
 and an embedder that wants a workflow wants its ordering, its context scope and its retreat *inside*
 the loop it holds. So the runner is this component's, and it must need neither metaharness nor a
 `protocol` process to walk a plan.
 
 **What stays outside, by decision.** The governor. The engine (`aep-engine`: guards, evidence,
 transitions, visit and attempt budgets) and the step map (`aep-driver-spec`) are
-engineering-protocols', and they stay there: this harness embeds nothing above it (invariant 2), and
+AEP', and they stay there: this harness embeds nothing above it (invariant 2), and
 a driver that evaluated a gate would be a second protocol implementation with none of the
-conformance suites behind it — engineering-protocols' own guide refuses that by name. The driver is
+conformance suites behind it — AEP' own guide refuses that by name. The driver is
 not in metaharness and nothing has to be extracted from it. What is worth taking apart is on the
-engineering-protocols side: the routing core (`aep-driver`, 90 lines) is a library already; the
+AEP side: the routing core (`aep-driver`, 90 lines) is a library already; the
 per-harness argv, the per-call `decide_tool`, store integrity and the run directory are the 6,994
-lines of `protocol drive`. The bridge asks that repository for one new thing — a way to put **one
+lines of `aep drive`. The bridge asks that repository for one new thing — a way to put **one
 transition** to the engine from a run cursor, as a program the loop can call — and nothing else.
 
 **The bridge is bytes, in both directions, over ports this loop already has:**
 
 | leg | mechanism | owner |
 |---|---|---|
-| workflow in | the flow document, `protocol workflow flow --map <steps> --max-attempts N` | engineering-protocols, exists |
+| workflow in | the flow document, `aep workflow flow --map <steps> --max-attempts N` | AEP, exists |
 | step → turn | a `StepRunner` in `harness-cli`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives` | here, absent |
 | transition out | a fourth hook point on `--hooks`, `transition`: fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is | here, absent |
-| the governor | any program behind that hook — `protocol drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | engineering-protocols, absent |
+| the governor | any program behind that hook — `aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |
 | the record | `flow.*` events on `--json`; metaharness maps each to an IR family or lists it as control plane, when an eval wants the run | metaharness, absent, optional |
 
 **What this is not: an eval arm.** Under the three-arm program the workflow runs in the engine on

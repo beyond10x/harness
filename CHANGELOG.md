@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-09-01
+
+- Move the external plugin compatibility check to the independently released Agentplugins
+  `aep-planning` plugin, and make the networked upstream check explicit instead of silently
+  skipping when the former monorepository layout is absent.
+- Update the workflow-runner boundary documentation to name standalone AEP and its canonical `aep`
+  command.
+
 - **A confined `run` is published only when the daemon proves the measurements it will request.**
   Harness asks for `resource-usage` on every execution, but previously admitted `run` from only
   `exec.argv-only` and `exec.cgroup-limits`. A delegated daemon without block-I/O counters therefore

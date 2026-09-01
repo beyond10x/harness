@@ -38,7 +38,7 @@ const MANIFEST: &str = ".claude-plugin/plugin.json";
 /// **A skill in a plugin is `<plugin>:<skill>`, not `<skill>`.** That is the vendor's own
 /// namespacing and it is not cosmetic: two plugins may both ship a `planning`, and a run that
 /// loaded whichever was read first would follow instructions nobody chose. It is also what a
-/// comparison's expectations name — `engineering-protocols:planning` — so an unqualified name
+/// comparison's expectations name — `aep-planning:planning` — so an unqualified name
 /// reads as *that skill was not offered* on an arm that offered it.
 ///
 /// `None` where there is no manifest or it states no name: a directory handed to `--skills-dir` is
@@ -318,19 +318,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the sibling agentplugins checkout; exercised by upstream-agentplugins.yml"]
     fn the_real_plugin_this_repository_ships_against_reads() {
-        // The one that would have caught a parser written to a format nobody uses. Skipped where
-        // the sibling checkout is not present, because this repository does not own that file.
+        // The one that catches a parser written to a format nobody uses. The dedicated upstream
+        // workflow checks out the independently released marketplace beside this repository.
         // Relative to this crate, never an absolute path from whoever wrote the test: an
         // absolute one is a personal directory published in a public repository, and it makes the
         // test pass on exactly one machine.
-        let planning = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../../engineering-protocols/integrations/claude-code/skills/planning/SKILL.md",
-        );
+        let planning = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../agentplugins/plugins/aep-planning/skills/planning/SKILL.md");
         let planning = planning.as_path();
-        if !planning.is_file() {
-            return;
-        }
+        assert!(planning.is_file(), "missing {}", planning.display());
         let skill = skill_at(planning).expect("the shipped skill reads");
         assert_eq!(skill.name, "planning");
         assert!(
@@ -353,14 +351,14 @@ mod plugin_tests {
     fn a_plugins_skills_carry_its_name_and_a_loose_directorys_do_not() {
         // `<plugin>:<skill>` is the vendor's namespacing and not decoration: two plugins may both
         // ship a `planning`, and an unqualified name also reads as *not offered* to an expectation
-        // naming `engineering-protocols:planning`, which is how a run that offered the skill got
+        // naming `aep-planning:planning`, which is how a run that offered the skill got
         // scored as one that did not.
         let root = tempfile::tempdir().expect("a root");
         let plugin = root.path().join("a-plugin");
         fs::create_dir_all(plugin.join(".claude-plugin")).expect("a manifest directory");
         fs::write(
             plugin.join(MANIFEST),
-            r#"{"name": "engineering-protocols", "version": "0.1.0"}"#,
+            r#"{"name": "aep-planning", "version": "0.1.0"}"#,
         )
         .expect("a manifest");
         let skill = plugin.join("skills").join("planning");
@@ -373,7 +371,7 @@ mod plugin_tests {
 
         let qualified = skills_in_plugin(&plugin).expect("reads");
         assert_eq!(qualified.len(), 1);
-        assert_eq!(qualified[0].name, "engineering-protocols:planning");
+        assert_eq!(qualified[0].name, "aep-planning:planning");
 
         // The same tree read as a plain skills directory keeps the document's own name: a
         // directory handed to `--skills-dir` is not a plugin and has no namespace to take.

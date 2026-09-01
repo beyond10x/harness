@@ -7,11 +7,11 @@ first milestone ships and what is left as a labelled later milestone.
 
 `crates/harness-flow` (1,891 lines, 27 tests) can plan and walk a workflow and nothing binds it:
 every `StepRunner` is in its own `tests.rs`, `crates/harness-cli/Cargo.toml` does not depend on it,
-and the only way a workflow runs this loop today is `protocol drive run` in engineering-protocols
+and the only way a workflow runs this loop today is `aep drive run` in AEP
 spawning the binary once per `llm` step through `metaharness run b10x` (`drive.rs:3800-3803`),
 with the step's prompt, `--context`, `--write-scope` and `--allow-program` — the loop never sees
 the graph, every step starts cold, and a retreat pays for its context again. Phase 5's consumer
-embeds the loop as a library, and a `protocol drive → metaharness → b10x-harness` process tree per
+embeds the loop as a library, and a `aep drive → metaharness → b10x-harness` process tree per
 step cannot be embedded. So the runner is this component's.
 
 ## 0. What is already decided, and where
@@ -21,7 +21,7 @@ step cannot be embedded. So the runner is this component's.
 | the notation: a DAG of sub-trees; an edge joins siblings only; a retreat is `Repeat`; only `gives` crosses a group boundary | `crates/harness-flow/src/lib.rs:1-60` |
 | the walk knows order and failure and nothing else; what a step *is* belongs to the caller behind `StepRunner` | `crates/harness-flow/src/run.rs:1-6` |
 | a group is a context scope: same `scope` = one warm conversation; a new scope starts from `available` and nothing else | `run.rs:20-38`, `StepContext` |
-| engineering-protocols projects `adp/default/2` into this notation, and says the projection is an ordering, not a government: guards, `declined`, early exit dropped | `crates/protocol-cli/src/flow.rs:16-31`; `fixtures/adp-default.projected.yaml:1-16` |
+| AEP projects `adp/default/2` into this notation, and says the projection is an ordering, not a government: guards, `declined`, early exit dropped | `crates/protocol-cli/src/flow.rs:16-31`; `fixtures/adp-default.projected.yaml:1-16` |
 | the governor stays outside: this harness embeds nothing above it (invariant 2) and evaluates no gate | `AGENTS.md:24`; ep `docs/guide/harness.md:16-19` |
 | a hook is declared, never discovered, and can only narrow | `crates/harness-cli/src/hooks.rs:3-13` |
 | the answer is a tool the loop owns; a run under a schema ends in the `answer` call or `LoopStop::Unstructured` | design 0002 § 1 |
@@ -272,16 +272,16 @@ beside the group — or, under `--json`, the `Plan` itself; exit `0` valid, `1` 
 - **Live evidence.** Everything below is `provider_emulated` until one authorized run walks the
   projected `adp/default/2` under a real governor (invariant 18).
 
-## 7. The other side — engineering-protocols
+## 7. The other side — AEP
 
 Two things this design asks of that repository, each its own story there, neither blocking § 5:
 
-- **E1 — `protocol workflow flow --map` is accepted and ignored.** `FlowArgs.map` is declared
+- **E1 — `aep workflow flow --map` is accepted and ignored.** `FlowArgs.map` is declared
   (`crates/protocol-cli/src/flow.rs:59`) and never read; `project(workflow, max_attempts)` takes
   no map. The verb's own help says a node *"carries what a harness actually does in that state"*
   with one. The story: thread the step map so each node's `run` carries the `llm` step's `prompt`,
   `context` and `scope`, and a `command` step its argv — the keys § 2 reads.
-- **E2 — a governor program.** `protocol drive transition` (name to be decided there): reads the
+- **E2 — a governor program.** `aep drive transition` (name to be decided there): reads the
   § 3 JSON on stdin, positions the engine on the run's cursor, and answers `enter`/`leave` from
   `evaluate`/`transition` — `Blocked { reasons }` is exit 2 with the engine's own words. That
   makes a native flow *governed* by the same engine that governs the driven arm, with no crate
@@ -322,7 +322,7 @@ rule), leaving a patch and no commit. Sizes are estimates.
 | wave | story | scope | files | est. |
 |---|---|---|---|---|
 | 1 | **A** the notation's half | § 3 gates, `TransitionRefused`, `from_yaml`/`from_json`, tests | `crates/harness-flow/**`, workspace `Cargo.toml` (`serde_yaml_ng`) | ~350 lines |
-| 1 | **E1** (engineering-protocols) | thread `--map` into `run` payloads | `crates/protocol-cli/src/flow.rs`, its tests, the fixture twin | ~200 lines |
+| 1 | **E1** (AEP) | thread `--map` into `run` payloads | `crates/protocol-cli/src/flow.rs`, its tests, the fixture twin | ~200 lines |
 | 2 | **B** the verb | § 1, § 2, § 4 without the hook; contract pin; emulator scenarios; e2e | `crates/harness-cli/src/{workflow,lib,render}.rs`, `Cargo.toml`, `contracts/cli/**`, `tests/workflow.rs`, both `fake_*.py` | ~900 lines |
 | 2 | **C** the words | README, guide, reference, CHANGELOG, STATUS, ROADMAP line | docs only | ~250 lines |
 | 3 | **D** the governor's port | § 3 in `hooks.rs`, the runner's calls, the three hook tests | `crates/harness-cli/src/{hooks,workflow}.rs`, `tests/workflow.rs` | ~300 lines |

@@ -176,7 +176,7 @@ published to the model as its own tool. Both halves changed, for one reason.
 The evaluation compares four arms across three harnesses that each name their tools differently:
 `Bash` here, `run` there, `Write` and `workspace_write` for one act, and a Codex write travelling as
 `apply_patch` with the path inside a patch envelope. Everything downstream of a run therefore had to
-learn one vendor's vocabulary — and the corpus in `engineering-protocols/conformance/eval/` selects
+learn one vendor's vocabulary — and the corpus in `aep/conformance/eval/` selects
 on tool names, so it was written in Claude Code's and was blind to every other harness. Two patches
 tried to widen it and both put *more* vendor names into a document that should hold none.
 
@@ -238,7 +238,7 @@ answers it almost for free.
 | model | who does it | cost |
 |---|---|---|
 | one conversation for the whole run | every vendor CLI | cheapest in tokens, worst in isolation: step 9 can be derailed by step 2's dead end |
-| one conversation per step | `protocol drive` today — a fresh metaharness session per workflow state | perfect isolation, worst cost: **14.0M tokens against raw's 4.6M for the same deliverable**, six cold sessions |
+| one conversation per step | `aep drive` today — a fresh metaharness session per workflow state | perfect isolation, worst cost: **14.0M tokens against raw's 4.6M for the same deliverable**, six cold sessions |
 | **one conversation per sub-tree** | proposed | the boundary already exists |
 
 ### Why the third falls out of the DAG

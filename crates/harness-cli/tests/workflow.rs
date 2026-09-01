@@ -211,7 +211,7 @@ root:
             summary: \"Make the smallest change that satisfies the units.\"
 ";
 
-/// One section holding a turn and then a verifier: the shape `protocol workflow flow --map` gives
+/// One section holding a turn and then a verifier: the shape `aep workflow flow --map` gives
 /// a state whose map says *ask the model, then run the suite*.
 const COMMANDED: &str = "\
 id: commanded
@@ -825,7 +825,7 @@ sys.exit(0)
 
 #[test]
 fn the_transition_payload_is_exactly_the_documented_document() {
-    // Design 0003 § 3, key for key. This is the contract engineering-protocols writes its governor
+    // Design 0003 § 3, key for key. This is the contract AEP writes its governor
     // against, so a key that appeared only sometimes would be a payload nobody could program to.
     for wire in WIRES {
         let workspace = workspace();
@@ -1290,7 +1290,7 @@ fn a_walk_whose_root_retreats_files_one_session_for_every_section_that_ran() {
 
 #[test]
 fn the_projected_adp_workflow_walks_end_to_end() {
-    // The document engineering-protocols projects from `adp/default/2`, unedited, read off disk.
+    // The document AEP projects from `adp/default/2`, unedited, read off disk.
     let flow = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("harness-flow")

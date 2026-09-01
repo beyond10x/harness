@@ -752,7 +752,7 @@ root:
 
 #[test]
 fn a_real_workflow_projected_by_another_component_plans_here() {
-    // `engineering-protocols`' own development workflow, as `protocol workflow flow` emits it. The
+    // `AEP`' own development workflow, as `aep workflow flow` emits it. The
     // fixture is committed rather than generated, so this repository stays free of a dependency on
     // that one and a change on either side shows up as a diff rather than as a surprise at runtime.
     //

@@ -84,6 +84,6 @@ command-line or event consumers against the build you will deploy.
 |---|---|
 | Drive and compare vendor coding harnesses | [metaharness](https://beyond10x.github.io/metaharness/) |
 | Confine files and processes | [substrate](https://github.com/beyond10x/substrate) |
-| Route and terminate model requests | [llmgw](https://github.com/beyond10x/llmgw) |
-| Principal identity and audiences | [identity](https://github.com/beyond10x/identity) |
-| Durable event-sourced state | [eventlog](https://github.com/beyond10x/eventlog) |
+| Route and terminate model requests | llmgw (not a public surface) |
+| Principal identity and audiences | identity (not a public surface) |
+| Durable event-sourced state | eventlog (not a public surface) |

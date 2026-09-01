@@ -1,0 +1,27 @@
+schema: b10x-docs/v1
+repository:
+  id: harness
+  url: https://github.com/beyond10x/harness
+surfaces:
+  - id: docs
+    name: Harness
+    summary: A provider-neutral agent loop with explicit tools, effects, approvals, budgets, and durable session evidence.
+    kind: documentation
+    canonicalUrl: https://beyond10x.github.io/harness/
+    maturity: development
+    availability: published
+    discoverability: public
+    audiences: [adopter, developer, operator]
+    journeys: [build-agents, operate-services]
+    capabilities: [agent-loop, tool-approvals, workflows, session-evidence]
+    sections:
+      - {label: Getting started, url: https://beyond10x.github.io/harness/docs/getting-started, kind: quickstart}
+      - {label: Agent loop, url: https://beyond10x.github.io/harness/docs/concepts/agent-loop, kind: docs}
+      - {label: CLI, url: https://beyond10x.github.io/harness/docs/reference/cli, kind: reference}
+      - {label: Status, url: https://beyond10x.github.io/harness/docs/status, kind: status}
+      - {label: Source, url: https://github.com/beyond10x/harness, kind: source}
+    relationships:
+      - {target: substrate/docs, kind: executes-in}
+    accent: "#b9f46a"
+    mark: website/static/img/mark.svg
+    shell: {integration: docusaurus, revision: 6323bfdaf73609247e8dabcc9df410ab280a1960}

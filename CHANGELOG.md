@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+- **A confined `run` is published only when the daemon proves the measurements it will request.**
+  Harness asks for `resource-usage` on every execution, but previously admitted `run` from only
+  `exec.argv-only` and `exec.cgroup-limits`. A delegated daemon without block-I/O counters therefore
+  published a tool whose every call earned `exec.metrics-unserved`. The publication gate now also
+  requires the structured `exec.resource-usage` fact and records that exact absence in `withheld`;
+  guarded workspace tools remain available.
+
 ## [0.10.0] — 2026-09-01
 
 ### Added

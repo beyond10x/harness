@@ -170,7 +170,7 @@ impl Facts {
     /// cannot disagree about which facts count.
     ///
     /// `false` takes the tool away silently, which is right for the model and wrong for a reader:
-    /// [`Facts::withheld`] is the other half, and says which of these two facts decided.
+    /// [`Facts::withheld`] is the other half, and says which required fact decided.
     pub fn confines_execution(&self) -> bool {
         self.get("exec.argv-only") == Some(&Value::Bool(true))
             && self
@@ -181,6 +181,13 @@ impl Facts {
                         .iter()
                         .all(|key| limits.get(*key) == Some(&Value::Bool(true)))
                 })
+            // Every request this client builds asks for `resource-usage`. Publishing `run` when
+            // the daemon withheld this independent fact makes every call deterministically earn
+            // `exec.metrics-unserved`, which is absence disguised as a usable tool.
+            && self
+                .get("exec.resource-usage")
+                .and_then(Value::as_object)
+                .is_some()
     }
 
     /// `true` when this machine can hold a guarded workspace.

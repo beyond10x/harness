@@ -7,6 +7,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Outbound tools-only MCP support through the separately released `beyond10x/mcp` foundation,
+  pinned at `58474c8` (`0.1.0`). Stdio and Streamable HTTP connections use the standalone shared
+  registry and owner-only OAuth store. Repeatable `--mcp-profile` on `run`, `chat`, `workflow run`
+  and `tools` requires a locally reviewed subset whose registry and discovery digests match before
+  the first model request; `--mcp-registry` explicitly overrides the shared registry.
+- `started.mcp` records each connection's registry, local profile and frozen snapshot digests plus
+  negotiated protocol version without credential material. MCP calls use the same per-call
+  approvals, hooks, deadlines and failed outcomes as local tools; server annotations never grant an
+  effect, risk or access.
+- CLI contract `2026-09-02` pins the two additive MCP option families.
+
 ## [0.10.2] — 2026-09-01
 
 ### Changed

@@ -94,8 +94,8 @@ pub use delegate::{
     DELEGATE_PARALLEL_NOTE, DELEGATE_PREAMBLE, Delegation, MAX_DELEGATION_DEPTH,
 };
 pub use event::{
-    CredentialRenewal, LoopEvent, LoopSink, NullLoopSink, ProfileRef, ToolchainRef, VecLoopSink,
-    Withheld,
+    CredentialRenewal, LoopEvent, LoopSink, McpRef, NullLoopSink, ProfileRef, ToolchainRef,
+    VecLoopSink, Withheld,
 };
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
@@ -343,6 +343,9 @@ pub struct LoopConfig {
     /// Declarative toolchain definitions used by this run, for its body-free record.
     pub toolchains: Vec<ToolchainRef>,
 
+    /// Outbound MCP snapshots and their local authority documents, for the run record.
+    pub mcp: Vec<McpRef>,
+
     /// Where this run's credential came from, for the record: `named`, or `provider:<name>`.
     pub credential_source: String,
 
@@ -435,6 +438,7 @@ impl LoopConfig {
             agents: None,
             profiles: Vec::new(),
             toolchains: Vec::new(),
+            mcp: Vec::new(),
             credential_source: "named".to_owned(),
             credential_renewal: None,
             admits: None,
@@ -486,6 +490,13 @@ impl LoopConfig {
     #[must_use]
     pub fn with_toolchains(mut self, toolchains: Vec<ToolchainRef>) -> Self {
         self.toolchains = toolchains;
+        self
+    }
+
+    /// Adds body-free outbound MCP provenance to the run record.
+    #[must_use]
+    pub fn with_mcp(mut self, mcp: Vec<McpRef>) -> Self {
+        self.mcp = mcp;
         self
     }
 
@@ -2089,6 +2100,7 @@ impl<'a> AgentLoop<'a> {
             profiles: self.config.profiles.clone(),
             context: self.config.context.manifest(),
             toolchains: self.config.toolchains.clone(),
+            mcp: self.config.mcp.clone(),
             credential_source: self.config.credential_source.clone(),
         });
         self.announce_prices(priced, sink);

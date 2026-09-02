@@ -32,7 +32,7 @@ use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, ContextCacheClass, ContextKind, ContextLayer,
     ContextPackage, ContextTrust, DenyAll, LoopCancel, LoopConfig, LoopStop, RunLedger,
 };
-use harness_wire::{ModelPort, Risk, Sampling, StaticBearer};
+use harness_wire::{ModelPort, Risk, Sampling, StaticBearer, ToolPort};
 
 pub use render::Renderer;
 
@@ -720,6 +720,21 @@ struct RunOptions {
     /// what an arm comparing the two surfaces asks for.
     #[arg(long, value_name = "SURFACE", default_value = "flat")]
     surface: Surface,
+    /// Reviewed MCP publication profile. Repeatable; every profile freezes one connection.
+    ///
+    /// Discovery alone grants nothing. Each file pins the shared registry digest and the exact
+    /// tools/list snapshot, then assigns Harness-owned names, descriptions and envelopes to the
+    /// subset this run may publish. A changed endpoint or catalogue refuses before the first model
+    /// request. MCP calls still pass through this run's ordinary approver, hooks and budget.
+    #[arg(long = "mcp-profile", value_name = "FILE")]
+    mcp_profiles: Vec<PathBuf>,
+    /// Override the shared b10x MCP registry used by `--mcp-profile`.
+    ///
+    /// Absent uses the same XDG registry as the standalone `b10x-mcp` command. This is a path to
+    /// non-secret connection declarations; credentials remain in their explicit sources or the
+    /// shared owner-only OAuth store.
+    #[arg(long = "mcp-registry", value_name = "FILE", requires = "mcp_profiles")]
+    mcp_registry: Option<PathBuf>,
     /// File holding the standing instruction. Defaults to the built-in one.
     #[arg(long)]
     instructions_file: Option<PathBuf>,
@@ -801,9 +816,9 @@ struct RunOptions {
     /// `<DIR>/<name>/SKILL.md`, YAML frontmatter with `name` and `description`, the document
     /// after. That is the on-disk shape Claude Code writes, read here so a plugin written for it
     /// runs unchanged and a comparison between the two harnesses is a comparison of harnesses.
-    /// Reading a vendor's **file format** is not becoming a client of a vendor **protocol** — the
-    /// distinction `README.md` draws where it refuses an MCP client; nothing here speaks to a
-    /// server or gives anyone a say in what this run may do.
+    /// Reading a vendor's **file format** is not becoming a client of a vendor **protocol**:
+    /// nothing on this path speaks to a server or grants remote authority. Outbound MCP is a
+    /// separate, explicitly reviewed profile at the shell boundary.
     ///
     /// **The descriptions are given to the model and the bodies are not.** A skill costs a `skill`
     /// call when the model decides it wants one, rather than input tokens on every turn of every
@@ -1008,6 +1023,12 @@ struct ToolsOptions {
     /// how a consumer comes to pin a tool list nothing serves.
     #[arg(long, value_name = "SURFACE", default_value = "flat")]
     surface: Surface,
+    /// Reviewed MCP publication profile. Repeatable; connects and verifies the frozen snapshot.
+    #[arg(long = "mcp-profile", value_name = "FILE")]
+    mcp_profiles: Vec<PathBuf>,
+    /// Override the shared b10x MCP registry used by `--mcp-profile`.
+    #[arg(long = "mcp-registry", value_name = "FILE", requires = "mcp_profiles")]
+    mcp_registry: Option<PathBuf>,
     /// Directory the read-only workspace tools may see.
     #[arg(long, default_value = ".")]
     workspace: PathBuf,
@@ -2067,6 +2088,11 @@ fn prepare(
             scope: write_scope(&options.write_scope)?,
         },
     )?;
+    let tools = with_mcp(
+        tools,
+        &options.mcp_profiles,
+        options.mcp_registry.as_deref(),
+    )?;
     let approvals = approver(options)?;
     let session_dir = session_dir(options)?;
     let session = open_session(options, session_dir.as_deref())?;
@@ -2096,6 +2122,17 @@ fn prepare(
     run_budget
         .validate(priced)
         .map_err(|error| format!("budget refused: {error}"))?;
+    let mcp = tools
+        .mcp_evidence()
+        .into_iter()
+        .map(|evidence| harness_loop::McpRef {
+            connection: evidence.connection,
+            registry_sha256: evidence.registry_sha256,
+            profile_sha256: evidence.profile_sha256,
+            snapshot_sha256: evidence.snapshot_sha256,
+            protocol_version: evidence.protocol_version,
+        })
+        .collect();
     let config = LoopConfig::new(options.model(), "")
         .with_context(instruction_package(
             options,
@@ -2130,6 +2167,7 @@ fn prepare(
                 })
                 .collect(),
         )
+        .with_mcp(mcp)
         .with_withheld(withheld_events(&withheld));
     // A hook is unconfined — it is the operator's own program — but it is not handed this run's
     // credential. The child would otherwise inherit the whole environment, including whichever
@@ -2789,6 +2827,130 @@ struct Confinement<'a> {
 enum Published {
     Flat(harness_tools::Flat),
     Verbs(harness_tools::Verbs),
+    Augmented(Box<Augmented>),
+}
+
+/// Local operations plus explicitly reviewed outbound MCP tools.
+///
+/// The local catalogue remains the source for workspace instruction and workflow narrowing. MCP
+/// publication is a separate flat surface because its names and envelopes are already the local
+/// review document; putting it behind the local catalogue's verbs would reinterpret that document.
+struct Augmented {
+    local: Published,
+    external: Vec<harness_mcp::McpTools>,
+    specs: Vec<harness_wire::ToolSpec>,
+}
+
+impl Augmented {
+    fn new(local: Published, external: Vec<harness_mcp::McpTools>) -> Result<Self, String> {
+        let mut names = std::collections::BTreeSet::new();
+        let mut specs = Vec::new();
+        for spec in local.specs() {
+            names.insert(spec.name.clone());
+            specs.push(spec.clone());
+        }
+        for port in &external {
+            for spec in harness_wire::ToolPort::specs(port) {
+                if !names.insert(spec.name.clone()) {
+                    return Err(format!(
+                        "MCP publish name `{}` collides with another tool in this run",
+                        spec.name
+                    ));
+                }
+                specs.push(spec.clone());
+            }
+        }
+        Ok(Self {
+            local,
+            external,
+            specs,
+        })
+    }
+
+    fn external_for(&self, name: &harness_wire::ToolName) -> Option<&harness_mcp::McpTools> {
+        self.external.iter().find(|port| {
+            harness_wire::ToolPort::specs(*port)
+                .iter()
+                .any(|spec| &spec.name == name)
+        })
+    }
+
+    fn external_for_mut(
+        &mut self,
+        name: &harness_wire::ToolName,
+    ) -> Option<&mut harness_mcp::McpTools> {
+        self.external.iter_mut().find(|port| {
+            harness_wire::ToolPort::specs(&**port)
+                .iter()
+                .any(|spec| &spec.name == name)
+        })
+    }
+
+    fn evidence(&self) -> Vec<harness_mcp::Evidence> {
+        self.external
+            .iter()
+            .map(|port| port.evidence().clone())
+            .collect()
+    }
+}
+
+impl harness_wire::ToolPort for Augmented {
+    fn specs(&self) -> &[harness_wire::ToolSpec] {
+        &self.specs
+    }
+
+    fn subjects(&self, call: &harness_wire::ToolCall) -> Vec<harness_wire::Subject> {
+        self.external_for(&call.name).map_or_else(
+            || self.local.subjects(call),
+            |port| harness_wire::ToolPort::subjects(port, call),
+        )
+    }
+
+    fn operation(&self, call: &harness_wire::ToolCall) -> Option<String> {
+        self.external_for(&call.name).map_or_else(
+            || self.local.operation(call),
+            |port| harness_wire::ToolPort::operation(port, call),
+        )
+    }
+
+    fn invoked(&self, call: &harness_wire::ToolCall) -> Option<harness_wire::ToolSpec> {
+        self.external_for(&call.name).map_or_else(
+            || self.local.invoked(call),
+            |port| harness_wire::ToolPort::invoked(port, call),
+        )
+    }
+
+    fn reachable(&self) -> Vec<harness_wire::ToolName> {
+        self.specs.iter().map(|spec| spec.name.clone()).collect()
+    }
+
+    fn reachable_specs(&self) -> Vec<harness_wire::ToolSpec> {
+        let mut specs = self.local.reachable_specs();
+        for port in &self.external {
+            specs.extend(harness_wire::ToolPort::reachable_specs(port));
+        }
+        specs
+    }
+
+    fn operations(&self) -> Vec<&'static str> {
+        self.local.operations()
+    }
+
+    fn call(&mut self, call: &harness_wire::ToolCall) -> harness_wire::ToolOutcome {
+        self.call_within(call, None)
+    }
+
+    fn call_within(
+        &mut self,
+        call: &harness_wire::ToolCall,
+        remaining: Option<std::time::Duration>,
+    ) -> harness_wire::ToolOutcome {
+        if let Some(port) = self.external_for_mut(&call.name) {
+            harness_wire::ToolPort::call_within(port, call, remaining)
+        } else {
+            self.local.call_within(call, remaining)
+        }
+    }
 }
 
 impl Published {
@@ -2797,6 +2959,7 @@ impl Published {
         match self {
             Self::Flat(flat) => flat.catalogue(),
             Self::Verbs(verbs) => verbs.catalogue(),
+            Self::Augmented(augmented) => augmented.local.catalogue(),
         }
     }
 
@@ -2810,6 +2973,7 @@ impl Published {
         match self {
             Self::Flat(flat) => flat.catalogue_mut(),
             Self::Verbs(verbs) => verbs.catalogue_mut(),
+            Self::Augmented(augmented) => augmented.local.catalogue_mut(),
         }
     }
 
@@ -2817,6 +2981,7 @@ impl Published {
         match self {
             Self::Flat(flat) => flat,
             Self::Verbs(verbs) => verbs,
+            Self::Augmented(augmented) => augmented.as_ref(),
         }
     }
 
@@ -2824,6 +2989,14 @@ impl Published {
         match self {
             Self::Flat(flat) => flat,
             Self::Verbs(verbs) => verbs,
+            Self::Augmented(augmented) => augmented.as_mut(),
+        }
+    }
+
+    fn mcp_evidence(&self) -> Vec<harness_mcp::Evidence> {
+        match self {
+            Self::Augmented(augmented) => augmented.evidence(),
+            Self::Flat(_) | Self::Verbs(_) => Vec::new(),
         }
     }
 }
@@ -2843,6 +3016,10 @@ impl harness_wire::ToolPort for Published {
         self.as_port().subjects(call)
     }
 
+    fn operation(&self, call: &harness_wire::ToolCall) -> Option<String> {
+        self.as_port().operation(call)
+    }
+
     fn invoked(&self, call: &harness_wire::ToolCall) -> Option<harness_wire::ToolSpec> {
         self.as_port().invoked(call)
     }
@@ -2853,6 +3030,10 @@ impl harness_wire::ToolPort for Published {
 
     fn reachable(&self) -> Vec<harness_wire::ToolName> {
         self.as_port().reachable()
+    }
+
+    fn reachable_specs(&self) -> Vec<harness_wire::ToolSpec> {
+        self.as_port().reachable_specs()
     }
 
     fn call(&mut self, call: &harness_wire::ToolCall) -> harness_wire::ToolOutcome {
@@ -3038,6 +3219,35 @@ fn published(
         ),
         withheld,
     })
+}
+
+/// Add only MCP tools whose local profile and live frozen snapshot agree byte-for-byte.
+fn with_mcp(
+    local: Published,
+    profiles: &[PathBuf],
+    registry: Option<&Path>,
+) -> Result<Published, String> {
+    if profiles.is_empty() {
+        return Ok(local);
+    }
+    let registry = registry
+        .map(|path| {
+            path.canonicalize()
+                .map_err(|error| format!("MCP registry `{}`: {error}", path.display()))
+        })
+        .transpose()?;
+    let external = profiles
+        .iter()
+        .map(|path| {
+            let path = path
+                .canonicalize()
+                .map_err(|error| format!("MCP profile `{}`: {error}", path.display()))?;
+            harness_mcp::McpTools::prepare(&path, registry.as_deref())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Published::Augmented(Box::new(Augmented::new(
+        local, external,
+    )?)))
 }
 
 /// One embedded driver, its machine facts and the adopted workspace, held together.
@@ -3438,6 +3648,11 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             scope: write_scope(&options.write_scope)?,
         },
     )?;
+    let tools = with_mcp(
+        tools,
+        &options.mcp_profiles,
+        options.mcp_registry.as_deref(),
+    )?;
     // On stderr, where it cannot be mistaken for part of the document and cannot be missed by a
     // person reading a screen of JSON — the same line the run's own renderer prints, so the
     // command a person checks a machine with and the run they then start say the same thing.
@@ -3461,6 +3676,9 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // `flat` the two lists name the same entries; under `verbs` they do not, and that
             // difference is exactly what a reader has to be able to see.
             "catalogue": tools.catalogue().search(None, None),
+            // Registry, local authority profile and frozen discovery digests for every outbound
+            // MCP connection. Bodies and credentials are deliberately absent.
+            "mcp": tools.mcp_evidence(),
             // And what it **cannot** do that it was asked to. Always present, empty included:
             // this command exists to state a machine's shape, and a reader who found no key could
             // not tell *nothing was withheld* from *this build does not answer that*. It is the

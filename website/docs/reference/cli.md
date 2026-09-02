@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-09-01`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-09-02`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -105,6 +105,22 @@ secret. Naming none records `"none"`.
 | `--write-scope GLOB=SCOPE` | Restrict matching paths; repeatable, first match wins |
 | `--scope-announce stated\|silent` | Tell the model the write restrictions or test the gate silently |
 | `--execution-path direct\|metaharness` | Tell the model whether this native loop was launched directly or as a metaharness comparison arm; grants no authority |
+
+## Outbound MCP
+
+`run`, `chat`, `workflow run`, and `tools` accept the same reviewed outbound surface.
+
+| Option | Meaning |
+|---|---|
+| `--mcp-profile FILE` | Publish the explicit subset in one Harness authority profile; repeatable |
+| `--mcp-registry FILE` | Override the shared `b10x-mcp` registry; requires at least one profile |
+
+The profile pins the registry SHA-256 and exact frozen `tools/list` snapshot, then supplies local
+names, reviewed descriptions, envelopes, and subjects. Discovery and server annotations grant
+nothing on their own. Preparation refuses digest drift and name collisions before the first model
+request; every admitted call still uses the normal approver, hooks, deadline, and result bound. The
+standalone `b10x-mcp config check`, `connections check`, and `tools snapshot` commands provide the
+review inputs. See design 0005 in the source repository for the strict TOML shape.
 
 ## Skills and agents
 

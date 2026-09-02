@@ -51,8 +51,9 @@ fixtures.
 - **No public binary distribution.** Build from a source checkout; the crates are not published.
 - **No hosted service.** Admission, tenancy, scheduling, durable storage, and deployment are outside
   this repository.
-- **No MCP client or multimodal input.** Harness currently owns text turns and its built-in or bound
-  tool port.
+- **No multimodal input.** Harness currently owns text turns. Outbound MCP tools are available only
+  through a reviewed profile that pins the local registry and exact discovery snapshot; server
+  annotations do not grant Harness authority.
 - **No realtime media or provider-side session state.** Local sessions replay a stateless
   conversation.
 - **Delegation is depth one.** Neighbouring delegates may run concurrently only on a non-mutating,
@@ -72,7 +73,7 @@ fixtures.
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
 profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
 means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
-a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-01`.
+a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-02`.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

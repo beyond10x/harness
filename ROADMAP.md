@@ -219,7 +219,7 @@ answer for the same reason.
 
 ## Phase 7: what the loop owns beyond the catalogue
 
-**Status: the first three landed 2026-08-29, `provider_emulated`; two stay out of scope.**
+**Status: four landed; multimodal input stays out of scope.**
 
 The comparison against other harnesses (`docs/reviews/2026-08-29-sota-comparison.md`, finding #13)
 named five things every one of them has: sub-agents, structured output, hooks, an MCP client and
@@ -250,9 +250,15 @@ run in order — concurrency changes how long a turn takes and nothing else abou
 Delegate **trees** remain out: each level is a context nobody can read afterwards, and that
 argument is untouched by this.
 
-Out of scope, and why: an MCP client would make this loop a client of a protocol whose tools
-nothing here confines — metaharness is the MCP side of this family; multimodal input is a new
-neutral value on both wires that nothing measuring this harness has asked for.
+Outbound MCP landed on 2026-09-02 under design 0005. The ownership answer changed because the
+protocol mechanics now live in a lower reusable `mcp` repository while this component keeps the
+thing that matters to a harness: a local profile must pin registry and discovery digests and assign
+every published name, description, envelope and subject. Discovery itself grants nothing, the list
+is frozen before turn one, and calls traverse the ordinary approver and hook path. This is distinct
+from metaharness, which still owns driving somebody else's loop over MCP.
+
+Multimodal input remains out of scope: it is a new neutral value on both provider wires that nothing
+measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 

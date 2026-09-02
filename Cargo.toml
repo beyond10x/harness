@@ -11,6 +11,7 @@ members = [
     "crates/harness-toolchain",
     "crates/harness-substrate",
     "crates/harness-tools",
+    "crates/harness-mcp",
     "crates/harness-app-server",
     "crates/harness-cli",
     "crates/harness-xtask",
@@ -35,6 +36,7 @@ harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
 harness-toolchain = { package = "b10x-harness-toolchain", path = "crates/harness-toolchain" }
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
 harness-tools = { package = "b10x-harness-tools", path = "crates/harness-tools" }
+harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 
 clap = { version = "4", features = ["derive"] }
@@ -75,6 +77,13 @@ tokio = { version = "1.53", features = ["rt", "time", "macros"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 thiserror = "2"
 zeroize = { version = "1.8", features = ["derive"] }
+
+# MCP is a lower reusable protocol boundary, pinned like substrate rather than read from a sibling
+# checkout. Harness supplies every envelope, approval, and publication decision itself.
+b10x-mcp-command = { git = "https://github.com/beyond10x/mcp", rev = "58474c8319a833c9506068bd3d544a21b3417b12" }
+b10x-mcp-client = { git = "https://github.com/beyond10x/mcp", rev = "58474c8319a833c9506068bd3d544a21b3417b12" }
+b10x-mcp-config = { git = "https://github.com/beyond10x/mcp", rev = "58474c8319a833c9506068bd3d544a21b3417b12" }
+b10x-mcp-types = { git = "https://github.com/beyond10x/mcp", rev = "58474c8319a833c9506068bd3d544a21b3417b12" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

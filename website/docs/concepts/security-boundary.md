@@ -78,15 +78,19 @@ to continue; it cannot add a tool or approve a call the regular gate rejected.
 Never discover hook files from the workspace. A repository-controlled hook would be a program the
 repository causes to run on the operator's machine.
 
-## Skills and agents are files, not a protocol
+## Skills and agents are files, not remote authority
 
 `--skills-dir`, `--agents-dir` and `--plugin-dir` read a directory the operator named, once, before
 the first request. Nothing opens a socket and nothing gives a third party a say in what the run may
-do — which is the line between reading a vendor's on-disk format and becoming a client of its
-protocol, and why these exist while an MCP client stays refused. A document this build cannot read
-refuses the run by name rather than being half-applied, and an agent's `tools:` can only narrow the
-parent's catalogue. A skill body is an instruction the model follows, so a directory under a
-repository's control puts that repository's words in the run: name what you trust, as with hooks.
+do. A document this build cannot read refuses the run by name rather than being half-applied, and
+an agent's `tools:` can only narrow the parent's catalogue. A skill body is an instruction the
+model follows, so a directory under a repository's control puts that repository's words in the
+run: name what you trust, as with hooks.
+
+Outbound MCP is different: it opens a remote protocol connection. Harness therefore publishes
+only entries in an operator-authored profile that pins both the shared local registry and the exact
+`tools/list` snapshot. The profile supplies the local risk, effect, access and subject claims;
+server annotations are preserved as remote data and never become Harness authority.
 
 ## Multi-tenant use
 

@@ -153,6 +153,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             context: _,
             credential_source: _,
             toolchains: _,
+            mcp,
         } = event
         else {
             return;
@@ -179,6 +180,15 @@ impl<O: Write, E: Write> Renderer<O, E> {
                 profiles
                     .iter()
                     .map(|used| used.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if !mcp.is_empty() {
+            self.note(&format!(
+                "  mcp: {}",
+                mcp.iter()
+                    .map(|connection| connection.connection.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -632,6 +642,7 @@ mod tests {
                     profiles: Vec::new(),
                     context: Vec::new(),
                     toolchains: Vec::new(),
+                    mcp: Vec::new(),
                     credential_source: "named".to_owned(),
                 },
                 LoopEvent::TextDelta {
@@ -980,6 +991,7 @@ mod tests {
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
+            mcp: Vec::new(),
             credential_source: "named".to_owned(),
         };
 
@@ -1199,6 +1211,7 @@ mod tests {
                 profiles: Vec::new(),
                 context: Vec::new(),
                 toolchains: Vec::new(),
+                mcp: Vec::new(),
                 credential_source: "named".to_owned(),
             }],
             false,

@@ -1,7 +1,8 @@
 # Design 0002 — sub-agents, structured output, hooks
 
 **Status:** proposed 2026-08-29, implemented the same day under `Unreleased`. Each section below
-states what shipped and what was left as a labelled later milestone.
+states what shipped and what was left as a labelled later milestone. The MCP part of § 5 was
+superseded by design 0005 on 2026-09-02; the historical reasoning remains here.
 
 ## The problem, in one line
 
@@ -9,8 +10,7 @@ states what shipped and what was left as a labelled later milestone.
 has and this one does not: sub-agents, structured output, hooks, an MCP client and multimodal input.
 `README.md § Not owned here` said each *"is a decision about what this component owns rather than a
 defect in it"*. This is the decision for the first three, in the order the operator gave them:
-**sub-agents, structured output, hooks**. The MCP client and multimodal input stay out of scope
-(§ 5).
+**sub-agents, structured output, hooks**. MCP and multimodal input stayed out of this design (§ 5).
 
 The constraint every section answers to is the same one design 0001 answered to: **the published
 toolset is the entire safety boundary**, and the approver is the review gate (AGENTS.md invariant
@@ -324,8 +324,10 @@ run sees which hook decided what.
 
 ## 5. Not in this design
 
-- **MCP client.** The loop would become a client of a protocol, and the tools it discovers would be
-  ones nothing here confines (design 0001 § 2). metaharness is the MCP side of this family.
+- **MCP client (superseded by design 0005).** This design did not have a local authority document
+  for discovered tools. Design 0005 added that missing boundary: the independent MCP foundation
+  handles the protocol, while a reviewed Harness profile pins discovery and supplies every local
+  envelope and subject before a tool can be published.
 - **Multimodal input.** `Item::UserText` is text; an image item is a new neutral value on both
   wires and a new contract version each. Nothing that measures this harness has asked for it.
 - **Provider-native structured output (M2), delegate trees (M4).** Each waits for evidence that the

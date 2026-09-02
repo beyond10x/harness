@@ -486,19 +486,15 @@ These suites drive real processes over real sockets and pipes:
 - **No substrate confinement claim.** This harness's effects are exactly what its published toolset
   admits, and nothing constrains it further.
 - **No live-provider conformance.** One live run has happened; the pins are still emulator-derived.
-- **No MCP client and no multimodal input.** Of the five gaps the comparison against other
-  harnesses ranked (`docs/reviews/2026-08-29-sota-comparison.md`), sub-agents, structured output
-  and hooks landed the same day (design 0002); these two stay decisions about what this component
-  owns. An MCP client would make the loop a client of a protocol whose tools nothing here confines
-  — metaharness is the MCP side of this family — and an image item is a new neutral value on both
-  wires that nothing measuring this harness has asked for.
-
-  **Reading a vendor's on-disk file format is not the same act as becoming a client of its
-  protocol**, which is why skills and agents could be added (`--skills-dir`,
-  `--agents-dir`, `--plugin-dir`, in the layout Claude Code writes) while an MCP client stays
-  refused. A file format has no reach: nothing opens
-  a socket, nothing gives a third party a say in what a run may do, and the bytes are read once,
-  before the run starts, out of a directory the operator named. A protocol has all three.
+- **No multimodal input.** An image item remains a new neutral value on both provider wires that
+  nothing measuring this harness has asked for.
+- **Outbound MCP is a client transport, not an authority source.** `--mcp-profile <FILE>` opens a
+  named connection from the standalone `b10x-mcp` registry, freezes `tools/list` before turn one,
+  and publishes only the subset whose local Harness profile pins the registry and snapshot digests
+  and assigns provider-safe names, reviewed prose and envelopes. Server annotations are retained
+  by the foundation client but never become risk, effect, approval or access policy here. Calls
+  enter the same `ToolPort` path as local operations, so the existing approver and hooks remain the
+  gate. See design 0005.
 
 - No realtime media or provider-side sessions. Sessions here are **this harness's own file on this
   machine**: nothing is retained on the far side and the whole conversation is replayed every turn

@@ -9,9 +9,9 @@
 //! `<dir>/<name>/SKILL.md`, YAML frontmatter with `name` and `description`, body after. That is
 //! their on-disk shape and this file exists to read it, so a plugin written for their harness runs
 //! here unchanged and a comparison between the two is a comparison of harnesses rather than of who
-//! had to rewrite their instructions. `README.md` refuses an MCP client on the grounds that it
-//! would make this loop a client of a protocol whose tools nothing here confines; a file format
-//! has no such reach. Nothing here opens a socket or gives anyone a say in what a run may do.
+//! had to rewrite their instructions. Reading that file format still grants no remote authority:
+//! unlike outbound MCP, it needs no separately reviewed profile and opens no connection. Nothing
+//! here opens a socket or gives anyone a say in what a run may do.
 //!
 //! # The parser is small on purpose, and refuses rather than guessing
 //!

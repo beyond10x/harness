@@ -20,6 +20,7 @@ harness-app-server = { workspace = true }
 harness-credential = { workspace = true }
 harness-flow = { workspace = true }
 harness-loop = { workspace = true }
+harness-mcp = { workspace = true }
 harness-messages = { workspace = true }
 harness-responses = { workspace = true }
 harness-substrate = { workspace = true }

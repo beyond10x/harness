@@ -88,6 +88,16 @@ pub struct ToolchainRef {
     pub sha256: String,
 }
 
+/// Body-free provenance for one outbound MCP connection frozen before the run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpRef {
+    pub connection: String,
+    pub registry_sha256: String,
+    pub profile_sha256: String,
+    pub snapshot_sha256: String,
+    pub protocol_version: String,
+}
+
 /// What `credential_source` says when nothing named a provider.
 fn named_credential() -> String {
     "named".to_owned()
@@ -163,6 +173,9 @@ pub enum LoopEvent {
         /// Declarative provider definitions used by the run. Bodies and installation paths stay out.
         #[serde(default)]
         toolchains: Vec<ToolchainRef>,
+        /// Outbound MCP registry, policy and discovery facts frozen for this run.
+        #[serde(default)]
+        mcp: Vec<McpRef>,
         /// Where this run's credential came from — `named`, or `provider:<name>`.
         ///
         /// **This field is what pays for a provider being allowed to default a credential path at
@@ -427,6 +440,7 @@ mod tests {
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
+            mcp: Vec::new(),
             credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_value(&event).expect("serializes");
@@ -460,12 +474,13 @@ mod tests {
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
+            mcp: Vec::new(),
             credential_source: "named".to_owned(),
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
             encoded,
-            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[],"toolchains":[],"credential_source":"named"}"#,
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[],"toolchains":[],"mcp":[],"credential_source":"named"}"#,
             "a run refused nothing, offered no skill, published no agent and read no profile says \
              `[]` to each; only a build older than the field is silent"
         );

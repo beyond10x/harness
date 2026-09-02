@@ -23,9 +23,9 @@
 //! # The format is a vendor's, and that is stated rather than hidden
 //!
 //! `SKILL.md` with `name`/`description` frontmatter is Anthropic's on-disk shape. Reading a
-//! vendor's **file format** is not the same act as becoming a client of a vendor **protocol** —
-//! the distinction `README.md` draws where it refuses an MCP client. Nothing here speaks to a
-//! server, opens a socket, or gives a third party a say in what this run may do.
+//! vendor's **file format** is not the same act as becoming a client of a vendor **protocol**.
+//! Nothing here speaks to a server, opens a socket, or grants the remote authority; outbound MCP
+//! does those things only through a separately reviewed profile at the shell boundary.
 
 use std::fmt::Write as _;
 

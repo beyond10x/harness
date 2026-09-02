@@ -35,11 +35,14 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    control protocol as a client. Driving a vendor's loop is `metaharness`.
 2. **No dependency on any sibling that could embed this.** Something else embeds this; this
    embeds nothing above it — not `metaharness`, `llmgw`, `identity` or `eventlog`. A dependency
-   there would quietly re-couple the components the split exists to separate. **The one
-   dependency below it is substrate** — `substrate-host` and `substrate-wire`, pinned by git
-   revision in `crates/harness-substrate/Cargo.toml`, never by `path`: a path into a sibling
-   checkout builds against whatever is checked out there, and `--locked` cannot lock it. The
-   boundary that import crosses is argued in `crates/harness-substrate/src/embedded.rs`.
+   there would quietly re-couple the components the split exists to separate. **The dependencies
+   below it are foundations, pinned and never sibling paths**: `substrate-host` and
+   `substrate-wire` for confinement, and the `b10x-mcp-*` client crates for outbound MCP protocol,
+   transport and local credential mechanics. A path into a sibling checkout builds against
+   whatever is checked out there, and `--locked` cannot lock it. Harness retains the authority in
+   both cases: the substrate crossing is argued in `crates/harness-substrate/src/embedded.rs`; MCP
+   discovery grants nothing until `crates/harness-mcp` intersects it with a locally reviewed,
+   digest-pinned Harness profile.
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
    byte lives in a wire crate. It defines the credential *types* — `Bearer`, zeroized on drop, and
    the `StaticBearer` a caller may hold for a process lifetime — but reads no credential from

@@ -35,4 +35,7 @@ sha2 = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+b10x-mcp-config = { workspace = true }
+b10x-mcp-testkit = { git = "https://github.com/beyond10x/mcp", rev = "58474c8319a833c9506068bd3d544a21b3417b12" }
+b10x-mcp-types = { workspace = true }
 tempfile = { workspace = true }

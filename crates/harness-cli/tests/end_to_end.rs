@@ -5,9 +5,14 @@
 //! `b10x-harness run` works.
 
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -26,6 +31,12 @@ impl Fixture {
     /// The same fixture, pointed at the second wire's emulator.
     fn messages(scenario: &str) -> Self {
         Self::of("harness-messages", "fake_messages.py", scenario)
+    }
+
+    /// Rust-only provider endpoint used by the outbound MCP composition tests.
+    fn mcp_provider() -> Self {
+        let (child, base_url) = controlled_endpoint("provider");
+        Self { child, base_url }
     }
 
     fn of(crate_name: &str, script: &str, scenario: &str) -> Self {
@@ -52,6 +63,132 @@ impl Fixture {
             base_url: ready["base_url"].as_str().expect("a base url").to_owned(),
             child,
         }
+    }
+}
+
+struct ControlledMcp {
+    child: Child,
+    url: String,
+}
+
+impl ControlledMcp {
+    fn http() -> Self {
+        let (child, url) = controlled_endpoint("http");
+        Self { child, url }
+    }
+}
+
+impl Drop for ControlledMcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn controlled_endpoint(mode: &str) -> (Child, String) {
+    let mut child = Command::new(controlled_fixture_binary())
+        .arg(mode)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("the Rust controlled endpoint starts");
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().expect("piped stdout"))
+        .read_line(&mut line)
+        .expect("the controlled endpoint announces its address");
+    let ready: Value = serde_json::from_str(&line).expect("the announcement is JSON");
+    let url = ready["url"].as_str().expect("an endpoint URL").to_owned();
+    (child, url)
+}
+
+fn controlled_fixture_binary() -> &'static Path {
+    static BINARY: OnceLock<PathBuf> = OnceLock::new();
+    BINARY
+        .get_or_init(|| {
+            let source =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_endpoint.rs");
+            let directory = tempfile::tempdir()
+                .expect("a fixture build directory")
+                .keep();
+            let binary = directory.join("b10x-harness-mcp-endpoint");
+            let output = Command::new("rustc")
+                .args(["--edition=2024", "-C", "debuginfo=0", "-o"])
+                .arg(&binary)
+                .arg(&source)
+                .output()
+                .expect("the workspace Rust compiler runs");
+            assert!(
+                output.status.success(),
+                "controlled endpoint compiles: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            binary
+        })
+        .as_path()
+}
+
+struct McpFiles {
+    directory: tempfile::TempDir,
+    registry: PathBuf,
+    profile: PathBuf,
+}
+
+impl McpFiles {
+    fn new(connection: &str, registry_document: &str, network: bool) -> Self {
+        let directory = tempfile::tempdir().expect("an MCP configuration directory");
+        let registry = directory.path().join("mcp.toml");
+        fs::write(&registry, registry_document).expect("write MCP registry");
+        let registry_sha256 = b10x_mcp_config::Registry::parse(registry_document)
+            .expect("the fixture registry is valid")
+            .sha256()
+            .expect("hash fixture registry");
+        let snapshot_sha256 = b10x_mcp_testkit::synthetic_snapshot(connection)
+            .expect("build the fixture snapshot")
+            .sha256;
+        let effects = if network {
+            r#"["read", "network"]"#
+        } else {
+            r#"["read"]"#
+        };
+        let access = if network {
+            r#"["network", "secret"]"#
+        } else {
+            "[]"
+        };
+        let subject = if network {
+            r#"{ kind = "host", value = "127.0.0.1" }"#
+        } else {
+            r#"{ kind = "process", value = "b10x-harness-mcp-endpoint" }"#
+        };
+        let profile_document = format!(
+            r#"connection = "{connection}"
+registry-sha256 = "{registry_sha256}"
+snapshot-sha256 = "{snapshot_sha256}"
+
+[[tools]]
+remote = "read_issue"
+publish = "mcp_fixture_read_issue"
+description = "Read one issue from the controlled MCP endpoint"
+subjects = [{subject}]
+
+[tools.envelope]
+effects = {effects}
+risk = "low"
+idempotency = "idempotent"
+access = {access}
+"#
+        );
+        let profile = directory.path().join("profile.toml");
+        fs::write(&profile, profile_document).expect("write MCP profile");
+        Self {
+            directory,
+            registry,
+            profile,
+        }
+    }
+
+    fn state_root(&self) -> PathBuf {
+        self.directory.path().join("state")
     }
 }
 
@@ -121,6 +258,145 @@ fn run_against(fixture: &Fixture, extra: &[&str], workspace: &Path) -> Output {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
+}
+
+fn run_against_mcp(fixture: &Fixture, files: &McpFiles, workspace: &Path) -> Output {
+    let output = Command::new(BINARY)
+        .args([
+            "run",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--api-key-env",
+            "B10X_HARNESS_TEST_KEY",
+            "--no-session",
+            "--json",
+            "--input",
+            "read controlled issue ISSUE-7",
+            "--mcp-profile",
+            files.profile.to_str().expect("UTF-8 profile path"),
+            "--mcp-registry",
+            files.registry.to_str().expect("UTF-8 registry path"),
+        ])
+        .arg("--workspace")
+        .arg(workspace)
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .env("XDG_STATE_HOME", files.state_root())
+        .output()
+        .expect("the binary runs with an MCP profile");
+    Output {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+fn assert_mcp_run(output: &Output, connection: &str) {
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(output);
+    let started = events
+        .iter()
+        .find(|event| event["kind"] == "started")
+        .expect("a started event");
+    assert_eq!(started["mcp"][0]["connection"], connection);
+    assert_eq!(
+        started["mcp"][0]["protocol_version"],
+        b10x_mcp_types::CURRENT_PROTOCOL_VERSION
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["kind"] == "tool-requested" && event["name"] == "mcp_fixture_read_issue"
+        }),
+        "the provider requested the published MCP tool: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["kind"] == "tool-completed"
+                && event["call_id"] == "call_b10x_001"
+                && event["failed"] == false
+        }),
+        "the MCP result returned through the ordinary loop: {events:?}"
+    );
+}
+
+#[test]
+fn outbound_mcp_runs_end_to_end_over_stdio() {
+    let provider = Fixture::mcp_provider();
+    let workspace = workspace();
+    let program = controlled_fixture_binary().to_string_lossy();
+    let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let registry = format!(
+        r#"[connections.stdio_fixture]
+transport = "stdio"
+program = {program:?}
+args = ["stdio"]
+cwd = {:?}
+"#,
+        cwd.to_string_lossy()
+    );
+    let files = McpFiles::new("stdio_fixture", &registry, false);
+
+    let output = run_against_mcp(&provider, &files, workspace.path());
+
+    assert_mcp_run(&output, "stdio_fixture");
+}
+
+#[test]
+fn outbound_mcp_runs_end_to_end_over_streamable_http_with_oauth() {
+    let provider = Fixture::mcp_provider();
+    let mcp = ControlledMcp::http();
+    let workspace = workspace();
+    let registry = format!(
+        r#"[connections.http_fixture]
+transport = "http"
+url = {:?}
+
+[connections.http_fixture.auth]
+kind = "o-auth"
+resource-url = {:?}
+redirect-uri = "http://127.0.0.1:9/callback"
+client-id = "fixture-client"
+scopes = ["mcp.read"]
+"#,
+        mcp.url, mcp.url
+    );
+    let files = McpFiles::new("http_fixture", &registry, true);
+    let credentials = files.state_root().join("b10x/mcp/oauth/http_fixture.json");
+    fs::create_dir_all(credentials.parent().expect("OAuth state parent"))
+        .expect("create private OAuth state directory");
+    let received_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs();
+    let document = serde_json::json!({
+        "resource": mcp.url,
+        "credentials": {
+            "client_id": "fixture-client",
+            "token_response": {
+                "access_token": "fixture-oauth-access-token",
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "refresh_token": "fixture-refresh-token"
+            },
+            "granted_scopes": ["mcp.read"],
+            "token_received_at": received_at,
+            "issuer": null
+        }
+    });
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(&credentials)
+        .expect("create OAuth credentials");
+    serde_json::to_writer(&mut file, &document).expect("write OAuth credentials");
+    file.flush().expect("flush OAuth credentials");
+
+    let output = run_against_mcp(&provider, &files, workspace.path());
+
+    assert_mcp_run(&output, "http_fixture");
 }
 
 #[test]

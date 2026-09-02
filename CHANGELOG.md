@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Outbound MCP now has `provider_emulated` end-to-end evidence through the shipped binary for both
+  stdio and Streamable HTTP with OAuth discovery and credential custody. The Rust-only controlled
+  endpoints exercise frozen discovery, reviewed publication, the ordinary tool-call gate and the
+  returned result over real pipes and sockets.
+
 ## [0.11.0] — 2026-09-02
 
 ### Added

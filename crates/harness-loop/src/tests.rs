@@ -747,6 +747,224 @@ fn a_tool_needing_approval_runs_once_a_person_says_yes() {
     );
 }
 
+struct DeferApproval(&'static str);
+
+impl ApprovalPort for DeferApproval {
+    fn decide(&mut self, _: &ToolCall, _: &ToolSpec) -> ApprovalDecision {
+        ApprovalDecision::deferred(self.0)
+    }
+}
+
+#[test]
+fn a_deferred_approval_serializes_and_resumes_on_fresh_ports() {
+    let specs = vec![
+        spec("fs.write", Approval::Required),
+        spec("workspace_read", Approval::NotRequired),
+    ];
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[
+        ("call-1", "fs.write", json!({"path": "a"})),
+        ("call-2", "workspace_read", json!({"path": "a"})),
+    ]))]);
+    let mut first_tools = ScriptedTools::new(specs.clone());
+    let mut defer = DeferApproval("approval-1");
+    let mut first_sink = VecLoopSink::new();
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut first_sink)
+    .expect("deferral is a suspended outcome");
+
+    assert_eq!(
+        suspended.stop,
+        LoopStop::AwaitingApproval {
+            checkpoint_id: "approval-1".to_owned()
+        }
+    );
+    assert!(first_tools.calls.is_empty(), "nothing runs before approval");
+    assert!(
+        !first_sink
+            .events()
+            .iter()
+            .any(|event| matches!(event, LoopEvent::Finished { .. })),
+        "a suspension is not a terminal finish"
+    );
+    let encoded = serde_json::to_vec(
+        suspended
+            .checkpoint
+            .as_ref()
+            .expect("a suspended outcome carries its continuation"),
+    )
+    .expect("checkpoint serializes");
+    let checkpoint: ApprovalCheckpoint =
+        serde_json::from_slice(&encoded).expect("checkpoint survives a process boundary");
+    assert_eq!(checkpoint.id(), "approval-1");
+    assert_eq!(checkpoint.call().call_id.as_str(), "call-1");
+    assert_eq!(checkpoint.invoked().name.as_str(), "fs.write");
+
+    let mut resumed_model = ScriptedModel::new(vec![Ok(answer("done"))]);
+    let mut resumed_tools = ScriptedTools::new(specs);
+    let mut no_new_approval = DenyAll;
+    let mut resumed_sink = VecLoopSink::new();
+    let completed = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut no_new_approval,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .resume_approval(checkpoint, ApprovalDecision::Approved, &mut resumed_sink)
+    .expect("a fresh worker resumes the exact call");
+
+    assert_eq!(completed.stop, LoopStop::Completed);
+    assert_eq!(completed.turns, 2, "accounting continues across the pause");
+    assert!(completed.checkpoint.is_none());
+    assert_eq!(
+        resumed_tools
+            .calls
+            .iter()
+            .map(|call| call.call_id.as_str())
+            .collect::<Vec<_>>(),
+        ["call-1", "call-2"],
+        "the approved call runs once, then the untouched tail keeps model order"
+    );
+    assert_eq!(
+        approvals(&resumed_sink),
+        vec!["call-1 approved=true"],
+        "resuming resolves the existing request instead of asking again"
+    );
+}
+
+#[test]
+fn a_deferred_denial_resumes_without_running_the_effect() {
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut first_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval("approval-2");
+    let mut first_sink = VecLoopSink::new();
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut first_sink)
+    .expect("suspends");
+
+    let mut resumed_model = ScriptedModel::new(vec![Ok(answer("understood"))]);
+    let mut resumed_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut no_new_approval = DenyAll;
+    let mut sink = VecLoopSink::new();
+    let completed = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut no_new_approval,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .resume_approval(
+        suspended.checkpoint.expect("checkpoint"),
+        ApprovalDecision::denied("not this change"),
+        &mut sink,
+    )
+    .expect("denial is delivered to the model");
+
+    assert!(resumed_tools.calls.is_empty());
+    let told = results(&completed);
+    assert_eq!(told.len(), 1);
+    assert!(told[0].0 && told[0].1.contains("not this change"));
+    assert_eq!(approvals(&sink), vec!["call-1 approved=false"]);
+}
+
+#[test]
+fn a_changed_tool_contract_invalidates_a_deferred_approval() {
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut first_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval("approval-3");
+    let mut first_sink = VecLoopSink::new();
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut first_sink)
+    .expect("suspends");
+
+    let mut changed = spec("fs.write", Approval::Required);
+    changed.description = "a different resolved contract".to_owned();
+    let mut resumed_model = ScriptedModel::new(vec![Ok(answer("did not run"))]);
+    let mut resumed_tools = ScriptedTools::new(vec![changed]);
+    let mut no_new_approval = DenyAll;
+    let mut sink = VecLoopSink::new();
+    let completed = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut no_new_approval,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .resume_approval(
+        suspended.checkpoint.expect("checkpoint"),
+        ApprovalDecision::Approved,
+        &mut sink,
+    )
+    .expect("the model receives a refusal");
+
+    assert!(resumed_tools.calls.is_empty(), "stale authority cannot run");
+    let told = results(&completed);
+    assert_eq!(told.len(), 1);
+    assert!(told[0].0 && told[0].1.contains("exact call"));
+    assert_eq!(approvals(&sink), vec!["call-1 approved=false"]);
+}
+
+#[test]
+fn a_changed_run_configuration_cannot_resume_a_checkpoint() {
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut first_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval("approval-4");
+    let mut first_sink = VecLoopSink::new();
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut first_sink)
+    .expect("suspends");
+
+    let mut resumed_model = ScriptedModel::new(vec![Ok(answer("must not be reached"))]);
+    let mut resumed_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut approvals = DenyAll;
+    let mut sink = VecLoopSink::new();
+    let error = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut approvals,
+        LoopConfig::new("different-model", "be useful"),
+    )
+    .resume_approval(
+        suspended.checkpoint.expect("checkpoint"),
+        ApprovalDecision::Approved,
+        &mut sink,
+    )
+    .expect_err("a checkpoint cannot be rebound to another run configuration");
+
+    assert!(matches!(error, LoopError::Config(reason) if reason.contains("configuration changed")));
+    assert!(resumed_model.seen.is_empty());
+    assert!(resumed_tools.calls.is_empty());
+}
+
 #[test]
 fn approval_is_never_asked_for_a_tool_that_does_not_need_it() {
     let mut harness = Harness::new(

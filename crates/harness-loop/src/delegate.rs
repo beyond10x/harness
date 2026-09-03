@@ -10,6 +10,7 @@
 //! Design: `docs/design/0002-sub-agents-structured-output-hooks.md` § 2.
 
 use harness_wire::{Approval, Envelope, Idempotency, Risk, ToolName, ToolSpec};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// The tool name delegation is published under when the caller names none.
@@ -87,7 +88,8 @@ pub const DELEGATE_PARALLEL_NOTE: &str = " Several of these calls in one turn ru
     each other, so no task may depend on another's result.";
 
 /// Whether, and how, a run may delegate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Delegation {
     /// The tool the model calls to delegate.
     pub name: ToolName,

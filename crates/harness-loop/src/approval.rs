@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ApprovalDecision {
     Approved,
-    Denied { reason: String },
+    Denied {
+        reason: String,
+    },
+    /// Suspend at this exact call and let the embedder persist the returned checkpoint.
+    Deferred {
+        checkpoint_id: String,
+    },
 }
 
 impl ApprovalDecision {
@@ -19,12 +25,20 @@ impl ApprovalDecision {
     pub fn is_approved(&self) -> bool {
         matches!(self, Self::Approved)
     }
+
+    /// Requests a restart-safe pause identified by an embedder-minted opaque id.
+    pub fn deferred(checkpoint_id: impl Into<String>) -> Self {
+        Self::Deferred {
+            checkpoint_id: checkpoint_id.into(),
+        }
+    }
 }
 
 /// Who decides, when a published tool says a person must.
 ///
-/// Because the loop is ours, this is an ordinary blocking call rather than a protocol round trip.
-/// The loop stops until it returns, so a decision cannot arrive after the effect.
+/// Interactive callers may decide synchronously. Hosted callers return
+/// [`ApprovalDecision::Deferred`], persist the loop's checkpoint, and resume it later with an exact
+/// approval or denial; in neither shape can a decision arrive after the effect.
 pub trait ApprovalPort {
     fn decide(&mut self, call: &ToolCall, spec: &ToolSpec) -> ApprovalDecision;
 }

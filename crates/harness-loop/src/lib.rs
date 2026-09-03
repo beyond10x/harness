@@ -112,7 +112,7 @@ pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
 /// `stop-hook-exhausted` and the run ends as the model asked.
 pub const MAX_STOP_HOOK_CONTINUES: u32 = 3;
 
-/// Why the loop stopped. Every variant is a real terminal state, not a failure.
+/// Why the loop stopped or suspended. Every variant is a real state, not an exception.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum LoopStop {
@@ -146,6 +146,10 @@ pub enum LoopStop {
     },
     Cancelled {
         reason: String,
+    },
+    /// The run is suspended before an exact effect until its checkpoint is resumed.
+    AwaitingApproval {
+        checkpoint_id: String,
     },
     /// The provider ended a turn early for a reason it named.
     ProviderIncomplete {
@@ -193,12 +197,49 @@ pub struct LoopOutcome {
     /// [`LoopStop::Unstructured`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured: Option<serde_json::Value>,
+    /// Restart-safe continuation data when `stop` is [`LoopStop::AwaitingApproval`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<ApprovalCheckpoint>,
 }
 
 impl LoopOutcome {
     /// Returns the summed reported token counts, or `None` when no turn reported any.
     pub fn total_tokens(&self) -> Option<(u64, u64)> {
         total_tokens(&self.usage)
+    }
+}
+
+/// Complete continuation captured immediately before one approval-gated tool effect.
+///
+/// Serialize this value durably and pass it back to [`AgentLoop::resume_approval`]. It contains
+/// conversation and accounting state but no credential, service client, or implementation port.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalCheckpoint {
+    format: String,
+    checkpoint_id: String,
+    config: LoopConfig,
+    call: ToolCall,
+    invoked: ToolSpec,
+    remaining_calls: Vec<ToolCall>,
+    state: RunState,
+    remaining_duration_ms: Option<u64>,
+}
+
+impl ApprovalCheckpoint {
+    /// Opaque identity minted by the approval port and bound to this exact continuation.
+    pub fn id(&self) -> &str {
+        &self.checkpoint_id
+    }
+
+    /// Exact call awaiting a human decision.
+    pub fn call(&self) -> &ToolCall {
+        &self.call
+    }
+
+    /// Exact resolved tool contract the decision covers.
+    pub fn invoked(&self) -> &ToolSpec {
+        &self.invoked
     }
 }
 
@@ -287,7 +328,8 @@ pub type LoopCancel = harness_wire::Cancel;
 
 // No `Eq`: sampling carries floating-point values, and two temperatures that are equal by `Eq`
 // would be a stronger claim than the wire can make about them.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoopConfig {
     /// Exact model identifier sent on every turn.
     pub model: String,
@@ -628,6 +670,8 @@ fn terminal_stop(reason: StopReason) -> LoopStop {
 }
 
 /// Everything one run accumulates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RunState {
     items: Vec<Item>,
     usage: Vec<Usage>,
@@ -796,7 +840,7 @@ impl RunState {
         }
     }
 
-    fn into_outcome(self, stop: LoopStop) -> LoopOutcome {
+    fn into_outcome(self, stop: LoopStop, checkpoint: Option<ApprovalCheckpoint>) -> LoopOutcome {
         LoopOutcome {
             stop,
             text: self.text,
@@ -805,6 +849,7 @@ impl RunState {
             usage: self.usage,
             cost_micro_usd: self.cost_total,
             structured: self.structured,
+            checkpoint,
         }
     }
 }
@@ -1714,6 +1759,16 @@ pub struct AgentLoop<'a> {
     context_revision: Option<String>,
     inventory_revision: Option<String>,
     refreshed_for_turn: Option<u64>,
+    deferred: Option<DeferredApproval>,
+    resumed_decision: Option<(CallId, ToolSpec, ApprovalDecision)>,
+}
+
+struct DeferredApproval {
+    checkpoint_id: String,
+    call: ToolCall,
+    invoked: ToolSpec,
+    remaining_calls: Vec<ToolCall>,
+    remaining_duration_ms: Option<u64>,
 }
 
 /// Projects the wire's live stream into the loop's own event stream.
@@ -1903,6 +1958,8 @@ impl<'a> AgentLoop<'a> {
             context_revision: None,
             inventory_revision: None,
             refreshed_for_turn: None,
+            deferred: None,
+            resumed_decision: None,
         }
     }
 
@@ -1957,7 +2014,15 @@ impl<'a> AgentLoop<'a> {
             .budget
             .max_duration_ms
             .map(|millis| Instant::now() + Duration::from_millis(millis));
-        let result = self.invoke(call, deadline, sink);
+        let mut result = self.invoke(call, deadline, sink);
+        if self.deferred.take().is_some() {
+            // `call` has nowhere to return a continuation. Keep the effect behind the gate and
+            // clear the marker so a later run on the same loop cannot inherit this call.
+            result = ToolOutcome::failed(
+                "the approval was deferred, but one-call execution cannot return a durable \
+                 checkpoint; use `run` or `run_in` for hosted approval",
+            );
+        }
         completed(call, &result, sink);
         result
     }
@@ -2026,7 +2091,8 @@ impl<'a> AgentLoop<'a> {
         *spend = state.ledger();
         match ended {
             Ok(stop) => {
-                let outcome = state.into_outcome(stop);
+                let checkpoint = self.take_checkpoint(&state);
+                let outcome = state.into_outcome(stop, checkpoint);
                 items.clone_from(&outcome.items);
                 Ok(outcome)
             }
@@ -2035,6 +2101,79 @@ impl<'a> AgentLoop<'a> {
                 Err(error)
             }
         }
+    }
+
+    /// Continues a run suspended by an exact approval checkpoint.
+    ///
+    /// The attached model and tool ports are fresh process resources; all replayable conversation
+    /// and accounting state comes from `checkpoint`. The current dynamic inventory is refreshed
+    /// before the approved effect and the tool port re-resolves the exact structural spec, so a
+    /// revoked or changed capability fails closed even after a human approved it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoopError::Config`] for a malformed checkpoint or another deferral as the supplied
+    /// resolution, and the ordinary budget, environment, or wire errors for resumed execution.
+    pub fn resume_approval(
+        &mut self,
+        checkpoint: ApprovalCheckpoint,
+        decision: ApprovalDecision,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
+        if checkpoint.format != "harness.approval-checkpoint/1"
+            || checkpoint.checkpoint_id.trim().is_empty()
+        {
+            return Err(LoopError::Config(
+                "the approval checkpoint is malformed".to_owned(),
+            ));
+        }
+        if checkpoint.config != self.config {
+            return Err(LoopError::Config(
+                "the run configuration changed after the approval checkpoint".to_owned(),
+            ));
+        }
+        if matches!(decision, ApprovalDecision::Deferred { .. }) {
+            return Err(LoopError::Config(
+                "a checkpoint must be resumed with an approval or denial".to_owned(),
+            ));
+        }
+        self.check_owned_names()?;
+        let priced = self
+            .config
+            .prices
+            .as_ref()
+            .is_some_and(|card| card.rates_for(&self.config.model).is_some());
+        self.config.budget.validate(priced)?;
+
+        let ApprovalCheckpoint {
+            call,
+            invoked,
+            remaining_calls,
+            mut state,
+            remaining_duration_ms,
+            ..
+        } = checkpoint;
+        let deadline = remaining_duration_ms
+            .map(Duration::from_millis)
+            .map(|remaining| Instant::now() + remaining);
+        self.refresh_environment(state.turns.saturating_add(1), sink)?;
+        self.resumed_decision = Some((call.call_id.clone(), invoked, decision));
+        let mut calls = Vec::with_capacity(remaining_calls.len().saturating_add(1));
+        calls.push(call);
+        calls.extend(remaining_calls);
+
+        let stop = match self.run_calls(&calls, &mut state, deadline, sink) {
+            Some(stop) => stop,
+            None => self.drive(&mut state, deadline, sink)?,
+        };
+        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
+            sink.emit(LoopEvent::Finished {
+                stop: stop.clone(),
+                turns: state.turns,
+            });
+        }
+        let checkpoint = self.take_checkpoint(&state);
+        Ok(state.into_outcome(stop, checkpoint))
     }
 
     /// One whole run over a [`RunState`] the caller keeps hold of, ending in `Finished`.
@@ -2051,11 +2190,27 @@ impl<'a> AgentLoop<'a> {
         sink: &mut dyn LoopSink,
     ) -> Result<LoopStop, LoopError> {
         let stop = self.drive_run(state, sink)?;
-        sink.emit(LoopEvent::Finished {
-            stop: stop.clone(),
-            turns: state.turns,
-        });
+        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
+            sink.emit(LoopEvent::Finished {
+                stop: stop.clone(),
+                turns: state.turns,
+            });
+        }
         Ok(stop)
+    }
+
+    fn take_checkpoint(&mut self, state: &RunState) -> Option<ApprovalCheckpoint> {
+        let deferred = self.deferred.take()?;
+        Some(ApprovalCheckpoint {
+            format: "harness.approval-checkpoint/1".to_owned(),
+            checkpoint_id: deferred.checkpoint_id,
+            config: self.config.clone(),
+            call: deferred.call,
+            invoked: deferred.invoked,
+            remaining_calls: deferred.remaining_calls,
+            state: state.clone(),
+            remaining_duration_ms: deferred.remaining_duration_ms,
+        })
     }
 
     /// One run, from the budget check to the stop, over a state the caller owns.
@@ -3020,6 +3175,12 @@ impl<'a> AgentLoop<'a> {
 
             sink.emit(requested(call, Some(self.tools)));
             let result = self.invoke(call, deadline, sink);
+            if let Some(deferred) = self.deferred.as_mut() {
+                deferred.remaining_calls = calls[next + 1..].to_vec();
+                return Some(LoopStop::AwaitingApproval {
+                    checkpoint_id: deferred.checkpoint_id.clone(),
+                });
+            }
             complete(call, result, state, sink);
             next += 1;
         }
@@ -3925,6 +4086,20 @@ impl<'a> AgentLoop<'a> {
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> ToolOutcome {
+        // Consume a resumed decision even when current authority now refuses the call. Leaving it
+        // in the loop would let it drift to a later call after revocation.
+        let resumed_decision = self.resumed_decision.take();
+        if let Some((expected_call_id, _, _)) = resumed_decision.as_ref()
+            && expected_call_id != &call.call_id
+        {
+            sink.emit(LoopEvent::ApprovalResolved {
+                call_id: call.call_id.clone(),
+                approved: false,
+            });
+            return ToolOutcome::failed(
+                "the approval checkpoint does not identify this exact pending call",
+            );
+        }
         // **Narrowing is checked here and not only in what was published.** `self.tools.invoked`
         // below answers for a call the *port* recognises, and it does not know this run was
         // narrowed — so without this guard a tool filtered out of the toolset was still reachable
@@ -3940,6 +4115,12 @@ impl<'a> AgentLoop<'a> {
         // a hook's `tools` filter — and the verb itself comes back a route, admitted whatever the
         // narrowing says because it is the only way to the entries that were granted.
         if let Some(invoked) = self.unadmitted(call) {
+            if resumed_decision.is_some() {
+                sink.emit(LoopEvent::ApprovalResolved {
+                    call_id: call.call_id.clone(),
+                    approved: false,
+                });
+            }
             return refuse_unadmitted(&invoked, sink);
         }
         let published = self.published(&call.name);
@@ -3953,6 +4134,12 @@ impl<'a> AgentLoop<'a> {
             (_, Some(invoked)) => invoked,
             (Some(spec), None) => spec.clone(),
             (None, None) => {
+                if resumed_decision.is_some() {
+                    sink.emit(LoopEvent::ApprovalResolved {
+                        call_id: call.call_id.clone(),
+                        approved: false,
+                    });
+                }
                 sink.emit(LoopEvent::Warning {
                     code: "unpublished-tool".to_owned(),
                     message: format!(
@@ -4003,20 +4190,15 @@ impl<'a> AgentLoop<'a> {
             ));
         }
 
-        if self.asks(published.as_ref(), &invoked) {
-            sink.emit(LoopEvent::ApprovalRequired {
-                call_id: call.call_id.clone(),
-                name: invoked.name.clone(),
-            });
-            let decision = self.approvals.decide(call, &invoked);
-            sink.emit(LoopEvent::ApprovalResolved {
-                call_id: call.call_id.clone(),
-                approved: decision.is_approved(),
-            });
-            if let ApprovalDecision::Denied { reason } = decision {
-                let name = refused_name(call, &invoked);
-                return ToolOutcome::failed(format!("{name} was not approved: {reason}"));
-            }
+        if let Some(refusal) = self.approval_gate(
+            call,
+            published.as_ref(),
+            &invoked,
+            deadline,
+            resumed_decision,
+            sink,
+        ) {
+            return refusal;
         }
 
         if let Some(refusal) = self.before_call_hook(call, &invoked, sink) {
@@ -4030,6 +4212,112 @@ impl<'a> AgentLoop<'a> {
         let result = self.tools.call_within(call, remaining);
         let result = within_result_bound(call, result);
         self.after_call_hook(call, &invoked, result, sink)
+    }
+
+    /// Resolves the approval stage, including a fresh worker's exact pending decision.
+    fn approval_gate(
+        &mut self,
+        call: &ToolCall,
+        published: Option<&ToolSpec>,
+        invoked: &ToolSpec,
+        deadline: Option<Instant>,
+        resumed: Option<(CallId, ToolSpec, ApprovalDecision)>,
+        sink: &mut dyn LoopSink,
+    ) -> Option<ToolOutcome> {
+        if let Some((call_id, expected, decision)) = resumed {
+            if call_id != call.call_id || expected != *invoked {
+                sink.emit(LoopEvent::ApprovalResolved {
+                    call_id: call.call_id.clone(),
+                    approved: false,
+                });
+                return Some(ToolOutcome::failed(format!(
+                    "`{}` changed or no longer identifies the exact call that was approved",
+                    invoked.name
+                )));
+            }
+            sink.emit(LoopEvent::ApprovalResolved {
+                call_id: call.call_id.clone(),
+                approved: decision.is_approved(),
+            });
+            return match decision {
+                ApprovalDecision::Approved => None,
+                ApprovalDecision::Denied { reason } => {
+                    let name = refused_name(call, invoked);
+                    Some(ToolOutcome::failed(format!(
+                        "{name} was not approved: {reason}"
+                    )))
+                }
+                ApprovalDecision::Deferred { .. } => unreachable!(
+                    "resume_approval rejects a second deferral before executing the checkpoint"
+                ),
+            };
+        }
+        if !self.asks(published, invoked) {
+            return None;
+        }
+
+        sink.emit(LoopEvent::ApprovalRequired {
+            call_id: call.call_id.clone(),
+            name: invoked.name.clone(),
+        });
+        match self.approvals.decide(call, invoked) {
+            ApprovalDecision::Approved => {
+                sink.emit(LoopEvent::ApprovalResolved {
+                    call_id: call.call_id.clone(),
+                    approved: true,
+                });
+                None
+            }
+            ApprovalDecision::Denied { reason } => {
+                sink.emit(LoopEvent::ApprovalResolved {
+                    call_id: call.call_id.clone(),
+                    approved: false,
+                });
+                let name = refused_name(call, invoked);
+                Some(ToolOutcome::failed(format!(
+                    "{name} was not approved: {reason}"
+                )))
+            }
+            ApprovalDecision::Deferred { checkpoint_id } => {
+                if self.nested {
+                    sink.emit(LoopEvent::ApprovalResolved {
+                        call_id: call.call_id.clone(),
+                        approved: false,
+                    });
+                    return Some(ToolOutcome::failed(
+                        "an in-process delegate cannot carry a durable approval checkpoint; \
+                         run hosted delegated work as its own restricted attempt",
+                    ));
+                }
+                if checkpoint_id.trim().is_empty() {
+                    sink.emit(LoopEvent::ApprovalResolved {
+                        call_id: call.call_id.clone(),
+                        approved: false,
+                    });
+                    return Some(ToolOutcome::failed(
+                        "the approval port returned an empty checkpoint identity",
+                    ));
+                }
+                let remaining_duration_ms = deadline.map(|deadline| {
+                    u64::try_from(
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis(),
+                    )
+                    .unwrap_or(u64::MAX)
+                });
+                self.deferred = Some(DeferredApproval {
+                    checkpoint_id,
+                    call: call.clone(),
+                    invoked: invoked.clone(),
+                    remaining_calls: Vec::new(),
+                    remaining_duration_ms,
+                });
+                Some(ToolOutcome::failed(
+                    "the call is suspended at a durable approval checkpoint",
+                ))
+            }
+        }
     }
 
     /// The `before-call` hook (design 0002 § 3): the operator's last word before an effect.

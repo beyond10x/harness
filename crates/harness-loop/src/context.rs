@@ -60,7 +60,8 @@ pub enum ContextCacheClass {
     Turn,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContextLayer {
     pub id: String,
     pub kind: ContextKind,
@@ -118,7 +119,8 @@ pub struct ContextManifestEntry {
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContextPackage {
     layers: Vec<ContextLayer>,
 }

@@ -544,6 +544,7 @@ mod tests {
             usage,
             cost_micro_usd: cost,
             structured: None,
+            checkpoint: None,
         }
     }
 

@@ -39,7 +39,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `openai-responses` wire | implemented, streaming, pinned by contract |
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
-| hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; service access remains in the embedder |
+| hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; serializable approval checkpoints resume on fresh workers before the exact effect; service access and durable storage remain in the embedder |
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
 | command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |

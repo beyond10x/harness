@@ -13,6 +13,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   exact current tool inventory before every model turn. Dynamic inventories are structural subsets
   of the attached port's reachable specifications, can only narrow authority, and emit body-free
   `context-changed` and `inventory-changed` events carrying their durable revisions.
+- Hosted approvers may return `ApprovalDecision::Deferred` to suspend immediately before an exact
+  tool effect. The resulting serializable `ApprovalCheckpoint` carries conversation, accounting,
+  the pending call and its resolved tool contract—but no credential or implementation client—and
+  can be resumed on a fresh worker with an explicit approval or denial. Resumption refreshes the
+  current inventory and rejects revoked or structurally changed tools before any effect.
 
 ### Changed
 

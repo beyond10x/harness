@@ -646,6 +646,7 @@ fn terminal_status(stop: &LoopStop) -> &'static str {
         | LoopStop::MaxCost { .. }
         | LoopStop::BudgetUnobservable { .. }
         | LoopStop::Deadline { .. }
+        | LoopStop::AwaitingApproval { .. }
         | LoopStop::ProviderIncomplete { .. }
         | LoopStop::Unstructured { .. } => "failed",
     }

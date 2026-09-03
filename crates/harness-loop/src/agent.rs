@@ -55,9 +55,11 @@
 use std::fmt::Write as _;
 
 use crate::Withheld;
+use serde::{Deserialize, Serialize};
 
 /// One agent: what it is called, what it is for, what it may touch, and what it is told.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Agent {
     /// The name the model picks it by, from the document's own frontmatter.
     pub name: String,
@@ -75,7 +77,8 @@ pub struct Agent {
 }
 
 /// The agents a run may hand work to.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Agents {
     agents: Vec<Agent>,
 }

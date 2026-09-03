@@ -30,6 +30,7 @@
 use std::fmt::Write as _;
 
 use harness_wire::{Approval, Effect, Envelope, Idempotency, Risk, ToolName, ToolSpec};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// The tool name skills are published under when the caller names none.
@@ -43,7 +44,8 @@ pub const SKILL_DESCRIPTION: &str = "Load one of this run's skills: a set of ins
     tells you things you cannot infer from the workspace.";
 
 /// One skill: what it is called, what it is for, and what it says.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Skill {
     /// The name the model calls it by, from the document's own frontmatter.
     pub name: String,
@@ -58,7 +60,8 @@ pub struct Skill {
 }
 
 /// The skills a run may load, and the tool it loads them with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Skills {
     /// The tool the model calls.
     pub name: ToolName,

@@ -10,6 +10,7 @@
 //! of `docs/design/0002-sub-agents-structured-output-hooks.md` § 1, behind the same value.
 
 use harness_wire::{Approval, Envelope, Idempotency, Risk, ToolName, ToolSpec};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The tool name a schema is published under when the caller names none.
@@ -30,7 +31,8 @@ pub const DEFAULT_ANSWER_DESCRIPTION: &str = "Finish the task by calling this to
     call in the same turn is refused, and nothing after it is read.";
 
 /// The shape a run's answer must take.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputSchema {
     /// The tool the model calls to answer.
     pub name: ToolName,

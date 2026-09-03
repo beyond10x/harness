@@ -195,6 +195,17 @@ pub enum LoopEvent {
     /// ordinary case and reads correctly as one: unlike the always-written lists on `Started`,
     /// this is an *act*, and an act that did not happen has no empty form.
     CredentialRenewed(CredentialRenewal),
+    /// The actor-specific context used by following turns changed.
+    ContextChanged {
+        revision: String,
+        /// Body-free provenance; prompt bodies never enter the event journal.
+        context: Vec<ContextManifestEntry>,
+    },
+    /// The exact actor-specific tool inventory used by following turns changed.
+    InventoryChanged {
+        revision: String,
+        published_tools: Vec<ToolName>,
+    },
     TurnStarted {
         turn: u64,
     },

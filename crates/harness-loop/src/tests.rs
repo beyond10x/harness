@@ -6569,3 +6569,151 @@ fn a_group_of_delegates_divides_the_runs_remaining_tokens_between_them() {
         );
     }
 }
+
+struct ScriptedEnvironment {
+    snapshots: VecDeque<Result<TurnEnvironment, EnvironmentError>>,
+    requests: Vec<TurnEnvironmentRequest>,
+}
+
+impl TurnEnvironmentProvider for ScriptedEnvironment {
+    fn refresh(
+        &mut self,
+        request: TurnEnvironmentRequest,
+    ) -> Result<TurnEnvironment, EnvironmentError> {
+        self.requests.push(request);
+        self.snapshots
+            .pop_front()
+            .expect("one environment snapshot per model turn")
+    }
+}
+
+fn environment(
+    context_revision: &str,
+    inventory_revision: &str,
+    body: &str,
+    tools: Vec<ToolSpec>,
+) -> TurnEnvironment {
+    TurnEnvironment {
+        context: ContextPackage::new(vec![ContextLayer::new(
+            format!("actor-view.{context_revision}"),
+            ContextKind::ProvidedContext,
+            ContextTrust::Workspace,
+            ContextCacheClass::Turn,
+            body,
+        )]),
+        tools,
+        context_revision: context_revision.to_owned(),
+        inventory_revision: inventory_revision.to_owned(),
+    }
+}
+
+#[test]
+fn actor_context_and_inventory_are_refreshed_before_every_model_turn() {
+    let read = spec("workspace_read", Approval::NotRequired);
+    let write = spec("workspace_write", Approval::NotRequired);
+    let mut model = ScriptedModel::new(vec![
+        Ok(asks_for(&[(
+            "call-1",
+            "workspace_read",
+            json!({"path": "README.md"}),
+        )])),
+        Ok(answer("done")),
+    ]);
+    let mut tools = ScriptedTools::new(vec![read.clone(), write.clone()]);
+    let mut approvals = DenyAll;
+    let mut provider = ScriptedEnvironment {
+        snapshots: VecDeque::from([
+            Ok(environment("ctx-1", "inv-1", "focused README", vec![read])),
+            Ok(environment("ctx-2", "inv-2", "focused diff", vec![write])),
+        ]),
+        requests: Vec::new(),
+    };
+    let mut sink = VecLoopSink::new();
+    let outcome = AgentLoop::new(
+        &mut model,
+        &mut tools,
+        &mut approvals,
+        LoopConfig::new("scripted-model", "standing"),
+    )
+    .with_environment(&mut provider)
+    .run("do the thing", &mut sink)
+    .expect("the dynamically narrowed run completes");
+
+    assert_eq!(outcome.turns, 2);
+    assert_eq!(
+        provider
+            .requests
+            .iter()
+            .map(|request| request.turn)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(model.seen[0].instructions.contains("focused README"));
+    assert!(model.seen[1].instructions.contains("focused diff"));
+    assert_eq!(
+        model.seen[0]
+            .tools
+            .iter()
+            .map(|spec| spec.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["workspace_read"]
+    );
+    assert_eq!(
+        model.seen[1]
+            .tools
+            .iter()
+            .map(|spec| spec.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["workspace_write"]
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| matches!(event, LoopEvent::ContextChanged { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| matches!(event, LoopEvent::InventoryChanged { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn a_dynamic_inventory_cannot_widen_or_redefine_the_attached_port() {
+    let mut model = ScriptedModel::new(vec![Ok(answer("must not be reached"))]);
+    let mut tools = ScriptedTools::new(vec![spec("workspace_read", Approval::NotRequired)]);
+    let mut approvals = DenyAll;
+    let mut redefined = spec("workspace_read", Approval::NotRequired);
+    redefined.description = "weakened alternate contract".to_owned();
+    let mut provider = ScriptedEnvironment {
+        snapshots: VecDeque::from([Ok(environment(
+            "ctx-1",
+            "inv-1",
+            "current",
+            vec![redefined],
+        ))]),
+        requests: Vec::new(),
+    };
+    let error = AgentLoop::new(
+        &mut model,
+        &mut tools,
+        &mut approvals,
+        LoopConfig::new("scripted-model", "standing"),
+    )
+    .with_environment(&mut provider)
+    .run("do the thing", &mut VecLoopSink::new())
+    .expect_err("a changed spec is not the attached tool");
+
+    assert!(matches!(
+        error,
+        LoopError::Environment(EnvironmentError::Invalid(_))
+    ));
+    assert!(
+        model.seen.is_empty(),
+        "the invalid inventory fails before a model request"
+    );
+}

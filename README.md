@@ -39,6 +39,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `openai-responses` wire | implemented, streaming, pinned by contract |
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
+| hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; service access remains in the embedder |
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
 | command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
@@ -46,7 +47,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | substrate confinement, embedded | working, including execution — but `run` has been *published*, not yet *exercised* against a confined process |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
 | live provider | first live run 2026-08-23. It found a real defect on turn 1 that the emulator could not: the whole workspace toolset was named illegally for that wire |
-| embedding | **not started.** Nothing embeds this component yet |
+| embedding | the per-turn context/inventory seam is implemented; production binding remains in the embedding service |
 
 Most evidence is `provider_emulated` and is never promoted to a claim about how a real provider
 behaves. The wire contract pins are still emulator-derived.

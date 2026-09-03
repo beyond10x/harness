@@ -62,6 +62,7 @@ mod approval;
 mod budget;
 mod context;
 mod delegate;
+mod environment;
 mod event;
 mod hook;
 mod parallel;
@@ -92,6 +93,9 @@ pub use context::{
 pub use delegate::{
     DEFAULT_DELEGATE_NAME, DELEGATE_DESCRIPTION, DELEGATE_MAX_PARALLEL, DELEGATE_MAX_TURNS,
     DELEGATE_PARALLEL_NOTE, DELEGATE_PREAMBLE, Delegation, MAX_DELEGATION_DEPTH,
+};
+pub use environment::{
+    EnvironmentError, TurnEnvironment, TurnEnvironmentProvider, TurnEnvironmentRequest,
 };
 pub use event::{
     CredentialRenewal, LoopEvent, LoopSink, McpRef, NullLoopSink, ProfileRef, ToolchainRef,
@@ -263,6 +267,8 @@ pub enum LoopError {
     Budget(#[from] BudgetError),
     #[error("model wire refused: {0}")]
     Wire(#[from] WireError),
+    #[error(transparent)]
+    Environment(#[from] EnvironmentError),
     /// The run as configured could not be described to a provider at all.
     ///
     /// Raised before the first request, so nothing is spent finding out. Today the only cause is a
@@ -1687,6 +1693,8 @@ pub struct AgentLoop<'a> {
     model: &'a mut dyn ModelPort,
     tools: &'a mut dyn ToolPort,
     approvals: &'a mut dyn ApprovalPort,
+    /// Caller-owned current context and inventory. The loop performs no service I/O itself.
+    environment: Option<&'a mut dyn TurnEnvironmentProvider>,
     /// The operator's hooks, when a shell attached any. [`None`] behaves as [`NoHooks`].
     hooks: Option<&'a mut dyn HookPort>,
     config: LoopConfig,
@@ -1698,6 +1706,14 @@ pub struct AgentLoop<'a> {
     /// itself. What it changes is [`AgentLoop::stop_hook`]; the other two hook points fire in a
     /// child exactly as in a parent.
     nested: bool,
+    /// The dynamic context rendered for the next request, after standing instructions.
+    active_instructions: String,
+    /// The exact dynamic subset of the port currently offered to the model.
+    active_specs: Option<Vec<ToolSpec>>,
+    active_context: Vec<ContextManifestEntry>,
+    context_revision: Option<String>,
+    inventory_revision: Option<String>,
+    refreshed_for_turn: Option<u64>,
 }
 
 /// Projects the wire's live stream into the loop's own event stream.
@@ -1870,14 +1886,23 @@ impl<'a> AgentLoop<'a> {
         approvals: &'a mut dyn ApprovalPort,
         config: LoopConfig,
     ) -> Self {
+        let active_instructions = config.instructions.clone();
+        let active_context = config.context.manifest();
         Self {
             model,
             tools,
             approvals,
+            environment: None,
             hooks: None,
             config,
             cancel: LoopCancel::new(),
             nested: false,
+            active_instructions,
+            active_specs: None,
+            active_context,
+            context_revision: None,
+            inventory_revision: None,
+            refreshed_for_turn: None,
         }
     }
 
@@ -1895,6 +1920,16 @@ impl<'a> AgentLoop<'a> {
     #[must_use]
     pub fn with_hooks(mut self, hooks: &'a mut dyn HookPort) -> Self {
         self.hooks = Some(hooks);
+        self
+    }
+
+    /// Refreshes actor-specific context and tools before every model turn.
+    ///
+    /// The provider may only return exact specs already exposed by the attached port. This makes
+    /// dynamic inventory a second narrowing boundary rather than an alternate authority.
+    #[must_use]
+    pub fn with_environment(mut self, environment: &'a mut dyn TurnEnvironmentProvider) -> Self {
+        self.environment = Some(environment);
         self
     }
 
@@ -2051,6 +2086,11 @@ impl<'a> AgentLoop<'a> {
             .max_duration()
             .map(|span| Instant::now() + span);
 
+        // Hosted context is current at the first request too. Doing this before `Started` makes
+        // that event describe what the model will actually be offered, not the static port the
+        // process happened to start with.
+        self.refresh_environment(state.turns.saturating_add(1), sink)?;
+
         // Before `Started`, because it happened before the run: the credential was stale, it was
         // renewed, and somebody's file on disk was rewritten — all of it upstream of the first
         // request. A reader of the record sees the acts in the order they occurred.
@@ -2098,7 +2138,7 @@ impl<'a> AgentLoop<'a> {
                 .map(Agents::names)
                 .unwrap_or_default(),
             profiles: self.config.profiles.clone(),
-            context: self.config.context.manifest(),
+            context: self.active_context.clone(),
             toolchains: self.config.toolchains.clone(),
             mcp: self.config.mcp.clone(),
             credential_source: self.config.credential_source.clone(),
@@ -2106,6 +2146,113 @@ impl<'a> AgentLoop<'a> {
         self.announce_prices(priced, sink);
 
         self.drive(state, deadline, sink)
+    }
+
+    /// Replaces the turn-scoped view with one freshly derived by the caller.
+    ///
+    /// Specifications are compared structurally with the attached port's reachable catalogue.
+    /// Matching only by name would let a provider weaken an envelope or argument bound while the
+    /// invocation still reached the original entry.
+    fn refresh_environment(&mut self, turn: u64, sink: &mut dyn LoopSink) -> Result<(), LoopError> {
+        if self.refreshed_for_turn == Some(turn) {
+            return Ok(());
+        }
+        let Some(provider) = self.environment.as_deref_mut() else {
+            self.refreshed_for_turn = Some(turn);
+            return Ok(());
+        };
+        let snapshot = provider.refresh(TurnEnvironmentRequest {
+            turn,
+            context_window: self.config.context_window,
+        })?;
+        if snapshot.context_revision.trim().is_empty()
+            || snapshot.inventory_revision.trim().is_empty()
+        {
+            return Err(EnvironmentError::Invalid(
+                "context and inventory revisions must be non-empty".to_owned(),
+            )
+            .into());
+        }
+
+        let reachable = self.tools.reachable_specs();
+        for (at, spec) in snapshot.tools.iter().enumerate() {
+            if snapshot.tools[..at]
+                .iter()
+                .any(|earlier| earlier.name == spec.name)
+            {
+                return Err(EnvironmentError::Invalid(format!(
+                    "tool `{}` appears more than once",
+                    spec.name
+                ))
+                .into());
+            }
+            if !reachable.iter().any(|candidate| candidate == spec) {
+                return Err(EnvironmentError::Invalid(format!(
+                    "tool `{}` is not an exact reachable specification of the attached port",
+                    spec.name
+                ))
+                .into());
+            }
+        }
+
+        let dynamic_rendered = snapshot.context.render();
+        let instructions = if dynamic_rendered.is_empty() {
+            self.config.instructions.clone()
+        } else if self.config.instructions.is_empty() {
+            dynamic_rendered
+        } else {
+            format!("{}\n\n{dynamic_rendered}", self.config.instructions)
+        };
+        let mut context = self.config.context.manifest();
+        context.extend(snapshot.context.manifest());
+
+        if self.context_revision.as_ref() == Some(&snapshot.context_revision)
+            && (self.active_context != context || self.active_instructions != instructions)
+        {
+            return Err(EnvironmentError::Invalid(format!(
+                "context revision `{}` changed its content",
+                snapshot.context_revision
+            ))
+            .into());
+        }
+        if self.inventory_revision.as_ref() == Some(&snapshot.inventory_revision)
+            && self.active_specs.as_ref() != Some(&snapshot.tools)
+        {
+            return Err(EnvironmentError::Invalid(format!(
+                "inventory revision `{}` changed its specifications",
+                snapshot.inventory_revision
+            ))
+            .into());
+        }
+
+        let context_changed = self.context_revision.as_ref() != Some(&snapshot.context_revision);
+        let inventory_changed =
+            self.inventory_revision.as_ref() != Some(&snapshot.inventory_revision);
+        self.active_instructions = instructions;
+        self.active_context = context;
+        self.active_specs = Some(snapshot.tools);
+        self.context_revision = Some(snapshot.context_revision.clone());
+        self.inventory_revision = Some(snapshot.inventory_revision.clone());
+        self.refreshed_for_turn = Some(turn);
+
+        if context_changed {
+            sink.emit(LoopEvent::ContextChanged {
+                revision: snapshot.context_revision,
+                context: self.active_context.clone(),
+            });
+        }
+        if inventory_changed {
+            sink.emit(LoopEvent::InventoryChanged {
+                revision: snapshot.inventory_revision,
+                published_tools: self
+                    .port_specs()
+                    .into_iter()
+                    .map(|spec| spec.name)
+                    .chain(self.owned_specs().into_iter().map(|spec| spec.name))
+                    .collect(),
+            });
+        }
+        Ok(())
     }
 
     /// Puts the rates in the record, and says so by name when they miss this model.
@@ -2169,6 +2316,8 @@ impl<'a> AgentLoop<'a> {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
                 return Ok(stop);
             }
+            let turn = state.turns.saturating_add(1);
+            self.refresh_environment(turn, sink)?;
             state.turns += 1;
             sink.emit(LoopEvent::TurnStarted { turn: state.turns });
             let outcome = match self.attempt_turn(state, deadline, sink)? {
@@ -2297,7 +2446,7 @@ impl<'a> AgentLoop<'a> {
         let tool_choice = self.held_to_the_answer(state);
         TurnRequest {
             model: self.config.model.clone(),
-            instructions: self.config.instructions.clone(),
+            instructions: self.active_instructions.clone(),
             items: state.items.clone(),
             tools,
             max_output_tokens: self.config.budget.max_output_tokens_per_turn,
@@ -4010,16 +4159,43 @@ impl<'a> AgentLoop<'a> {
             .collect()
     }
 
+    /// Published route names required to reach entries in the dynamic inventory.
+    fn environment_routes(&self) -> Vec<harness_wire::ToolName> {
+        let Some(inventory) = self.active_specs.as_ref() else {
+            return Vec::new();
+        };
+        if inventory.is_empty()
+            || inventory.iter().all(|entry| {
+                self.tools
+                    .specs()
+                    .iter()
+                    .any(|published| published.name == entry.name)
+            })
+        {
+            return Vec::new();
+        }
+        self.tools
+            .specs()
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect()
+    }
+
     /// Whether this run may use `name`, which is the whole of the narrowing rule.
     ///
     /// *Admitted, or a route to something admitted.* [`AgentLoop::port_specs`] filters the
     /// published toolset by it and [`AgentLoop::unadmitted`] judges calls by it, so a tool taken
     /// out of the list is also refused when the model names it anyway and the two cannot drift.
     fn admits(&self, name: &harness_wire::ToolName) -> bool {
-        let Some(admitted) = &self.config.admits else {
-            return true;
-        };
-        admitted.contains(name) || self.routes(admitted).contains(name)
+        let configured =
+            self.config.admits.as_ref().is_none_or(|admitted| {
+                admitted.contains(name) || self.routes(admitted).contains(name)
+            });
+        let current = self.active_specs.as_ref().is_none_or(|inventory| {
+            inventory.iter().any(|spec| &spec.name == name)
+                || self.environment_routes().contains(name)
+        });
+        configured && current
     }
 
     /// The name this call would run that this run was never admitted, or [`None`] if it may run.
@@ -4036,7 +4212,9 @@ impl<'a> AgentLoop<'a> {
     fn unadmitted(&self, call: &ToolCall) -> Option<harness_wire::ToolName> {
         // An unnarrowed run asks the port nothing: `invoked` is a question a port may answer by
         // walking a catalogue, and every call would pay for it to be told `None` is `None`.
-        self.config.admits.as_ref()?;
+        if self.config.admits.is_none() && self.active_specs.is_none() {
+            return None;
+        }
         let invoked = self
             .tools
             .invoked(call)
@@ -4053,7 +4231,7 @@ impl<'a> AgentLoop<'a> {
     /// question, through the same [`AgentLoop::admits`] the other half asks.
     fn port_specs(&self) -> Vec<ToolSpec> {
         let specs = self.tools.specs();
-        if self.config.admits.is_none() {
+        if self.config.admits.is_none() && self.active_specs.is_none() {
             return specs.to_vec();
         }
         specs

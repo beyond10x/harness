@@ -254,6 +254,17 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
             LoopEvent::CredentialRenewed(renewal) => {
                 let _ = writeln!(self.err, "{}", renewed_line(&renewal));
             }
+            LoopEvent::ContextChanged { revision, context } => self.note(&format!(
+                "· context {revision} ({} attributable layers)",
+                context.len()
+            )),
+            LoopEvent::InventoryChanged {
+                revision,
+                published_tools,
+            } => self.note(&format!(
+                "· inventory {revision} ({} published tools)",
+                published_tools.len()
+            )),
             LoopEvent::TurnStarted { turn } => self.note(&format!("· turn {turn}")),
             // Whatever streamed for the turn is void, and the person who read it has to be told:
             // a stdout that cannot be un-printed gets a marker line instead.

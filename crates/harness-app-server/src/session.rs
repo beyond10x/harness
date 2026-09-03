@@ -312,6 +312,10 @@ impl LoopSink for BridgeSink {
             // Bridged tools carry no approval posture, so these never fire here.
             | LoopEvent::ApprovalRequired { .. }
             | LoopEvent::ApprovalResolved { .. }
+            // Dynamic environment revisions are retained by the loop's own record. This pinned
+            // bridge notification vocabulary has no corresponding frame and must not invent one.
+            | LoopEvent::ContextChanged { .. }
+            | LoopEvent::InventoryChanged { .. }
             // The turn's own frames are written by the server, which holds the outcome.
             | LoopEvent::Started { .. }
             | LoopEvent::TurnStarted { .. }

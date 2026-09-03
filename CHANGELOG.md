@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Embedders may attach a `TurnEnvironmentProvider` that refreshes actor-specific context and the
+  exact current tool inventory before every model turn. Dynamic inventories are structural subsets
+  of the attached port's reachable specifications, can only narrow authority, and emit body-free
+  `context-changed` and `inventory-changed` events carrying their durable revisions.
+
 ### Changed
 
 - Outbound MCP now has `provider_emulated` end-to-end evidence through the shipped binary for both

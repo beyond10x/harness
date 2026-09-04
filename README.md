@@ -377,7 +377,7 @@ exhausted section, a cancelled run — `1` refused before it started, or aborted
 **What stays outside: the governor.** Guards, evidence and transition budgets are
 AEP' engine and stay there — this harness embeds nothing above it (invariant 2),
 and a runner that evaluated a gate would be a second protocol implementation with none of the
-conformance suites behind it. `aep workflow flow` projects `adp/default/2` into this notation
+conformance suites behind it. `aep govern workflow flow` projects `adp/default/2` into this notation
 and says what the projection is: an ordering, not a government. Nor is this an eval arm — a run here
 moves the sequencer, so it is a different experiment, and where it is measured against the driven
 arm it is measured as cost, tokens and wall-time under the **same** governor program.

@@ -1450,7 +1450,7 @@ fn action_of(step: &Step) -> Result<StepAction, String> {
 /// Where **this step** may write, read from its node, or an empty scope when it declares none.
 ///
 /// The grammar is `--write-scope`'s, `<glob>=<word>`, because that is exactly what
-/// `aep workflow flow --map` emits into the node — one reader for one grammar, so a
+/// `aep govern workflow flow --map` emits into the node — one reader for one grammar, so a
 /// projection and a driven run cannot come to disagree about what a rule means. The list is kept
 /// **in the order the map wrote it**: first match wins, so re-ordering it changes what it says and
 /// nothing here may sort it.

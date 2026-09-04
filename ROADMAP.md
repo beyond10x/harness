@@ -271,7 +271,7 @@ provider call and no invented failure or downstream skip (2026-08-31). Flow resu
 `Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and
 `Flow::run` walking a validated plan against a caller's `StepRunner`. Every `StepRunner` that
 exists is in its own `tests.rs`; no crate in `harness-cli` depends on it. On the other side of the
-boundary, AEP already projects into it — `aep workflow flow --id adp/default/2
+boundary, AEP already projects into it — `aep govern workflow flow --id adp/default/2
 --map …` emits `fixtures/adp-default.projected.yaml`, and that document plans and retreats here.
 The projection says what it is: **an ordering, not a government.** Guards, the `declined` outcome
 and every early exit are dropped, and the retreat bound is a number on the command line because the
@@ -305,7 +305,7 @@ transition** to the engine from a run cursor, as a program the loop can call —
 
 | leg | mechanism | owner |
 |---|---|---|
-| workflow in | the flow document, `aep workflow flow --map <steps> --max-attempts N` | AEP, exists |
+| workflow in | the flow document, `aep govern workflow flow --map <steps> --max-attempts N` | AEP, exists |
 | step → turn | a `StepRunner` in `harness-cli`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives` | here, absent |
 | transition out | a fourth hook point on `--hooks`, `transition`: fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is | here, absent |
 | the governor | any program behind that hook — `aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |

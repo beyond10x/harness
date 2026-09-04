@@ -11,13 +11,13 @@ tags:
 - workflow
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 ---
 # Story: a step's declared write scope is the scope it runs under
 
 ## Outcome
 
-`protocol workflow flow --map` writes each step's `scope` into its node — the map's own
+`protocol govern workflow flow --map` writes each step's `scope` into its node — the map's own
 first-match-wins list, `.engineering/**=denied` before a catch-all. `FlowRunner` never reads it.
 The toolset, the approver and the write scope are built once in `prepare` from the command line
 (design 0003 § 2, § 6: *a published toolset per group is M2*), so **every step of a walk runs under

@@ -276,7 +276,7 @@ beside the group — or, under `--json`, the `Plan` itself; exit `0` valid, `1` 
 
 Two things this design asks of that repository, each its own story there, neither blocking § 5:
 
-- **E1 — `aep workflow flow --map` is accepted and ignored.** `FlowArgs.map` is declared
+- **E1 — `aep govern workflow flow --map` is accepted and ignored.** `FlowArgs.map` is declared
   (`crates/protocol-cli/src/flow.rs:59`) and never read; `project(workflow, max_attempts)` takes
   no map. The verb's own help says a node *"carries what a harness actually does in that state"*
   with one. The story: thread the step map so each node's `run` carries the `llm` step's `prompt`,

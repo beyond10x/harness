@@ -112,7 +112,7 @@ in this milestone. The **write scope is not** — a step runs under the one its 
 
 A step's `run.scope` says where that step may write. It is a list of
 `<glob>=<allowed|partial-only|denied>` — the grammar `--write-scope` takes, and the one
-`aep workflow flow --map` emits into the node it projects:
+`aep govern workflow flow --map` emits into the node it projects:
 
 ```yaml
 - id: implement-1

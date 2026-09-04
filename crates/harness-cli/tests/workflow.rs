@@ -211,7 +211,7 @@ root:
             summary: \"Make the smallest change that satisfies the units.\"
 ";
 
-/// One section holding a turn and then a verifier: the shape `aep workflow flow --map` gives
+/// One section holding a turn and then a verifier: the shape `aep govern workflow flow --map` gives
 /// a state whose map says *ask the model, then run the suite*.
 const COMMANDED: &str = "\
 id: commanded

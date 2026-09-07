@@ -15,20 +15,21 @@ workspace = true
 harness-toolchain = { workspace = true }
 harness-tools = { workspace = true }
 harness-wire = { workspace = true }
-# **The one dependency on a sibling component, and both boundaries it crosses are argued in
+# **The confinement dependency, and both boundaries it crosses are argued in
 # `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
 # daemon artifact and the wire contract; this imports the driver. Embedding stays because it needs
 # no deployment, and because the wire types turn a 422 nobody could diagnose into a compile error.
 #
-# **Pinned by a released git tag, never by path.** A `path` into a sibling checkout builds against
+# **Pinned by a published git revision, never by path.** A `path` into a sibling checkout builds against
 # whatever happens to be checked out there, and `--locked` cannot lock it — the gate was green
-# against a tree no lockfile named (AGENTS.md invariant 2). The tag is substrate `0.5.0`
-# (2026-09-01, merge revision `fcb48e5`): the standalone SDK and session-route release whose
-# applied record carries exact read-only/scoped/read-write workspace authority and resource usage.
-# Both version requirements are exact so a resolver cannot silently substitute a later contract
-# for the one tested here.
-substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", tag = "0.5.0", version = "=0.5.0" }
-substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", tag = "0.5.0", version = "=0.5.0" }
+# against a tree no lockfile named (AGENTS.md invariant 2). Revision
+# `4d830f2f662e3ac6d5c573f1915ce3ce226c4085` adds the no-Git-source metadata correction
+# after release `0.7.6`; its package version remains `0.7.6` and development wire is `0.16.0`.
+# Harness continues to request exact workspace access, no network and resource usage through the
+# existing embedded driver boundary. Both version requirements are exact so a resolver cannot
+# silently substitute a later contract for this selection.
+substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "4d830f2f662e3ac6d5c573f1915ce3ce226c4085", version = "=0.7.6" }
+substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "4d830f2f662e3ac6d5c573f1915ce3ce226c4085", version = "=0.7.6" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

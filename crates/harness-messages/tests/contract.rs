@@ -17,10 +17,9 @@ use harness_wire::{
 };
 use serde_json::{Value, json};
 
-/// The cut that added the subscription client preamble. `2026-08-30` is the same wire without it,
-/// `2026-08-29b` the one before `tool_choice`, and `2026-08-29` the one before the rolling cache
-/// breakpoint; all three stay pinned as they were released.
-const VERSION: &str = "2026-08-31";
+/// This cut adds bounded refusal diagnostics to the subscription-preamble wire.
+/// Earlier versions remain pinned as released.
+const VERSION: &str = "2026-09-07";
 
 fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -40,6 +39,36 @@ fn fixture(name: &str) -> String {
 
 fn fixture_bytes(name: &str) -> Vec<u8> {
     fs::read(contract_dir().join("fixtures").join(name)).expect("readable fixture")
+}
+
+#[test]
+fn refusal_preserves_partial_output_and_declared_diagnostics_without_completion() {
+    let mut sink = VecSink::new();
+    let outcome = decode_stream(
+        "b10x-emulated",
+        fixture("refusal-stream.sse").as_bytes(),
+        &mut sink,
+    )
+    .unwrap();
+    assert_eq!(
+        outcome.stop_reason,
+        StopReason::Incomplete {
+            reason: "refusal".to_owned()
+        }
+    );
+    assert_eq!(sink.text(), "Partial");
+    let warnings: Vec<Value> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            harness_wire::StreamEvent::Warning { code, message } => {
+                Some(json!({"code":code,"message":message}))
+            }
+            _ => None,
+        })
+        .collect();
+    let expected: Value = serde_json::from_str(&fixture("refusal-diagnostic.json")).unwrap();
+    assert_eq!(warnings, vec![expected]);
 }
 
 fn manifest() -> Value {

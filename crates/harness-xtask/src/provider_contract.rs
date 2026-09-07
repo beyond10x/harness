@@ -96,6 +96,9 @@ fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         ));
     }
     check_files(directory, &manifest, failures);
+    if manifest.get("refusal_diagnostics").is_some() {
+        check_refusal(directory, &manifest, failures);
+    }
     check_stream(directory, &manifest, version >= "2026-08-31", failures);
     if version >= "2026-08-31" {
         for key in ["request_encoding", "request_headers", "terminal_sentinel"] {
@@ -109,6 +112,34 @@ fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         check_inventory(directory, &manifest, failures);
     }
     check_immutable(root, directory, failures);
+}
+
+fn check_refusal(directory: &Path, manifest: &Value, failures: &mut Vec<String>) {
+    let check = || -> Option<()> {
+        let stream = std::fs::read_to_string(directory.join("fixtures/refusal-stream.sse")).ok()?;
+        let delta = stream
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|event| event["type"] == "message_delta")?;
+        let details = &delta["delta"]["stop_details"];
+        let expected: Value = serde_json::from_slice(
+            &std::fs::read(directory.join("fixtures/refusal-diagnostic.json")).ok()?,
+        )
+        .ok()?;
+        let category = details["category"].as_str()?;
+        let explanation = details["explanation"].as_str()?;
+        (delta["delta"]["stop_reason"] == "refusal"
+            && expected["code"] == manifest["refusal_diagnostics"]["warning_code"]
+            && expected["message"] == format!("Provider declined the response. Category: {category}. Explanation: {explanation}")
+            && category.len() <= 128 && explanation.len() <= 2048).then_some(())
+    };
+    if check().is_none() {
+        failures.push(format!(
+            "{}: refusal diagnostic fixture disagrees with declared provider details",
+            directory.display()
+        ));
+    }
 }
 
 fn check_files(directory: &Path, manifest: &Value, failures: &mut Vec<String>) {

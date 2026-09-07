@@ -56,3 +56,7 @@ formatting, clippy with warnings denied, independent provider and CLI contract v
 planted bad CLI fixtures), the app-server profile and home-path checks, the generic HTTP boundary
 guard, and strict rustdoc. This page deliberately carries no hand-maintained test counts; the gate's
 own output is the current count and exit evidence.
+
+## Provider refusal diagnostics candidate
+
+The Messages decoder preserves declared refusal details in a bounded warning, through the neutral existing event type. The new contract is synthetic provider-emulated evidence. Source verification and a consuming live run must be recorded before claiming that the current provider refusal has been explained; this change itself neither retries nor resolves a refused request.

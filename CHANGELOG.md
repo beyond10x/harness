@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Messages preserves the provider-declared refusal category and explanation as a bounded diagnostic warning. Missing details stay unknown and invalid or oversized fields are explicitly omitted. A new `2026-09-07` contract pins the additive warning; refusals remain incomplete and request/authentication bytes are unchanged.
+
 ## [0.11.1] — 2026-09-03
 
 ### Added

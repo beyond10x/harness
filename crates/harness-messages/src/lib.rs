@@ -27,6 +27,7 @@
 //! payload that is not JSON — a protocol refusal, which is what it must stay.
 
 mod project;
+mod refusal;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -435,7 +436,15 @@ impl<'a> TurnDecoder<'a> {
             Some("content_block_start") => self.start_block(event),
             Some("content_block_delta") => self.apply_delta(event, sink)?,
             Some("content_block_stop") => self.stop_block(event, sink)?,
-            Some("message_delta") => self.apply_message_delta(event),
+            Some("message_delta") => {
+                self.apply_message_delta(event);
+                if let Some(message) = refusal::message(event) {
+                    sink.emit(StreamEvent::Warning {
+                        code: "provider-refusal".to_owned(),
+                        message,
+                    });
+                }
+            }
             Some("message_stop") => self.complete = true,
             Some("error") => return Err(project::stream_error(event)),
             // A keep-alive. The turn is not advanced by it and nothing is lost by ignoring it.

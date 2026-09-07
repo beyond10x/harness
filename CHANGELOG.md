@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Update the embedded confinement boundary to Substrate `4d830f2f` (package `0.7.6`, development
+  wire `0.16.0`), which leaves Git metadata untouched when Git sources are disabled, and the
+  outbound MCP client and testkits to `3c68df04` (`0.1.1`).
+
 ## [0.11.1] — 2026-09-03
 
 ### Added

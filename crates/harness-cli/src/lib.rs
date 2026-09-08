@@ -3948,6 +3948,8 @@ mod tests {
     fn delegate_models_use_the_selected_providers_configured_aliases() {
         let mut options = options(&[]);
         options.base_url = None;
+        // Alias resolution never needs a real vendor credential or a login on the test host.
+        options.api_key_env = Some("HARNESS_TEST_UNREAD_CREDENTIAL".into());
         let aliases = std::collections::BTreeMap::from([(
             "sonnet".to_owned(),
             "fixture-sonnet-v2".to_owned(),

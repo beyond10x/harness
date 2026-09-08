@@ -61,6 +61,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Agent {
+    /// Exact model for this delegate. The document adapter resolves provider aliases first.
+    /// Absence inherits the parent model without selecting another endpoint or credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Reasoning effort for this delegate; absence inherits the parent's sampling setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     /// The name the model picks it by, from the document's own frontmatter.
     pub name: String,
     /// One line, in the standing instruction, that the model chooses on.
@@ -198,6 +205,8 @@ mod tests {
 
     fn agent(name: &str, tools: &[&str]) -> Agent {
         Agent {
+            model: None,
+            reasoning_effort: None,
             name: name.to_owned(),
             description: format!("What {name} is for."),
             tools: tools.iter().map(|tool| (*tool).to_owned()).collect(),

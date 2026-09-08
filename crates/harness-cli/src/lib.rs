@@ -556,6 +556,9 @@ struct RunOptions {
     /// that pays for a defaulted credential path at all.
     #[arg(skip)]
     credential_from_provider: Option<String>,
+    /// The selected provider's alias table, retained for document-declared delegate models.
+    #[arg(skip)]
+    agent_model_aliases: std::collections::BTreeMap<String, String>,
     /// The profiles that configured this run, for its record. Set by [`apply_profiles`] alone.
     #[arg(skip)]
     applied_profiles: Vec<profile::ProfileRef>,
@@ -1240,6 +1243,7 @@ fn apply_provider(
     // *which one is current*. A name the table does not know passes through, so a model released
     // after this binary is still reachable by its exact identifier.
     options.model = Some(provider.exact_model(options.model.as_deref().unwrap_or(&provider.model)));
+    options.agent_model_aliases.clone_from(&provider.aliases);
     if options.wire.is_none() {
         options.wire = Some(match provider.wire.as_str() {
             "anthropic-messages" => Wire::AnthropicMessages,
@@ -2102,7 +2106,11 @@ fn prepare(
     // under a schema that was never told to finish by calling `answer`.
     let delegation = delegation(options);
     let skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
-    let agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
+    let agents = agents_from(
+        &options.agents_dir,
+        &options.plugin_dir,
+        &options.agent_model_aliases,
+    )?;
     let owned = Owned {
         delegate: delegation.as_ref().map(|tool| tool.name.as_str()),
         answer: answer.as_ref().map(|tool| tool.name.as_str()),
@@ -2290,13 +2298,19 @@ fn skills_from(
 fn agents_from(
     agents_dir: &[PathBuf],
     plugin_dir: &[PathBuf],
+    model_aliases: &std::collections::BTreeMap<String, String>,
 ) -> Result<Option<harness_loop::Agents>, String> {
     if agents_dir.is_empty() && plugin_dir.is_empty() {
         return Ok(None);
     }
     let mut agents: Vec<harness_loop::Agent> = Vec::new();
     let mut take = |loaded: Vec<harness_loop::Agent>| {
-        for agent in loaded {
+        for mut agent in loaded {
+            if let Some(model) = &agent.model
+                && let Some(exact) = model_aliases.get(model)
+            {
+                agent.model = Some(exact.clone());
+            }
             if !agents.iter().any(|held| held.name == agent.name) {
                 agents.push(agent);
             }
@@ -3623,7 +3637,11 @@ fn context_command(verb: &ContextCommand) -> Result<(), String> {
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools_skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
-    let tools_agents = agents_from(&options.agents_dir, &options.plugin_dir)?;
+    let tools_agents = agents_from(
+        &options.agents_dir,
+        &options.plugin_dir,
+        &std::collections::BTreeMap::new(),
+    )?;
     let confined_toolchain = toolchain(
         options.toolchain.as_deref(),
         &options.toolchain_specs,
@@ -3923,6 +3941,41 @@ mod tests {
                 "/tmp/key",
             ])
             .is_err()
+        );
+    }
+
+    #[test]
+    fn delegate_models_use_the_selected_providers_configured_aliases() {
+        let mut options = options(&[]);
+        options.base_url = None;
+        let aliases = std::collections::BTreeMap::from([(
+            "sonnet".to_owned(),
+            "fixture-sonnet-v2".to_owned(),
+        )]);
+        let overrides = std::collections::BTreeMap::from([(
+            "claude".to_owned(),
+            provider::ProviderOverride {
+                aliases,
+                ..provider::ProviderOverride::default()
+            },
+        )]);
+        apply_provider(&mut options, Some("claude"), &overrides).expect("selected provider");
+        let root = tempfile::tempdir().expect("agents");
+        fs::write(root.path().join("reviewer.md"), "---\nname: reviewer\ndescription: Reads\nmodel: sonnet\neffort: high\n---\nReview only.\n").expect("document");
+        let agents = agents_from(
+            &[root.path().to_path_buf()],
+            &[],
+            &options.agent_model_aliases,
+        )
+        .expect("load")
+        .expect("agents");
+        let reviewer = agents.get("reviewer").expect("reviewer");
+        assert_eq!(reviewer.model.as_deref(), Some("fixture-sonnet-v2"));
+        assert_eq!(reviewer.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            options.model.as_deref(),
+            Some("m"),
+            "delegate settings never replace the parent selection"
         );
     }
 

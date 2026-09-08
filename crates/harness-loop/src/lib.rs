@@ -3459,7 +3459,19 @@ impl<'a> AgentLoop<'a> {
             )));
         }
         let (agent, admitted, refused) = self.agent_for(call)?;
+        let mut sampling = self.config.sampling.clone();
+        if let Some(effort) = agent
+            .as_ref()
+            .and_then(|agent| agent.reasoning_effort.as_ref())
+        {
+            sampling.reasoning_effort = Some(effort.clone());
+        }
         let config = LoopConfig {
+            model: agent
+                .as_ref()
+                .and_then(|agent| agent.model.clone())
+                .unwrap_or_else(|| self.config.model.clone()),
+            sampling,
             // The parent's standing instruction whole, so the delegate knows where it is and what
             // its tools are for, and the preamble after it — which is everything that is true only
             // of a child. A named agent's own body goes after both: it is the most specific thing

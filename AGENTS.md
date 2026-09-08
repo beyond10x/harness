@@ -277,11 +277,11 @@ every crate the other tree touched before trusting the result.
 
 (`gate.sh 2>&1 | tail` reports `tail`'s status, not the gate's).
 
-The released `agentplugins/aep-planning` documents are checked separately by
-`.github/workflows/upstream-agentplugins.yml`. Those tests are explicitly ignored in the offline
-gate because Harness does not own the marketplace checkout; the scheduled workflow checks out
-Agentplugins `0.3.1` beside Harness and runs both ignored compatibility tests. They must fail when
-that checkout or its declared resources are absent—never return early as a silent pass.
+Atlas owns the scheduled consumer compatibility suite for current Agentplugins documents.
+Its `integration/harness-plugins` tests call Harness's public skill and agent loaders against an
+explicit Agentplugins checkout, including `aep-plan`. Missing documents still fail; the parser's
+generic fixture tests remain in this repository's gate. Harness neither checks out nor reads its
+consumers during its own build, test or release.
 
 ## Releases
 

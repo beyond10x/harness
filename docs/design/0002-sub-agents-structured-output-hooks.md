@@ -4,6 +4,14 @@
 states what shipped and what was left as a labelled later milestone. The MCP part of § 5 was
 superseded by design 0005 on 2026-09-02; the historical reasoning remains here.
 
+Named-agent settings were extended on 2026-09-08: document `model` and `effort` fields now become
+the child's exact model and reasoning effort. The CLI expands model aliases through the already
+selected provider, including operator overrides. Missing fields inherit the parent; `model: inherit`
+explicitly requests that behavior. Each child's configuration is separate, so later parent requests
+retain their original settings. The endpoint, credential source, tool intersection, approvals and
+remaining budget are shared under the existing delegation rules. A cost ceiling still requires a
+rate for the selected child model before its first request. Unknown document fields remain refused.
+
 ## The problem, in one line
 
 `docs/reviews/2026-08-29-sota-comparison.md` finding #13 ranked five things every comparable harness

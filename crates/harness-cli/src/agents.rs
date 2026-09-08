@@ -163,6 +163,9 @@ pub fn agent_at(document: &Path) -> Result<Agent, String> {
     let mut name = None;
     let mut description = None;
     let mut tools = Vec::new();
+    let mut model = None;
+    let mut reasoning_effort = None;
+    let mut keys = std::collections::BTreeSet::new();
     for line in frontmatter.lines() {
         if line.trim().is_empty() || line.trim_start().starts_with('#') {
             continue;
@@ -170,17 +173,23 @@ pub fn agent_at(document: &Path) -> Result<Agent, String> {
         let (key, value) = line
             .split_once(':')
             .ok_or_else(|| named(format!("`{line}` is not `key: value`")))?;
-        // **Refused, not ignored.** A `model:` or a `disable-model-invocation:` this build skipped
-        // would be a rule the agent's author wrote and the run did not apply, and nothing would say
-        // so. The caller can add a key here when it means something.
+        if !keys.insert(key.trim()) {
+            return Err(named(format!("declares `{}` more than once", key.trim())));
+        }
+        // Every admitted field must reach the delegate. Unimplemented behavior is still refused.
         match key.trim() {
             "name" => name = Some(value.trim().to_owned()),
             "description" => description = Some(value.trim().to_owned()),
             "tools" => tools = granted_tools(value).map_err(named)?,
+            "model" => {
+                let value = setting(value).map_err(named)?;
+                model = (value != "inherit").then_some(value);
+            }
+            "effort" => reasoning_effort = Some(setting(value).map_err(named)?),
             other => {
                 return Err(named(format!(
                     "declares `{other}`, which this build does not read. It reads `name`, \
-                     `description` and `tools`. A key skipped here is a rule its author wrote and \
+                     `description`, `tools`, `model` and `effort`. A key skipped here is a rule its author wrote and \
                      this run would not have applied."
                 )));
             }
@@ -200,11 +209,30 @@ pub fn agent_at(document: &Path) -> Result<Agent, String> {
         return Err(named("declares an empty `name`".to_owned()));
     }
     Ok(Agent {
+        model,
+        reasoning_effort,
         name,
         description,
         tools,
         instructions: instructions.to_owned(),
     })
+}
+
+fn setting(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+        .unwrap_or(value);
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-._:/".contains(&c))
+    {
+        return Err("model and effort require one nonempty scalar identifier".to_owned());
+    }
+    Ok(value.to_owned())
 }
 
 /// The harness tools a `tools:` value grants, or what is wrong with the value.
@@ -394,18 +422,51 @@ mod tests {
     }
 
     #[test]
+    fn declared_model_and_effort_are_retained_and_ambiguous_values_are_refused() {
+        let root = tempfile::tempdir().expect("a root");
+        let document = write(
+            root.path(),
+            "reviewer",
+            "---\nname: reviewer\ndescription: Reads\ntools: [Read]\nmodel: 'sonnet'\neffort: high\n---\nReview only.\n",
+        );
+        let agent = agent_at(&document).expect("declared settings read");
+        assert_eq!(agent.model.as_deref(), Some("sonnet"));
+        assert_eq!(agent.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(agent.tools, ["file_read"]);
+        let document = write(
+            root.path(),
+            "inherited",
+            "---\nname: inherited\ndescription: Reads\nmodel: inherit\n---\nReview only.\n",
+        );
+        let agent = agent_at(&document).expect("explicit inheritance");
+        assert_eq!(agent.model, None);
+        assert_eq!(agent.reasoning_effort, None);
+        for invalid in [
+            "model:",
+            "effort: {}",
+            "model: sonnet\nmodel: opus",
+            "effort: high\neffort: low",
+        ] {
+            let document = write(
+                root.path(),
+                "invalid",
+                &format!("---\nname: invalid\ndescription: Reads\n{invalid}\n---\nbody\n"),
+            );
+            assert!(agent_at(&document).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
     fn a_key_this_build_does_not_read_refuses_the_run_rather_than_being_skipped() {
-        // The failure this prevents: an agent author writes `model: haiku`, this build ignores it,
-        // and the run spends an epic's decomposition on a model nobody chose. A refusal names the
-        // key; a skip names nothing and looks like it worked.
+        // An unsupported behavior must not become accepted merely because settings were added.
         let root = tempfile::tempdir().expect("a root");
         let document = write(
             root.path(),
             "worker",
-            "---\nname: worker\ndescription: d\nmodel: haiku\n---\nbody\n",
+            "---\nname: worker\ndescription: d\ndisable-model-invocation: true\n---\nbody\n",
         );
         let error = agent_at(&document).expect_err("refused");
-        assert!(error.contains("model"), "{error}");
+        assert!(error.contains("disable-model-invocation"), "{error}");
         assert!(error.contains("does not read"), "{error}");
     }
 
@@ -459,67 +520,6 @@ mod tests {
         fs::write(root.path().join("README.txt"), "not an agent").expect("a file");
         fs::create_dir_all(root.path().join("a-directory")).expect("a directory");
         assert!(agents_in(root.path()).expect("reads").is_empty());
-    }
-
-    #[test]
-    #[ignore = "requires the sibling agentplugins checkout; exercised by upstream-agentplugins.yml"]
-    fn the_real_agents_this_repository_ships_against_read() {
-        // The one that catches a parser written to a format nobody uses. The dedicated upstream
-        // workflow checks out the independently released marketplace beside this repository.
-        // Relative to this crate, never an absolute path from whoever wrote the test: an
-        // absolute one is a personal directory published in a public repository, and it makes the
-        // test pass on exactly one machine.
-        let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../agentplugins/plugins/aep-planning/agents");
-        let shipped = shipped.as_path();
-        assert!(shipped.is_dir(), "missing {}", shipped.display());
-        let agents = agents_in(shipped).expect("the shipped agents read");
-        let names: Vec<&str> = agents.iter().map(|agent| agent.name.as_str()).collect();
-        // Named, not counted. The sibling's roster is that repository's to grow, and pinning it
-        // here turns a document added over there into a red gate over here for nothing this
-        // parser did wrong. Every agent it ships still has to read, which is below.
-        for wanted in ["decomposer", "plan-reviewer", "reverse-engineer"] {
-            assert!(
-                names.contains(&wanted),
-                "`{wanted}` is missing from {names:?}"
-            );
-        }
-
-        let decomposer = agents
-            .iter()
-            .find(|agent| agent.name == "decomposer")
-            .expect("the decomposer reads");
-        assert_eq!(
-            decomposer.tools,
-            vec!["file_read", "search", "find", "run"],
-            "`tools: [Read, Grep, Glob, Bash]` is what the shipped document grants"
-        );
-        assert!(
-            decomposer.description.contains("epic"),
-            "{}",
-            decomposer.description
-        );
-        assert!(
-            decomposer.instructions.contains("# Decomposer"),
-            "the body is the standing instruction"
-        );
-        for agent in &agents {
-            // Each shipped body opens with its own heading, so anything left of that heading is
-            // frontmatter that leaked. Searching the whole body for `FENCE` is the wrong check and
-            // was tried: `plan-reviewer` writes a markdown table, and a table separator is
-            // `|---|---|`.
-            assert!(
-                agent.instructions.starts_with("# "),
-                "`{}` is handed something before its own heading: {:?}",
-                agent.name,
-                &agent.instructions[..agent.instructions.len().min(40)]
-            );
-            assert!(
-                !agent.instructions.contains(&agent.description),
-                "`{}` kept its frontmatter in what the delegate is handed",
-                agent.name
-            );
-        }
     }
 }
 

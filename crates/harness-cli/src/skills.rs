@@ -316,31 +316,6 @@ mod tests {
         fs::create_dir_all(root.path().join("not-a-skill")).expect("a directory");
         assert!(skills_in(root.path()).expect("reads").is_empty());
     }
-
-    #[test]
-    #[ignore = "requires the sibling agentplugins checkout; exercised by upstream-agentplugins.yml"]
-    fn the_real_plugin_this_repository_ships_against_reads() {
-        // The one that catches a parser written to a format nobody uses. The dedicated upstream
-        // workflow checks out the independently released marketplace beside this repository.
-        // Relative to this crate, never an absolute path from whoever wrote the test: an
-        // absolute one is a personal directory published in a public repository, and it makes the
-        // test pass on exactly one machine.
-        let planning = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../agentplugins/plugins/aep-planning/skills/planning/SKILL.md");
-        let planning = planning.as_path();
-        assert!(planning.is_file(), "missing {}", planning.display());
-        let skill = skill_at(planning).expect("the shipped skill reads");
-        assert_eq!(skill.name, "planning");
-        assert!(
-            skill.description.contains("planning"),
-            "{}",
-            skill.description
-        );
-        assert!(
-            skill.body.contains("# Planning"),
-            "the body is the document"
-        );
-    }
 }
 
 #[cfg(test)]

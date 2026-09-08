@@ -5429,6 +5429,8 @@ fn a_narrowed_run_is_refused_the_entry_behind_a_verb_by_the_same_rule() {
     // the approver, for the event, for the refusal text and — design 0002 § 2 — for a hook. This
     // is that same rule reaching one more gate, not a second gate beside it.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "reader".to_owned(),
         description: "Reads and reports.".to_owned(),
         tools: vec!["file_read".to_owned()],
@@ -5517,6 +5519,111 @@ fn a_narrowed_run_is_refused_the_entry_behind_a_verb_by_the_same_rule() {
 }
 
 #[test]
+fn named_delegates_apply_their_model_settings_without_changing_the_parent_or_tool_scope() {
+    let agents = Agents::new(vec![Agent {
+        name: "reviewer".to_owned(),
+        description: "Reads".to_owned(),
+        tools: vec!["read".to_owned()],
+        instructions: "Review only.".to_owned(),
+        model: Some("child-model".to_owned()),
+        reasoning_effort: Some("high".to_owned()),
+    }]);
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "delegate-call",
+                "delegate",
+                json!({"task":"review", "agent":"reviewer"}),
+            )])),
+            Ok(answer("reviewed")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("read", Approval::NotRequired),
+            spec("write", Approval::NotRequired),
+        ]),
+    );
+    harness.config.model = "parent-model".to_owned();
+    harness.config.sampling.reasoning_effort = Some("low".to_owned());
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(agents));
+    let (_, sink) = harness.run();
+    let seen = &harness.model.seen;
+    assert_eq!(seen.len(), 3);
+    assert_eq!(
+        seen.iter()
+            .map(|request| request.model.as_str())
+            .collect::<Vec<_>>(),
+        ["parent-model", "child-model", "parent-model"]
+    );
+    assert_eq!(
+        seen.iter()
+            .map(|request| request.sampling.reasoning_effort.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("low"), Some("high"), Some("low")]
+    );
+    assert_eq!(published_names(&seen[1]), ["read"]);
+    assert!(
+        delegated(&sink).iter().any(
+            |event| matches!(event, LoopEvent::Started { model, .. } if model == "child-model")
+        )
+    );
+}
+
+#[test]
+fn a_delegate_cannot_escape_a_cost_ceiling_by_selecting_an_unpriced_model() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "delegate-call",
+                "delegate",
+                json!({"task":"review", "agent":"reviewer"}),
+            )])),
+            Ok(answer("parent sees refusal")),
+        ]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .budgeted(Budget {
+        max_cost_microunits: Some(1_000),
+        ..Budget::default()
+    })
+    .priced(scripted_card());
+    harness.config = harness
+        .config
+        .clone()
+        .with_delegation(Some(Delegation::default()))
+        .with_agents(Some(Agents::new(vec![Agent {
+            name: "reviewer".to_owned(),
+            description: "Reads".to_owned(),
+            tools: Vec::new(),
+            instructions: "Review only.".to_owned(),
+            model: Some("unpriced-child".to_owned()),
+            reasoning_effort: None,
+        }])));
+    let _ = harness.run();
+    assert_eq!(
+        harness.model.seen.len(),
+        2,
+        "only the parent's request and response to the refusal reach the model port"
+    );
+    assert!(
+        harness
+            .model
+            .seen
+            .iter()
+            .all(|request| request.model == "scripted-model")
+    );
+    assert!(
+        serde_json::to_string(&harness.model.seen[1].items)
+            .unwrap()
+            .contains("max_cost_microunits")
+    );
+}
+
+#[test]
 fn a_narrowed_run_is_refused_an_ungranted_entry_behind_a_verb_beside_a_neighbour() {
     // The same narrowing as the test above, in the one shape the model chooses freely: **two calls
     // in one turn**. `AgentLoop::run_calls` sends a run of neighbouring `batchable` calls to
@@ -5532,6 +5639,8 @@ fn a_narrowed_run_is_refused_an_ungranted_entry_behind_a_verb_beside_a_neighbour
     // An agent granted `[Grep]` must not be able to read a file. Here it asks for one beside a
     // search it *was* granted, and the pair is a batch.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "grepper".to_owned(),
         description: "Searches and reports.".to_owned(),
         tools: vec!["search".to_owned()],
@@ -5612,6 +5721,8 @@ fn a_narrowed_flat_run_refuses_an_ungranted_read_beside_a_neighbour() {
     // that can drift*: the identical turn under a flat surface. This one is green, which is what
     // makes the verb surface's answer a drift and not a shared limitation.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "grepper".to_owned(),
         description: "Searches and reports.".to_owned(),
         tools: vec!["search".to_owned()],
@@ -5686,6 +5797,8 @@ fn a_narrowed_child_cannot_widen_itself_by_delegating_again_without_an_agent() {
     // delegates to `reader`, granted `file_read` alone, and `reader` delegates once more with no
     // agent. The grandchild writes.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "reader".to_owned(),
         description: "Reads and reports.".to_owned(),
         tools: vec!["file_read".to_owned()],
@@ -5759,6 +5872,8 @@ fn a_port_that_under_reports_its_reach_narrows_a_run_to_nothing_and_not_to_every
     // This matters because `reachable` is defaulted: any port outside this crate can get it wrong,
     // and the doc tells its author the cost is reach.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "reader".to_owned(),
         description: "Reads and reports.".to_owned(),
         tools: vec!["file_read".to_owned()],
@@ -5827,6 +5942,8 @@ fn a_port_that_under_reports_part_of_its_reach_still_costs_reach_and_not_boundar
     // port does not publish?* — it cannot: `file_read` is published, so the run needs no
     // indirection and is given none.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "reader".to_owned(),
         description: "Reads and reports.".to_owned(),
         tools: vec!["file_read".to_owned()],
@@ -5894,6 +6011,8 @@ fn a_delegate_run_as_a_named_agent_is_narrowed_to_what_its_author_declared() {
     // this prevents is the quiet one: an agent its author wrote as read-only silently handed
     // write and exec, with the record showing a child that had the parent's whole catalogue.
     let agents = Agents::new(vec![Agent {
+        model: None,
+        reasoning_effort: None,
         name: "reader".to_owned(),
         description: "Reads and reports.".to_owned(),
         tools: vec!["read".to_owned(), "absent".to_owned()],

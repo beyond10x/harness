@@ -1,9 +1,8 @@
 # AGENTS.md — harness
 
-The contract for changing **this** repository. Org-wide rules — the naming convention, the language rule (anything that runs is Rust, not Python), the
-former-brand rule (atlas ADR 0001) and its four exemption categories, and the rule that renaming
-anything another repo verifies is a coordinated migration with an ADR — live in `atlas/AGENTS.md`
-and are not restated here.
+The contract for changing **this** repository. Organization naming, Rust implementation and
+public privacy rules apply. Changing bytes another repository verifies requires a coordinated
+migration and an ADR; historical brand exemptions do not authorize new public associations.
 
 `README.md` orients a reader; `STATUS.md` says what is built and `ROADMAP.md` what is next. This
 file says what must not break.
@@ -236,7 +235,8 @@ cargo xtask gate
 `cargo xtask cli-contract` — the contract checkers, one per pinned interface — and
 `python3 scripts/check-no-home-paths.py`. Two of them, the CLI contract checker and
 `check-no-home-paths.py`, run **twice**: `--self-test` first, on planted fixtures, then the tree.
-Run it before every commit. The former brand is fenced org-wide by `scripts/check-org-brand.sh` in the **atlas** repo, not here.
+Run it before every commit. Organization audits in Atlas are separate from this source gate;
+ordinary publication does not run Atlas scripts.
 
 **The home-path check judges the index and the worktree, and only a literal POSIX path.** It reads
 what `git cat-file` returns for every entry in `git ls-files -s`, because a commit records the index
@@ -305,16 +305,24 @@ consumers during its own build, test or release.
 
 ## Bot identity
 
-Automated commits and pushes use the GitHub App via `scripts/as-bot.sh`, never a human credential.
-`scripts/bot-token.sh` mints the token; its org default is `beyond10x` (`scripts/bot-token.sh:8`),
-which is where the App is installed. **The bot's automation lives in atlas**
-(`atlas/scripts/`, `atlas/docs/bot-only-commits.md`); the copies here are byte-identical to it and
-are changed there first.
+Automated commits and pushes use standalone `b10x-gates bot` and the GitHub App identity
+`b10x-bot[bot]`. Credentials and token minting remain outside this public source tree.
 
 The three commits before this repository became canonical (`fc676ec`, `14f53f4`, `b61a9bb`) carry
 the bot's former name, and two of them carry b10x-bot's own app ID (`316511680`) under it. A
 `.mailmap` would put the former brand back in the tree and fail the org fence, and history is not
 rewritten, so the record stands as it is.
+
+## Source publication
+
+This repository owns its correctness checks, required reviews and release artifacts. Ordinary
+commits, pushes and releases require no Atlas checkout, current Atlas main or organization-wide
+dependency admission. Use standalone `b10x-gates bot --repo . -- <git-command>` with protected local
+credentials and the existing `b10x-bot[bot]` identity. Preserve repository and worktree hooks.
+
+Atlas documentation validation belongs to documentation operations; it is not a prerequisite for
+source publication. Documentation failures affect documentation delivery. Organization privacy
+rules still apply; historical brand exemptions do not authorize new public associations.
 
 <!-- b10x-docs-operations:start -->
 ## Public documentation operations

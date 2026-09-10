@@ -65,7 +65,10 @@ The gate is **`cargo xtask gate`**. Green here is the bar for main.
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
 | command-line argv pin | `cargo xtask cli-contract --self-test`, then `cargo xtask cli-contract` |
 | absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
-| brand | org-wide, from the atlas checkout: `bash ../atlas/scripts/check-org-brand.sh harness` |
+
+Source publication uses this repository's checks and standalone `b10x-gates bot`. It requires no
+Atlas checkout or organization-wide admission. Organization privacy rules remain applicable;
+Atlas documentation delivery and optional organization audits run separately.
 
 Rust 1.97, edition 2024. The binary is `b10x-harness`.
 

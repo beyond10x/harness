@@ -23,13 +23,13 @@ harness-wire = { workspace = true }
 # **Pinned by a published git revision, never by path.** A `path` into a sibling checkout builds against
 # whatever happens to be checked out there, and `--locked` cannot lock it — the gate was green
 # against a tree no lockfile named (AGENTS.md invariant 2). Revision
-# `4d830f2f662e3ac6d5c573f1915ce3ce226c4085` adds the no-Git-source metadata correction
-# after release `0.7.6`; its package version remains `0.7.6` and development wire is `0.16.0`.
+# `3fafeae65fe6ee9f36c3ba17d49b36a1a0d1a3a3` is release `0.7.7`, which leaves Git metadata
+# untouched when no Git sources are configured; the development wire remains `0.16.0`.
 # Harness continues to request exact workspace access, no network and resource usage through the
 # existing embedded driver boundary. Both version requirements are exact so a resolver cannot
 # silently substitute a later contract for this selection.
-substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "4d830f2f662e3ac6d5c573f1915ce3ce226c4085", version = "=0.7.6" }
-substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "4d830f2f662e3ac6d5c573f1915ce3ce226c4085", version = "=0.7.6" }
+substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "3fafeae65fe6ee9f36c3ba17d49b36a1a0d1a3a3", version = "=0.7.7" }
+substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "3fafeae65fe6ee9f36c3ba17d49b36a1a0d1a3a3", version = "=0.7.7" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

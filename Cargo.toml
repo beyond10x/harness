@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.12.0"
+version = "0.12.1"
 edition = "2024"
 rust-version = "1.97"
 license = "LicenseRef-B10x-Proprietary"
@@ -80,10 +80,10 @@ zeroize = { version = "1.8", features = ["derive"] }
 
 # MCP is a lower reusable protocol boundary, pinned like substrate rather than read from a sibling
 # checkout. Harness supplies every envelope, approval, and publication decision itself.
-b10x-mcp-command = { git = "https://github.com/beyond10x/mcp", rev = "3c68df0449536756c74009836f6d02078a2326ed" }
-b10x-mcp-client = { git = "https://github.com/beyond10x/mcp", rev = "3c68df0449536756c74009836f6d02078a2326ed" }
-b10x-mcp-config = { git = "https://github.com/beyond10x/mcp", rev = "3c68df0449536756c74009836f6d02078a2326ed" }
-b10x-mcp-types = { git = "https://github.com/beyond10x/mcp", rev = "3c68df0449536756c74009836f6d02078a2326ed" }
+b10x-mcp-command = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
+b10x-mcp-client = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
+b10x-mcp-config = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
+b10x-mcp-types = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

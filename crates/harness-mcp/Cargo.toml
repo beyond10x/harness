@@ -23,6 +23,6 @@ toml = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-b10x-mcp-testkit = { git = "https://github.com/beyond10x/mcp", rev = "3c68df0449536756c74009836f6d02078a2326ed" }
+b10x-mcp-testkit = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

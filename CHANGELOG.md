@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-09-11
+
+### Changed
+
+- Update the embedded confinement boundary to Substrate `3fafeae6` (release `0.7.7`), which leaves
+  Git metadata untouched during host startup, Git-only observations and workspace destruction when
+  no Git sources are configured. Both `b10x-substrate-host` and `b10x-substrate-wire` keep an exact
+  `=0.7.7` version requirement beside the revision, so a resolver cannot substitute a later
+  contract; the development wire bundle remains `0.16.0`.
+- Update the outbound MCP client crates and both testkit declarations to `bf7f9415` (release
+  `0.1.2`). The release carries documentation-surface and publication changes only; no client API,
+  transport or credential behaviour changed.
+- Consume `@beyond10x/docs-system` at revision `86cd6c6e` (release `0.7.0`) in
+  `website/package.json` and `website/package-lock.json`. The documentation bundle and Pages
+  delivery workflows keep their own catalog-owned pins and are unchanged.
+
+The full `cargo xtask gate` is green against the updated `Cargo.lock`.
+
 ## [0.12.0] — 2026-09-10
 
 ### Changed

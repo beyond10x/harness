@@ -1,17 +1,16 @@
 # Status
 
-Observed on 2026-09-07 after the foundation refresh under `Unreleased`. Current evidence is the repository-owned
+Observed on 2026-09-11 after the agent-tooling refresh released as `0.12.1`. Current evidence is the repository-owned
 `cargo xtask gate`; historical live-provider observations remain dated in the rows that carry them.
 
-The foundation refresh pins Substrate `4d830f2f` (package `0.7.6`, with the no-Git-source
-metadata correction) and MCP `3c68df04` (`0.1.1`). The updated lockfile passed the full
-`cargo xtask gate` on Rust `1.98.1` and `cargo build --workspace --locked` on the declared Rust
-`1.97.0`. These checks establish local compatibility; historical live-provider observations
-below remain evidence of the versions and environments in which they were recorded.
+The refresh pins Substrate `3fafeae6` (package `0.7.7`, development wire `0.16.0`) and MCP
+`bf7f9415` (`0.1.2`). The updated lockfile passed the full `cargo xtask gate`. These checks
+establish local compatibility; historical live-provider observations below remain evidence of the
+versions and environments in which they were recorded.
 
 | Area | State | Next evidence |
 | --- | --- | --- |
-| Source | canonical repository `beyond10x/harness`; own workspace, own gate. Lower foundation dependencies are exact Git pins, never sibling paths: Substrate `4d830f2f` (package `0.7.6`) for confinement and MCP `3c68df04` (`0.1.1`) for client protocol/transport/OAuth, including both MCP testkit declarations. The locked graph passed the full gate and the declared Rust `1.97.0` workspace build. Harness depends on nothing that could embed it | repository CI repeats the full gate and declared compiler build on publication |
+| Source | canonical repository `beyond10x/harness`; own workspace, own gate. Lower foundation dependencies are exact Git pins, never sibling paths: Substrate `3fafeae6` (package `0.7.7`) for confinement and MCP `bf7f9415` (`0.1.2`) for client protocol/transport/OAuth, including both MCP testkit declarations. The locked graph passed the full gate. Harness depends on nothing that could embed it | repository CI repeats the full gate and declared compiler build on publication |
 | Outbound MCP | `harness-mcp` turns a `b10x-mcp` tools snapshot into the existing `ToolPort`. `--mcp-profile` is repeatable on `run`, `chat`, `workflow run` and `tools`; the shared XDG registry/OAuth store is the default and `--mcp-registry` is explicit. Every profile pins registry and snapshot SHA-256 values, names an explicit subset, and supplies local descriptions, envelopes and subjects. Discovery is frozen for the run; annotations are never authority; all calls use the existing approval, hook, result-bound and deadline path. `started.mcp` records registry/profile/snapshot digests and protocol version. Two Rust-only controlled endpoint tests drive the shipped binary through a model turn, a remote tool call and its result over real stdio and Streamable HTTP sockets; the HTTP run discovers OAuth metadata, loads an owner-only OAuth credential and proves the bearer reaches the protected resource. This remains `provider_emulated` evidence | repeat both transports against independently operated MCP servers; the repository-owned evidence proves composition, not third-party conformance |
 | Architecture | **carried from the architecture repository, not verified here.** That the split from `runtime/agent`'s bridges is accepted by ADR 0052, and that this component is registered in `architecture/STATUS.md`, are both claims about a repository that is not in this tree and not on this machine; the only corroboration at this commit is `CHANGELOG.md:1208` restating the same sentence | re-read ADR 0052 and `architecture/STATUS.md` where they live. Nothing at this commit can confirm or deny either, so this row is the one row on this page that is not read off the tree it names |
 | Neutral values | `harness-wire` implements items, tool specs, turns, usage, stream events, the three ports and every size bound; positive and adversarial tests pass. **The second wire held it, at the cost of two widenings**, each with its reason recorded where it lands: `Usage::cache_creation_input_tokens` (an `Option`, because a route that reports no cache-write figure has not said there was none) and `BearerSource::kind` (the same secret travels under different header names on one endpoint's two routes, so which one a credential *is* stopped being derivable from the wire alone). `Usage` also now states the invariant it had only ever implied — `input_tokens` is the whole and the cache figures are parts of it | none pending. What the second wire found wrong is one layer up, not here: see *Messages wire* |

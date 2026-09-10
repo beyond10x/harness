@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-10
+
 ### Changed
 
 - Honor named agents' `model` and `effort` declarations on delegate requests, resolve model aliases
@@ -15,6 +17,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   wire `0.16.0`), which leaves Git metadata untouched when Git sources are disabled, and the
   outbound MCP client and testkits to `3c68df04` (`0.1.1`).
 - Move the real Agentplugins skill and agent compatibility suite to Atlas, removing the reverse consumer dependency from Harness tests and CI.
+- Publish source through standalone bot tooling without an Atlas checkout or dependency-admission
+  requirement; retain Harness's own correctness checks and release requirements.
+
+This source release was cut without running gates, tests or binary packaging, at the operator's
+request. Existing historical test observations above are not new verification of this release.
 
 ## [0.11.1] — 2026-09-03
 

@@ -22,14 +22,30 @@ const REQUIRED: &[&str] = &[
     "wire",
 ];
 
+/// The released bytes every pinned contract is compared against.
+///
+/// A checkout without this ref can compare nothing. That used to pass in silence — each file was
+/// skipped one at a time and the summary still said `verified` — so CI, which checked out only the
+/// pull request's merge ref, never once compared a released contract with its released bytes. The
+/// ref's absence is now a named failure, and `.github/workflows/gate.yml` checks out with
+/// `fetch-depth: 0` so it is present.
+const BASELINE: &str = "origin/main";
+
 pub fn check(root: &Path) -> Result<(), String> {
     let contracts = root.join("contracts/provider-wires");
     let mut failures = Vec::new();
     let mut versions = 0_u64;
+    let baseline = baseline_present(root);
+    if !baseline {
+        failures.push(format!(
+            "`{BASELINE}` is absent from this checkout, so no released contract can be compared \
+             with its released bytes; fetch it with `git fetch origin main:refs/remotes/{BASELINE}`"
+        ));
+    }
     for wire in directories(&contracts)? {
         for version in directories(&wire)? {
             versions += 1;
-            check_version(root, &version, &mut failures);
+            check_version(root, &version, baseline, &mut failures);
         }
     }
     if versions == 0 {
@@ -50,7 +66,7 @@ pub fn check(root: &Path) -> Result<(), String> {
     }
 }
 
-fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
+fn check_version(root: &Path, directory: &Path, baseline: bool, failures: &mut Vec<String>) {
     let manifest_path = directory.join("manifest.json");
     let Ok(body) = std::fs::read(&manifest_path) else {
         failures.push(format!("{}: no manifest.json", directory.display()));
@@ -108,7 +124,9 @@ fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         }
         check_inventory(directory, &manifest, failures);
     }
-    check_immutable(root, directory, failures);
+    if baseline {
+        check_immutable(root, directory, failures);
+    }
 }
 
 fn check_files(directory: &Path, manifest: &Value, failures: &mut Vec<String>) {
@@ -260,12 +278,14 @@ fn check_immutable(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         let Ok(relative) = path.strip_prefix(root) else {
             continue;
         };
-        let spec = format!("origin/main:{}", relative.to_string_lossy());
+        let spec = format!("{BASELINE}:{}", relative.to_string_lossy());
         let exists = Command::new("git")
             .current_dir(root)
             .args(["cat-file", "-e", &spec])
             .stderr(Stdio::null())
             .status();
+        // The ref itself is present (`check` refuses otherwise), so a path that is not in it is a
+        // contract this branch adds rather than one it could be silently changing.
         if !matches!(exists, Ok(status) if status.success()) {
             continue;
         }
@@ -279,11 +299,23 @@ fn check_immutable(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         };
         if std::fs::read(&path).ok().as_deref() != Some(output.stdout.as_slice()) {
             failures.push(format!(
-                "{}: released contract differs from origin/main",
+                "{}: released contract differs from {BASELINE}",
                 relative.display()
             ));
         }
     }
+}
+
+/// Whether [`BASELINE`] resolves to a commit in this checkout.
+fn baseline_present(root: &Path) -> bool {
+    Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", "--quiet"])
+        .arg(format!("{BASELINE}^{{commit}}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn strings(value: &Value) -> BTreeSet<String> {
@@ -398,7 +430,7 @@ mod tests {
         )
         .expect("tampered stream");
         let mut failures = Vec::new();
-        check_version(root.path(), &directory, &mut failures);
+        check_version(root.path(), &directory, false, &mut failures);
         assert!(
             failures
                 .iter()
@@ -414,12 +446,32 @@ mod tests {
         let changed = b"{\"stream_events\":[\"event.b\"]}\n";
         std::fs::write(&path, changed).expect("tampered inventory");
         let mut failures = Vec::new();
-        check_version(root.path(), &directory, &mut failures);
+        check_version(root.path(), &directory, false, &mut failures);
         assert!(
             failures
                 .iter()
                 .any(|failure| failure.contains("stream inventory differs")),
             "the planted inventory defect passed: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn a_checkout_without_the_baseline_is_refused() {
+        let (root, _directory) = planted_contract();
+        // A repository of its own, so the answer is this checkout's and not an ancestor's.
+        Command::new("git")
+            .current_dir(root.path())
+            .args(["init", "--quiet"])
+            .status()
+            .expect("git init");
+        let error = check(root.path()).expect_err("a checkout with no `origin/main` must refuse");
+        assert!(
+            error.contains(BASELINE) && error.contains("absent from this checkout"),
+            "the missing baseline was not named: {error}"
+        );
+        assert!(
+            !error.contains("pinned version(s) verified"),
+            "a checkout that compared nothing reported verification: {error}"
         );
     }
 }

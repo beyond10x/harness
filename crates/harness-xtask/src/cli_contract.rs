@@ -21,14 +21,27 @@ const ARGUMENT_KEYS: &[&str] = &[
 ];
 const POSITIONAL_KEYS: &[&str] = &["multiple", "name", "required"];
 
+/// The released bytes every pinned contract is compared against.
+///
+/// See `provider_contract::BASELINE`: a checkout without this ref can compare nothing, and used to
+/// say `verified` anyway. Its absence is a named failure here too.
+const BASELINE: &str = "origin/main";
+
 pub fn check(root: &Path) -> Result<(), String> {
     let contracts = root.join("contracts/cli");
     let mut failures = Vec::new();
     let mut versions = 0_u64;
+    let baseline = baseline_present(root);
+    if !baseline {
+        failures.push(format!(
+            "`{BASELINE}` is absent from this checkout, so no released contract can be compared \
+             with its released bytes; fetch it with `git fetch origin main:refs/remotes/{BASELINE}`"
+        ));
+    }
     for product in directories(&contracts)? {
         for version in directories(&product)? {
             versions += 1;
-            check_version(root, &version, &mut failures);
+            check_version(root, &version, baseline, &mut failures);
         }
     }
     if versions == 0 {
@@ -149,7 +162,7 @@ pub fn pin(root: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
+fn check_version(root: &Path, directory: &Path, baseline: bool, failures: &mut Vec<String>) {
     let manifest_path = directory.join("manifest.json");
     let Ok(body) = std::fs::read(&manifest_path) else {
         failures.push(format!("{}: no manifest", directory.display()));
@@ -208,7 +221,9 @@ fn check_version(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         }
         None => failures.push(format!("{}: absent or not JSON", argv_path.display())),
     }
-    check_immutable(root, directory, failures);
+    if baseline {
+        check_immutable(root, directory, failures);
+    }
 }
 
 #[allow(
@@ -390,7 +405,9 @@ fn check_immutable(root: &Path, directory: &Path, failures: &mut Vec<String>) {
         let Ok(relative) = path.strip_prefix(root) else {
             continue;
         };
-        let spec = format!("origin/main:{}", relative.to_string_lossy());
+        let spec = format!("{BASELINE}:{}", relative.to_string_lossy());
+        // The ref itself is present (`check` refuses otherwise), so a path that is not in it is a
+        // contract this branch adds rather than one it could be silently changing.
         if !Command::new("git")
             .current_dir(root)
             .args(["cat-file", "-e", &spec])
@@ -449,6 +466,18 @@ fn sha256(body: &[u8]) -> String {
     encoded
 }
 
+/// Whether [`BASELINE`] resolves to a commit in this checkout.
+fn baseline_present(root: &Path) -> bool {
+    Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "--verify", "--quiet"])
+        .arg(format!("{BASELINE}^{{commit}}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn directories(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut found = Vec::new();
     for entry in
@@ -463,4 +492,31 @@ fn directories(root: &Path) -> Result<Vec<PathBuf>, String> {
     }
     found.sort();
     Ok(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_checkout_without_the_baseline_is_refused() {
+        let root = tempfile::tempdir().expect("a root");
+        let directory = root.path().join("contracts/cli/b10x-example/2026-09-02");
+        std::fs::create_dir_all(&directory).expect("contract directory");
+        // A repository of its own, so the answer is this checkout's and not an ancestor's.
+        Command::new("git")
+            .current_dir(root.path())
+            .args(["init", "--quiet"])
+            .status()
+            .expect("git init");
+        let error = check(root.path()).expect_err("a checkout with no `origin/main` must refuse");
+        assert!(
+            error.contains(BASELINE) && error.contains("absent from this checkout"),
+            "the missing baseline was not named: {error}"
+        );
+        assert!(
+            !error.contains("pinned version(s) verified"),
+            "a checkout that compared nothing reported verification: {error}"
+        );
+    }
 }

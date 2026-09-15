@@ -47,7 +47,9 @@ Done:
 
 **Exit:** the existing bridge, pointed at this binary instead of `codex`, drives a turn. Everything
 so far is this component's own client, written from the bridge's published source — the two
-processes have never spoken, and `STATUS.md` says so rather than implying otherwise.
+processes have never spoken, and `STATUS.md` says so rather than implying otherwise. **Open since
+2026-08-21** (`88bbf61`, the commit that wrote this phase); the crate is kept rather than retired,
+and this date is what a reader should weigh against that.
 
 ## Phase 3: the second wire
 
@@ -180,9 +182,9 @@ The first consumer is **agent-platform**, not `runtime/agent`. `agent-platform/C
 pins `b10x-harness-wire`, `b10x-harness-loop` and `b10x-harness-messages` at tag **`0.10.0`**, and
 `atlas/ROADMAP.md` records `agent-platform-harness` proving a compiled tool round trip through the
 embedded loop. So *something outside this repository holds this loop as a library* is reached, at a
-release two behind the current one. `STATUS.md`'s "No production component embeds it at this
-commit" is the statement this page supersedes; it was true when it was written and is not true of
-`0.10.0` onwards.
+release two behind the current one. `STATUS.md`'s **Embedding** row is what replaced the older
+"nothing embeds this loop" statement this page was written against; it now records Agent Platform
+as the first embedder at `0.10.0` and says what is still open.
 
 What remains, and what closes the phase:
 

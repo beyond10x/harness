@@ -47,7 +47,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
 | command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`, `events`) | implemented. Eleven top-level verbs, 23 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-09-02/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
-| bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
+| bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories. That exit has been open since 2026-08-21 (`88bbf61`, the commit that wrote Phase 2); kept, not retired — see [ROADMAP Phase 2](ROADMAP.md#phase-2-bridge-mode) |
 | substrate confinement, embedded | working, including execution, and `run` has been *exercised* against a confined process: on 2026-08-31 an embedded delegated scope built, formatted, tested and vetted a Go server through the admitted toolchain; see `STATUS.md` |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
 | live provider | first live run 2026-08-23. It found a real defect on turn 1 that the emulator could not: the whole workspace toolset was named illegally for that wire |
@@ -262,9 +262,11 @@ call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` was an 
 provider could check.
 
 `--surface verbs` publishes the three verbs over the same catalogue and is fully supported:
-metaharness serves that surface over MCP, and an arm comparing the two asks for it by name. Under
-it, a model that calls an entry by its bare name is routed to it and the waste is warned about
-(`unpublished-tool-routed`) rather than costing a dead turn.
+metaharness publishes the same three verbs over MCP to a vendor harness
+(`metaharness/crates/metaharness-tools/src/lib.rs`), so the vocabulary is the same on either side.
+No evaluation arm asks for `--surface` by name today. Under it, a model that calls an entry by its
+bare name is routed to it and the waste is warned about (`unpublished-tool-routed`) rather than
+costing a dead turn.
 
 With no `--substrate` or `--substrate-embedded`, nothing the run can call changes a file or starts
 a process. **That is a fact about the machine, not a promise this README makes to the model**: the

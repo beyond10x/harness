@@ -311,6 +311,17 @@ consumers during its own build, test or release.
 Automated commits and pushes use standalone `b10x-gates bot` and the GitHub App identity
 `b10x-bot[bot]`. Credentials and token minting remain outside this public source tree.
 
+**There is no bot wrapper script here, and adding one would be a second mechanism.**
+`scripts/as-bot.sh` and `scripts/bot-token.sh` — and `scripts/check-bot-files.py`, which only
+`bot-token.sh` called — were copies of atlas's, left in the tree when this section moved to
+`b10x-gates bot` (`e506af2`, 2026-09-10), and are deleted. Nothing here ran them: not
+`cargo xtask gate` (`crates/harness-xtask/src/main.rs:115-121` runs two Python checks and no other
+script), not `.github/workflows/gate.yml`, which mints its own installation token. A copy is also a
+divergence — this tree's `as-bot.sh` had fallen behind atlas's, missing its `GIT_CONFIG_GLOBAL`
+isolation and its refusal to push with `--no-verify`. Atlas and substrate keep their wrappers as
+their admitted delivery path by decision (atlas ADR 0057); harness is enrolled on standalone
+`b10x-gates` by ADR 0049 and does not.
+
 The three commits before this repository became canonical (`fc676ec`, `14f53f4`, `b61a9bb`) carry
 the bot's former name, and two of them carry b10x-bot's own app ID (`316511680`) under it. A
 `.mailmap` would put the former brand back in the tree and fail the org fence, and history is not

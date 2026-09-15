@@ -7,10 +7,10 @@
 # promise breaking — a dependency raising its own MSRV is enough.
 #
 # The substrate dependency is a private repository (`crates/harness-substrate/Cargo.toml`), and
-# `GITHUB_TOKEN` cannot read across repositories. An installation token minted from the same
-# b10x-bot GitHub App that `scripts/bot-token.sh` uses is what reaches it; atlas's
-# `scripts/bot-ci-secrets.sh` is what puts the two secrets on a repository. Without them the token
-# step fails by name and nothing is built — a missing credential is a red gate, not a skipped one.
+# `GITHUB_TOKEN` cannot read across repositories. An installation token minted from the b10x-bot
+# GitHub App is what reaches it; atlas's `scripts/bot-ci-secrets.sh` is what puts the two secrets on
+# a repository. Without them the token step fails by name and nothing is built — a missing
+# credential is a red gate, not a skipped one.
 name: Gate
 
 on:

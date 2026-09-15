@@ -91,7 +91,7 @@ pub const TRANSPORT: Settings = Settings::streaming(Framing::DoneSentinel);
 /// configured for another client transfers unchanged. The credential is deliberately not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
-    /// Origin plus API prefix, for example `https://llmgw.dev.babelforce.com/v1`.
+    /// Origin plus API prefix, for example `https://llmgw.dev.example.com/v1`.
     pub base_url: String,
     /// The exact model identifier the endpoint serves.
     pub model: String,

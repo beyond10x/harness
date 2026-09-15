@@ -15,9 +15,13 @@ to hold a loop, registering every tool through that vendor's mechanism, and livi
 budgets that vendor happens to enforce. Owning the loop makes tool names, budgets, cost accounting
 and approval decisions ours.
 
-It is deliberately small and carries no bridges to vendor binaries. **It depends on one other
-component in `beyond10x` — [substrate](https://github.com/beyond10x/substrate), pinned by released
-git tag — and on nothing that could embed it.** The arrow points inward — something else embeds
+It is deliberately small and carries no bridges to vendor binaries. **It depends on two other
+foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrate) for confinement and
+[mcp](https://github.com/beyond10x/mcp) for the outbound client protocol — each pinned by an exact
+git revision, never by a sibling path, and on nothing that could embed it.** At `0.12.1` those
+revisions are substrate `3fafeae6` (`crates/harness-substrate/Cargo.toml`, package `=0.7.7`) and mcp
+`bf7f9415` (`Cargo.toml`, release `0.1.2`); each happens to be the commit a release tag points at,
+but the pin the manifests carry is the revision. The arrow points inward — something else embeds
 this, never the reverse.
 
 ## Where it sits
@@ -41,10 +45,10 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; serializable approval checkpoints resume on fresh workers before the exact effect; service access and durable storage remain in the embedder |
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
-| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `app-server`, `events`) | implemented. Sessions are filed per run and resumable; the argv surface is pinned by contract |
+| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`, `events`) | implemented. Eleven top-level verbs, 23 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-09-02/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories |
-| substrate confinement, embedded | working, including execution — but `run` has been *published*, not yet *exercised* against a confined process |
+| substrate confinement, embedded | working, including execution, and `run` has been *exercised* against a confined process: on 2026-08-31 an embedded delegated scope built, formatted, tested and vetted a Go server through the admitted toolchain; see `STATUS.md` |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
 | live provider | first live run 2026-08-23. It found a real defect on turn 1 that the emulator could not: the whole workspace toolset was named illegally for that wire |
 | embedding | the per-turn context/inventory seam is implemented; production binding remains in the embedding service |
@@ -54,17 +58,25 @@ behaves. The wire contract pins are still emulator-derived.
 
 ## Build, test, run
 
-The gate is **`cargo xtask gate`**. Green here is the bar for main.
+The gate is **`cargo xtask gate`**. Green here is the bar for main. The list below is transcribed
+from [`gate()`](crates/harness-xtask/src/main.rs) — that function is the definition, and a step
+added there and not here is a documentation defect, not a second gate.
 
 | step | command |
 |---|---|
 | tests | `cargo test --workspace --locked` |
+| cross-workspace conformance | `cargo test -p b10x-harness-substrate --locked --test conformance` |
 | format | `cargo fmt --all --check` |
 | lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | provider-wire pins | `cargo xtask provider-contracts` |
-| app-server profile pin | `python3 scripts/check-app-server-profile.py` |
 | command-line argv pin | `cargo xtask cli-contract --self-test`, then `cargo xtask cli-contract` |
+| website contract | `cargo xtask website-contract` |
+| toolchain specs | `cargo xtask toolchain-specs --self-test`, then `cargo xtask toolchain-specs` |
+| generated toolchain docs | `cargo xtask toolchain-docs --check` |
+| HTTP boundary guard | in-process check that `harness-http` carries no vendor name |
+| app-server profile pin | `python3 scripts/check-app-server-profile.py` |
 | absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
+| strict rustdoc | `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked` |
 
 Source publication uses this repository's checks and standalone `b10x-gates bot`. It requires no
 Atlas checkout or organization-wide admission. Organization privacy rules remain applicable;
@@ -456,6 +468,8 @@ reading two files side by side.
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-tools` | one catalogue, published flat or under three verbs |
+| `crates/harness-toolchain` | versioned declarative toolchain providers — Rust, Go, Taskfile, npm, Yarn and explicitly loaded operator documents — with read-only discovery and a typed argv compiler |
+| `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
 | `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block |
 
@@ -489,7 +503,9 @@ These suites drive real processes over real sockets and pipes:
 
 - **No substrate confinement claim.** This harness's effects are exactly what its published toolset
   admits, and nothing constrains it further.
-- **No live-provider conformance.** One live run has happened; the pins are still emulator-derived.
+- **No live-provider conformance.** Live runs have happened on both routes — 2026-08-23, 08-29,
+  08-30 and 08-31, listed with what each one measured in `STATUS.md` — and the pins are still
+  emulator-derived. A run is not a conformance pin.
 - **No multimodal input.** An image item remains a new neutral value on both provider wires that
   nothing measuring this harness has asked for.
 - **Outbound MCP is a client transport, not an authority source.** `--mcp-profile <FILE>` opens a

@@ -5,6 +5,12 @@ Serves **O1**, **O3** and **O6** of `atlas/ROADMAP.md`, the collection's objecti
 An outcome roadmap. A phase advances only when its exit evidence exists; a compiling scaffold does
 not stand in for behavioral proof.
 
+**Read against the `0.12.1` tree (2026-09-11).** Every status line below is what that tree shows.
+No phase is in progress at this commit: `aep plan artifact list --store .engineering/planning
+--status active` returns nothing, and the open work is held as draft artifacts under the epics each
+phase names. `STATUS.md` carries the per-area state and the next piece of evidence each area waits
+for; this page carries the ordering.
+
 ## Phase 1: the loop, over one wire
 
 **Status: complete.**
@@ -56,8 +62,10 @@ side grows a case the other lacks. The shipped binary drives either one on a `--
 loop below it cannot tell which it got. `contracts/provider-wires/anthropic-messages/2026-08-29`
 pins the request, the stream and the credential headers, checked from both directions — **and is
 superseded by `2026-08-29b`**, cut the same day for the rolling `cache_control` breakpoint that
-caches the conversation and not only its head. `2026-08-29` stays as released (invariant 13); the
-current pin is `2026-08-29b`. Reached.
+caches the conversation and not only its head. Every released version stays as released
+(invariant 13), so the directory now holds `2026-08-29`, `2026-08-29b`, `2026-08-30`, `2026-08-30.1`
+and `2026-08-31`; **the current Messages pin is `2026-08-31`**, and the current Responses pin is
+`2026-08-31.1` (`STATUS.md`, *Wire contract*). Reached.
 
 `harness-wire` needed widening twice, and each widening carries its reason where it lands:
 
@@ -121,11 +129,12 @@ Not done, and stated so nobody reads the absence as working:
   with a fresh token and outlives it still fails by name partway through, which is the case
   `story:oauth-token-renewal` is titled after;
 - **a live contract version for the Anthropic route.** The run below happened; its *bytes* were not
-  captured, so `contracts/provider-wires/anthropic-messages/2026-08-29b` — the current pin — is
-  still `provider_emulated` and stays that way. Invariant 18 forbids promoting emulated evidence in
-  place: a live pin is a **new dated version** cut from captured bytes, not an edit to this one.
-  The cache-breakpoint placement `2026-08-29b` introduces is the part most worth capturing live:
-  the measurement that argued for it is a hit-rate series, and the pin itself is emulated.
+  captured, so `contracts/provider-wires/anthropic-messages/2026-08-31` — the current pin — is
+  still `provider_emulated`, as is every version before it, and stays that way. Invariant 18 forbids
+  promoting emulated evidence in place: a live pin is a **new dated version** cut from captured
+  bytes, not an edit to this one. The cache-breakpoint placement `2026-08-29b` introduced is the
+  part most worth capturing live: the measurement that argued for it is a hit-rate series, and the
+  pin itself is emulated.
 
 Done since, and it is the Anthropic half of this phase's exit:
 
@@ -165,15 +174,30 @@ And the ChatGPT/Codex half, which closes the phase:
 
 ## Phase 5: embedding and live characterization
 
-**Status: not started.**
+**Status: begun — the first embedder exists; the binding and the live pin are open.**
 
-- a `runtime/agent` direct-provider adapter that embeds this loop and binds `ToolPort` to its
-  capability compiler — the first consumer, and the first time the tools are real operations;
-- one explicitly authorized live run against a real gateway, retained as `vendor_live` evidence
-  distinct from everything above it.
+The first consumer is **agent-platform**, not `runtime/agent`. `agent-platform/Cargo.toml:40-42`
+pins `b10x-harness-wire`, `b10x-harness-loop` and `b10x-harness-messages` at tag **`0.10.0`**, and
+`atlas/ROADMAP.md` records `agent-platform-harness` proving a compiled tool round trip through the
+embedded loop. So *something outside this repository holds this loop as a library* is reached, at a
+release two behind the current one. `STATUS.md`'s "No production component embeds it at this
+commit" is the statement this page supersedes; it was true when it was written and is not true of
+`0.10.0` onwards.
 
-**Exit:** a direct-provider run passes `runtime/agent`'s own lifecycle conformance, and a live run
-exists whose evidence is not confused with provider emulation.
+What remains, and what closes the phase:
+
+- **the per-turn seam is pinned but not bound.** `TurnEnvironmentProvider` exists here and refreshes
+  attributable context and a fail-closed tool subset before every model turn; the embedder has not
+  implemented it, so per-turn revision evidence does not exist yet. Binding it is the embedder's
+  work and the retained evidence is the embedder's to produce;
+- **the embedder is two releases behind.** The cheapest close is a re-pin of agent-platform from
+  `0.10.0` to the current tag, so a bug fixed here is a bug fixed there;
+- **one explicitly authorized live run against a real gateway**, retained as `vendor_live` evidence
+  distinct from everything above it. Every run in Phase 4 was against a vendor's own endpoint under
+  the operator's own subscription, which is not the same thing.
+
+**Exit:** an embedder binds `TurnEnvironmentProvider` and retains per-turn revision evidence, and a
+live run exists whose evidence is not confused with provider emulation.
 
 ## Phase 6: `harness-workspace`, one trait over three ways to hold a tree
 
@@ -262,33 +286,41 @@ measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 
-**Status: in progress — design 0003; M1 shipped in `0.2.0`; of M2, command and operator steps
-landed.** A `kind: command` step is one `run` call through the run's gate, no model turn
-(2026-08-30). A `kind: operator` step is a typed successful pause with terminal `flow-paused`, no
-provider call and no invented failure or downstream skip (2026-08-31). Flow resume remains open.
+**Status: the binary half shipped; nothing is in progress.** Design 0003. M1 shipped in `0.2.0`;
+of M2, command and operator steps landed — a `kind: command` step is one `run` call through the
+run's gate, no model turn (2026-08-30), and a `kind: operator` step is a typed successful pause with
+terminal `flow-paused`, no provider call and no invented failure or downstream skip (2026-08-31).
+The last commit touching `crates/harness-flow` or `crates/harness-cli/src/workflow.rs` is
+`a4e1218` (2026-08-31); everything since is MCP, documentation and releases. **Two items stay
+open and neither is being worked at this commit**: flow resume (`--resume` is refused by name,
+`crates/harness-cli/src/workflow.rs:426-431`, because a flow names one session per section) and the
+library walk. Both are held as draft artifacts — `epic:embedded-by-a-consumer` and
+`story:workflow-run-through-the-library` — and the store has no active artifact.
 
-`crates/harness-flow` is 1,891 lines and 27 tests: a DAG of sub-trees, a group as a context scope,
-`Repeat` as the shape of a retreat, `gives` as the only thing that crosses a group boundary, and
-`Flow::run` walking a validated plan against a caller's `StepRunner`. Every `StepRunner` that
-exists is in its own `tests.rs`; no crate in `harness-cli` depends on it. On the other side of the
-boundary, AEP already projects into it — `aep govern workflow flow --id adp/default/2
+`crates/harness-flow` is a DAG of sub-trees, a group as a context scope, `Repeat` as the shape of a
+retreat, `gives` as the only thing that crosses a group boundary, and `Flow::run` walking a
+validated plan against a caller's `StepRunner`. The production `StepRunner` is
+`crates/harness-cli/src/workflow.rs` — `FlowRunner`, which binds a step to one `AgentLoop::run_in`
+over the same `Prepared` the `run` verb builds; the crate's own `tests.rs` holds the rest. On the
+other side of the boundary, AEP already projects into it — `aep govern workflow flow --id adp/default/2
 --map …` emits `fixtures/adp-default.projected.yaml`, and that document plans and retreats here.
 The projection says what it is: **an ordering, not a government.** Guards, the `declined` outcome
 and every early exit are dropped, and the retreat bound is a number on the command line because the
 source bounds a retreat with the engine's iteration budget.
 
-**Why the runner has to live here, and not stay a process-per-step driver.** Today a workflow runs
-this loop in exactly one way: `aep drive run` in AEP spawns the binary once
-per `llm` step, through `metaharness run b10x`, with the step's prompt, `--context` files,
+**Why the runner has to live here, and not stay a process-per-step driver.** The other way a
+workflow runs this loop is one process per step: `metaharness aep drive` — the CLI atlas ADR 0047
+fixes, with AEP's own model-backed invocations refusing before effects — spawns the binary once per
+`llm` step, through `metaharness run b10x`, with the step's prompt, `--context` files,
 `--write-scope` and `--allow-program`, and nothing else. The loop never sees the graph; every step
 starts cold; a retreat is the engine re-entering a state and paying for the context again.
 metaharness is the right spawner for a *vendor* harness — a scratch home, a copied plugin tree, a
 hook channel, a retained transcript — and for this loop it adds an argv and an attestation, which its
-own adapter says in as many words. Phase 5's consumer embeds this loop as a library. A driver that
-is a process tree of `aep drive` → `metaharness` → `b10x-harness` per step cannot be embedded,
-and an embedder that wants a workflow wants its ordering, its context scope and its retreat *inside*
-the loop it holds. So the runner is this component's, and it must need neither metaharness nor a
-`protocol` process to walk a plan.
+own adapter says in as many words. Phase 5's embedder holds this loop as a library. A driver that
+is a process tree of `metaharness aep drive` → `metaharness run b10x` → `b10x-harness` per step
+cannot be embedded, and an embedder that wants a workflow wants its ordering, its context scope and
+its retreat *inside* the loop it holds. So the runner is this component's, and it needs neither
+metaharness nor an AEP process to walk a plan — which is what `workflow run` does today.
 
 **What stays outside, by decision.** The governor. The engine (`aep-engine`: guards, evidence,
 transitions, visit and attempt budgets) and the step map (`aep-driver-spec`) are
@@ -298,18 +330,20 @@ conformance suites behind it — AEP' own guide refuses that by name. The driver
 not in metaharness and nothing has to be extracted from it. What is worth taking apart is on the
 AEP side: the routing core (`aep-driver`, 90 lines) is a library already; the
 per-harness argv, the per-call `decide_tool`, store integrity and the run directory are the 6,994
-lines of `aep drive`. The bridge asks that repository for one new thing — a way to put **one
-transition** to the engine from a run cursor, as a program the loop can call — and nothing else.
+lines behind `metaharness aep drive`. The bridge asks that repository for one new thing — a way to
+put **one transition** to the engine from a run cursor, as a program the loop can call — and nothing
+else.
 
 **The bridge is bytes, in both directions, over ports this loop already has:**
 
 | leg | mechanism | owner |
 |---|---|---|
 | workflow in | the flow document, `aep govern workflow flow --map <steps> --max-attempts N` | AEP, exists |
-| step → turn | a `StepRunner` in `harness-cli`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives` | here, absent |
-| transition out | a fourth hook point on `--hooks`, `transition`: fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is | here, absent |
-| the governor | any program behind that hook — `aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |
+| step → turn | `FlowRunner`, the `StepRunner` in `crates/harness-cli/src/workflow.rs`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives`, and a `kind: command` step is one gated `run` call instead | here, **shipped** |
+| transition out | the fourth hook point on `--hooks`, `transition` (`crates/harness-cli/src/hooks.rs:216`, `:352`): fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is, and a hook that cannot answer is read closed at both moments | here, **shipped** |
+| the governor | any program behind that hook — `metaharness aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |
 | the record | `flow.*` events on `--json`; metaharness maps each to an IR family or lists it as control plane, when an eval wants the run | metaharness, absent, optional |
+| flow resume | a cursor a stopped walk can be re-entered from. `--resume` is refused by name today, because a flow has one session per section and no name for the walk | here, **open** |
 
 **What this is not: an eval arm.** Under the three-arm program the workflow runs in the engine on
 every arm, and the arms are comparable because only the treatment varies. A run under this phase
@@ -319,23 +353,31 @@ program — the warm-context claim above is a number to be produced, not a prope
 
 Steps, each its own story:
 
-1. `StepRunner` bound to a turn: a group's steps share one session, a step in a new group starts
-   from `available` and nothing else, `handoff` reads the structured `answer`. Both emulators.
-2. `workflow run --flow <FILE> [--max-attempts N]`, and `flow-started`, `group-entered`,
-   `step-started`, `step-finished`, `group-repeating`, `group-left`, `transition-refused`,
-   `flow-finished` on `--json`, rendered on stderr like
-   everything else.
-3. The `transition` hook point, with the same *declared, never discovered; narrowing only* rules.
-4. The metaharness projection of `flow.*`, only when an eval asks for it.
+1. **Shipped.** `StepRunner` bound to a turn: a group's steps share one session, a step in a new
+   group starts from `available` and nothing else, `handoff` reads the structured `answer`. Both
+   emulators.
+2. **Shipped.** `workflow run --flow <FILE> [--max-attempts N]`, and the whole `FlowEvent`
+   inventory — `FlowStarted`, `GroupEntered`, `LayerReady`, `StepStarted`, `StepFinished`,
+   `NodeSkipped`, `GroupRepeating`, `HandoffIncomplete`, `TransitionRefused`, `GroupLeft`,
+   `FlowFinished`, `FlowPaused` (`crates/harness-flow/src/event.rs`) — on `--json`, rendered on
+   stderr like everything else.
+3. **Shipped.** The `transition` hook point, with the same *declared, never discovered; narrowing
+   only* rules.
+4. **Open, optional.** The metaharness projection of `flow.*`, only when an eval asks for it.
+5. **Open.** Flow resume: a walk that stopped can be re-entered from where it stopped, rather than
+   `--resume` being refused because a flow has one session per section.
 
-**Exit evidence:** the shipped binary walks `adp-default.projected.yaml` end to end over both
-emulators, takes one retreat and stops at its bound, and puts every transition to a hook program
-that refuses one of them — with no `metaharness` and no `protocol` process alive; and one embedded
-run under Phase 5's consumer does the same through the library.
+**Exit evidence.** The binary half is reached:
+`crates/harness-cli/tests/workflow.rs:1292` walks the unedited `adp-default.projected.yaml` end to
+end over both emulators, and `:502`, `:634` and `:715` drive a `transition` hook that refuses a
+leave, refuses an enter, and fails closed when it cannot answer — with no `metaharness` and no AEP
+process alive. **Still open:** one embedded run under Phase 5's embedder doing the same through the
+library, which is why the step runner's home (`harness-cli` today, reachable only with the binary)
+is the design question `story:workflow-run-through-the-library` carries; and flow resume.
 
 ## Phase 9: attributable context and toolchain providers
 
-**Status: implemented under `Unreleased`; live polyglot evidence remains open.**
+**Status: implemented, released in `0.9.0` (2026-08-31); live polyglot evidence remains open.**
 
 Design 0004 replaces the shell's flat standing instruction with typed layers carrying trust,
 source, freshness class and a body-free digest manifest. Toolchains are now strict declarative

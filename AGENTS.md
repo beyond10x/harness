@@ -229,12 +229,15 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 cargo xtask gate
 ```
 
-`cargo test --workspace --locked`, `cargo fmt --all --check`,
-`cargo clippy --workspace --all-targets --locked -- -D warnings`, strict rustdoc,
-`cargo xtask provider-contracts`, `python3 scripts/check-app-server-profile.py`,
-`cargo xtask cli-contract` — the contract checkers, one per pinned interface — and
-`python3 scripts/check-no-home-paths.py`. Two of them, the CLI contract checker and
-`check-no-home-paths.py`, run **twice**: `--self-test` first, on planted fixtures, then the tree.
+`gate()` in `crates/harness-xtask/src/main.rs` is the definition of what runs; this paragraph
+transcribes it and nothing else decides. In order: `cargo test --workspace --locked`,
+`cargo test -p b10x-harness-substrate --locked --test conformance`, `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo xtask provider-contracts`,
+`cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask toolchain-specs`,
+`cargo xtask toolchain-docs --check`, the in-process HTTP boundary guard,
+`python3 scripts/check-app-server-profile.py`, `python3 scripts/check-no-home-paths.py` and strict
+rustdoc. Three of them — the CLI contract checker, the toolchain specs checker and
+`check-no-home-paths.py` — run **twice**: `--self-test` first, on planted fixtures, then the tree.
 Run it before every commit. Organization audits in Atlas are separate from this source gate;
 ordinary publication does not run Atlas scripts.
 

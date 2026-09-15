@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:real-bridge-drives-this-binary
 kind: story
-status: draft
+status: proposed
 title: The bridge that was written against this protocol drives this binary
 relations:
 - derived_from: epic:bridge-mode-proof
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

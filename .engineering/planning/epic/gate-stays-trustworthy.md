@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:gate-stays-trustworthy
 kind: epic
-status: draft
+status: proposed
 title: The gate is trusted because nothing in it is unexplained
 summary: One test that failed once and was never pinned; one duplicated CI step named as cleanup and left.
 relations:
 - decomposes: initiative:record-matches-the-code
-revision: 2
+revision: 5
 ---
 ## Evidence
 
@@ -38,3 +38,20 @@ Pin the interrupt race; remove the duplicated CI credential steps. Both were nam
 
 The bridge-mode interrupt test either passes deterministically under load or is replaced by one that
 does, and `gate.yml` states its token step once.
+
+## What is already closed — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201). *Done When* has two clauses; one is met.
+
+- **the bridge-mode interrupt race** — met. `story:bridge-interrupt-race-pinned` is `implemented`,
+  and `story:bridge-interrupt-settlement-makes-progress` beside it. The test the review named still
+  exists — `crates/harness-cli/tests/bridge_mode.rs:748`,
+  `an_unknown_request_mid_turn_is_refused_without_killing_the_server` — and the window it raced in
+  now has cases of its own at `:712` and `:771`.
+- **`gate.yml` states its token step once** — **not met.** The two step pairs the epic was drafted
+  from are still there, byte for byte: mint at `.github/workflows/gate.yml:46-53` and rewrite at
+  `:57-63` in the first job, the same two at `:84-91` and `:93-99` in the `msrv` job. There is no
+  `.github/actions/` directory in this tree. `task:gate-token-steps-in-one-action` is the whole of
+  what is left here.
+
+Not re-run here: the gate. This triage read files; it built nothing.

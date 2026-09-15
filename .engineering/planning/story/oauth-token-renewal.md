@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:oauth-token-renewal
 kind: story
-status: draft
+status: proposed
 title: A run outlives the token it started with
 relations:
 - derived_from: epic:subscription-auth-finished
-revision: 3
+- serves: vision:b10x-owns-its-loop
+revision: 4
 ---
 ## Evidence
 

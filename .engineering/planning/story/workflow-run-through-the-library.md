@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:workflow-run-through-the-library
 kind: story
-status: draft
+status: proposed
 title: A workflow is walked through the library, with no b10x-harness process
 relations:
 - derived_from: epic:embedded-by-a-consumer
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

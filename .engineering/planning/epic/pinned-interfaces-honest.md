@@ -2,13 +2,13 @@
 format: aep.planning-md/1
 id: epic:pinned-interfaces-honest
 kind: epic
-status: draft
+status: implemented
 title: A pinned interface document says what the binary does
 summary: The current CLI pin is dated ahead, diffed against the wrong predecessor, and records defaults the binary no longer holds.
 relations:
 - decomposes: initiative:record-matches-the-code
 - informed_by: specification:published-interfaces
-revision: 2
+revision: 6
 ---
 ## Evidence
 
@@ -40,3 +40,29 @@ applies after clap. The provider-wire pins' live capture is `epic:wire-pins-from
 The version in force is dated the day it was cut, its "what changed" section is measured against its
 real predecessor, and every flag whose effective default is not clap's is either recorded or
 explicitly out of what the pin claims to cover.
+
+## Closed
+
+Closed 2026-09-15 by triage of the draft backlog (ORG-0201).
+
+All eight stories derived from this epic are `implemented`, and the three clauses of *Done When* are
+each answered in the tree:
+
+- **dated the day it was cut.** `contracts/cli/b10x-harness/2026-09-02/` was created by commit
+  `1d84c6e`, authored 2026-09-02 02:43 +0200 — same day, not a day ahead. The earlier same-day
+  recut took the `.N` suffix invariant 13 requires: `contracts/cli/b10x-harness/2026-08-30.2/` was
+  created by `6889741`, authored 2026-08-30 14:50 +0200.
+- **measured against its real predecessor.** `contracts/cli/b10x-harness/2026-09-02/README.md:8`
+  reads "What changed since `2026-09-01`", and `2026-09-01` is the directory immediately before it
+  in `contracts/cli/b10x-harness/`.
+- **effective defaults recorded.** `contracts/cli/b10x-harness/2026-09-02/README.md:63` states that
+  `--wire` and `--session-dir` record `"default": null` while the binary applies one after clap;
+  `:136`, `:139` and `:142` carry the per-command correction rows, and `:318`, `:320` and `:323`
+  record `openai-responses` as `--wire`'s effective default on `chat`, `run` and `workflow run`.
+  `contracts/cli/b10x-harness/2026-09-02/argv.json` agrees: `--wire` carries `"default": null` on
+  `run`, `chat` and `workflow run`, and `"default": "openai-responses"` on `app-server`.
+
+The pin in force is `2026-09-02` (`crates/harness-cli/src/contract.rs:34`).
+
+Not re-run here: the contract checkers themselves. This triage read files and commits; it built
+nothing (the checkout was under the disk floor for a workspace build).

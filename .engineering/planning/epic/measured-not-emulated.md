@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:measured-not-emulated
 kind: epic
-status: draft
+status: proposed
 title: The behaviours that only the emulator has ever seen are measured on something real
 summary: Compaction, the answer path, the flat surface and the embedded driver's exec.
 relations:
 - decomposes: initiative:live-evidence
-revision: 2
+revision: 4
 ---
 ## Evidence
 
@@ -39,3 +39,27 @@ that compares arms lives in another repository (`README.md:23`).
 
 Each of the four has a retained figure, and the design decisions waiting on them — design 0002's
 M2, and whether `verbs` stays the default anywhere — are taken against it.
+
+## What is already closed — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201). Two of the four measurements are done.
+
+- **the `answer` path's prose rate** — `story:answer-prose-rate-measured` is `implemented`.
+- **the embedded driver's confined exec** — `story:embedded-exec-exercised` is `implemented`.
+  `STATUS.md:30` now records an authorized run on 2026-08-31 that built, formatted, tested and
+  vetted a scratch application inside an embedded delegated scope, and no longer says the exec is
+  unexercised.
+
+Still open, and each carries its own story:
+
+- **compaction against a real context window** — `STATUS.md:18` still reads "measure a compaction
+  summary against a real provider — the trigger, the ratio and the summary prompt are all
+  `provider_emulated`" (`story:compaction-measured-live`).
+- **flat versus verbs on a real provider** — `story:flat-surface-measured`. Note that `STATUS.md:20`
+  no longer names this measurement in its *next evidence* cell; it now asks for a polyglot workspace
+  under a delegated cgroup. Nothing in this tree says the flat-surface measurement was taken, so the
+  story is kept rather than closed — the cell changed, not the measurement.
+  `crates/harness-tools/src/flat.rs:7` still carries the 33–44% figure as the argument the surface
+  was built on, which is the verbs-side measurement and not this one.
+
+Not re-run here: any live provider. This triage read files and the store; it contacted nothing.

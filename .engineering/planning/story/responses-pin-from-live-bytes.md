@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:responses-pin-from-live-bytes
 kind: story
-status: draft
+status: proposed
 title: The Responses wire is pinned from bytes a real endpoint sent
 relations:
 - derived_from: epic:wire-pins-from-live-bytes
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: initiative:live-evidence
 kind: initiative
-status: draft
+status: proposed
 title: Every claim rests on a real provider or a real machine, not the emulator
 summary: 'Close the STATUS next-evidence column: live pins, an authorized run per route, and the measurements the emulator cannot produce.'
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 2
+revision: 3
 ---
 ## Evidence
 

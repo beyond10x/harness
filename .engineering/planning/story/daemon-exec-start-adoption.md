@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:daemon-exec-start-adoption
 kind: story
-status: draft
+status: proposed
 title: An adopted workspace can run an exec over the daemon path
 relations:
 - derived_from: epic:adoption-follow-ups
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## What is missing
 

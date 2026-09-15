@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:tracking-documents-current
 kind: epic
-status: draft
+status: implemented
 title: STATUS and CHANGELOG describe the tree they ship with
 summary: Five feature commits after the status page was last written; three user-visible changes with no changelog entry.
 relations:
 - decomposes: initiative:record-matches-the-code
-revision: 2
+revision: 6
 ---
 ## Evidence
 
@@ -41,3 +41,33 @@ anything mechanical should stop it recurring — the gate reads none of these fi
 
 `STATUS.md` and `CHANGELOG.md` agree with the tree at a named commit, and the three internal
 contradictions above are resolved rather than reworded.
+
+## Closed
+
+Closed 2026-09-15 by triage of the draft backlog (ORG-0201).
+
+All five items derived from this epic are `implemented` — `story:status-page-contradicts-the-code`,
+`story:changelog-in-the-same-change`, `story:allowed-program-is-root-exec`,
+`story:tool-return-is-not-process-success` and `task:substrate-pin-comment-names-the-tag` — and the
+four defects this epic was drafted from are gone from the tree, not reworded:
+
+- **`STATUS.md` names the commit it was observed at.** `STATUS.md:3` reads "Observed on 2026-09-11
+  after the agent-tooling refresh released as `0.12.1`"; `CHANGELOG.md:10` carries `[0.12.1] —
+  2026-09-11` with `[Unreleased]` empty above it. The page was last rewritten to the tree by
+  `f470a76b63a667c72d4a4fb97de6ea06b3278948` (2026-09-15).
+- **The `ServerConfig` contradiction is gone.** `grep -n ServerConfig STATUS.md` returns nothing at
+  this commit; the claim the epic quoted no longer exists.
+- **The self-contradiction about sub-agents, hooks and confinement is gone.** The list under
+  `STATUS.md:33` no longer says "No sub-agents, no hooks … no structured output" or "No Substrate
+  confinement". What stands in their place are scoped claims that agree with the rows above them:
+  `:35` "No confinement unless it is asked for", `:45` "No live-provider conformance", `:49` "No
+  multimodal input".
+- **The credential-route contradiction is resolved.** Both routes are recorded as reached in the
+  *Subscription auth* row, and `ROADMAP.md:174-175` states the phase exit as "Both met".
+
+What this epic's *Scope* raised and did **not** settle: nothing mechanical stops the drift
+recurring — no gate step reads `STATUS.md`. That question stays open under
+`initiative:record-matches-the-code`, which is where a check would be filed, rather than being
+carried by this epic.
+
+Not re-run here: the gate. This triage read files and commits; it built nothing.

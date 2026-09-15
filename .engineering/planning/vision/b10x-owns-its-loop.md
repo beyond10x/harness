@@ -2,10 +2,10 @@
 format: aep.planning-md/1
 id: vision:b10x-owns-its-loop
 kind: vision
-status: draft
+status: approved
 title: The b10x agent loop is owned here, and nothing above it is embedded
 summary: A harness that talks to model APIs directly, depends only on substrate, and is embedded by others rather than embedding them.
-revision: 2
+revision: 6
 ---
 ## Evidence
 
@@ -34,3 +34,30 @@ published interface is pinned by a dated, immutable contract checked from both d
 (`AGENTS.md:81-104`). Almost every open item in the plan below is a consequence of that one rule —
 the code exists, and the evidence that would let it be described as working against something real
 does not yet.
+
+## Standing — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201). This objective sat in `draft` from the run
+that reverse-engineered it until this pass, which made it indistinguishable from a scratch note
+while most of the store declared that it `serves` it — 67 artifacts before this pass, 80 after it,
+counted from `aep plan artifact list --format json`.
+
+It is not a proposal. It restates commitments the repository already publishes and enforces —
+`README.md`, `AGENTS.md`'s invariants, and the fact that the gate refuses a build that breaks them —
+and the store has been acting on it: `epic:full-review-remediation` and
+`epic:public-site-is-accurate-live-and-governed` are both `implemented` and both carry
+`serves: vision:b10x-owns-its-loop`.
+
+What has changed in the tree since this was drafted, without changing the objective:
+
+- **something outside this repository now holds the loop as a library.** `ROADMAP.md:179-187`
+  records Agent Platform as the first embedder, pinning three of these crates at tag `0.10.0`.
+  "The arrow points inward" is now a fact with an instance, not only a rule.
+- **the two live routes exist.** `ROADMAP.md:174-175` states the credential phase's exit as "Both
+  met".
+- **the emulator rule has not moved.** Every provider-wire pin in `contracts/` is still
+  emulator-derived (`STATUS.md:23`), which is the objective's distinguishing commitment still being
+  paid for rather than waived.
+
+Moved to `approved` on that basis. Nothing here was re-measured; the citations above are file reads
+in this worktree and statuses read from this store.

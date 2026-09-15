@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:bridge-mode-proof
 kind: epic
-status: draft
+status: proposed
 title: A real bridge client drives this binary
 summary: 'Phase 2''s exit: the two processes have never spoken and no gate compares their inventories.'
 relations:
 - decomposes: initiative:driven-from-outside
-revision: 2
+revision: 3
 ---
 ## Evidence
 

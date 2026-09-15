@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: verification-report:openai-responses-on-vllm
 kind: verification-report
-status: draft
+status: accepted
 title: The openai-responses wire reaches vLLM v0.27.1 unchanged
 summary: A two-turn tool-calling run completed against the deployment's own vLLM image and the production chat template. No wire change is needed.
 relations:
 - informed_by: initiative:live-evidence
-revision: 1
+revision: 3
 ---
 ## What was measured
 
@@ -85,3 +85,24 @@ returned **HTTP 200** — the `raise ValueError("Encrypted content is not suppor
 - Nothing about the RunPod pod, its proxy, or a cold start. The account is unfunded.
 - Nothing about the `anthropic-messages` wire against the same server. Not measured.
 - Nothing about compaction, which needs a run long enough to trigger it.
+
+## Disposition — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201).
+
+This record is complete: the run it describes happened, its result is stated, and the section above
+already bounds what it may and may not be read as. It was left at `draft` only because nothing moved
+it, and a finished measurement sitting in `draft` reads as a note somebody abandoned.
+
+It has also already been acted on. `story:vllm-reasoning-events-unpinned` was drafted from the
+warning counts in this report, carries `informed_by` back to it, and was folded under
+`epic:wire-pins-from-live-bytes` by commit `82cdd2c`.
+
+Moved to `accepted` rather than to `implemented`: `aep plan artifact lifecycle verification-report`
+declares no lifecycle, so every status is legal, and this kind records an observation rather than
+work that gets built.
+
+`third-party-blocker:runpod-account-unfunded` stays `open` and still blocks this record. Accepting
+the report does not clear it and must not be read as clearing it: what the blocker withholds is
+everything in *What this does not establish* — the 27B model's behaviour, the pod, its proxy and a
+cold start — none of which this report claims.

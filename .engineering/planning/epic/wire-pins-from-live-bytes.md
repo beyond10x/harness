@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:wire-pins-from-live-bytes
 kind: epic
-status: draft
+status: proposed
 title: Both wire contracts are pinned from bytes a real provider sent
 summary: Every provider-wire pin in contracts/ is emulator-derived; a live pin is a new dated version.
 relations:
 - decomposes: initiative:live-evidence
-revision: 2
+revision: 3
 ---
 ## Evidence
 

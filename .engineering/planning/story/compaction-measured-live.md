@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:compaction-measured-live
 kind: story
-status: draft
+status: proposed
 title: Compaction is measured against a real provider, not the emulator
 relations:
 - derived_from: epic:measured-not-emulated
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

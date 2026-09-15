@@ -2,12 +2,13 @@
 format: aep.planning-md/1
 id: story:one-spelling-of-a-path-in-every-workspace
 kind: story
-status: draft
+status: proposed
 title: One spelling of a path names one file in every workspace
 summary: ./notes.txt reads locally and is refused as a path escape when confined; the model is never told which spelling is required.
 relations:
 - derived_from: epic:embedded-by-a-consumer
-revision: 1
+- serves: vision:b10x-owns-its-loop
+revision: 2
 ---
 ## Evidence
 

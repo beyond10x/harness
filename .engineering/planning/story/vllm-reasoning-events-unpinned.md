@@ -2,13 +2,14 @@
 format: aep.planning-md/1
 id: story:vllm-reasoning-events-unpinned
 kind: story
-status: draft
+status: proposed
 title: vLLM's reasoning stream events are outside the pinned subset
 summary: '301 warnings in a two-turn run, and no ReasoningDelta ever fires: the pin knows OpenAI''s reasoning_summary_text names, vLLM sends reasoning_text.'
 relations:
 - informed_by: verification-report:openai-responses-on-vllm
 - derived_from: epic:wire-pins-from-live-bytes
-revision: 1
+- serves: vision:b10x-owns-its-loop
+revision: 2
 ---
 ## Evidence
 

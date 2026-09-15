@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: initiative:driven-from-outside
 kind: initiative
-status: draft
+status: proposed
 title: Something other than this repository's own tests drives the loop
 summary: The bridge proof, the first embedder, and one answer about what a workspace admits for all three implementations.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 2
+revision: 3
 ---
 ## Evidence
 

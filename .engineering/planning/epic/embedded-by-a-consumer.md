@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:embedded-by-a-consumer
 kind: epic
-status: draft
+status: proposed
 title: A consumer embeds the loop as a library
 summary: Phase 5's adapter, the workflow walked through the library, and one conformance suite over the three workspace implementations.
 relations:
 - decomposes: initiative:driven-from-outside
-revision: 2
+revision: 4
 ---
 ## Evidence
 
@@ -36,3 +36,24 @@ Hosting, an admission transport or a durable store (`AGENTS.md:193-201`).
 
 A library caller has run a turn and a flow, and one suite runs against all three workspace
 implementations in `scripts/gate.sh`.
+
+## What is already closed — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201). *Done When* has two clauses; one is met.
+
+- **"one suite runs against all three workspace implementations"** — met.
+  `story:one-conformance-suite-over-three-workspaces` is `implemented`, the suite is
+  `crates/harness-substrate/tests/conformance.rs`, and `gate()` in
+  `crates/harness-xtask/src/main.rs:81-88` runs it explicitly
+  (`cargo test -p b10x-harness-substrate --locked --test conformance`) as well as through the
+  workspace run above it.
+- **"a library caller has run a turn and a flow"** — open. `story:direct-provider-adapter` and
+  `story:workflow-run-through-the-library` carry the two halves.
+
+Two pins the suite left standing are also open under this epic:
+`story:one-spelling-of-a-path-in-every-workspace` (`crates/harness-substrate/tests/conformance.rs:1133`)
+is still red-when-changed rather than closed, while `story:a-confined-write-makes-its-own-parents`
+is `implemented`.
+
+The Evidence section above is stale in one respect: `STATUS.md:29` no longer says "not started" —
+see `story:direct-provider-adapter`.

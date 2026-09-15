@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:repo-local-profiles
 kind: story
-status: draft
+status: proposed
 title: A repository may supply profiles, once a trust decision says how
 relations:
 - derived_from: epic:adoption-follow-ups
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## What is missing
 

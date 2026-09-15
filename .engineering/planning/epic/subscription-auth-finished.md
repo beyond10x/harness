@@ -2,12 +2,12 @@
 format: aep.planning-md/1
 id: epic:subscription-auth-finished
 kind: epic
-status: draft
+status: proposed
 title: Subscription authentication is finished on both routes
 summary: 'Phase 4''s two open halves: token renewal, and an authorized run on the ChatGPT/Codex route.'
 relations:
 - decomposes: initiative:live-evidence
-revision: 2
+revision: 4
 ---
 ## Evidence
 
@@ -38,3 +38,26 @@ credential path — see `story:chatgpt-codex-authorized-run`.
 
 Phase 4's exit line reads "met" for both routes, against retained evidence, and a run whose token is
 renewed by its owner outside this process keeps working across the renewal.
+
+## What is already closed — 2026-09-15
+
+Recorded during triage of the draft backlog (ORG-0201). Both halves this epic was named after are
+closed; what keeps it open is narrower than what opened it.
+
+- **the second route's authorized run** — `story:chatgpt-codex-authorized-run` is `implemented`.
+- **renewal against whatever holds the refresh token** — `story:codex-provider` and
+  `story:codex-live-refresh-measured` are `implemented`, and
+  `story:credential-renewal-is-secret-and-atomic` beside them.
+- `ROADMAP.md:174-175` now states the phase exit as "one authorized run on each, with the credential
+  never leaving the source that owns it. **Both met.**" The *Risks* section above is therefore
+  answered: the two pages no longer disagree about whether the second route has been contacted.
+
+What is left is one sentence, and it is the one this epic's own child was titled after: **nothing
+renews mid-run.** `STATUS.md:27`'s *next evidence* cell reads "**mid-run renewal**", and names
+`story:oauth-token-renewal` as where it lives. The check is once, before the first request, against
+a fifteen-minute margin, so a run that outlives its own token still fails by name.
+
+This epic stays a queue item for that alone. Whoever picks it up may reasonably decide the residue
+belongs to `story:oauth-token-renewal` and close the epic on the evidence above.
+
+Not re-run here: any credential path. This triage read files and the store.

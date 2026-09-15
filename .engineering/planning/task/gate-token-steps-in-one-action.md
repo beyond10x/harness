@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: task:gate-token-steps-in-one-action
 kind: task
-status: draft
+status: proposed
 title: The CI token step is written once
 relations:
 - decomposes: epic:gate-stays-trustworthy
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

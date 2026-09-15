@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:direct-provider-adapter
 kind: story
-status: draft
+status: proposed
 title: A consumer's adapter binds the loop's ToolPort to its own operations
 relations:
 - derived_from: epic:embedded-by-a-consumer
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 4
 ---
 ## Evidence
 
@@ -30,3 +31,26 @@ the `RunLedger` — and the evidence that the run passed the consumer's own life
 
 A direct-provider run driven by the consumer's adapter passes that consumer's lifecycle conformance,
 and `STATUS.md`'s embedding row names it instead of saying "not started".
+
+## Since this was drafted — 2026-09-15
+
+**The consumer named in the Evidence above is the wrong one, and "not started" is no longer true.**
+Recorded during triage of the draft backlog (ORG-0201); the story is kept because the work it asks
+for is still open, not because its premise survived.
+
+- `ROADMAP.md:181` — "The first consumer is **agent-platform**, not `runtime/agent`."
+  `ROADMAP.md:179` states the phase as "begun — the first embedder exists; the binding and the live
+  pin are open."
+- `STATUS.md:29` — the Embedding row no longer reads "not started". It records Agent Platform as the
+  first embedder, pinning `b10x-harness-wire`, `b10x-harness-loop` and `b10x-harness-messages` at
+  tag `0.10.0`, two releases behind this tree — read in a sibling checkout on 2026-09-15 and
+  explicitly **not verified from this repository**.
+- The seam the embedder is asked to bind is now named and exists here:
+  `TurnEnvironmentProvider` (`STATUS.md:18`, `ROADMAP.md:191`).
+
+So the acceptance below should be read against `ROADMAP.md:201`'s exit — an embedder binds
+`TurnEnvironmentProvider` and retains per-turn revision evidence — rather than against a
+`runtime/agent` adapter that was never built. Rewriting the acceptance is a decision about what this
+story now asks for, and is left to whoever picks it up.
+
+Not verified here: anything inside the embedder's own repository. This triage read only this tree.

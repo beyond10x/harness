@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:messages-cache-breakpoint-live-pin
 kind: story
-status: draft
+status: proposed
 title: The rolling cache breakpoint is pinned from a live Anthropic run
 relations:
 - derived_from: epic:wire-pins-from-live-bytes
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

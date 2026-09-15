@@ -2,11 +2,12 @@
 format: aep.planning-md/1
 id: story:flat-surface-measured
 kind: story
-status: draft
+status: proposed
 title: The flat surface's cost against a real provider is measured
 relations:
 - derived_from: epic:measured-not-emulated
-revision: 2
+- serves: vision:b10x-owns-its-loop
+revision: 3
 ---
 ## Evidence
 

@@ -1,0 +1,12 @@
+{
+  "source": "Not a vendor rate. The deterministic local endpoint (`crates/harness-messages/tests/fixtures/fake_messages.py`) serves a model it calls `b10x-emulated` and charges nobody anything. This card exists so the free dry run exercises the whole pricing path — `{\"kind\":\"rates\"}`, per-turn `{\"kind\":\"cost\"}` and `Budget::validate(priced = true)` — before a paid run depends on it. The figures are copied from the Claude Haiku 4.5 card of the same date so the dry run's arithmetic is the arithmetic the paid run will use. Every cost this card produces is `provider_emulated` and is a rehearsal, never a price anyone paid.",
+  "as_of": "2026-09-18",
+  "models": {
+    "b10x-emulated": {
+      "input_usd_per_mtok": 1.0,
+      "cached_input_usd_per_mtok": 0.1,
+      "cache_creation_input_usd_per_mtok": 1.25,
+      "output_usd_per_mtok": 5.0
+    }
+  }
+}

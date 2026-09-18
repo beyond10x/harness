@@ -71,6 +71,45 @@ name this run does not have is refused by the provider before it is sent.
 stay distinguishable. The `started` event and `b10x-harness tools` list the offered names — always,
 empty included — because a run given skills and a run given none are different records.
 
+`--plugin-dir` contributes **no** memories. It is a skills-and-agents flag and nothing else.
+
+## Offer memories on demand
+
+`--memory-dir DIR`, repeatable, offers every `DIR/<id>.md` as a memory — the id is the file's own
+name, the frontmatter is `kind`, `summary`, `trust`, `status` and an optional `supersedes`, and the
+body follows. It is the exact shape `--skills-dir` has, for the same reason: only the `summary`
+reaches the model, one line each in the standing instruction, and the body arrives as the result of
+a `recall` call the model makes by id. `recall`'s `id` argument is a schema `enum` over the active
+records, so an id this run does not have is refused by the provider before it is sent.
+
+```bash
+b10x-harness run --memory-dir ./vault "what did we decide about retries?"
+```
+
+`Memories` is a value the **caller** constructs and hands in. The loop walks no directory and reads
+no file, before the run or during it, and the whole value is cloned into a delegate, so a child
+observes exactly its parent's vault entry for entry. Without the flag a run has no memories and
+publishes no `recall` tool, and its bytes are identical to a run built before memories existed.
+
+A record is closed and refuses rather than guessing. `kind` is one of `decision`, `fact`, `handoff`,
+`lesson`, `preference`, `runbook`, with no catch-all. `trust` has exactly one legal value,
+`unreviewed`. `status` is `active`, `rejected` or `superseded` — nothing is deleted, and a
+correction is a new record naming the old one in `supersedes`. Only `active` records are offered;
+the rest are held, reported, and answered by name if the model asks. An unknown frontmatter key, an
+unreadable record, an empty `summary`, two records of one id, a dangling `supersedes`, or a
+bidirectional override or control codepoint in any field refuses the **whole** vault by name —
+never a smaller one, because a vault silently missing the record that mattered reads to the model
+exactly like a complete vault. `Memories::new` is fallible where `Skills::new` is not, and that is
+the difference it buys.
+
+Like skills, the ids are listed by the `started` event and by `b10x-harness tools` — always, empty
+included, and **whatever a record's status**, because a run handed a superseded record it did not
+offer is not a run that was handed nothing.
+
+**There is no memory-writing tool and no writing flag.** The shipped toolset is read-only; every
+memory a run can see was handed to it before it started. A writer is its own change with its own
+gate, and never a flag on the reader.
+
 ## Delegate one task
 
 `--delegate` publishes another loop-owned tool. The model can hand one self-contained task to a

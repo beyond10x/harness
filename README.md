@@ -44,8 +44,8 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | `anthropic-messages` wire | implemented, streaming, pinned by contract. Selected with `--wire`; the loop below cannot tell which it got |
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; serializable approval checkpoints resume on fresh workers before the exact effect; service access and durable storage remain in the embedder |
-| sub-agents (`delegate`), structured output (`answer`), skills (`skill`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md) |
-| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`, `events`) | implemented. Eleven top-level verbs, 23 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-09-02/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract |
+| sub-agents (`delegate`), structured output (`answer`), skills (`skill`), memories (`recall`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md). `recall` is read-only and has no writing counterpart |
+| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`, `events`) | implemented. Eleven top-level verbs, 23 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-09-18/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract |
 | workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories. That exit has been open since 2026-08-21 (`88bbf61`, the commit that wrote Phase 2); kept, not retired — see [ROADMAP Phase 2](ROADMAP.md#phase-2-bridge-mode) |
 | substrate confinement, embedded | working, including execution, and `run` has been *exercised* against a confined process: on 2026-08-31 an embedded delegated scope built, formatted, tested and vetted a Go server through the admitted toolchain; see `STATUS.md` |
@@ -304,9 +304,9 @@ unattended run toward rewriting whole files when the narrower edit was the safer
 over `/dev/tty` when there is one to ask, and a refusal — stated in one line before the run — when
 there is not. `--yes` (`--approve all`) is the declared unattended run.
 
-## Sub-agents, structured output, skills, hooks
+## Sub-agents, structured output, skills, memories, hooks
 
-Four opt-in extensions under one rule: **nothing reaches a
+Five opt-in extensions under one rule: **nothing reaches a
 tool without the gate, nothing widens what a turn admits, and nothing refuses silently.** The
 argument is [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md); each is off
 unless a run asks for it.
@@ -316,11 +316,13 @@ unless a run asks for it.
 | structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it **and the turn that ask opens is held to that tool at the provider** — one turn per run, never any other; if it still does not, the run stops `unstructured` and exits 2 — never a success status over prose |
 | sub-agents | `--delegate` (`--delegate-turns N`, default 20; `--delegate-parallel N`, default 4) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and a share of the parent's remaining budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate. **Neighbouring `delegate` calls of one turn run side by side** — each child gets a fork of the model and tool ports, while the approver, the hooks and the record stay single and are asked from the run's own thread. `--delegate-parallel 1` runs them one at a time |
 | skills | `--skills-dir <DIR>` or `--plugin-dir <DIR>` | a tool named `skill` returns one operator-supplied instruction document by name. Descriptions are present in the standing instruction; bounded bodies are loaded before the run and returned only on demand. The loop performs no filesystem discovery and a delegate receives the same immutable set. |
+| memories | `--memory-dir <DIR>`, repeatable | a **read-only** tool named `recall` returns one caller-supplied memory record by id; the ids are a schema `enum` over the active records. Summaries are present in the standing instruction; bodies are returned only on demand. `Memories` is the exact sibling of `Skills` — the loop walks no directory and reads no file, and a delegate observes its parent's vault entry for entry. **This flag is the whole of how a memory reaches a run**: no default vault, no `$XDG` location, no environment variable, no walk beside the workspace, no `--plugin-dir` arm, no profile key. Absent, no `recall` tool is published. A record's `trust` admits exactly one value, `unreviewed`; `status` is `active`/`rejected`/`superseded` and nothing is deleted. A malformed or partly-invalid vault refuses the **whole** vault by name rather than yielding a smaller one. **There is no memory-writing tool and no writing flag** — the shipped toolset is read-only, and a writer would be its own change with its own gate. |
 | hooks | `--hooks <FILE>` | the operator's own programs, run as an argv (never a shell) at three moments: `before-call` (after approval; exit 2 refuses the call, a hook that fails refuses it too), `after-call` (a note the model reads beside the result), `stop` (exit 2 keeps the run working with the reason, at most three times). Named on the command line, **never discovered in the workspace** |
 
-None is a catalogue entry or touches `harness-wire`: `answer`, `delegate` and `skill` are tools the
-**loop** owns, resolved before the tool port ever sees a call, and a hook is a port like the approver,
-with the process-running half in the shell. A delegate's tool calls meet exactly the gate the
+None is a catalogue entry or touches `harness-wire`: `answer`, `delegate`, `skill` and `recall` are
+tools the **loop** owns, resolved before the tool port ever sees a call, and a hook is a port like the
+approver, with the process-running half in the shell. None of the four writes or executes: `skill`
+and `recall` each return one immutable document the caller loaded before the run began. A delegate's tool calls meet exactly the gate the
 parent's do; a hook can refuse what the gate allowed and can allow nothing the gate refused.
 
 Running delegates side by side changes how long a turn takes and nothing else. It is permitted only
@@ -466,7 +468,7 @@ reading two files side by side.
 | `crates/harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST`. No vendor name, field name or header name |
 | `crates/harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers |
 | `crates/harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under |
-| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the three tools it owns itself (`answer`, `delegate`, `skill`) and the hook port |
+| `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-tools` | one catalogue, published flat or under three verbs |

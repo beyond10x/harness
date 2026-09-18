@@ -7054,3 +7054,228 @@ fn a_dynamic_inventory_cannot_widen_or_redefine_the_attached_port() {
         "the invalid inventory fails before a model request"
     );
 }
+
+/// A small vault, built through the constructor that refuses rather than by struct literal.
+fn a_vault() -> Memories {
+    Memories::new(vec![
+        Memory {
+            id: "gate-is-xtask".to_owned(),
+            kind: MemoryKind::Fact,
+            summary: "The gate is `cargo xtask gate`.".to_owned(),
+            trust: MemoryTrust::Unreviewed,
+            status: MemoryStatus::Active,
+            supersedes: None,
+            body: "It runs python3 too.\n".to_owned(),
+        },
+        Memory {
+            id: "old-pin".to_owned(),
+            kind: MemoryKind::Fact,
+            summary: "An earlier substrate pin.".to_owned(),
+            trust: MemoryTrust::Unreviewed,
+            status: MemoryStatus::Superseded,
+            supersedes: None,
+            body: "3fafeae5\n".to_owned(),
+        },
+        Memory {
+            id: "new-pin".to_owned(),
+            kind: MemoryKind::Fact,
+            summary: "The substrate pin.".to_owned(),
+            trust: MemoryTrust::Unreviewed,
+            status: MemoryStatus::Active,
+            supersedes: Some("old-pin".to_owned()),
+            body: "3fafeae6\n".to_owned(),
+        },
+    ])
+    .expect("a legal vault")
+}
+
+#[test]
+fn a_run_handed_no_memories_publishes_no_recall_tool_at_all() {
+    // The default, and it stays the default: memory is opt-in per run exactly as `--delegate` and
+    // `--output-schema` are, and a run that named no vault is byte-identical to one built before
+    // this existed.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("done"))]),
+        ScriptedTools::new(vec![spec("file_read", Approval::NotRequired)]),
+    );
+    let (_, sink) = harness.run();
+    let Some(LoopEvent::Started {
+        published_tools,
+        memories,
+        ..
+    }) = sink.events().first()
+    else {
+        panic!("a run starts");
+    };
+    assert!(
+        !published_tools.iter().any(|name| name.as_str() == "recall"),
+        "{published_tools:?}"
+    );
+    assert!(
+        memories.is_empty(),
+        "and an empty list rather than an absence: a reader cannot otherwise tell `no memories` \
+         from `this build does not say`"
+    );
+}
+
+#[test]
+fn a_recall_answers_the_body_and_the_record_names_every_memory_whatever_its_status() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "recall", json!({"id": "new-pin"}))])),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("file_read", Approval::NotRequired)]),
+    );
+    harness.config = harness.config.clone().with_memories(Some(a_vault()));
+    let (outcome, sink) = harness.run();
+    let outcome = outcome.expect("the run completes");
+
+    assert_eq!(
+        result_of(&outcome, "call-1"),
+        (false, json!("3fafeae6\n")),
+        "the body arrives as the tool result and never as standing instruction"
+    );
+    let Some(LoopEvent::Started {
+        published_tools,
+        memories,
+        ..
+    }) = sink.events().first()
+    else {
+        panic!("a run starts");
+    };
+    assert!(published_tools.iter().any(|name| name.as_str() == "recall"));
+    assert_eq!(
+        memories,
+        &vec![
+            "gate-is-xtask".to_owned(),
+            "old-pin".to_owned(),
+            "new-pin".to_owned()
+        ],
+        "every record, superseded included: a run handed one it did not offer is not a run that \
+         was handed nothing"
+    );
+}
+
+#[test]
+fn recalling_a_superseded_memory_names_its_replacement_rather_than_saying_no() {
+    // Three different facts — absent, superseded, rejected — and a model told only "no" for all
+    // three spends the next turn guessing which (`AGENTS.md` invariant 7).
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[
+                ("call-1", "recall", json!({"id": "old-pin"})),
+                ("call-2", "recall", json!({"id": "never-written"})),
+            ])),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("file_read", Approval::NotRequired)]),
+    );
+    harness.config = harness.config.clone().with_memories(Some(a_vault()));
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("the run completes");
+
+    let (failed, superseded) = result_of(&outcome, "call-1");
+    assert!(
+        failed,
+        "a failed outcome, never a stop: the model can choose again"
+    );
+    assert!(
+        superseded
+            .as_str()
+            .expect("text")
+            .contains("superseded by `new-pin`"),
+        "{superseded}"
+    );
+    let (failed, absent) = result_of(&outcome, "call-2");
+    assert!(failed);
+    assert!(
+        absent
+            .as_str()
+            .expect("text")
+            .contains("is not a memory this run has"),
+        "and an absence is reported as an absence, not as a supersession: {absent}"
+    );
+}
+
+#[test]
+fn a_delegate_observes_exactly_its_parents_vault_and_no_more() {
+    // **Delegation widens nothing.** The value is cloned with the rest of the config, exactly as
+    // `Skills` is, so a child cannot gain a memory the parent lacked and cannot observe a vault
+    // that changed on disk after the run began — there is no disk in this path at all.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "read the pin and report"}),
+            )])),
+            // The child's turn: it recalls, through its own inherited vault.
+            Ok(asks_for(&[("call-2", "recall", json!({"id": "new-pin"}))])),
+            Ok(answer("child done")),
+            Ok(answer("parent done")),
+        ]),
+        ScriptedTools::new(vec![spec("file_read", Approval::NotRequired)]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_memories(Some(a_vault()))
+        .with_delegation(Some(Delegation::default()));
+    let (_, sink) = harness.run();
+
+    let parent = match sink.events().first() {
+        Some(LoopEvent::Started { memories, .. }) => memories.clone(),
+        _ => panic!("a run starts"),
+    };
+    let child = delegated(&sink)
+        .into_iter()
+        .find_map(|event| match event {
+            LoopEvent::Started { memories, .. } => Some(memories.clone()),
+            _ => None,
+        })
+        .expect("the child starts too");
+    assert_eq!(
+        child, parent,
+        "entry for entry, in order: a delegate gains no memory the parent lacked and loses none \
+         it had"
+    );
+    assert_eq!(
+        child,
+        vec![
+            "gate-is-xtask".to_owned(),
+            "old-pin".to_owned(),
+            "new-pin".to_owned()
+        ]
+    );
+    assert!(
+        delegated(&sink).into_iter().any(|event| matches!(
+            event,
+            LoopEvent::ToolCompleted { call_id, failed }
+                if call_id.as_str() == "call-2" && !failed
+        )),
+        "and the child can actually recall through it, rather than merely being told it has one"
+    );
+}
+
+#[test]
+fn a_run_whose_port_already_answers_to_recall_is_refused_before_a_byte_goes_out() {
+    // The same probe that refuses a catalogue entry shadowing `skill` or `delegate`: two tools of
+    // one name is a name the model can address neither of, and it is refused before the first
+    // request rather than found out on turn one.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("done"))]),
+        ScriptedTools::new(vec![spec("recall", Approval::NotRequired)]),
+    );
+    harness.config = harness.config.clone().with_memories(Some(a_vault()));
+    let (outcome, _) = harness.run();
+    let error = outcome.expect_err("refused");
+    let LoopError::Config(message) = error else {
+        panic!("a configuration refusal");
+    };
+    assert!(message.contains("recall"), "{message}");
+    assert!(
+        harness.model.seen.is_empty(),
+        "and nothing was sent: the refusal is before the first request"
+    );
+}

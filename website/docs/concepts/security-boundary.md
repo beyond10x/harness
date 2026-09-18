@@ -78,14 +78,36 @@ to continue; it cannot add a tool or approve a call the regular gate rejected.
 Never discover hook files from the workspace. A repository-controlled hook would be a program the
 repository causes to run on the operator's machine.
 
-## Skills and agents are files, not remote authority
+## Skills, agents and memories are files, not remote authority
 
-`--skills-dir`, `--agents-dir` and `--plugin-dir` read a directory the operator named, once, before
-the first request. Nothing opens a socket and nothing gives a third party a say in what the run may
-do. A document this build cannot read refuses the run by name rather than being half-applied, and
-an agent's `tools:` can only narrow the parent's catalogue. A skill body is an instruction the
-model follows, so a directory under a repository's control puts that repository's words in the
-run: name what you trust, as with hooks.
+`--skills-dir`, `--agents-dir`, `--plugin-dir` and `--memory-dir` read a directory the operator
+named, once, before the first request. Nothing opens a socket and nothing gives a third party a say
+in what the run may do. A document this build cannot read refuses the run by name rather than being
+half-applied, and an agent's `tools:` can only narrow the parent's catalogue. A skill or memory body
+is an instruction the model follows, so a directory under a repository's control puts that
+repository's words in the run: name what you trust, as with hooks.
+
+`--memory-dir` is the **whole** of how a memory reaches a run. There is no default vault, no `$XDG`
+location, no environment variable, no walk up the tree beside the workspace, no `--plugin-dir` arm
+and no profile key; without the flag a run has no memories and publishes no `recall` tool. Three
+properties follow from a vault being unreviewed text a previous run may have caused to be written:
+
+- **`trust` has exactly one legal value, `unreviewed`.** A vault record is unreviewed context.
+  Governed truth is promoted *out* of a vault into an artifact with its own review, never marked
+  trusted in place, so nothing a run reads can raise its own standing by asserting it.
+- **A bad vault refuses whole, by name.** An unknown frontmatter key, an unreadable record, an empty
+  `summary`, two records of one id or a dangling `supersedes` refuses the entire vault — never a
+  smaller one, because a vault silently missing the record that mattered reads to the model exactly
+  like a complete vault.
+- **Bidirectional overrides and control codepoints are refused in every field a person reads**,
+  naming the record, the field and the codepoint. A Trojan-Source reordering would make a record
+  read one way in an auditor's terminal and another to the parser. Single-line fields additionally
+  refuse newline and tab: a `summary` holding `\n- ` would forge an extra row in the instruction's
+  memory list.
+
+**There is no memory-writing tool and no writing flag.** The shipped toolset is read-only, so a run
+cannot leave words behind for the next run to read as context. A writer would be its own change,
+with its own gate and its own threat model — never a flag on the reader.
 
 Outbound MCP is different: it opens a remote protocol connection. Harness therefore publishes
 only entries in an operator-authored profile that pins both the shared local registry and the exact

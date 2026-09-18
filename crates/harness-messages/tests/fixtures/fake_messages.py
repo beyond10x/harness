@@ -14,6 +14,7 @@ the two `--list-scenarios` answers are equal.
 
 import argparse
 import json
+import re
 import sys
 import threading
 import time
@@ -31,6 +32,7 @@ SCENARIOS = [
     "bad-arguments",
     "cold",
     "cold-once",
+    "compaction",
     "delegate",
     "delegate-pair",
     "dynamic-tool",
@@ -174,15 +176,20 @@ def tool_use_events(name, arguments, index=0, partial_json=None, nth=1):
     ]
 
 
-def answered(text, leading=()):
-    index = 1 if leading else 0
-    return [message_start(), *leading, *text_events(text, index=index), *message_end("end_turn", 4)]
-
-
-def called(name, arguments, leading=()):
+def answered(text, leading=(), usage=None):
     index = 1 if leading else 0
     return [
-        message_start(),
+        message_start(usage),
+        *leading,
+        *text_events(text, index=index),
+        *message_end("end_turn", 4),
+    ]
+
+
+def called(name, arguments, leading=(), usage=None):
+    index = 1 if leading else 0
+    return [
+        message_start(usage),
         *leading,
         *tool_use_events(name, arguments, index=index),
         *message_end("tool_use", 8),
@@ -248,6 +255,68 @@ def has_tool_result(body):
             if isinstance(block, dict) and block.get("type") == "tool_result":
                 return True
     return False
+
+
+# --- the `compaction` scenario ------------------------------------------------------------------
+#
+# The one scenario whose answers depend on how large the conversation has become, because it is the
+# only behaviour in this loop that the conversation's *size* is the input to. Everything else here
+# replies to a shape; this replies to a weight.
+#
+# Three things it does that no other scenario needs:
+#
+# * **It reports an input count derived from the request it was actually sent** rather than the
+#   fixed 42 every other scenario reports. Compaction fires on the provider's own last reported
+#   count where there is one (`crates/harness-loop/src/lib.rs`, `compact_run`), so a fixed count
+#   means the trigger is only ever exercised against the four-bytes-per-token *estimate*, and the
+#   field the paid run will be measured on is never read. Four bytes per token is this loop's own
+#   estimate, used here so the rehearsal's arithmetic is the arithmetic being rehearsed -- it is a
+#   stand-in for a tokenizer, not a claim about one.
+# * **It walks a fixture of many files**, one read per turn, so the conversation grows in even
+#   steps and more than one tool result exists. `elide` protects the newest result unconditionally
+#   -- "at least one result always survives, because a model that cannot see the result of the call
+#   it just made is stuck" -- so a conversation with one result can never report `elided_results >
+#   0`, whatever window is declared.
+# * **It answers out of what it can still see.** The final turn scans the conversation it was sent
+#   for each chapter's key and says `lost` for the ones it cannot find. That makes "did the run
+#   continue, and with what" a deterministic property of the transcript instead of a judgement
+#   about a model, which is what lets the scorer for that figure be proved here rather than
+#   guessed at against a paid run.
+COMPACTION_CHAPTERS = 8
+KEY_PATTERN = re.compile(r"KEY-(\d{2}) is ([0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4})")
+
+
+def estimated_input_tokens(raw):
+    """What a provider would plausibly report for a request of this size, minus the cache figure.
+
+    `usage_object` adds a fixed 7 cache-read tokens and the client sums the two into the neutral
+    total, so the fresh figure is the estimate less those 7.
+    """
+    return max(1, len(raw) // 4 - 7)
+
+
+def compaction_reads(transcript):
+    """Which chapters have been asked for, counted as *distinct* chapters.
+
+    Distinct, because one read leaves the path in the transcript more than once -- in the call's
+    arguments and again in the reply that answers it -- and counting occurrences would advance the
+    walk two chapters per turn and skip half the fixture.
+
+    Counted from the path rather than from tool results, because elision replaces a result's
+    payload and leaves the call above it standing: counting surviving results would make the
+    emulator re-read a chapter the moment compaction dropped its text, and the walk would never
+    end.
+    """
+    return len(set(re.findall(r"chapters/chapter-(\d{2})\.md", transcript)))
+
+
+def compaction_answer(transcript):
+    """One line per chapter, out of what this request still carries."""
+    found = dict(KEY_PATTERN.findall(transcript))
+    return "\n".join(
+        f"KEY-{chapter:02d} {found.get(f'{chapter:02d}', 'lost')}"
+        for chapter in range(1, COMPACTION_CHAPTERS + 1)
+    )
 
 
 def replayed_thinking(body):
@@ -333,7 +402,8 @@ class Handler(BaseHTTPRequestHandler):
                 413, {"type": "error", "error": {"type": "request_too_large", "message": "too large"}}
             )
             return
-        body = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length) or b"{}"
+        body = json.loads(raw)
         api_key = self.headers.get("x-api-key")
         authorization = self.headers.get("authorization")
         Handler.turn_count += 1
@@ -479,6 +549,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_sse(answered("I see, I cannot use that."))
             else:
                 self._send_sse(called("shell_exec", {"cmd": "id"}))
+        elif scenario == "compaction":
+            # A walk long enough to fill a window. See the module's `compaction` section above.
+            transcript = json.dumps(body.get("messages", []))
+            usage = usage_object(input_tokens=estimated_input_tokens(raw))
+            if not body.get("tools"):
+                # The summary turn: the loop sends the fold rendered as one user item, with no
+                # tools at all, under its own instruction. Answering in prose is the whole
+                # contract -- a summary turn that answers with no text is a `summary-failed`
+                # warning and the conversation keeps its elided form.
+                keys = KEY_PATTERN.findall(transcript)
+                self._send_sse(
+                    answered(
+                        "Earlier in this run the chapters below were read. "
+                        + "; ".join(f"KEY-{chapter} is {value}" for chapter, value in keys)
+                        + ". The task is to report every chapter's key in order.",
+                        usage=usage,
+                    )
+                )
+            elif compaction_reads(transcript) < COMPACTION_CHAPTERS:
+                nth = compaction_reads(transcript) + 1
+                self._send_sse(
+                    called("file_read", {"path": f"chapters/chapter-{nth:02d}.md"}, usage=usage)
+                )
+            else:
+                self._send_sse(answered(compaction_answer(transcript), usage=usage))
         elif scenario == "flat-tool":
             # The flat surface: the model calls the catalogue entry by its own name, with the
             # entry's own arguments. No verb, and nothing nested a level down.

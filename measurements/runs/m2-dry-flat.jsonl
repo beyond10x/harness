@@ -1,0 +1,15 @@
+{"kind":"started","model":"b10x-emulated","published_tools":["file_read","dir_list","search","find"],"operations":["file.read","dir.list","search","find"],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[{"id":"harness.instructions","kind":"harness_instructions","trust":"harness","cache":"session","bytes":620,"sha256":"964b8884c8a2e27ba0d8290a3e916ebe70ed51466c99889becc3114f4cffae36"},{"id":"environment.workspace","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-09-18T00:14:21Z","bytes":96,"sha256":"22cc255bbf411e59fee18ce14d2a074684202e95fb92cee10b0b48466310e01d"},{"id":"environment.execution","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-09-18T00:14:21Z","bytes":346,"sha256":"2aee8d2fda71efd2f0fe5f41fe43c30fdef4b9eccb71f96e9beb8a2925dc2fc2"}],"toolchains":[],"mcp":[],"credential_source":"none"}
+{"kind":"rates","source":"Not a vendor rate. The deterministic local endpoint (`crates/harness-messages/tests/fixtures/fake_messages.py`) serves a model it calls `b10x-emulated` and charges nobody anything. This card exists so the free dry run exercises the whole pricing path — `{\"kind\":\"rates\"}`, per-turn `{\"kind\":\"cost\"}` and `Budget::validate(priced = true)` — before a paid run depends on it. The figures are copied from the Claude Haiku 4.5 card of the same date so the dry run's arithmetic is the arithmetic the paid run will use. Every cost this card produces is `provider_emulated` and is a rehearsal, never a price anyone paid.","as_of":"2026-09-18"}
+{"kind":"turn-started","turn":1}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"R"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"EADME.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":49,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":83}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"README.md"},"operation":"file.read","subjects":["file:README.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":2}
+{"kind":"text-delta","text":"The file says:"}
+{"kind":"text-delta","text":" hello harness"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":49,"output_tokens":4,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":63}
+{"kind":"finished","stop":{"kind":"completed"},"turns":2}

@@ -1,0 +1,14 @@
+Read every chapter under `chapters/` in order, from `chapter-01.md` to `chapter-08.md`, one
+`file_read` call at a time. Read each one whole before you read the next, and do not read two in
+the same turn.
+
+When you have read all eight, answer with one line per chapter, in order, in exactly this form:
+
+    KEY-01 <value>
+    KEY-02 <value>
+    ...
+    KEY-08 <value>
+
+The value for each chapter appears once, in that chapter, and nowhere else in the workspace. Do
+not guess a value and do not re-read a chapter you have already read: if you no longer have a
+chapter's text in front of you, say so on that line instead of inventing it.

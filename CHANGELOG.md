@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-18
+
 Two changes land here, and they are **not** the same class of evidence. The memories work is
 `provider_emulated`: no real provider has been shown a `recall` tool. The compaction measurement is
 `vendor_live`, for one route and one model, and for the trigger and the ratio only. Neither claim

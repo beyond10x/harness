@@ -175,12 +175,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   (atlas ADR 0001 § *Wire-visible identifiers*). Renaming either again is a **coordinated
   migration with an ADR in atlas**, done by cutting a new contract version — never by rewriting
   a released one (invariant 13).
-- **Three tools belong to the loop, not to the catalogue, and they meet the same gate.** `answer`
-  (structured output), `delegate` (sub-agents) and `skill` (operator-supplied instructions) are
-  published by `harness-loop` itself only when a run asks for them, resolved in
-  `AgentLoop::run_calls` before the tool port sees a call, and never batched or routed by bare name.
-  A skill reads only the immutable documents the caller loaded before the run; it performs no
-  ambient discovery, and its result is bounded like every other tool result. A delegate runs a
+- **Four tools belong to the loop, not to the catalogue, and they meet the same gate.** `answer`
+  (structured output), `delegate` (sub-agents), `skill` (operator-supplied instructions) and
+  `recall` (caller-owned memories) are published by `harness-loop` itself only when a run asks for
+  them, resolved in `AgentLoop::run_calls` before the tool port sees a call, and never batched or
+  routed by bare name. A skill reads only the immutable documents the caller loaded before the run;
+  it performs no ambient discovery, and its result is bounded like every other tool result.
+  `recall` is the exact sibling of `skill` and is **read-only**: it returns one record out of a
+  `Memories` value the caller constructed before the run, its `id` argument is a schema `enum` over
+  the active records, and **no tool and no flag in this binary writes a memory**. That absence is
+  deliberate; a writer is its own change with its own gate and its own `STATUS.md` row, and never a
+  flag on the reader. A delegate runs a
   second `AgentLoop` over the **same** tool port, approver, hooks and cancellation token, with the
   remainder of the parent's budget: delegation widens nothing, and every call inside a delegate is
   gated on its own entry's envelope exactly as the parent's calls are. Adding another loop-owned

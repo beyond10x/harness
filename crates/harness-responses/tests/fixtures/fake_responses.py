@@ -9,6 +9,7 @@ real provider behaves this way.
 
 import argparse
 import json
+import re
 import sys
 import threading
 import time
@@ -28,6 +29,7 @@ SCENARIOS = [
     "bad-arguments",
     "cold",
     "cold-once",
+    "compaction",
     "delegate",
     "delegate-pair",
     "dynamic-tool",
@@ -74,13 +76,13 @@ def response_object(status, output, usage, incomplete=None, error=None):
     }
 
 
-def usage_object(output_tokens):
+def usage_object(output_tokens, input_tokens=42):
     return {
-        "input_tokens": 42,
+        "input_tokens": input_tokens,
         "input_tokens_details": {"cached_tokens": 7},
         "output_tokens": output_tokens,
         "output_tokens_details": {"reasoning_tokens": 0},
-        "total_tokens": 42 + output_tokens,
+        "total_tokens": input_tokens + output_tokens,
     }
 
 
@@ -115,7 +117,7 @@ def function_call_item(name, arguments, nth=1):
     }
 
 
-def text_events(text, extra_output=()):
+def text_events(text, extra_output=(), input_tokens=42):
     midpoint = len(text) // 2
     output = [*extra_output, message_item(text)]
     events = [
@@ -140,13 +142,13 @@ def text_events(text, extra_output=()):
         {"type": "response.output_item.done", "output_index": 0, "item": message_item(text)},
         {
             "type": "response.completed",
-            "response": response_object("completed", output, usage_object(4)),
+            "response": response_object("completed", output, usage_object(4, input_tokens)),
         },
     ]
     return events
 
 
-def function_call_events(name, arguments):
+def function_call_events(name, arguments, input_tokens=42):
     item = function_call_item(name, arguments)
     added = {**item, "status": "in_progress", "arguments": ""}
     return [
@@ -161,7 +163,7 @@ def function_call_events(name, arguments):
         {"type": "response.output_item.done", "output_index": 0, "item": item},
         {
             "type": "response.completed",
-            "response": response_object("completed", [item], usage_object(8)),
+            "response": response_object("completed", [item], usage_object(8, input_tokens)),
         },
     ]
 
@@ -231,6 +233,45 @@ def has_function_output(body):
     return any(
         isinstance(entry, dict) and entry.get("type") == "function_call_output"
         for entry in body.get("input", [])
+    )
+
+
+# --- the `compaction` scenario ------------------------------------------------------------------
+#
+# The twin of the Messages emulator's `compaction` branch, in this wire's shapes. Read that one's
+# comment for why it exists; the short version is that compaction is the only behaviour in the loop
+# whose input is the conversation's *size*, so it is the only scenario whose answers have to depend
+# on how large the request it was handed has become.
+COMPACTION_CHAPTERS = 8
+KEY_PATTERN = re.compile(r"KEY-(\d{2}) is ([0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4})")
+
+
+def estimated_input_tokens(raw):
+    """What a provider would plausibly report for a request of this size.
+
+    Four bytes per token is this loop's own estimate, used here so the rehearsal's arithmetic is
+    the arithmetic being rehearsed. It stands in for a tokenizer; it is not a claim about one.
+    """
+    return max(1, len(raw) // 4)
+
+
+def compaction_reads(transcript):
+    """Which chapters have been asked for, counted as *distinct* chapters.
+
+    Distinct, because one read leaves the path in the transcript more than once -- in the call's
+    arguments and again in the reply that answers it -- and counting occurrences would advance the
+    walk two chapters per turn and skip half the fixture. Counted from the path rather than from
+    results, because elision replaces a result's payload and leaves the call above it standing.
+    """
+    return len(set(re.findall(r"chapters/chapter-(\d{2})\.md", transcript)))
+
+
+def compaction_answer(transcript):
+    """One line per chapter, out of what this request still carries."""
+    found = dict(KEY_PATTERN.findall(transcript))
+    return "\n".join(
+        f"KEY-{chapter:02d} {found.get(f'{chapter:02d}', 'lost')}"
+        for chapter in range(1, COMPACTION_CHAPTERS + 1)
     )
 
 
@@ -306,7 +347,8 @@ class Handler(BaseHTTPRequestHandler):
         if length > MAX_REQUEST_BYTES:
             self._send_json(413, {"error": {"message": "too large", "code": "too_large"}})
             return
-        body = json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length) or b"{}"
+        body = json.loads(raw)
         authorization = self.headers.get("authorization", "")
         Handler.turn_count += 1
         self._record(
@@ -465,6 +507,37 @@ class Handler(BaseHTTPRequestHandler):
                     function_call_events(
                         "tool_invoke", {"name": "file_read", "arguments": {"path": "README.md"}}
                     )
+                )
+        elif scenario == "compaction":
+            # A walk long enough to fill a window. See the module's `compaction` section above.
+            transcript = json.dumps(body.get("input", []))
+            reported = estimated_input_tokens(raw)
+            if not body.get("tools"):
+                # The summary turn: the loop sends the fold rendered as one user item, with no
+                # tools at all, under its own instruction. Answering in prose is the whole
+                # contract -- a summary turn that answers with no text is a `summary-failed`
+                # warning and the conversation keeps its elided form.
+                keys = KEY_PATTERN.findall(transcript)
+                self._send_sse(
+                    text_events(
+                        "Earlier in this run the chapters below were read. "
+                        + "; ".join(f"KEY-{chapter} is {value}" for chapter, value in keys)
+                        + ". The task is to report every chapter's key in order.",
+                        input_tokens=reported,
+                    )
+                )
+            elif compaction_reads(transcript) < COMPACTION_CHAPTERS:
+                nth = compaction_reads(transcript) + 1
+                self._send_sse(
+                    function_call_events(
+                        "file_read",
+                        {"path": f"chapters/chapter-{nth:02d}.md"},
+                        input_tokens=reported,
+                    )
+                )
+            else:
+                self._send_sse(
+                    text_events(compaction_answer(transcript), input_tokens=reported)
                 )
         elif scenario == "flat-tool":
             # The flat surface: the model calls the catalogue entry by its own name, with the

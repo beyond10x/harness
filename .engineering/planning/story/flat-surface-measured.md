@@ -7,6 +7,7 @@ title: The flat surface's cost against a real provider is measured
 relations:
 - derived_from: epic:measured-not-emulated
 - serves: vision:b10x-owns-its-loop
+- depends_on: story:measurement-apparatus-proved-on-the-emulator
 revision: 3
 ---
 ## Evidence

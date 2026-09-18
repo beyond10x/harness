@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-09-02`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-09-18`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -132,6 +132,27 @@ refuses the run by name, as `--context` does.
 | `--skills-dir DIR` | Offer every `DIR/<name>/SKILL.md` as a skill: its `description` in the standing instruction, its body only when the model calls the `skill` tool by name |
 | `--agents-dir DIR` | Offer every `DIR/<name>.md` as a named agent a `delegate` call may pick; needs `--delegate` |
 | `--plugin-dir DIR` | `--skills-dir DIR/skills` plus `--agents-dir DIR/agents`, each name qualified `<plugin>:<name>` from `DIR/.claude-plugin/plugin.json` |
+| `--memory-dir DIR` | Offer every `DIR/<id>.md` as a memory: its `summary` in the standing instruction, its body only when the model calls the `recall` tool by id. Repeatable |
+
+A memory record is `<id>.md` — the id is the file's own name — with frontmatter `kind`, `summary`,
+`trust`, `status` and an optional `supersedes`, and the body after. `kind` is one of `decision`,
+`fact`, `handoff`, `lesson`, `preference`, `runbook`. `trust` has exactly one legal value,
+`unreviewed`: a vault record is unreviewed context, and governed truth is promoted **out** of a
+vault into an artifact with its own review rather than marked trusted in place. `status` is
+`active`, `rejected` or `superseded` — nothing is deleted, and a correction is a new record naming
+the old one in `supersedes`. Only `active` records are offered; the rest are held, reported, and
+answered by name if the model asks for one.
+
+**This flag is the whole of how a memory reaches a run.** There is no default vault, no `$XDG`
+location, no environment variable and no walk up the tree beside the workspace; `--plugin-dir`
+contributes none and no profile key sets one. Without it a run has no memories and publishes no
+`recall` tool. An unknown frontmatter key, an unreadable record, an empty `summary`, two records of
+one id, a dangling `supersedes`, or a bidirectional override or control codepoint in any field
+refuses the **whole** vault by name — never a smaller one, because a vault silently missing the
+record that mattered reads to the model exactly like a complete vault.
+
+**There is no memory-writing tool and no writing flag.** The shipped toolset is read-only; a writer
+would be its own change with its own gate.
 
 The layout is the one Claude Code writes, so a plugin written for it runs here unchanged. The
 frontmatter reader takes top-level `key: value` lines and nothing else: a document using a key this

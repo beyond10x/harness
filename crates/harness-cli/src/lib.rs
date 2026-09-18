@@ -11,6 +11,7 @@ pub mod approve;
 pub mod contract;
 pub mod environment;
 pub mod hooks;
+pub mod memories;
 mod metaharness;
 pub mod profile;
 pub mod provider;
@@ -90,6 +91,12 @@ struct Owned<'a> {
     /// block and the name check needs the tool name, and reading them out of one place is how
     /// they cannot disagree.
     skills: Option<&'a harness_loop::Skills>,
+    /// The memories this run offers, under `--memory-dir`.
+    ///
+    /// The whole value rather than a name, for the reason `skills` is: the instruction needs the
+    /// one-line-per-memory block and the name check needs the tool name, and reading them out of
+    /// one place is how they cannot disagree.
+    memories: Option<&'a harness_loop::Memories>,
 }
 
 /// The standing instruction for this run, written for the surface the model is offered.
@@ -161,6 +168,12 @@ fn standing_instruction(
     // every turn of every run, including the ones that never wanted it.
     if let Some(skills) = owned.skills.filter(|skills| !skills.is_empty()) {
         text.push_str(&skills.brief());
+    }
+    // **The summaries and never the bodies**, for the reason above — and the cost argument binds
+    // harder here: a skill library is curated and a vault grows with every run the operator ever
+    // made, so eager bodies would make the per-turn bill rise with the age of the project.
+    if let Some(memories) = owned.memories.filter(|memories| !memories.is_empty()) {
+        text.push_str(&memories.brief());
     }
     // Only where a delegate exists to run them with: an agent named in the instruction that the
     // model has no tool to invoke is a turn spent discovering that.
@@ -830,6 +843,30 @@ struct RunOptions {
     /// skipped: a skill half-read is a rule its author wrote that the run would not apply.
     #[arg(long, value_name = "DIR")]
     skills_dir: Vec<PathBuf>,
+    /// A directory of memories this run may recall. Repeatable.
+    ///
+    /// `<DIR>/<id>.md`, YAML frontmatter with `kind`, `summary`, `trust`, `status` and an optional
+    /// `supersedes`, the body after. The id is the file's own name.
+    ///
+    /// **Handed in, never discovered.** There is no default vault, no `$XDG` location and no walk
+    /// up the tree beside the workspace: a run given memories nobody named is a run nobody can
+    /// reproduce or compare, and an ambient memory file is exactly the hermeticity hazard that
+    /// kept this harness from having memory at all. This flag is the whole of how one arrives.
+    ///
+    /// **The summaries are given to the model and the bodies are not**, as `--skills-dir` does,
+    /// and for one more reason: a vault grows with every run the operator ever made, so bodies in
+    /// the instruction would bill the whole history of the project on every turn.
+    ///
+    /// **Every record is unreviewed.** `trust` has one legal value and a record claiming another
+    /// refuses the run. Governed truth is promoted out of a vault into an artifact with its own
+    /// review, never marked trusted in place. A record this build cannot read refuses the run by
+    /// name rather than being skipped: a vault silently missing the record that mattered reads to
+    /// the model exactly like a complete one.
+    ///
+    /// **This run cannot write one.** There is no memory-writing tool, here or anywhere in this
+    /// binary; that is a separate change with its own gate.
+    #[arg(long, value_name = "DIR")]
+    memory_dir: Vec<PathBuf>,
     /// A directory of named agents a delegate may be run as. Repeatable.
     ///
     /// `<DIR>/<name>.md`, YAML frontmatter with `name`, `description` and an optional `tools`
@@ -1123,6 +1160,13 @@ struct ToolsOptions {
     /// the model is given arrives from somewhere else.
     #[arg(long, value_name = "DIR")]
     skills_dir: Vec<PathBuf>,
+    /// The memories a `run` would be offered, so `tools` answers with them.
+    ///
+    /// The same declaration `run` takes, here for the reason `--skills-dir` is: "what can this run
+    /// do?" is not answered by a list of tools alone once some of what the model is given arrives
+    /// from somewhere else.
+    #[arg(long, value_name = "DIR")]
+    memory_dir: Vec<PathBuf>,
     /// The named agents a `run` would be offered, so `tools` answers with them.
     #[arg(long, value_name = "DIR")]
     agents_dir: Vec<PathBuf>,
@@ -2106,6 +2150,7 @@ fn prepare(
     // under a schema that was never told to finish by calling `answer`.
     let delegation = delegation(options);
     let skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
+    let memories = memories_from(&options.memory_dir)?;
     let agents = agents_from(
         &options.agents_dir,
         &options.plugin_dir,
@@ -2115,6 +2160,7 @@ fn prepare(
         delegate: delegation.as_ref().map(|tool| tool.name.as_str()),
         answer: answer.as_ref().map(|tool| tool.name.as_str()),
         skills: skills.as_ref(),
+        memories: memories.as_ref(),
         agents: agents.as_ref(),
     };
     let run_budget = budget(options);
@@ -2158,6 +2204,7 @@ fn prepare(
         .with_output_schema(answer)
         .with_delegation(delegation)
         .with_skills(skills)
+        .with_memories(memories)
         .with_agents(agents)
         // Reported in the record and acted on nowhere: what the machine would not admit was already
         // decided when the catalogue was built, and this is the sentence saying so.
@@ -2283,6 +2330,50 @@ fn skills_from(
         take(skills::skills_in_plugin(directory)?);
     }
     Ok(Some(harness_loop::Skills::new(skills)))
+}
+
+/// The memories this run may recall, from every directory the caller named.
+///
+/// **No `--plugin-dir` arm, deliberately.** A plugin ships instructions its author wrote for
+/// anybody; a vault holds what *this* project's earlier runs believed. Reading a vault out of a
+/// plugin would let an installed package put unreviewed prose about a project into the standing
+/// instruction of every run that installed it, which is the ambient-discovery failure this whole
+/// design is shaped against — one directory further away from the operator, not one closer.
+///
+/// **And no profile arm.** `--plugin-dir` may be set by a profile; this may not. A profile that
+/// silently attached a vault would be a run carrying memories the command line does not name,
+/// which is the reproducibility question `--memory-dir` exists to answer.
+///
+/// # Errors
+///
+/// Names the directory or the record that could not be read, or the refusal the value itself
+/// makes — a codepoint that makes a record read differently to a person than to the parser, an
+/// empty summary, two records of one id, a supersession of something absent. In every case the
+/// run gets **no** memories rather than the ones that happened to parse: a named directory that
+/// is not there refuses the run exactly as `--context` does.
+fn memories_from(memory_dir: &[PathBuf]) -> Result<Option<harness_loop::Memories>, String> {
+    if memory_dir.is_empty() {
+        return Ok(None);
+    }
+    let mut loaded: Vec<harness_loop::Memory> = Vec::new();
+    for directory in memory_dir {
+        if !directory.is_dir() {
+            return Err(format!(
+                "the memory directory `{}` is not there",
+                directory.display()
+            ));
+        }
+        loaded.extend(memories::memories_in(directory)?);
+    }
+    // A duplicate id across two directories is refused rather than resolved first-wins, which is
+    // where this parts company with `skills_from`. A skill library is a namespace an operator
+    // curates and a later directory losing is a predictable rule; two vaults each holding a
+    // `substrate-pin` are two projects' beliefs about one name, and picking either silently is
+    // handing the model a memory nobody chose while a second one, saying something else, is in
+    // the same run and unreachable.
+    harness_loop::Memories::new(loaded)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 /// The named agents this run may delegate as, from every directory the caller named.
@@ -3637,6 +3728,7 @@ fn context_command(verb: &ContextCommand) -> Result<(), String> {
 
 fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let tools_skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
+    let tools_memories = memories_from(&options.memory_dir)?;
     let tools_agents = agents_from(
         &options.agents_dir,
         &options.plugin_dir,
@@ -3709,6 +3801,12 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             "skills": tools_skills
                 .as_ref()
                 .map_or_else(Vec::new, harness_loop::Skills::names),
+            // Every record whatever its status, for the reason `withheld` is always present: a
+            // reader cannot otherwise tell *this vault holds a superseded record this run will
+            // not offer* from *this vault is smaller than it is*.
+            "memories": tools_memories
+                .as_ref()
+                .map_or_else(Vec::new, harness_loop::Memories::ids),
             "agents": tools_agents
                 .as_ref()
                 .map_or_else(Vec::new, harness_loop::Agents::names),
@@ -4662,6 +4760,7 @@ mod tests {
                 delegate: Some("delegate"),
                 answer: Some("answer"),
                 skills: None,
+                memories: None,
                 agents: None,
             },
         )

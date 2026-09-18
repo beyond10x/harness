@@ -65,6 +65,7 @@ mod delegate;
 mod environment;
 mod event;
 mod hook;
+mod memory;
 mod parallel;
 mod price;
 mod skill;
@@ -102,6 +103,10 @@ pub use event::{
     VecLoopSink, Withheld,
 };
 pub use hook::{AfterCall, HookDecision, HookPoint, HookPort, NoHooks};
+pub use memory::{
+    DEFAULT_RECALL_NAME, Memories, Memory, MemoryError, MemoryKind, MemoryStatus, MemoryTrust,
+    RECALL_DESCRIPTION, Recall,
+};
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
 
@@ -451,6 +456,15 @@ pub struct LoopConfig {
     /// Loaded by the caller and never discovered: a skill directory this loop went and looked for
     /// would be instructions the model follows that nobody declared.
     pub skills: Option<Skills>,
+
+    /// The memories this run may recall, or [`None`] to publish no `recall` tool.
+    ///
+    /// Loaded by the caller and never discovered, for the reason [`LoopConfig::skills`] is — and
+    /// for one more. An ambient memory file is the hazard `metaharness` refuses by hermetic rule:
+    /// a run steered by a document nobody declared is a run nobody can reproduce or compare. This
+    /// field is how memory is admitted without that: it is **handed in**, exactly as a skill is,
+    /// and the loop walks no directory to find it.
+    pub memories: Option<Memories>,
     /// Tools this run asked for that its machine would not admit, as whoever built the tool port
     /// found them.
     ///
@@ -491,6 +505,7 @@ impl LoopConfig {
             credential_renewal: None,
             admits: None,
             skills: None,
+            memories: None,
             withheld: Vec::new(),
         }
     }
@@ -580,6 +595,13 @@ impl LoopConfig {
     #[must_use]
     pub fn with_skills(mut self, skills: Option<Skills>) -> Self {
         self.skills = skills;
+        self
+    }
+
+    /// Lets the model recall the memories the caller handed in, one call each.
+    #[must_use]
+    pub fn with_memories(mut self, memories: Option<Memories>) -> Self {
+        self.memories = memories;
         self
     }
 
@@ -1846,6 +1868,8 @@ enum Owned {
     Delegate(Delegation),
     /// The skills this run publishes, carried for the same reason as the two above.
     Skill(Skills),
+    /// The memories this run publishes, carried for the same reason as the three above.
+    Recall(Memories),
 }
 
 impl Owned {
@@ -1859,6 +1883,7 @@ impl Owned {
             Self::Answer(schema) => schema.spec(),
             Self::Delegate(delegation) => delegation.spec(),
             Self::Skill(skills) => skills.spec(),
+            Self::Recall(memories) => memories.spec(),
         }
     }
 }
@@ -1890,6 +1915,45 @@ fn load_skill(skills: &Skills, call: &ToolCall) -> ToolOutcome {
         None => ToolOutcome::failed(format!(
             "`{name}` is not a skill this run has. It has: {}.",
             skills.names().join(", ")
+        )),
+    }
+}
+
+/// Answers the run's own `recall` call with what the memory says.
+///
+/// Reads nothing from a filesystem, for [`load_skill`]'s reason: the records were loaded before
+/// the run started, by the caller, so a memory cannot change under a run that is already using it
+/// and a loop cannot be made to read a path the model named.
+///
+/// **Four answers and not two.** A superseded record names what replaced it and a rejected one
+/// says it was withdrawn, because *there is no such memory*, *there was and it was replaced* and
+/// *there was and it was judged wrong* are three different facts (`AGENTS.md` invariant 7). A
+/// model told only "no" for all three spends the next turn guessing which.
+///
+/// Every answer is a failed [`ToolOutcome`] rather than a stop, exactly as an unknown skill is:
+/// the list it should have chosen from is in its own instructions and it can choose again.
+fn recall_memory(memories: &Memories, call: &ToolCall) -> ToolOutcome {
+    let Some(id) = call.arguments.get("id").and_then(serde_json::Value::as_str) else {
+        return ToolOutcome::failed(format!(
+            "`{}` takes an `id`, a string, naming one of: {}.",
+            call.name,
+            memories.offered().join(", ")
+        ));
+    };
+    match memories.recall(id) {
+        Recall::Body(body) => ToolOutcome::ok(serde_json::Value::String(body.to_owned())),
+        Recall::Superseded { by } => ToolOutcome::failed(format!(
+            "`{id}` was superseded by `{by}`, which is what this run offers instead. It was kept \
+             rather than deleted, and its text is not read back."
+        )),
+        Recall::Rejected => ToolOutcome::failed(format!(
+            "`{id}` was written and then judged wrong. It was kept rather than deleted, and its \
+             text is not read back. This run offers: {}.",
+            memories.offered().join(", ")
+        )),
+        Recall::Absent => ToolOutcome::failed(format!(
+            "`{id}` is not a memory this run has. It has: {}.",
+            memories.offered().join(", ")
         )),
     }
 }
@@ -2286,6 +2350,15 @@ impl<'a> AgentLoop<'a> {
                 .as_ref()
                 .map(Skills::names)
                 .unwrap_or_default(),
+            // The same question for the vault, and the answer names every record whatever its
+            // status: a run handed a superseded memory it did not offer is not a run that was
+            // handed nothing, and a shorter list would claim it was.
+            memories: self
+                .config
+                .memories
+                .as_ref()
+                .map(Memories::ids)
+                .unwrap_or_default(),
             agents: self
                 .config
                 .agents
@@ -2670,6 +2743,13 @@ impl<'a> AgentLoop<'a> {
             && !skills.is_empty()
         {
             specs.push(skills.spec());
+        }
+        // The same emptiness rule, and it also covers a vault whose every record was rejected or
+        // superseded: those are held and reported, and none of them is an id the model may name.
+        if let Some(memories) = self.config.memories.as_ref()
+            && !memories.is_empty()
+        {
+            specs.push(memories.spec());
         }
         specs
     }
@@ -3252,6 +3332,10 @@ impl<'a> AgentLoop<'a> {
                 .iter()
                 .map(|call| (load_skill(skills, call), None))
                 .collect(),
+            Owned::Recall(memories) => admitted
+                .iter()
+                .map(|call| (recall_memory(memories, call), None))
+                .collect(),
             Owned::Delegate(delegation) => self
                 .run_delegates(delegation, &admitted, state, deadline, sink)
                 .into_iter()
@@ -3319,7 +3403,7 @@ impl<'a> AgentLoop<'a> {
     /// groups of the cap, in order.
     ///
     /// `answer` is never grouped — it ends the turn, and what follows it is refused rather than
-    /// run — and neither is `skill`, which reads a document this process already holds.
+    /// run — and neither is `skill` or `recall`, which read a document this process already holds.
     fn delegate_span(&self, owned: &Owned, rest: &[ToolCall]) -> usize {
         let Owned::Delegate(delegation) = owned else {
             return 1;
@@ -3364,6 +3448,12 @@ impl<'a> AgentLoop<'a> {
             && skills.name == call.name
         {
             return Some(Owned::Skill(skills.clone()));
+        }
+        if let Some(memories) = self.config.memories.as_ref()
+            && !memories.is_empty()
+            && memories.name == call.name
+        {
+            return Some(Owned::Recall(memories.clone()));
         }
         None
     }

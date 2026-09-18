@@ -160,6 +160,19 @@ pub enum LoopEvent {
         skills: Vec<String>,
         #[serde(default)]
         agents: Vec<String>,
+        /// The memories this run was handed, by id, **whatever their status**.
+        ///
+        /// Always written, empty included, for the reason `skills` above is. Whatever their
+        /// status because a run handed a superseded or rejected record and offering neither is
+        /// not the same run as one that was handed nothing, and only the longer list can tell a
+        /// reader which it was looking at.
+        ///
+        /// Ids only. What a memory says is what the `recall` tool answers with; a body here would
+        /// put unreviewed prose from earlier runs into every reader's face on every run, and a
+        /// session record is already the file `AGENTS.md` keeps outside the workspace for holding
+        /// whatever the model read.
+        #[serde(default)]
+        memories: Vec<String>,
         /// The profiles that configured this run, in the order they were applied.
         ///
         /// Always written, empty included, for the reason `withheld` is: skip-when-empty makes
@@ -448,6 +461,7 @@ mod tests {
             }],
             skills: Vec::new(),
             agents: Vec::new(),
+            memories: Vec::new(),
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
@@ -482,6 +496,7 @@ mod tests {
             withheld: Vec::new(),
             skills: Vec::new(),
             agents: Vec::new(),
+            memories: Vec::new(),
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
@@ -491,9 +506,9 @@ mod tests {
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
             encoded,
-            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[],"toolchains":[],"mcp":[],"credential_source":"named"}"#,
-            "a run refused nothing, offered no skill, published no agent and read no profile says \
-             `[]` to each; only a build older than the field is silent"
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"memories":[],"profiles":[],"context":[],"toolchains":[],"mcp":[],"credential_source":"named"}"#,
+            "a run refused nothing, offered no skill or memory, published no agent and read no profile \
+             says `[]` to each; only a build older than the field is silent"
         );
 
         // And a record written before the field existed still reads, as a run that withheld

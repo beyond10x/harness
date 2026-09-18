@@ -1,0 +1,70 @@
+{"kind":"started","model":"b10x-emulated","published_tools":["file_read","dir_list","search","find"],"operations":["file.read","dir.list","search","find"],"withheld":[],"skills":[],"agents":[],"profiles":[],"context":[{"id":"harness.instructions","kind":"harness_instructions","trust":"harness","cache":"session","bytes":620,"sha256":"964b8884c8a2e27ba0d8290a3e916ebe70ed51466c99889becc3114f4cffae36"},{"id":"environment.workspace","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-09-18T00:13:58Z","bytes":97,"sha256":"4745b1d7962b7a9f833f91092497976b9936b9e1a235445b613fee6300d52499"},{"id":"environment.execution","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-09-18T00:13:58Z","bytes":346,"sha256":"2aee8d2fda71efd2f0fe5f41fe43c30fdef4b9eccb71f96e9beb8a2925dc2fc2"}],"toolchains":[],"mcp":[],"credential_source":"none"}
+{"kind":"rates","source":"Not a vendor rate. The deterministic local endpoint (`crates/harness-messages/tests/fixtures/fake_messages.py`) serves a model it calls `b10x-emulated` and charges nobody anything. This card exists so the free dry run exercises the whole pricing path — `{\"kind\":\"rates\"}`, per-turn `{\"kind\":\"cost\"}` and `Budget::validate(priced = true)` — before a paid run depends on it. The figures are copied from the Claude Haiku 4.5 card of the same date so the dry run's arithmetic is the arithmetic the paid run will use. Every cost this card produces is `provider_emulated` and is a rehearsal, never a price anyone paid.","as_of":"2026-09-18"}
+{"kind":"turn-started","turn":1}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-01.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":1524,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":1558}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-01.md"},"operation":"file.read","subjects":["file:chapters/chapter-01.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":2}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-02.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":3566,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":3600}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-02.md"},"operation":"file.read","subjects":["file:chapters/chapter-02.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":3}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-03.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":5631,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":5665}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-03.md"},"operation":"file.read","subjects":["file:chapters/chapter-03.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":4}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-04.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":7727,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":7761}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-04.md"},"operation":"file.read","subjects":["file:chapters/chapter-04.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"warning","code":"conversation-compacted","message":"the conversation reached 8319 tokens of the 8000 declared, so 3 old tool result(s) were elided and 0 item(s) folded into a summary; 33277 bytes became 9913."}
+{"kind":"compacted","elided_results":3,"elided_bytes":23847,"summarised_items":0,"bytes_before":33277,"bytes_after":9913,"summary_turn":false}
+{"kind":"turn-started","turn":5}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-05.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":3916,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":3950}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-05.md"},"operation":"file.read","subjects":["file:chapters/chapter-05.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":6}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-06.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":6004,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":6038}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-06.md"},"operation":"file.read","subjects":["file:chapters/chapter-06.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"warning","code":"conversation-compacted","message":"the conversation reached 6569 tokens of the 8000 declared, so 2 old tool result(s) were elided and 0 item(s) folded into a summary; 26276 bytes became 10562."}
+{"kind":"compacted","elided_results":2,"elided_bytes":16036,"summarised_items":0,"bytes_before":26276,"bytes_after":10562,"summary_turn":false}
+{"kind":"turn-started","turn":7}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-07.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":4112,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":4146}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-07.md"},"operation":"file.read","subjects":["file:chapters/chapter-07.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"turn-started","turn":8}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"{\"path\":\"chapter"}
+{"kind":"tool-arguments-delta","call_id":"toolu_b10x_001","delta":"s/chapter-08.md\"}"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":6181,"output_tokens":8,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":6215}
+{"kind":"tool-requested","call_id":"toolu_b10x_001","name":"file_read","arguments":{"path":"chapters/chapter-08.md"},"operation":"file.read","subjects":["file:chapters/chapter-08.md"]}
+{"kind":"tool-completed","call_id":"toolu_b10x_001","failed":false}
+{"kind":"warning","code":"conversation-compacted","message":"the conversation reached 6706 tokens of the 8000 declared, so 2 old tool result(s) were elided and 0 item(s) folded into a summary; 26826 bytes became 11229."}
+{"kind":"compacted","elided_results":2,"elided_bytes":15919,"summarised_items":0,"bytes_before":26826,"bytes_after":11229,"summary_turn":false}
+{"kind":"turn-started","turn":9}
+{"kind":"text-delta","text":"KEY-01 lost\nKEY-02 lost\nKEY-03 lost\nKEY-04 lost\nKEY-"}
+{"kind":"text-delta","text":"05 lost\nKEY-06 lost\nKEY-07 lost\nKEY-08 5ecd-0cd9-b520"}
+{"kind":"usage","model":"b10x-emulated","input_tokens":4311,"output_tokens":4,"cached_input_tokens":7}
+{"kind":"cost","model":"b10x-emulated","micro_usd":4325}
+{"kind":"finished","stop":{"kind":"completed"},"turns":9}

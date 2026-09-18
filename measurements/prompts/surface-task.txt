@@ -1,0 +1,11 @@
+Find out what you can do here before you do anything: you have not been told which tools this run
+published, and the answer depends on the run.
+
+Then, using whatever you found, report three things about this workspace:
+
+1. how many files there are under the workspace root, at any depth;
+2. the name of the largest one;
+3. the first line of `README.md`, quoted exactly.
+
+Do not guess at a tool's name or at its arguments. If a call is refused, say what was refused and
+why before trying anything else.

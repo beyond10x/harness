@@ -18,7 +18,7 @@ release.
 | Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `context show`, `app-server`, and `events` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
-| Advanced loop | Opt-in depth-one delegation, named agents and skills read from a Claude Code plugin layout, and operator hooks |
+| Advanced loop | Opt-in depth-one delegation, named agents and skills read from a Claude Code plugin layout, caller-owned memories behind a read-only `recall` tool, and operator hooks |
 | Workflows | A YAML or JSON flow walked one model turn per step, one session per section, with a `transition` hook asked at every section boundary |
 | Contracts | Pinned provider requests/streams, app-server profile, and generated argv surface |
 
@@ -60,6 +60,11 @@ fixtures.
   approval-free surface with no hooks; delegates cannot create delegate trees.
 - **The skill and agent frontmatter reader is deliberately small.** Top-level `key: value` only;
   any other key refuses the run by name rather than being skipped.
+- **Memories are read-only, and there is no writer.** `--memory-dir` is the whole of how a memory
+  reaches a run — no default vault, no environment variable, no discovery. `recall` returns a body
+  the caller loaded before the run; **no tool and no flag writes a memory**, deliberately, and a
+  writer would be its own change with its own gate. A malformed or partly-invalid vault refuses the
+  whole vault by name rather than yielding a smaller one.
 - **Hooks are host programs, not sandboxed tools.** They must be explicitly named and trusted.
 - **Bridge mode lacks live external-client evidence.** The implemented profile is contract-tested,
   but no real external bridge has driven it yet.
@@ -73,7 +78,10 @@ fixtures.
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
 profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
 means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
-a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-02`.
+a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-18`, which
+added `--memory-dir` to `run`, `chat`, `workflow run` and `tools`. It is **strictly additive**:
+four arrivals and no field of any surviving flag moved, so a consumer pinned to `2026-09-02` is
+still correct against this binary. `2026-09-02` is released and was superseded rather than edited.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

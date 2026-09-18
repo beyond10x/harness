@@ -7,6 +7,98 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+Two changes land here, and they are **not** the same class of evidence. The memories work is
+`provider_emulated`: no real provider has been shown a `recall` tool. The compaction measurement is
+`vendor_live`, for one route and one model, and for the trigger and the ratio only. Neither claim
+reaches the other, and neither promotes any contract or wire pin.
+
+### Added
+
+- **Caller-owned memories, and a read-only `recall` tool.** `Memories` is a value the caller
+  constructs and hands to the loop, the exact sibling of `Skills`: the loop walks no directory and
+  reads no file, before the run or during it. `--memory-dir <DIR>` is repeatable on `run`, `chat`,
+  `workflow run` and `tools`, and is the **whole** of how a memory reaches a run — there is no
+  default vault, no `$XDG` location, no environment variable, no walk up the tree beside the
+  workspace, no `--plugin-dir` arm and no profile key. Absent, a run publishes no `recall` tool and
+  is byte-identical to one built before this existed. The summaries go in the standing instruction
+  and the bodies stay behind the tool, whose `id` argument is a schema `enum` over the active
+  records, because a stateless loop replays its conversation and a vault grows with every run the
+  operator ever made. The whole value is cloned into delegates: a child observes exactly its
+  parent's vault, entry for entry.
+- A record is closed and refuses rather than guessing. `trust` is an enum whose **only** legal
+  value is `unreviewed` — a vault record is unreviewed context, and governed truth is promoted out
+  into an artifact with its own review rather than marked trusted in place. `status` is
+  `active`/`rejected`/`superseded` and flipping it is the only thing that happens to a record;
+  nothing is deleted and a correction is a new record naming the old in `supersedes`. `kind` is a
+  closed six-member enum with no catch-all. An unknown frontmatter key, an unreadable record, an
+  empty `summary`, two records of one id and a supersession of something absent each refuse the
+  **whole** vault by name — never a smaller one, because a vault silently missing the record that
+  mattered reads to the model exactly like a complete vault.
+- Bidirectional overrides (U+202A–U+202E, U+2066–U+2069) and C0/C1 control codepoints are refused
+  in every field a person reads, naming the record, the field and the codepoint. A Trojan-Source
+  reordering makes a record read one way in an auditor's terminal and another to the parser. Single
+  line fields additionally refuse the newline and tab a body may carry: a `summary` holding `
+- `
+  would forge an extra row in the instruction's memory list. This refusal did not previously exist
+  anywhere in this tree.
+- `LoopEvent::Started` carries `memories`, the ids of every record handed in **whatever its
+  status**, always present and empty rather than absent — the rule `withheld` and `skills` were
+  fixed to. A run handed a superseded record it did not offer is not a run that was handed nothing.
+  `b10x-harness tools` answers with the same list.
+
+- **A measurement apparatus for `epic:measured-not-emulated`, and the first live compaction run.**
+  `measurements/` holds the part that needs no provider — a dated rate card, a deterministic
+  compaction fixture, a scorer over the `compacted`, `usage` and `cost` events the loop already
+  emits, and free rehearsal scripts. **Nothing in production was instrumented for any of it**; every
+  figure comes from a typed event `crates/harness-loop/src/event.rs` already published.
+- A `compaction` scenario on **both** emulator fixtures — `crates/harness-messages/tests/fixtures/
+  fake_messages.py` and `crates/harness-responses/tests/fixtures/fake_responses.py` — so
+  `the_two_wires_serve_the_same_scenarios` stays honest and the same measurement can be rehearsed
+  on either wire. The rehearsal the preparation document proposed does not work: the shipped
+  `flat-tool` scenario emits **no** `compacted` event at any declared window, because `elide`
+  protects the newest tool result unconditionally and that scenario makes exactly one call. A
+  scenario producing several results is what makes the first figure reportable at all.
+- The rate card prices `claude-haiku-4-5-20251001` **and** `claude-haiku-4-5` for one model,
+  deliberately. `Budget::validate` decides whether `--max-cost-microunits` is enforceable from the
+  model the run **asked for**; `RateCard::price` prices the model the provider **reported** on each
+  turn. Keying only one identifier makes the ceiling enforceable and the cost silently absent, or
+  the reverse — a run that starts, spends, and then stops `budget-unobservable` after the money is
+  gone.
+
+### Contracts
+
+- `contracts/cli/b10x-harness/2026-09-18` cut, pinning `--memory-dir` on `run`, `chat`,
+  `workflow run` and `tools`. **Strictly additive**: four arrivals and no field of any surviving
+  flag moved, so a consumer pinned to `2026-09-02` is correct against this binary and needs to
+  change nothing. `2026-09-02` is released and was not edited (invariant 13).
+
+### Measured
+
+- **Compaction measured live, 2026-09-18** — operator-authorized, one run against
+  `https://api.anthropic.com/v1` on `claude-haiku-4-5-20251001` at a **declared** window of 16000.
+  Compaction fired once at 14,662 occupied tokens (**91.6%** of the declared window, on the loop's
+  own estimate rather than a provider-reported count), elided 4 results and 31,856 bytes, and left
+  **0.4678** of the conversation (58,650 → 27,438 bytes). It spent **no summary turn**
+  (`summarised_items: 0`). The run finished `completed` in 9 turns with 0 retries and **8 of 8**
+  chapter keys still recoverable — observed once, a judgement about output rather than arithmetic.
+  72,511 input tokens of which 42,896 were cache reads, 824 output, **43,905 micro-USD**
+  ($0.043905). The record is `measurements/runs/m1-tier-a-2026-09-18.jsonl`.
+- **What that is evidence for, exactly.** It is `vendor_live` for compaction's **trigger** and
+  **ratio**, on that one route and that one model. It **promotes no contract and re-pins no wire**:
+  the Messages and Responses cuts stay where they are and stay emulator-derived, and no other
+  `STATUS.md` row moves. The **summary prompt is still unmeasured** and is not claimed — it fired at
+  no window tried, free or paid, because on a conversation whose weight is in tool results elision
+  reaches the target first. `story:compaction-measured-live` stays open on that third figure.
+- Every rehearsal record beside it remains `provider_emulated` and is never promoted (invariant 18).
+  A rehearsal against the deterministic local endpoint is not the measurement and does not become
+  one by agreeing with the live run.
+
+### Deliberately absent
+
+- **No memory-writing tool and no writing flag.** The shipped toolset stays read-only; a writer is
+  its own change, with its own gate and its own `STATUS.md` entry, and never a flag on the reader
+  (`AGENTS.md`). Every memory a run can see was handed to it before it started.
+
 ## [0.12.1] — 2026-09-11
 
 ### Changed

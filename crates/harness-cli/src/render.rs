@@ -149,6 +149,7 @@ impl<O: Write, E: Write> Renderer<O, E> {
             // Not rendered: this loop publishes none yet, and a `agents: []` line every run would
             // be noise. It is in the record, which is where a comparison reads it.
             agents: _,
+            memories,
             profiles,
             context: _,
             credential_source: _,
@@ -171,6 +172,13 @@ impl<O: Write, E: Write> Renderer<O, E> {
         // of thing a person comparing two runs afterwards has no other way to see.
         if !skills.is_empty() {
             self.note(&format!("  skills: {}", skills.join(", ")));
+        }
+        // **Shown for the same reason, and it matters more.** A skill library is something the
+        // operator curated and can recite; a vault is what earlier runs wrote, and a person
+        // watching a run has no other way to see that this one started carrying unreviewed prose
+        // from work they may not remember. Ids only — the bodies are what `recall` answers with.
+        if !memories.is_empty() {
+            self.note(&format!("  memories: {}", memories.join(", ")));
         }
         // **Shown, because a run configured by a file and one configured by flags are different
         // runs and only one of them is reproducible from the command line you can see.**
@@ -650,6 +658,7 @@ mod tests {
                     withheld: Vec::new(),
                     skills: Vec::new(),
                     agents: Vec::new(),
+                    memories: Vec::new(),
                     profiles: Vec::new(),
                     context: Vec::new(),
                     toolchains: Vec::new(),
@@ -999,6 +1008,7 @@ mod tests {
             }],
             skills: Vec::new(),
             agents: Vec::new(),
+            memories: Vec::new(),
             profiles: Vec::new(),
             context: Vec::new(),
             toolchains: Vec::new(),
@@ -1219,6 +1229,7 @@ mod tests {
                 withheld: Vec::new(),
                 skills: Vec::new(),
                 agents: Vec::new(),
+                memories: Vec::new(),
                 profiles: Vec::new(),
                 context: Vec::new(),
                 toolchains: Vec::new(),

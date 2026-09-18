@@ -7,6 +7,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A measurement apparatus for `epic:measured-not-emulated`, and the first live compaction run.**
+  `measurements/` holds the part that needs no provider — a dated rate card, a deterministic
+  compaction fixture, a scorer over the `compacted`, `usage` and `cost` events the loop already
+  emits, and free rehearsal scripts. **Nothing in production was instrumented for any of it**; every
+  figure comes from a typed event `crates/harness-loop/src/event.rs` already published.
+- A `compaction` scenario on **both** emulator fixtures — `crates/harness-messages/tests/fixtures/
+  fake_messages.py` and `crates/harness-responses/tests/fixtures/fake_responses.py` — so
+  `the_two_wires_serve_the_same_scenarios` stays honest and the same measurement can be rehearsed
+  on either wire. The rehearsal the preparation document proposed does not work: the shipped
+  `flat-tool` scenario emits **no** `compacted` event at any declared window, because `elide`
+  protects the newest tool result unconditionally and that scenario makes exactly one call. A
+  scenario producing several results is what makes the first figure reportable at all.
+- The rate card prices `claude-haiku-4-5-20251001` **and** `claude-haiku-4-5` for one model,
+  deliberately. `Budget::validate` decides whether `--max-cost-microunits` is enforceable from the
+  model the run **asked for**; `RateCard::price` prices the model the provider **reported** on each
+  turn. Keying only one identifier makes the ceiling enforceable and the cost silently absent, or
+  the reverse — a run that starts, spends, and then stops `budget-unobservable` after the money is
+  gone.
+
+### Measured
+
+- **Compaction measured live, 2026-09-18** — operator-authorized, one run against
+  `https://api.anthropic.com/v1` on `claude-haiku-4-5-20251001` at a **declared** window of 16000.
+  Compaction fired once at 14,662 occupied tokens (**91.6%** of the declared window, on the loop's
+  own estimate rather than a provider-reported count), elided 4 results and 31,856 bytes, and left
+  **0.4678** of the conversation (58,650 → 27,438 bytes). It spent **no summary turn**
+  (`summarised_items: 0`). The run finished `completed` in 9 turns with 0 retries and **8 of 8**
+  chapter keys still recoverable — observed once, a judgement about output rather than arithmetic.
+  72,511 input tokens of which 42,896 were cache reads, 824 output, **43,905 micro-USD**
+  ($0.043905). The record is `measurements/runs/m1-tier-a-2026-09-18.jsonl`.
+- **What that is evidence for, exactly.** It is `vendor_live` for compaction's **trigger** and
+  **ratio**, on that one route and that one model. It **promotes no contract and re-pins no wire**:
+  the Messages and Responses cuts stay where they are and stay emulator-derived, and no other
+  `STATUS.md` row moves. The **summary prompt is still unmeasured** and is not claimed — it fired at
+  no window tried, free or paid, because on a conversation whose weight is in tool results elision
+  reaches the target first. `story:compaction-measured-live` stays open on that third figure.
+- Every rehearsal record beside it remains `provider_emulated` and is never promoted (invariant 18).
+  A rehearsal against the deterministic local endpoint is not the measurement and does not become
+  one by agreeing with the live run.
+
 ## [0.12.1] — 2026-09-11
 
 ### Changed

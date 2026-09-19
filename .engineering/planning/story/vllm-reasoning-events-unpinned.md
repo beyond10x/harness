@@ -9,7 +9,8 @@ relations:
 - informed_by: verification-report:openai-responses-on-vllm
 - derived_from: epic:wire-pins-from-live-bytes
 - serves: vision:b10x-owns-its-loop
-revision: 2
+- informed_by: story:llm-neutral-interface
+revision: 3
 ---
 ## Evidence
 
@@ -59,3 +60,7 @@ than a subset, which is a different claim about what this wire accepts and needs
 
 A run against vLLM emits `ReasoningDelta` events and no `unknown-stream-event` warning for any
 `response.reasoning_*` event, with the pin and the changelog carrying the change.
+
+## LLM ownership plan — 2026-09-19
+
+The existing vLLM evidence is an input to LLM Responses projection qualification, including pinned server/model versions and reasoning-event behavior. `story:llm-neutral-interface` owns preserving that evidence when Harness adopts the shared neutral interface after foundation qualification. This unresolved story stays in its current state; neither a scaffold nor an OpenAI-compatible label establishes vLLM behavior.

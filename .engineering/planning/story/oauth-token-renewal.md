@@ -7,7 +7,8 @@ title: A run outlives the token it started with
 relations:
 - derived_from: epic:subscription-auth-finished
 - serves: vision:b10x-owns-its-loop
-revision: 4
+- informed_by: story:llm-provider-routing
+revision: 5
 ---
 ## Evidence
 
@@ -67,3 +68,7 @@ owner or by the run — or stops with a message that names the credential and th
 expired, before the turn is paid for. `ROADMAP.md`'s Phase 4 renewal bullet states which was chosen
 and why, and is corrected where it now says nothing here calls an authorization server: as of
 2026-08-30 something does.
+
+## LLM ownership plan — 2026-09-19
+
+The accepted LLM foundation plan moves the neutral credential/resolver contract to `beyond10x/llm`; renewal and persistent credential writes remain caller-owned. The current Harness implementation and historical decision above remain evidence of existing behavior. `story:llm-provider-routing` owns adapting that behavior to the injected contract and preserving visible expiry/renewal events after the foundation release is qualified. This story is not closed by the plan, and no shared LLM adapter should acquire vendor-file write authority implicitly.

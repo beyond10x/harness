@@ -1,0 +1,6 @@
+version: aep.workspace/1
+members:
+  - name: harness
+    source: ..
+  - name: llm
+    source: ../../llm

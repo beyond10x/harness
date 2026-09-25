@@ -1,0 +1,104 @@
+# Prebuilt `b10x-harness` binaries for every release. The full gate runs on `main` before the tag is
+# written (AGENTS.md § Releases); this workflow only builds, smoke-tests and packages the tagged
+# commit.
+name: Release
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 keeps the glibc floor lower than `ubuntu-latest` for downloaded binaries.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build, smoke-test and package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin b10x-harness --target "$TARGET"
+          bin="target/$TARGET/release/b10x-harness"
+          printed=$("$bin" --version | head -1 | awk '{print $2}')
+          if [ "$printed" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::the built binary reports $printed, but the release tag is $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          package="b10x-harness-$GITHUB_REF_NAME-$TARGET"
+          mkdir -p "dist/$package"
+          cp "$bin" README.md "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release assets
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Verify archives and write checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+            test -f "b10x-harness-$GITHUB_REF_NAME-$target.tar.gz" || { echo "::error::missing b10x-harness-$GITHUB_REF_NAME-$target.tar.gz" >&2; exit 1; }
+          done
+          sha256sum b10x-harness-*.tar.gz > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat SHA256SUMS
+      # A release written by hand keeps its notes; otherwise the annotated tag's message becomes
+      # them. Either way the archives are attached, idempotently.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            notes="${RUNNER_TEMP}/notes.md"
+            git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > "$notes"
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Harness $GITHUB_REF_NAME" --notes-file "$notes"
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber

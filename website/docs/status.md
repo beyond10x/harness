@@ -1,11 +1,11 @@
 ---
 title: Status and limitations
-description: What Harness 0.13.2 can do today and which claims are not yet earned.
+description: What Harness 0.13.3 can do today and which claims are not yet earned.
 ---
 
 # Status and limitations
 
-Harness is pre-v1. Version `0.13.2` was tagged on 2026-09-25; this documentation describes that
+Harness is pre-v1. Version `0.13.3` was tagged on 2026-09-25; this documentation describes that
 release.
 
 ## Available now

@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-09-25
+
+### Added
+
+- **Prebuilt binaries with every release.** `.github/workflows/release.yml` builds `b10x-harness`
+  for `x86_64`/`aarch64` Linux and macOS when a tag is pushed, checks that each binary reports the
+  tag, and attaches `b10x-harness-<version>-<target>.tar.gz` and `SHA256SUMS` to the GitHub Release,
+  so the binary installs without a Rust toolchain. `cargo install` is unchanged. Releases up to
+  `0.13.0` had no binaries, and `0.13.0` had no GitHub Release at all.
+
 ## [0.13.0] — 2026-09-18
 
 Two changes land here, and they are **not** the same class of evidence. The memories work is

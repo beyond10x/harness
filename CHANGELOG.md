@@ -7,6 +7,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.13.3] — 2026-09-25
+
+### Added
+
+- **Release binaries for `aarch64` Linux.** `.github/workflows/release.yml` builds
+  `aarch64-unknown-linux-gnu` on `ubuntu-22.04-arm` beside `x86_64-unknown-linux-gnu`, and the
+  publish job refuses a release missing either archive. macOS stays excluded: the embedded
+  substrate host needs Linux namespaces.
+
+### Changed
+
+- Update the embedded confinement boundary to Substrate `05695970` (release `0.7.8`), which
+  compiles for `aarch64` Linux: it no longer assumes `c_char` is `i8`. Both `b10x-substrate-host`
+  and `b10x-substrate-wire` keep an exact `=0.7.8` version requirement beside the revision; the
+  development wire bundle remains `0.16.0`.
+
 ## [0.13.2] — 2026-09-25
 
 ### Fixed

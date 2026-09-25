@@ -7,6 +7,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-09-25
+
+### Fixed
+
+- **Release binaries are published for `x86_64` Linux only.** The `0.13.1` release workflow built all
+  four targets and published nothing, because three failed inside the embedded substrate host
+  (`substrate-host` at `3fafeae`): macOS has no Linux namespaces (`setns`, `CLONE_NEWUSER`), and
+  `aarch64` Linux reads `c_char` as `u8` where the crate assumes `i8`. `0.13.1` therefore has a tag
+  and no GitHub Release. The workflow now builds the one target that compiles and states why the
+  others are absent.
+
 ## [0.13.1] — 2026-09-25
 
 ### Added

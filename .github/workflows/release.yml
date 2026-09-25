@@ -21,16 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # x86_64 Linux only. The embedded substrate host (`substrate-host`) uses Linux namespaces,
+        # so macOS does not compile; aarch64 Linux fails in the same crate on `c_char` signedness.
+        # Add a target here once its build is green.
         include:
           # Ubuntu 22.04 keeps the glibc floor lower than `ubuntu-latest` for downloaded binaries.
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-          - target: aarch64-apple-darwin
-            runner: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -83,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+          for target in x86_64-unknown-linux-gnu; do
             test -f "b10x-harness-$GITHUB_REF_NAME-$target.tar.gz" || { echo "::error::missing b10x-harness-$GITHUB_REF_NAME-$target.tar.gz" >&2; exit 1; }
           done
           sha256sum b10x-harness-*.tar.gz > SHA256SUMS

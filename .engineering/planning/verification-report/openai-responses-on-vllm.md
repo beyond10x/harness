@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: verification-report:openai-responses-on-vllm
 kind: verification-report
 status: accepted
@@ -8,6 +8,8 @@ summary: A two-turn tool-calling run completed against the deployment's own vLLM
 relations:
 - informed_by: initiative:live-evidence
 revision: 3
+transitions:
+- {from: "draft", to: "accepted", at: "2026-09-15T17:27:59Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## What was measured
 

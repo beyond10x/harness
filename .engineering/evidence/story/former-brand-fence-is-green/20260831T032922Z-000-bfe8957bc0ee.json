@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:22Z",
+  "actor": "human:timo",
+  "artifact": "story:former-brand-fence-is-green",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "atlas check-org-brand.sh --worktree harness — 0 hits",
+    "reference": "../atlas/scripts/check-org-brand.sh"
+  }
+}

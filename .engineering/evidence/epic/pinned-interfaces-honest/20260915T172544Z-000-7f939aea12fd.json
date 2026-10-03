@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-15T17:25:44Z",
+  "actor": "human:timo",
+  "artifact": "epic:pinned-interfaces-honest",
+  "kind": "epic",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "diff",
+    "source": "git show -s 1d84c6e in beyond10x/harness",
+    "reference": "1d84c6e5e13a2c1e0f0a0b"
+  }
+}

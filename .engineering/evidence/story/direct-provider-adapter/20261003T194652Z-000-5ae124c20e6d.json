@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-03T19:46:52Z",
+  "actor": "human:timo",
+  "artifact": "story:direct-provider-adapter",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:harness-planning-round-one",
+    "review": "review-result:harness-planning-round-one",
+    "outcome": "fixed"
+  }
+}

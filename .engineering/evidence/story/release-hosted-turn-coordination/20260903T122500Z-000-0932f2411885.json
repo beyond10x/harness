@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-03T12:25:00Z",
+  "actor": "human:timo",
+  "artifact": "story:release-hosted-turn-coordination",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate",
+    "reference": "local:rust-1.98.0"
+  }
+}

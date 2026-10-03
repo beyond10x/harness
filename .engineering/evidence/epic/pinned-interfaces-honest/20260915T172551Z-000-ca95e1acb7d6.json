@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-15T17:25:51Z",
+  "actor": "human:timo",
+  "artifact": "epic:pinned-interfaces-honest",
+  "kind": "epic",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "diff",
+    "source": "correction: the ref on the preceding diff record was mistyped; the commit is",
+    "reference": "1d84c6ea10d98de85fd26d6c1fa52b186c7749c9"
+  }
+}

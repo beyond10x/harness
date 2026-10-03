@@ -1,11 +1,13 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:adoption-follow-ups
 kind: epic
 status: proposed
 title: Deferred work from the profiles and workspace-adoption wave
 summary: Five things named rather than left to be found, while shipping providers, profiles, model aliases and real-directory workspaces on 2026-08-29/30.
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:27:26Z", actor: "human:timo", revision: 4, imported: true}
 ---
 Body written 2026-09-15 during triage of the draft backlog (ORG-0201). Until then this file held the
 unedited `epic` template — the frontmatter said `epic:adoption-follow-ups` and the prose said

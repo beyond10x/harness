@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:23Z",
+  "actor": "human:timo",
+  "artifact": "story:website-build-dependencies-have-bounded-risk",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "clean install/typecheck/build and npm ls verified patched overrides; unpatched image parser pair reviewed",
+    "reference": "website/SECURITY.md"
+  }
+}

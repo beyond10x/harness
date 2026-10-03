@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:pinned-interfaces-honest
 kind: epic
 status: implemented
@@ -9,6 +9,10 @@ relations:
 - decomposes: initiative:record-matches-the-code
 - informed_by: specification:published-interfaces
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:25:23Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-09-15T17:25:23Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "active", to: "implemented", at: "2026-09-15T17:25:23Z", actor: "human:timo", revision: 5, imported: true}
 ---
 ## Evidence
 

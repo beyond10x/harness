@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:codex-provider
 kind: story
 status: implemented
@@ -8,6 +8,10 @@ relations:
 - derived_from: epic:adoption-follow-ups
 - serves: vision:b10x-owns-its-loop
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-29T23:06:57Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"health_observation":1}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-29T23:06:57Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"health_observation":1}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-29T23:06:57Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"health_observation":1}}, imported: true}
 ---
 ## What is missing
 

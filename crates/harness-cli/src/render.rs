@@ -1168,7 +1168,7 @@ mod tests {
             retreats: 0,
         };
         let (out, err) = render_flow(vec![event.clone()], false);
-        assert!(out.is_empty());
+        assert_eq!(out, "");
         assert!(
             err.contains(
                 "flow ‖ development — awaiting operator at root.decompose: review the decomposition"
@@ -1177,7 +1177,7 @@ mod tests {
         );
 
         let (out, err) = render_flow(vec![event], true);
-        assert!(err.is_empty());
+        assert_eq!(err, "");
         let line: serde_json::Value = serde_json::from_str(out.trim()).expect("one event");
         assert_eq!(line["kind"], serde_json::json!("flow-paused"));
         assert_eq!(line["path"], serde_json::json!("root.decompose"));

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: initiative:live-evidence
 kind: initiative
 status: proposed
@@ -8,6 +8,8 @@ summary: 'Close the STATUS next-evidence column: live pins, an authorized run pe
 relations:
 - serves: vision:b10x-owns-its-loop
 revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:15Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 

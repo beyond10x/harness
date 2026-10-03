@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:workflow-run-through-the-library
 kind: story
 status: proposed
@@ -7,7 +7,14 @@ title: A workflow is walked through the library, with no b10x-harness process
 relations:
 - derived_from: epic:embedded-by-a-consumer
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: inferred
+  path: crates/harness-cli/src/workflow.rs
+- confidence: inferred
+  path: crates/harness-flow
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:33Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 

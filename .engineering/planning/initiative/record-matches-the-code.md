@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: initiative:record-matches-the-code
 kind: initiative
 status: proposed
@@ -7,7 +7,9 @@ title: The pages this repository tracks work on say what the code does
 summary: STATUS, CHANGELOG and the pinned contracts drifted from the tree inside twelve days; the tracking is prose and prose does not fail a gate.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:27:15Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 
@@ -58,3 +60,7 @@ documents were brought to the tree by hand twice and nothing stops a third drift
 That is the open question this initiative carries, and it is not filed as a story anywhere. It needs
 a decision before it needs an implementation — whether a tracking document is gateable at all, or
 whether the drift is accepted with its reason written down.
+
+## Drift-policy ownership — 2026-10-03
+
+The continuing drift-prevention clause is held by decision-blocker:tracking-document-drift-policy. Snapshot repairs do not close it; the owner must choose a check with its own work record or explicitly accept residual drift. The initiative remains proposed and no completion is claimed from this review.

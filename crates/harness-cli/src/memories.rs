@@ -140,10 +140,10 @@ pub fn memory_at(document: &Path) -> Result<Memory, String> {
             .ok_or_else(|| named(format!("`{line}` is not `key: value`")))?;
         let value = value.trim();
         match key.trim() {
-            "kind" => kind = Some(parse_kind(value).map_err(&named)?),
+            "kind" => kind = Some(parse_kind(value).map_err(named)?),
             "summary" => summary = Some(value.to_owned()),
-            "trust" => trust = Some(parse_trust(value).map_err(&named)?),
-            "status" => status = Some(parse_status(value).map_err(&named)?),
+            "trust" => trust = Some(parse_trust(value).map_err(named)?),
+            "status" => status = Some(parse_status(value).map_err(named)?),
             "supersedes" => supersedes = Some(value.to_owned()),
             // **Refused, not ignored**, exactly as an unread skill frontmatter key is. A
             // `confidence:` or a `scope:` this build skipped would be a claim its writer made and
@@ -384,7 +384,10 @@ mod tests {
     fn a_directory_holding_no_record_reads_as_none_rather_than_failing() {
         let root = tempfile::tempdir().expect("a root");
         fs::write(root.path().join("README.txt"), "not a record").expect("a file");
-        assert!(memories_in(root.path()).expect("reads").is_empty());
+        assert_eq!(
+            memories_in(root.path()).expect("reads"),
+            [] as [harness_loop::Memory; 0]
+        );
     }
 
     #[test]

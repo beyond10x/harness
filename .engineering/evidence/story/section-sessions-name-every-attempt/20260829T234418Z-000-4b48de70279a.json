@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:44:18Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:section-sessions-name-every-attempt",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh in worktree ~/.cache/harness-wt-sessions at commit c4034ec (branch wt/section-sessions, not yet on main): exit 0, 898 passed, 0 failed",
+    "reference": "c4034ec"
+  }
+}

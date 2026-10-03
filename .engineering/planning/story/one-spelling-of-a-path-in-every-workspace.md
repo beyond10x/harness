@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:one-spelling-of-a-path-in-every-workspace
 kind: story
 status: proposed
@@ -8,7 +8,14 @@ summary: ./notes.txt reads locally and is refused as a path escape when confined
 relations:
 - derived_from: epic:embedded-by-a-consumer
 - serves: vision:b10x-owns-its-loop
-revision: 2
+scope:
+- confidence: inferred
+  path: crates/harness-substrate/tests/conformance.rs
+- confidence: inferred
+  path: crates/harness-tools/src/catalogue.rs
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:31Z", actor: "human:timo", revision: 2, imported: true}
 ---
 ## Evidence
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:23Z",
+  "actor": "human:timo",
+  "artifact": "story:website-typecheck-is-side-effect-free",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "clean npm typecheck emitted no JavaScript; production build had no duplicate route",
+    "reference": "website/tsconfig.json"
+  }
+}

@@ -314,7 +314,10 @@ mod tests {
     fn a_directory_holding_no_skill_reads_as_none_rather_than_failing() {
         let root = tempfile::tempdir().expect("a root");
         fs::create_dir_all(root.path().join("not-a-skill")).expect("a directory");
-        assert!(skills_in(root.path()).expect("reads").is_empty());
+        assert_eq!(
+            skills_in(root.path()).expect("reads"),
+            [] as [harness_loop::Skill; 0]
+        );
     }
 }
 
@@ -376,6 +379,9 @@ mod plugin_tests {
         let root = tempfile::tempdir().expect("a root");
         let plugin = root.path().join("a-plugin");
         fs::create_dir_all(plugin.join("agents")).expect("an agents directory");
-        assert!(skills_in_plugin(&plugin).expect("reads").is_empty());
+        assert_eq!(
+            skills_in_plugin(&plugin).expect("reads"),
+            [] as [harness_loop::Skill; 0]
+        );
     }
 }

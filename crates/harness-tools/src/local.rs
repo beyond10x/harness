@@ -1703,7 +1703,10 @@ mod tests {
         let value = local
             .search("fn (alpha", ".", &SearchOptions::default())
             .expect("the search answers");
-        assert!(value["matches"].as_array().expect("matches").is_empty());
+        assert_eq!(
+            value["matches"].as_array().expect("matches").as_slice(),
+            [] as [serde_json::Value; 0]
+        );
 
         let refusal = local
             .search(

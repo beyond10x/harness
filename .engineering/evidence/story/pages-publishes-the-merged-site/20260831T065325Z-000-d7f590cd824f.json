@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:53:25Z",
+  "actor": "human:timo",
+  "artifact": "story:pages-publishes-the-merged-site",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GitHub Pages run 33365903174 for main 8d8758c",
+    "reference": "https://beyond10x.github.io/harness/"
+  }
+}

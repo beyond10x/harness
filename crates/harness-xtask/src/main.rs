@@ -6,6 +6,7 @@ use std::process::{Command, ExitCode};
 use clap::{Parser, Subcommand};
 
 mod cli_contract;
+mod home_paths;
 mod provider_contract;
 mod website_contract;
 
@@ -30,6 +31,12 @@ enum Task {
     },
     /// Verify the public website against shipped versions and the generated CLI surface.
     WebsiteContract,
+    /// Refuse literal absolute POSIX home paths in the index and tracked working files.
+    HomePaths {
+        /// Prove byte scanning and index/worktree coverage on planted fixtures.
+        #[arg(long)]
+        self_test: bool,
+    },
     /// Verify built-in toolchain specs, or prove the checker rejects planted defects.
     ToolchainSpecs {
         #[arg(long)]
@@ -59,6 +66,8 @@ fn main() -> ExitCode {
         Task::CliContract { self_test: true } => cli_contract::self_test(),
         Task::CliContract { self_test: false } => cli_contract::check(&root),
         Task::WebsiteContract => website_contract::check(&root),
+        Task::HomePaths { self_test: true } => home_paths::self_test(),
+        Task::HomePaths { self_test: false } => home_paths::check(&root),
         Task::ToolchainSpecs { self_test } => toolchain_specs(self_test),
         Task::ToolchainDocs { check } => toolchain_docs(&root, check),
         Task::PinCli { version } => cli_contract::pin(&root, &version),
@@ -110,15 +119,10 @@ fn gate(root: &Path) -> Result<(), String> {
     toolchain_docs(root, true)?;
     check_http_boundary(root)?;
 
-    // These two pre-existing checkers were not changed by this wave. They remain until their own
-    // next material change; the gate itself and the two changed contract checkers are Rust now.
+    // The untouched app-server profile checker remains until its next material change.
     run(root, "python3", &["scripts/check-app-server-profile.py"])?;
-    run(
-        root,
-        "python3",
-        &["scripts/check-no-home-paths.py", "--self-test"],
-    )?;
-    run(root, "python3", &["scripts/check-no-home-paths.py"])?;
+    home_paths::self_test()?;
+    home_paths::check(root)?;
 
     let mut docs = Command::new("cargo");
     docs.current_dir(root)

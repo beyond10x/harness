@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-15T00:00:00Z",
+  "actor": "human:timo",
+  "artifact": "story:embedded-exec-exercised",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "health_observation",
+    "source": "acceptance walk at f470a76 (org-state review 2026-09-15): all five re-worded clauses read as stated — STATUS.md:30 names the date, workload and host checks; grep -c unexercised STATUS.md = 0; the next-evidence column asks for the socket deployment; README.md:51 says exercised; website/docs/status.md:43-47 says the same; git merge-base --is-ancestor ee7a631 origin/main exit 0",
+    "reference": "commands: sed -n 30p STATUS.md, sed -n 51p README.md, sed -n 43,47p website/docs/status.md, git show origin/main:<each> | grep -c = 1 for all three"
+  }
+}

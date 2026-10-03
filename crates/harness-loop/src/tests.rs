@@ -872,7 +872,11 @@ fn a_deferred_denial_resumes_without_running_the_effect() {
     )
     .expect("denial is delivered to the model");
 
-    assert!(resumed_tools.calls.is_empty());
+    assert!(
+        resumed_tools.calls.is_empty(),
+        "expected empty, got {:?}",
+        resumed_tools.calls
+    );
     let told = results(&completed);
     assert_eq!(told.len(), 1);
     assert!(told[0].0 && told[0].1.contains("not this change"));
@@ -961,8 +965,16 @@ fn a_changed_run_configuration_cannot_resume_a_checkpoint() {
     .expect_err("a checkpoint cannot be rebound to another run configuration");
 
     assert!(matches!(error, LoopError::Config(reason) if reason.contains("configuration changed")));
-    assert!(resumed_model.seen.is_empty());
-    assert!(resumed_tools.calls.is_empty());
+    assert!(
+        resumed_model.seen.is_empty(),
+        "expected empty, got {:?}",
+        resumed_model.seen
+    );
+    assert!(
+        resumed_tools.calls.is_empty(),
+        "expected empty, got {:?}",
+        resumed_tools.calls
+    );
 }
 
 #[test]
@@ -1096,7 +1108,11 @@ fn what_is_asked_about_and_refused_is_the_entry_and_not_the_verb_it_came_through
     let (outcome, sink) = harness.run();
     let outcome = outcome.expect("a denial is not a failure");
 
-    assert!(harness.tools.calls.is_empty());
+    assert!(
+        harness.tools.calls.is_empty(),
+        "expected empty, got {:?}",
+        harness.tools.calls
+    );
     let asked: Vec<&str> = sink
         .events()
         .iter()
@@ -1542,7 +1558,11 @@ fn unreported_usage_stays_unknown_rather_than_zero() {
     let (outcome, sink) = harness.run();
     let outcome = outcome.expect("completes");
 
-    assert!(outcome.usage.is_empty());
+    assert!(
+        outcome.usage.is_empty(),
+        "expected empty, got {:?}",
+        outcome.usage
+    );
     assert_eq!(outcome.total_tokens(), None);
     assert!(
         !sink
@@ -1624,7 +1644,11 @@ fn oversized_arguments_never_reach_the_tool() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("the run recovers");
 
-    assert!(harness.tools.calls.is_empty());
+    assert!(
+        harness.tools.calls.is_empty(),
+        "expected empty, got {:?}",
+        harness.tools.calls
+    );
     assert!(
         outcome
             .items
@@ -1863,7 +1887,11 @@ fn an_unpriced_run_reports_no_cost_at_all_rather_than_a_zero() {
     let (outcome, sink) = harness.run();
 
     assert_eq!(outcome.expect("completes").cost_micro_usd, None);
-    assert!(costs(&sink).is_empty());
+    assert!(
+        costs(&sink).is_empty(),
+        "expected empty, got {:?}",
+        costs(&sink)
+    );
     assert!(
         !sink
             .events()
@@ -3614,7 +3642,11 @@ fn a_call_a_person_refused_never_reaches_a_hook() {
     let (outcome, sink) = run_hooked(&mut harness, &mut hooks);
     let outcome = outcome.expect("a denial is not a failure");
 
-    assert!(harness.tools.calls.is_empty());
+    assert!(
+        harness.tools.calls.is_empty(),
+        "expected empty, got {:?}",
+        harness.tools.calls
+    );
     assert!(results(&outcome)[0].1.contains("not approved"));
     assert!(
         hooks.asked_at(HookPoint::BeforeCall).is_empty(),
@@ -4487,7 +4519,11 @@ fn a_port_that_publishes_an_owned_name_refuses_the_run_before_any_byte_goes_out(
         panic!("the same holds for the other owned tool: {outcome:?}");
     };
     assert!(reason.contains("`delegate`"), "{reason}");
-    assert!(delegating.model.seen.is_empty());
+    assert!(
+        delegating.model.seen.is_empty(),
+        "expected empty, got {:?}",
+        delegating.model.seen
+    );
 
     // And a caller who named both the same thing is refused with nobody else to blame.
     let schema = OutputSchema::named(
@@ -4507,7 +4543,11 @@ fn a_port_that_publishes_an_owned_name_refuses_the_run_before_any_byte_goes_out(
         panic!("two owned tools of one name is the same unaddressable request: {outcome:?}");
     };
     assert!(reason.contains("both published as `delegate`"), "{reason}");
-    assert!(colliding.model.seen.is_empty());
+    assert!(
+        colliding.model.seen.is_empty(),
+        "expected empty, got {:?}",
+        colliding.model.seen
+    );
 }
 
 #[test]

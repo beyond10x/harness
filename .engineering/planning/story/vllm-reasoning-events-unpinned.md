@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:vllm-reasoning-events-unpinned
 kind: story
 status: proposed
@@ -9,7 +9,16 @@ relations:
 - informed_by: verification-report:openai-responses-on-vllm
 - derived_from: epic:wire-pins-from-live-bytes
 - serves: vision:b10x-owns-its-loop
-revision: 2
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: contracts/provider-wires/openai-responses
+- confidence: inferred
+  path: crates/harness-responses/src/lib.rs
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:33Z", actor: "human:timo", revision: 2, imported: true}
 ---
 ## Evidence
 
@@ -57,5 +66,4 @@ than a subset, which is a different claim about what this wire accepts and needs
 
 ## Acceptance
 
-A run against vLLM emits `ReasoningDelta` events and no `unknown-stream-event` warning for any
-`response.reasoning_*` event, with the pin and the changelog carrying the change.
+A vLLM fixture/run containing the four observed events (response.reasoning_text.delta, response.reasoning_part.added, response.reasoning_text.done and response.reasoning_part.done) emits ReasoningDelta for the delta and no unknown-stream-event warning for those four admitted names, while an unrecognized response.reasoning_* event remains preserved and warned about; a new immutable contract version and the changelog carry that exact accepted subset.

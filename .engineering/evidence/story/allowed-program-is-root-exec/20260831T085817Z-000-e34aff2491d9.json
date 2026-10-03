@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T08:58:17Z",
+  "actor": "human:timo",
+  "artifact": "story:allowed-program-is-root-exec",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate plus confined Go descendant execution (exit 0)",
+    "reference": "/tmp/harness-go-todo-VazIYU"
+  }
+}

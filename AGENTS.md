@@ -240,9 +240,9 @@ transcribes it and nothing else decides. In order: `cargo test --workspace --loc
 `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo xtask provider-contracts`,
 `cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask toolchain-specs`,
 `cargo xtask toolchain-docs --check`, the in-process HTTP boundary guard,
-`python3 scripts/check-app-server-profile.py`, `python3 scripts/check-no-home-paths.py` and strict
+`python3 scripts/check-app-server-profile.py`, `cargo xtask home-paths` and strict
 rustdoc. Three of them — the CLI contract checker, the toolchain specs checker and
-`check-no-home-paths.py` — run **twice**: `--self-test` first, on planted fixtures, then the tree.
+`home-paths` — run **twice**: `--self-test` first, on planted fixtures, then the tree.
 Run it before every commit. Organization audits in Atlas are separate from this source gate;
 ordinary publication does not run Atlas scripts.
 
@@ -257,12 +257,15 @@ What a green run does **not** say: nothing about `~`, `$HOME` or any path assemb
 nothing about a Windows home directory (`C:\Users\<name>`); nothing about history, which
 `story:history-carries-a-home-directory` decided not to rewrite. One account name, `you`, is treated
 as a documentation placeholder in every file type — `user` and `username` are not, because they are
-account names real machines have. Two planning-store paths are exempt with the reason in the script:
+account names real machines have. Two historical planning-store paths are exempt with the reason in
+`crates/harness-xtask/src/home_paths.rs`:
 the journal is append-only and committed, and editing it to satisfy a check would forge the record.
+The one evidence record extracted from that journal by the verified revision-5 AEP migration
+inherits the exemption only at its exact path and SHA-256; a changed record or sibling does not.
 `--self-test` is a gate step of its own, because a check that passed everything would look green.
 
-**`python3` must be available** until the two untouched legacy checks move on their next material
-change: the app-server profile check and home-path check. A missing interpreter is a failed gate,
+**`python3` must be available** until the untouched app-server profile check moves on its next
+material change. A missing interpreter is a failed gate,
 not a skipped check.
 
 **CI is `.github/workflows/gate.yml`**, and it runs `cargo xtask gate` itself rather than a copied
@@ -320,7 +323,7 @@ Automated commits and pushes use standalone `b10x-gates bot` and the GitHub App 
 `scripts/as-bot.sh` and `scripts/bot-token.sh` — and `scripts/check-bot-files.py`, which only
 `bot-token.sh` called — were copies of atlas's, left in the tree when this section moved to
 `b10x-gates bot` (`e506af2`, 2026-09-10), and are deleted. Nothing here ran them: not
-`cargo xtask gate` (`crates/harness-xtask/src/main.rs:115-121` runs two Python checks and no other
+`cargo xtask gate` (`crates/harness-xtask/src/main.rs` runs one Python check and no other
 script), not `.github/workflows/gate.yml`, which mints its own installation token. A copy is also a
 divergence — this tree's `as-bot.sh` had fallen behind atlas's, missing its `GIT_CONFIG_GLOBAL`
 isolation and its refusal to push with `--no-verify`. Atlas and substrate keep their wrappers as

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:measured-not-emulated
 kind: epic
 status: proposed
@@ -8,6 +8,8 @@ summary: Compaction, the answer path, the flat surface and the embedded driver's
 relations:
 - decomposes: initiative:live-evidence
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:27:05Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

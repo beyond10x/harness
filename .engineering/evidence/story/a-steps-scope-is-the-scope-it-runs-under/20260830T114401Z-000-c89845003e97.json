@@ -1,0 +1,12 @@
+{
+  "at": "2026-08-30T11:44:01Z",
+  "actor": "human:timo",
+  "artifact": "story:a-steps-scope-is-the-scope-it-runs-under",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "metaharness run-native.sh --spend, 2026-08-30, native-eval.9kZNVc: store valid after the walk (1 artifact), no hand-written revision reached specification/passkey-login.md, 3 retreats, 2 protocol-validate command steps through the gate"
+  }
+}

@@ -7,6 +7,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Migrate the planning store to `aep.project/5` with the Git driver and pin the governing
+  documents to AEP 0.68.0. Preserve historical transitions and evidence, review the open plan
+  twice, and record unresolved policy choices as explicit blockers.
+- Run the home-path privacy check from Rust, retaining index and working-tree coverage and
+  a content-pinned exception for the historical evidence extracted from the former journal.
+
+### Fixed
+
+- Keep the source gate compatible with Rust 1.99's assertion diagnostics while retaining the
+  Rust 1.97 minimum and the existing atomic-update behavior.
+
 ## [0.13.3] — 2026-09-25
 
 ### Added

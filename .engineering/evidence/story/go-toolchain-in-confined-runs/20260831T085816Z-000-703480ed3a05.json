@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T08:58:16Z",
+  "actor": "human:timo",
+  "artifact": "story:go-toolchain-in-confined-runs",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate plus live Anthropic scratch-app exercise (exit 0)",
+    "reference": "/tmp/harness-go-todo-VazIYU"
+  }
+}

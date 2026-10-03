@@ -192,6 +192,8 @@ impl TurnControl {
         self.requested.store(true, Ordering::SeqCst);
         // Saturating: an interrupt the reading thread never counted — one it could not attribute
         // to any turn — must still be answerable without taking the count below zero.
+        // Rust 1.97 is supported; try_update only replaces this API in Rust 1.99.
+        #[allow(deprecated)]
         let _ = self
             .owed
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |owed| {

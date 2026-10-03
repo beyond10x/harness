@@ -1100,7 +1100,7 @@ mod tests {
             moves,
             "`false` -> `true` is the opposite claim: the flag became more required, not less"
         );
-        assert!(unstated(&honest(&moves), &moves).is_empty());
+        assert_eq!(unstated(&honest(&moves), &moves), [] as [Moved; 0]);
     }
 
     #[test]
@@ -1135,7 +1135,7 @@ mod tests {
             2,
             "one line answers one move; the document has to say the other two out loud"
         );
-        assert!(unstated(&honest(&moves), &moves).is_empty());
+        assert_eq!(unstated(&honest(&moves), &moves), [] as [Moved; 0]);
     }
 
     #[test]
@@ -1370,7 +1370,7 @@ mod tests {
             "an arriving positional is an arrival, which is why the nineteen this version records \
              against six that recorded none need no row"
         );
-        assert!(moves_between(&required, &required).is_empty());
+        assert_eq!(moves_between(&required, &required), [] as [Moved; 0]);
     }
 
     /// A flag that eats no word holds no default but the one clap gives every bare flag.

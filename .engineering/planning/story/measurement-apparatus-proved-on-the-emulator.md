@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:measurement-apparatus-proved-on-the-emulator
 kind: story
 status: implemented
@@ -9,6 +9,10 @@ relations:
 - derived_from: epic:measured-not-emulated
 - serves: vision:b10x-owns-its-loop
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-18T01:22:02Z", actor: "human:timo", revision: 2, decided_on: {"recorded":{"test_result":1}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-09-18T01:22:02Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"test_result":1}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-09-18T01:22:05Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}, imported: true}
 ---
 ## Outcome
 The compaction and surface measurements can be produced end to end without a provider, so the paid run is one confirmation rather than several exploratory attempts.

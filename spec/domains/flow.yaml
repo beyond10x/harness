@@ -1,0 +1,22 @@
+domain: harness.flow
+summary: Native DAG validation and execution, bounded retreat, refusal and operator pause.
+# Sources: crates/harness-flow/src/lib.rs:111-196,318-342; run.rs:48-208,214 onward.
+# Run wraps Flow::from_json and Flow::run. Its document is the existing serde Flow shape;
+# script supplies StepRunner outcomes, an explicit upstream port, not simulated Flow behavior.
+# Groups/steps are nested value objects rather than separately persisted entities.
+commands:
+  - name: harness.flow.Run
+    input:
+      - {name: document, type: Json}
+      - {name: script, type: 'List<String>'}
+      - {name: refuse_entry, type: Boolean}
+    response:
+      - {name: status, type: 'Optional<String>'}
+      - {name: reached, type: Integer}
+      - {name: ran, type: Integer}
+      - {name: failed, type: Integer}
+      - {name: skipped, type: Integer}
+      - {name: retreats, type: Integer}
+      - {name: paths, type: 'List<String>'}
+      - {name: diagnostic, type: 'Optional<String>'}
+    outcomes: [{name: returned, returns: true}]

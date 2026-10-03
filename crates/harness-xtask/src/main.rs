@@ -31,6 +31,10 @@ enum Task {
     },
     /// Verify the public website against shipped versions and the generated CLI surface.
     WebsiteContract,
+    /// Validate, test and lint the independent documentation workspace.
+    Website,
+    /// Compile the ESS specification and execute its native conformance suite.
+    Specification,
     /// Refuse literal absolute POSIX home paths in the index and tracked working files.
     HomePaths {
         /// Prove byte scanning and index/worktree coverage on planted fixtures.
@@ -66,6 +70,8 @@ fn main() -> ExitCode {
         Task::CliContract { self_test: true } => cli_contract::self_test(),
         Task::CliContract { self_test: false } => cli_contract::check(&root),
         Task::WebsiteContract => website_contract::check(&root),
+        Task::Website => website(&root),
+        Task::Specification => specification(&root),
         Task::HomePaths { self_test: true } => home_paths::self_test(),
         Task::HomePaths { self_test: false } => home_paths::check(&root),
         Task::ToolchainSpecs { self_test } => toolchain_specs(self_test),
@@ -114,10 +120,12 @@ fn gate(root: &Path) -> Result<(), String> {
     cli_contract::self_test()?;
     cli_contract::check(root)?;
     website_contract::check(root)?;
+    website(root)?;
     toolchain_specs(true)?;
     toolchain_specs(false)?;
     toolchain_docs(root, true)?;
     check_http_boundary(root)?;
+    specification(root)?;
 
     // The untouched app-server profile checker remains until its next material change.
     run(root, "python3", &["scripts/check-app-server-profile.py"])?;
@@ -131,6 +139,55 @@ fn gate(root: &Path) -> Result<(), String> {
     run_command("strict rustdoc", &mut docs)?;
     println!("gate: green");
     Ok(())
+}
+
+fn website(root: &Path) -> Result<(), String> {
+    let site = root.join("website");
+    run(&site, "cargo", &["fmt", "--check"])?;
+    run(&site, "cargo", &["test", "--locked"])?;
+    run(
+        &site,
+        "cargo",
+        &[
+            "clippy",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
+    run(&site, "cargo", &["run", "--locked", "--", "check"])
+}
+
+fn specification(root: &Path) -> Result<(), String> {
+    run(
+        root,
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "b10x-harness-conformance",
+            "--",
+            "--root",
+            ".",
+        ],
+    )?;
+    run(
+        root,
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "b10x-harness-conformance",
+            "--",
+            "--root",
+            ".",
+            "--audit-noop",
+        ],
+    )
 }
 
 fn toolchain_specs(self_test: bool) -> Result<(), String> {

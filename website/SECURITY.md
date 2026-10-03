@@ -1,24 +1,19 @@
-# Website build dependency review
+# Documentation build boundary
 
-Reviewed: 2026-08-31.
+The independent builder accepts an explicit public Markdown inventory and three reviewed SVG assets.
+Markdown raw HTML is refused (the generated toolchain provenance comment is discarded), local links
+and fragment targets are checked, and the rendered pages reject scripts, frames, embedded objects,
+forms and inline event handlers. Authored landing-page HTML receives the same rendered checks.
 
-The website is compiled to static files. Its Node dependency graph is build tooling and is not
-served by the resulting site. `package.json` overrides `serialize-javascript` to `7.1.1` and `uuid`
-to `11.1.1`; those are the compatible fixed releases for the advisories found in the 2026-08-31
-review.
+The browser receives static HTML and CSS, with no third-party fonts, scripts or analytics. Cargo
+resolves only crates.io dependencies from `website/Cargo.lock`; the separate workspace does not
+resolve Harness's private dependencies. Dependency changes require lockfile review and the builder's
+format, tests, and Clippy checks.
 
-The published `image-size@2.0.2` release used by Docusaurus has no fixed successor and carries two
-infinite-loop advisories:
+The output is restricted to `website/build`. Symlink outputs and unrecognized leftover files are
+refused. A production artifact requires clean committed inputs and an exact HEAD revision; previews
+omit publication provenance. CI has only `contents: read`, persists no checkout credential, and
+uploads artifacts without deploying them. Legacy shared delivery is documented in [README.md](README.md).
 
-- `GHSA-w3rx-r6r6-pgpr`: an infinite loop in the ICNS parser.
-- `GHSA-5p2g-fcmc-qvqq`: infinite loops in the JXL and HEIF parsers.
-
-The lock replaces that transitive package with the API-compatible
-`image-size-next@2.1.1`. That release adds forward-progress checks to the ICNS, JXL, HEIF, and JP2
-parsers and regression tests for zero-sized structures. The override is exact and the npm lock pins
-the registry tarball's integrity; it must not float to a tag or branch.
-
-The repository currently contains only reviewable SVG website assets—no ICNS, JXL, HEIF, HEIC, or
-AVIF input. That keeps the fixed parser paths outside today's build as a second boundary, not as a
-reason to retain vulnerable code. A clean `npm ci`, `npm audit`, typecheck, production build, and
-development-server smoke test pass with all three overrides.
+Report vulnerabilities through the repository's
+[private security policy](https://github.com/beyond10x/harness/security/policy).

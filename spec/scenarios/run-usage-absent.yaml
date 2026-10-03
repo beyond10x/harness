@@ -1,0 +1,52 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.loop",
+  "scenario": "run-usage-absent",
+  "summary": "run usage absent",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.loop.Run",
+      "input": {
+        "budget": {
+          "max_turns": null,
+          "max_input_tokens": null,
+          "max_output_tokens": null,
+          "max_output_tokens_per_turn": null,
+          "max_duration_ms": null,
+          "max_cost_microunits": null
+        },
+        "script": [
+          {
+            "stop_reason": {
+              "kind": "end-turn"
+            },
+            "items": [
+              {
+                "kind": "assistant-text",
+                "text": "done"
+              }
+            ],
+            "usage": null
+          }
+        ],
+        "cancelled": false,
+        "approve": false
+      },
+      "outcome": "returned",
+      "response": {
+        "stop": {
+          "kind": "completed"
+        },
+        "text": "done",
+        "turns": 1,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "failed_results": 0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "diagnostic": null
+      }
+    }
+  ]
+}

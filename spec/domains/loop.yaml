@@ -1,0 +1,75 @@
+domain: harness.loop
+summary: Observable native loop results and admission decisions; no durable run entity is invented.
+# Sources: crates/harness-loop/src/lib.rs:123-218,338-486,2002-2143,2812-2885;
+# budget.rs:11-109; approval.rs:7-78; harness-wire/src/turn.rs and item.rs.
+# Run/Call are adapter names for existing AgentLoop methods, not additional product APIs.
+# Script is serialized TurnOutcome from an injected ModelPort, not a vendor protocol.
+# Budget, stop and usage are existing implementation types. Only Budget is structurally declared
+# here together with the observed stop envelope. A LoopStop is a return value, not a row
+# transitioning between persistent states. Stop fields retain serde spelling and absence.
+# Per-variant payload correlations are checked by authored scenarios, not the broad struct.
+types:
+  - name: harness.loop.Budget
+    kind: struct
+    fields:
+      - {name: max_turns, type: 'Optional<Integer>'}
+      - {name: max_input_tokens, type: 'Optional<Integer>'}
+      - {name: max_output_tokens, type: 'Optional<Integer>'}
+      - {name: max_output_tokens_per_turn, type: 'Optional<Integer>'}
+      - {name: max_duration_ms, type: 'Optional<Integer>'}
+      - {name: max_cost_microunits, type: 'Optional<Integer>'}
+  - name: harness.loop.StopKind
+    kind: enum
+    variants: [completed, max-turns, max-input-tokens, max-output-tokens, max-cost, budget-unobservable, deadline, cancelled, awaiting-approval, provider-incomplete, unstructured]
+  - name: harness.loop.Stop
+    kind: struct
+    fields:
+      - {name: kind, type: harness.loop.StopKind}
+      - {name: limit, type: 'Optional<Integer>'}
+      - {name: reported, type: 'Optional<Integer>'}
+      - {name: limit_micro_usd, type: 'Optional<Integer>'}
+      - {name: spent_micro_usd, type: 'Optional<Integer>'}
+      - {name: name, type: 'Optional<String>'}
+      - {name: reason, type: 'Optional<String>'}
+      - {name: limit_ms, type: 'Optional<Integer>'}
+      - {name: checkpoint_id, type: 'Optional<String>'}
+      - {name: asked_again, type: 'Optional<Integer>'}
+commands:
+  - name: harness.loop.ValidateBudget
+    # Calls Budget::validate; no state mutation or emitted event is claimed.
+    input:
+      - {name: budget, type: harness.loop.Budget}
+      - {name: priced, type: Boolean}
+    response:
+      - {name: accepted, type: Boolean}
+      - {name: diagnostic, type: 'Optional<String>'}
+    outcomes: [{name: returned, returns: true}]
+  - name: harness.loop.Run
+    # AgentLoop::run_in (the implementation behind run) with concrete ScriptedModel/ToolPort input fixtures. The adapter reports
+    # actual return data and counted port effects; it does not infer outcomes from fixture inputs.
+    input:
+      - {name: budget, type: harness.loop.Budget}
+      - {name: script, type: 'List<Json>'}
+      - {name: cancelled, type: Boolean}
+      - {name: approve, type: Boolean}
+    response:
+      - {name: stop, type: 'Optional<harness.loop.Stop>'}
+      - {name: text, type: String}
+      - {name: turns, type: Integer}
+      - {name: model_calls, type: Integer}
+      - {name: tool_calls, type: Integer}
+      - {name: failed_results, type: Integer}
+      - {name: input_tokens, type: 'Optional<Integer>'}
+      - {name: output_tokens, type: 'Optional<Integer>'}
+      - {name: diagnostic, type: 'Optional<String>'}
+    outcomes: [{name: returned, returns: true}]
+  - name: harness.loop.Call
+    # AgentLoop::call uses the same gate as model-issued tool calls (lib.rs:2073).
+    input:
+      - {name: name, type: String, example: read}
+      - {name: approve, type: Boolean}
+    response:
+      - {name: failed, type: Boolean}
+      - {name: tool_calls, type: Integer}
+      - {name: refusal, type: 'Optional<Json>'}
+    outcomes: [{name: returned, returns: true}]

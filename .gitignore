@@ -2,6 +2,8 @@
 /website/node_modules/
 /website/.docusaurus/
 /website/build/
+/website/target/
+/.engineering/drafts/
 __pycache__/
 *.py[cod]
 *.pem

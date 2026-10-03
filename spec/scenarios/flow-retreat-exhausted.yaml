@@ -1,0 +1,53 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-retreat-exhausted",
+  "summary": "flow retreat exhausted",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "first"
+              },
+              {
+                "id": "second",
+                "needs": [
+                  "first"
+                ]
+              }
+            ],
+            "repeat": {
+              "max": 2
+            }
+          }
+        },
+        "script": [
+          "failed",
+          "failed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": "Failed",
+        "reached": 2,
+        "ran": 2,
+        "failed": 2,
+        "skipped": 2,
+        "retreats": 1,
+        "paths": [
+          "root.first",
+          "root.first"
+        ],
+        "diagnostic": null
+      }
+    }
+  ]
+}

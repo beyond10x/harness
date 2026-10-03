@@ -1,0 +1,37 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-empty-group",
+  "summary": "flow empty group",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": []
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": null,
+        "reached": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "retreats": 0,
+        "paths": [],
+        "diagnostic": "`root` holds no nodes: a section that runs nothing is not a section"
+      }
+    }
+  ]
+}

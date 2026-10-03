@@ -48,7 +48,10 @@ fixtures.
 
 ## Important limitations
 
-- **No public binary distribution.** Build from a source checkout; the crates are not published.
+- **Linux builds.** The release workflow packages Linux x86_64 and aarch64 binaries. Check the
+  [release page](https://github.com/beyond10x/harness/releases) for the assets and checksums of the
+  version you choose. Source builds need Rust 1.97 and access to pinned foundation dependencies;
+  crates are not published on crates.io. The embedded host does not target macOS.
 - **No hosted service.** Admission, tenancy, scheduling, durable storage, and deployment are outside
   this repository.
 - **No multimodal input.** Harness currently owns text turns. Outbound MCP tools are available only

@@ -72,7 +72,8 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    denied approval, an oversized result: all come back as a failed `ToolOutcome` so the model knows
    the effect did not happen. Ending the run would leave it believing the call succeeded.
 10. **A bound that cannot be enforced is refused, never ignored.** `Budget::validate` refuses
-    `max_cost_microunits` **by name**, because nothing here can convert tokens to money.
+    `max_cost_microunits` **by name** when the run cannot price its model. A loaded rate card that
+    covers the model makes that ceiling admissible; an unpriced run must never ignore it.
 11. **A budget that binds is an outcome, not a failure.** `LoopStop` carries the reason; `LoopError`
     is only for a run that could not proceed at all.
 12. **The default approver is `DenyAll`.** A harness that approves by default turns a review gate
@@ -228,6 +229,19 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 | Principal identity and token audiences | `identity` |
 | Durable event-sourced state | `eventlog` |
 
+## Executable specification
+
+`spec/ess-inputs.yaml` pins ESS 0.52.0. The authored specification describes the native loop and
+workflow boundaries; `conformance/` records the compiled model, selected suite, required scenario
+inventory and coverage limits. This is a retrofit of shipped behavior, not permission to invent
+new runtime semantics. Preserve source citations and report every unresolved mapping.
+
+`cargo xtask specification` compiles with the exact pinned ESS Rust libraries, checks generated
+artifacts for drift, and runs the suite against the real Harness libraries. It also runs an inert
+target to prove the scenarios require observable responses. The full gate and `task check` run this
+command; they require no ambient ESS executable. `task spec` additionally validates through the
+pinned ESS CLI. Native fixture-port evidence is not a live-provider or confinement claim.
+
 ## The gate
 
 ```console
@@ -238,8 +252,8 @@ cargo xtask gate
 transcribes it and nothing else decides. In order: `cargo test --workspace --locked`,
 `cargo test -p b10x-harness-substrate --locked --test conformance`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo xtask provider-contracts`,
-`cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask toolchain-specs`,
-`cargo xtask toolchain-docs --check`, the in-process HTTP boundary guard,
+`cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask website`, `cargo xtask toolchain-specs`,
+`cargo xtask toolchain-docs --check`, the in-process HTTP boundary guard, `cargo xtask specification`,
 `python3 scripts/check-app-server-profile.py`, `cargo xtask home-paths` and strict
 rustdoc. Three of them — the CLI contract checker, the toolchain specs checker and
 `home-paths` — run **twice**: `--self-test` first, on planted fixtures, then the tree.
@@ -345,6 +359,22 @@ credentials and the existing `b10x-bot[bot]` identity. Preserve repository and w
 Atlas documentation validation belongs to documentation operations; it is not a prerequisite for
 source publication. Documentation failures affect documentation delivery. Organization privacy
 rules still apply; historical brand exemptions do not authorize new public associations.
+
+## Independent documentation source
+
+`website/` is an independent Rust workspace with its own lockfile and public crates.io dependencies.
+It owns the public HTML/CSS presentation and the explicit Markdown navigation. `cargo xtask website`
+runs its formatting, tests, strict Clippy and rendered link/anchor checks. The source gate also
+checks the documentation against the product's generated CLI and toolchain contracts.
+
+Follow `website/README.md` to preview or produce the deterministic artifact for `/harness/`.
+Production builds verify all website and build-workflow input bytes against checkout HEAD;
+previews deliberately omit publication provenance. The read-only `pages.yml` produces the
+`b10x-project-site` artifact without deploying it.
+
+The generated delivery integration below remains the active legacy route. It is not a dependency
+of the independent builder. Switching live delivery requires a separate coordinated publisher
+change; do not claim this source change has deployed the new site.
 
 <!-- b10x-docs-operations:start -->
 ## Public documentation operations

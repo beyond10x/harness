@@ -1,0 +1,22 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.loop",
+  "scenario": "call-read",
+  "summary": "call read",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.loop.Call",
+      "input": {
+        "name": "read",
+        "approve": false
+      },
+      "outcome": "returned",
+      "response": {
+        "failed": false,
+        "tool_calls": 1,
+        "refusal": null
+      }
+    }
+  ]
+}

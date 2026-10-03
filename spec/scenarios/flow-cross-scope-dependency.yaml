@@ -1,0 +1,52 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-cross-scope-dependency",
+  "summary": "flow cross scope dependency",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "x",
+                "needs": [
+                  "group.child"
+                ]
+              },
+              {
+                "id": "group",
+                "nodes": [
+                  {
+                    "id": "child"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": null,
+        "reached": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "retreats": 0,
+        "paths": [],
+        "diagnostic": "`root.x` needs `group.child`, which is not one of its siblings. An edge may only join siblings — to depend on something inside another group, depend on the group"
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[package]
+name = "harness-docs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "LicenseRef-B10x-Proprietary"
+publish = false
+
+# Independent on purpose: documentation builds resolve no private product dependencies.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+pulldown-cmark = "0.13.4"
+scraper = "0.27"
+serde_json = "1"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0

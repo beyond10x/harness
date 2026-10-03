@@ -1,0 +1,63 @@
+{
+  "format": "harness-mutation-evidence/1",
+  "date": "2026-10-03",
+  "restored": true,
+  "mutations": [
+    {
+      "mutation": "terminal-stop",
+      "source": "crates/harness-loop/src/lib.rs",
+      "failed": [
+        "harness.loop/authored/run-completed",
+        "harness.loop/authored/run-tool-missing",
+        "harness.loop/authored/run-tool-read",
+        "harness.loop/authored/run-tool-write",
+        "harness.loop/authored/run-usage-absent"
+      ],
+      "counts": {
+        "error": 0,
+        "failed": 5,
+        "passed": 37,
+        "skipped": 0,
+        "total": 42,
+        "unsupported": 0
+      },
+      "exit_status": 1
+    },
+    {
+      "mutation": "approval-default",
+      "source": "crates/harness-loop/src/approval.rs",
+      "failed": [
+        "harness.loop/authored/call-write",
+        "harness.loop/authored/run-tool-write"
+      ],
+      "counts": {
+        "error": 0,
+        "failed": 2,
+        "passed": 40,
+        "skipped": 0,
+        "total": 42,
+        "unsupported": 0
+      },
+      "exit_status": 1
+    },
+    {
+      "mutation": "flow-failed-status",
+      "source": "crates/harness-flow/src/run.rs",
+      "failed": [
+        "harness.flow/authored/flow-entry-refused",
+        "harness.flow/authored/flow-failure-skips-dependent",
+        "harness.flow/authored/flow-missing-handoff-does-not-retreat",
+        "harness.flow/authored/flow-retreat-exhausted"
+      ],
+      "counts": {
+        "error": 0,
+        "failed": 4,
+        "passed": 38,
+        "skipped": 0,
+        "total": 42,
+        "unsupported": 0
+      },
+      "exit_status": 1
+    }
+  ]
+}

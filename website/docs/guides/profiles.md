@@ -24,13 +24,11 @@ Built-in providers may name default credential sources. `claude` reads
 `OPENAI_API_KEY`. This is visible in `providers show` and in the run record as
 `credential_source: "provider:<name>"`.
 
-:::warning The `codex` provider may update its credential file
-
-When its default token is near expiry, `codex` renews it before the model call and atomically
-rewrites `~/.codex/auth.json`. Harness reports that write even under `--quiet`. Naming your own
-OAuth source disables renewal: explicitly named credential files are read-only.
-
-:::
+> **The `codex` provider may update its credential file**
+>
+> When its default token is near expiry, `codex` renews it before the model call and atomically
+> rewrites `~/.codex/auth.json`. Harness reports that write even under `--quiet`. Naming your own
+> OAuth source disables renewal: explicitly named credential files are read-only.
 
 ## Create a configuration
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-03T23:47:34Z",
+  "actor": "human:timo",
+  "artifact": "decision-blocker:migrated-evidence-policy-exception",
+  "kind": "decision-blocker",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "operator instruction: unblock yourself; exact policy exception verified at bot commit 51477ce3821d26dacbaffae99286a0befc1f7dce",
+    "reference": "decision-blocker:migrated-evidence-policy-exception"
+  }
+}

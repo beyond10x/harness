@@ -9,6 +9,18 @@ description: Harness owns the agent loop between a model API and an explicitly b
 Harness is the beyond10x agent loop. It talks to model APIs directly, assembles each turn, executes
 tool round trips, asks for approvals, enforces budgets, and records what happened.
 
+## Choose your path
+
+| You want to… | Start here |
+|---|---|
+| Inspect a repository with a model | [First read-only run](./getting-started.md) |
+| Let a run edit admitted files | [First confined change](./tutorials/confined-change.md) |
+| Connect an endpoint or reuse a profile | [Providers and profiles](./guides/profiles.md) |
+| Understand where authority stops | [Security boundary](./concepts/security-boundary.md) |
+| Look up a flag or configuration key | [CLI reference](./reference/cli.md) · [Configuration](./reference/configuration.md) |
+
+## Own the loop
+
 It is deliberately not a wrapper around a vendor's coding-agent binary. If you need to drive and
 compare vendor harnesses, that is [metaharness](https://beyond10x.github.io/metaharness/). Harness
 owns the loop itself.
@@ -70,15 +82,13 @@ Start with [Getting started](./getting-started.md) for a read-only first run. Th
 [The agent loop](./concepts/agent-loop.md) to understand the execution model or
 [Tools and approvals](./concepts/tools-and-approvals.md) before enabling effects.
 
-:::info Pre-v1
-
-Harness is tagged `0.13.3` and changing quickly. The provider wires and command-line surface are
-pinned by repository contracts, but live-provider and external-bridge characterization is still
-limited. See [Status and limitations](./status.md) before adopting it.
-
-The source is publicly readable under `LicenseRef-B10x-Proprietary`. Public visibility is not an
-open-source licence or a stability promise. See the repository
-[security policy](https://github.com/beyond10x/harness/security/policy) for private vulnerability
-reporting.
-
-:::
+> **Pre-v1**
+>
+> Harness is tagged `0.13.3` and changing quickly. The provider wires and command-line surface are
+> pinned by repository contracts, but live-provider and external-bridge characterization is still
+> limited. See [Status and limitations](./status.md) before adopting it.
+>
+> The source is publicly readable under `LicenseRef-B10x-Proprietary`. Public visibility is not an
+> open-source licence or a stability promise. See the repository
+> [security policy](https://github.com/beyond10x/harness/security/policy) for private vulnerability
+> reporting.

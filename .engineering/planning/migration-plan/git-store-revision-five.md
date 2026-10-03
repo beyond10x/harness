@@ -6,7 +6,7 @@ status: draft
 title: Migrate Harness planning to the Git-native revision-five store
 relations:
 - informed_by: initiative:record-matches-the-code
-revision: 3
+revision: 5
 ---
 ## Outcome
 
@@ -27,3 +27,15 @@ The source gate passed before staging. The verified extraction moves one existin
 ## Review record handling
 
 Two plan-reviewer passes found six substantive issues and then approved their corrections. Public reports explicitly redact the local checkout prefix from validation output; original tool output remains outside the public repository. One unpublished report creation was rolled back before commit and re-recorded from the reviewer's public-safe delivery. No published or historical review was rewritten.
+
+## Session handoff after implementation
+
+The managed tree `harness-integration-20261003` holds branch `integration/harness-20261003`. HEAD remains `798325f03cf5a18df8fadb346d31b314826136ec`: no session commit or push succeeded. The initial migration/review/Rust-compatibility/privacy-checker baseline remains staged; subsequent independent documentation and ESS work remains unstaged, preserving the requested baseline commit boundary.
+
+The final working tree passed `task check` (including native conformance and standalone documentation) and `cargo +1.97 check --workspace --all-targets --locked`. AEP validates 108 artifacts, retaining four warnings on two unchanged historical review records. Current planning reviews have structured findings and recorded outcomes. Public documentation is implemented; the first native ESS slice is conforming, with unmapped surfaces explicitly recorded in spec/COVERAGE.md.
+
+The next action is the operator's decision on the exact historical-evidence policy exception in decision-blocker:migrated-evidence-policy-exception. The trusted policy remains unchanged; do not bypass the refusal or substitute another commit route. After an approved policy change, commit the staged baseline using the bot, then validate/stage/commit the finished source and publish the integration branch. Preserve this tree for the rest of the session. No main merge, source release or live documentation publication is claimed.
+
+## Publication unblocked
+
+The exact historical-evidence exception is now present in the trusted policy and verified at its published bot commit. decision-blocker:migrated-evidence-policy-exception is cleared. The requested migration baseline was committed through the normal bot route with coordinated hooks intact. The completed documentation and native ESS retrofit are being committed on the same integration branch after the final source gate; the earlier blocked handoff describes the prior state, not a current refusal. This session retains the integration tree for continuing work.

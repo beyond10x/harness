@@ -1,0 +1,44 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-self-dependency",
+  "summary": "flow self dependency",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "x",
+                "needs": [
+                  "x"
+                ]
+              }
+            ]
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": null,
+        "reached": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "retreats": 0,
+        "paths": [],
+        "diagnostic": "`root.x` needs itself"
+      }
+    }
+  ]
+}

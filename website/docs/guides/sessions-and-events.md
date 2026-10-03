@@ -43,12 +43,10 @@ A session records:
 It records neither credentials nor the standing instruction. The instruction is rebuilt from the
 current invocation, catalogue, environment, write scope, and project files.
 
-:::warning Resume must stay on one wire
-
-Opaque provider items are replayed verbatim. A session produced by `openai-responses` is refused by
-`anthropic-messages`, and vice versa. Start a new session to change wires.
-
-:::
+> **Resume must stay on one wire**
+>
+> Opaque provider items are replayed verbatim. A session produced by `openai-responses` is refused by
+> `anthropic-messages`, and vice versa. Start a new session to change wires.
 
 ## Chat
 

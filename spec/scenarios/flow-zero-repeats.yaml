@@ -1,0 +1,44 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-zero-repeats",
+  "summary": "flow zero repeats",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "repeat": {
+              "max": 0
+            },
+            "nodes": [
+              {
+                "id": "x"
+              }
+            ]
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": null,
+        "reached": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "retreats": 0,
+        "paths": [],
+        "diagnostic": "`root` may repeat at most 0 times: a group that may run zero times is a group that is not there. Delete it, or say `max: 1`"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+[package]
+name = "b10x-harness-conformance"
+description = "ESS conformance against native Harness library boundaries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+harness-wire.workspace = true
+harness-loop.workspace = true
+harness-flow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+# Exact ESS 0.52.0 release. No sibling checkout participates in this gate.
+ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "4d6a4ecafc0feb4e11e4bee777b19c7351fa3647" }
+ess-primitives = { git = "https://github.com/beyond10x/ess", rev = "4d6a4ecafc0feb4e11e4bee777b19c7351fa3647" }
+
+ess-domain = { git = "https://github.com/beyond10x/ess", rev = "4d6a4ecafc0feb4e11e4bee777b19c7351fa3647" }
+ess-compiler = { git = "https://github.com/beyond10x/ess", rev = "4d6a4ecafc0feb4e11e4bee777b19c7351fa3647" }
+serde_yaml_ng.workspace = true
+
+[lints]
+workspace = true

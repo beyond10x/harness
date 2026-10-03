@@ -1,0 +1,47 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-entry-refused",
+  "summary": "flow entry refused",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "first"
+              },
+              {
+                "id": "second",
+                "needs": [
+                  "first"
+                ]
+              }
+            ]
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": true
+      },
+      "outcome": "returned",
+      "response": {
+        "status": "Failed",
+        "reached": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 2,
+        "retreats": 0,
+        "paths": [],
+        "diagnostic": null
+      }
+    }
+  ]
+}

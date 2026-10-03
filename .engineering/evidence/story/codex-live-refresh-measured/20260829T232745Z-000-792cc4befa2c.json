@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:27:45Z",
+  "actor": "human:timo",
+  "artifact": "story:codex-live-refresh-measured",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "metric_observation",
+    "source": "live refresh against https://auth.openai.com/oauth/token, 2026-08-29T23:26:14Z",
+    "reference": "credential-renewed{source:/home/timo/.codex/auth.json, provider:codex, expires_unix:1788909974, refresh_token_rotated:true, byte_preserving:true}; all three tokens rotated; 4 of 11 lines changed, line count and key order identical; auth_mode/OPENAI_API_KEY/account_id intact; mode 600; codex exec still authenticates afterwards"
+  }
+}

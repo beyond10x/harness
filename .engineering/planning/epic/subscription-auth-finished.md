@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:subscription-auth-finished
 kind: epic
 status: proposed
@@ -8,6 +8,8 @@ summary: 'Phase 4''s two open halves: token renewal, and an authorized run on th
 relations:
 - decomposes: initiative:live-evidence
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:27:10Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-30T14:50:06Z",
+  "actor": "human:timo",
+  "artifact": "story:one-conformance-suite-over-three-workspaces",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh, run step by step, wave 3 close",
+    "reference": "c7ed633: 10/10 steps exit 0; cargo test --workspace --locked 1001 passed, 0 failed, 1 ignored; conformance 34; 7 provider-wire, 1 profile, 7 command-line versions verified; two self-tests green (37 and 52 cases); 271 tracked files searched for home paths"
+  }
+}

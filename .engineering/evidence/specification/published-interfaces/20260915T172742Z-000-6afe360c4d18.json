@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-15T17:27:42Z",
+  "actor": "human:timo",
+  "artifact": "specification:published-interfaces",
+  "kind": "specification",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "artifact",
+    "source": "story:executable-gate-and-contract-checkers-run-in-rust (implemented) in this store; the checkers it moved are called from gate() at crates/harness-xtask/src/main.rs:104-105",
+    "reference": "b5e5bce"
+  }
+}

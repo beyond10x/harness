@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:53:26Z",
+  "actor": "human:timo",
+  "artifact": "story:public-repository-controls-are-on",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GitHub repository settings audit and unauthenticated reporting-form probe",
+    "reference": "https://github.com/beyond10x/harness/security/advisories"
+  }
+}

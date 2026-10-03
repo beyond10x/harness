@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T08:58:15Z",
+  "actor": "human:timo",
+  "artifact": "story:responses-keepalive-is-progress",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate (non-PTY, exit 0)",
+    "reference": "wave/hard-defects-0.7.0 release tree"
+  }
+}

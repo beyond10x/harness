@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:55:50Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:section-sessions-name-every-attempt",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh on harness main at 65b59d3, both changes merged: gate: green, 38 suites, 907 passed, 0 failed, 6+1+5 pinned contract versions verified",
+    "reference": "65b59d3"
+  }
+}

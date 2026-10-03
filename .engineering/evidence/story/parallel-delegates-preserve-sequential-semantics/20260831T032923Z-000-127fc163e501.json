@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:23Z",
+  "actor": "human:timo",
+  "artifact": "story:parallel-delegates-preserve-sequential-semantics",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "conflicting child writes ran sequentially; event order, call order, outcomes, and final right-hand state matched model order",
+    "reference": "crates/harness-loop/src/tests.rs"
+  }
+}

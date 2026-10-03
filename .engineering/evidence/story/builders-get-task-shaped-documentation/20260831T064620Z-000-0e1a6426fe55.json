@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:46:20Z",
+  "actor": "human:timo",
+  "artifact": "story:builders-get-task-shaped-documentation",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Docusaurus production build",
+    "reference": "website/docs/tutorials/confined-change.md"
+  }
+}

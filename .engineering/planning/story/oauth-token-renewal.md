@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:oauth-token-renewal
 kind: story
 status: proposed
@@ -8,6 +8,8 @@ relations:
 - derived_from: epic:subscription-auth-finished
 - serves: vision:b10x-owns-its-loop
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:31Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

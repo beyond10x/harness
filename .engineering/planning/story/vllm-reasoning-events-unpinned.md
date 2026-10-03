@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:vllm-reasoning-events-unpinned
 kind: story
 status: proposed
@@ -10,6 +10,8 @@ relations:
 - derived_from: epic:wire-pins-from-live-bytes
 - serves: vision:b10x-owns-its-loop
 revision: 2
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:33Z", actor: "human:timo", revision: 2, imported: true}
 ---
 ## Evidence
 

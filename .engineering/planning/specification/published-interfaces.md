@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: specification:published-interfaces
 kind: specification
 status: implemented
@@ -8,6 +8,10 @@ summary: Provider wires, the app-server profile and the argv surface — what is
 relations:
 - informed_by: vision:b10x-owns-its-loop
 revision: 6
+transitions:
+- {from: "draft", to: "in_review", at: "2026-09-15T17:27:36Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "in_review", to: "approved", at: "2026-09-15T17:27:37Z", actor: "human:timo", revision: 5, imported: true}
+- {from: "approved", to: "implemented", at: "2026-09-15T17:27:37Z", actor: "human:timo", revision: 6, imported: true}
 ---
 ## Evidence
 

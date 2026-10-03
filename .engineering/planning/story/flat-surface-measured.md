@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:flat-surface-measured
 kind: story
 status: proposed
@@ -9,6 +9,8 @@ relations:
 - serves: vision:b10x-owns-its-loop
 - depends_on: story:measurement-apparatus-proved-on-the-emulator
 revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 

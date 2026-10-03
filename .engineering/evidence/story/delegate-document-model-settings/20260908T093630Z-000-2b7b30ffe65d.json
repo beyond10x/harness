@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-08T09:36:30Z",
+  "actor": "human:timo",
+  "artifact": "story:delegate-document-model-settings",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate: green after removing host login dependence from the alias fixture; original remote CI failure retained"
+  }
+}

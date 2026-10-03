@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:compaction-measured-live
 kind: story
 status: active
@@ -9,6 +9,9 @@ relations:
 - serves: vision:b10x-owns-its-loop
 - depends_on: story:measurement-apparatus-proved-on-the-emulator
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-09-18T01:22:16Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
 ---
 ## Evidence
 

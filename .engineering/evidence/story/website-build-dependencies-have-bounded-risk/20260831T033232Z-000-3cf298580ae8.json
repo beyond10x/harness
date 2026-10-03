@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:32:32Z",
+  "actor": "human:timo",
+  "artifact": "story:website-build-dependencies-have-bounded-risk",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "npm ci, npm audit (0 vulnerabilities), typecheck, build, and npm ls all green with exact replacements",
+    "reference": "website/package-lock.json"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:22Z",
+  "actor": "human:timo",
+  "artifact": "story:shipped-documentation-and-rustdoc-are-current",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "npm run typecheck and npm run build — green without warnings",
+    "reference": "website/package.json"
+  }
+}

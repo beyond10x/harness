@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T22:55:24Z",
+  "actor": "human:timo",
+  "artifact": "story:codex-provider",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "health_observation",
+    "source": "unpaid control POST to https://auth.openai.com/oauth/token",
+    "reference": "real client_id app_EMoamEEZ73f0CkXaXp7hrann plus a deliberately invalid refresh_token answered 401 {\"error\":{\"code\":\"token_expired\",\"message\":\"Could not validate your token. Please try signing in again.\"}} — the endpoint exists, recognises the client and speaks this grant. A SUCCESSFUL exchange is not measured: see story:codex-live-refresh-measured"
+  }
+}

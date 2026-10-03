@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:status-page-contradicts-the-code
 kind: story
 status: implemented
@@ -8,6 +8,10 @@ relations:
 - derived_from: epic:tracking-documents-current
 - serves: vision:b10x-owns-its-loop
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-30T09:42:42Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-30T09:42:42Z", actor: "human:timo", revision: 5, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-30T11:32:39Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}, imported: true}
 ---
 ## Evidence
 

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:codex-live-refresh-measured
 kind: story
 status: implemented
@@ -9,6 +9,10 @@ relations:
 - depends_on: story:codex-provider
 - serves: vision:b10x-owns-its-loop
 revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-29T23:27:59Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-29T23:27:59Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-29T23:28:10Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"metric_observation":1}}, imported: true}
 ---
 ## What is unmeasured
 

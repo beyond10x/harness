@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T22:55:18Z",
+  "actor": "human:timo",
+  "artifact": "story:codex-provider",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh",
+    "reference": "38 suites, 894 passed, 0 failed, exit 0, 'gate: green'; adds codex_tests in crates/harness-cli/src/provider.rs, renewal::tests in crates/harness-credential/src/renewal.rs, and providers_show_states_the_file_it_will_rewrite_and_the_server_it_will_talk_to in crates/harness-cli/tests/end_to_end.rs"
+  }
+}

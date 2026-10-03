@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:53:25Z",
+  "actor": "human:timo",
+  "artifact": "story:public-visibility-is-an-accepted-decision",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "private Atlas ADR 0008 merged at 4fbbf96",
+    "reference": "architecture/adr/0008-harness-is-public.md"
+  }
+}

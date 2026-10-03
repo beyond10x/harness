@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:tracking-documents-current
 kind: epic
 status: implemented
@@ -8,6 +8,10 @@ summary: Five feature commits after the status page was last written; three user
 relations:
 - decomposes: initiative:record-matches-the-code
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:01Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "proposed", to: "active", at: "2026-09-15T17:26:01Z", actor: "human:timo", revision: 5, imported: true}
+- {from: "active", to: "implemented", at: "2026-09-15T17:26:01Z", actor: "human:timo", revision: 6, imported: true}
 ---
 ## Evidence
 

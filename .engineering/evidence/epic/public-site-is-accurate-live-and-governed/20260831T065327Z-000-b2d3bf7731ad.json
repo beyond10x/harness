@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:53:27Z",
+  "actor": "human:timo",
+  "artifact": "epic:public-site-is-accurate-live-and-governed",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "all eight derived stories implemented; Harness full gates green; Atlas scoped gates green with unrelated aggregate fence disclosed",
+    "reference": "https://github.com/beyond10x/harness/actions/runs/33365903174"
+  }
+}

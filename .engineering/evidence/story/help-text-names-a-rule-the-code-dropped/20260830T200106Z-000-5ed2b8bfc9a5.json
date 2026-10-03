@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-30T20:01:06Z",
+  "actor": "human:timo",
+  "artifact": "story:help-text-names-a-rule-the-code-dropped",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh, run step by step, wave 4 close",
+    "reference": "5405823: 10/10 steps exit 0; cargo test --workspace --locked 1015 passed, 0 failed, 1 ignored; 7 provider-wire, 1 profile, 7 command-line versions verified; self-tests 37 and 52 cases; 276 tracked files searched for home paths"
+  }
+}

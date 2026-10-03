@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: initiative:record-matches-the-code
 kind: initiative
 status: proposed
@@ -8,6 +8,8 @@ summary: STATUS, CHANGELOG and the pinned contracts drifted from the tree inside
 relations:
 - serves: vision:b10x-owns-its-loop
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:27:15Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

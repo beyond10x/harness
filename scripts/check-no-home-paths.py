@@ -84,6 +84,9 @@ EXEMPT = frozenset(
     {
         ".engineering/planning/journal.jsonl",
         ".engineering/planning/story/history-carries-a-home-directory.md",
+        # The aep.project/5 migration (2026-10-04) moved this journalled evidence record, with the
+        # log path it cited on 2026-08-29, out of the journal into its own file.
+        ".engineering/evidence/story/codex-live-refresh-measured/20260829T232745Z-000-792cc4befa2c.json",
     }
 )
 

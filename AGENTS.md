@@ -7,6 +7,12 @@ migration and an ADR; historical brand exemptions do not authorize new public as
 `README.md` orients a reader; `STATUS.md` says what is built and `ROADMAP.md` what is next. This
 file says what must not break.
 
+**Successor: [Loom](https://github.com/beyond10x/loom)** (Atlas ADR 0071, 2026-10-04). Loom ports
+this repository's loop, sessions, providers, tool round trips, streaming, compaction, budgets and
+records step by step and implements Commission's executor contract. Harness stays in service for
+agentide, agent-platform, metaharness and uilab until each has moved to Loom; until then, changes
+here must not break them.
+
 ## Serves
 
 The objectives of the collection this repository moves, by id from `atlas/ROADMAP.md` — the only

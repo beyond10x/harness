@@ -40,9 +40,7 @@ surfaces:
   maturity: development
   name: Harness
   primaryJourney: build-agents
-  relationships:
-  - kind: executes-in
-    target: substrate/docs
+  relationships: []
   routeBase: /docs/harness/
   sections:
   - kind: quickstart

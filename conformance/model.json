@@ -1,0 +1,667 @@
+{
+  "system": "harness",
+  "version": 1,
+  "naming": {},
+  "domains": {
+    "harness.flow": {
+      "name": "harness.flow",
+      "naming": {
+        "summary": "Native DAG validation and execution, bounded retreat, refusal and operator pause."
+      },
+      "types": [],
+      "entities": [],
+      "commands": [
+        "harness.flow.Run"
+      ],
+      "events": [],
+      "errors": [],
+      "views": [],
+      "actors": []
+    },
+    "harness.loop": {
+      "name": "harness.loop",
+      "naming": {
+        "summary": "Observable native loop results and admission decisions; no durable run entity is invented."
+      },
+      "types": [
+        "harness.loop.Budget",
+        "harness.loop.Stop",
+        "harness.loop.StopKind"
+      ],
+      "entities": [],
+      "commands": [
+        "harness.loop.Call",
+        "harness.loop.Run",
+        "harness.loop.ValidateBudget"
+      ],
+      "events": [],
+      "errors": [],
+      "views": [],
+      "actors": []
+    }
+  },
+  "types": {
+    "harness.loop.Budget": {
+      "name": "harness.loop.Budget",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_turns",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "max_input_tokens",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "max_output_tokens",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "max_output_tokens_per_turn",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "max_duration_ms",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "max_cost_microunits",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.Stop": {
+      "name": "harness.loop.Stop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type_ref": {
+              "kind": "declared",
+              "name": "harness.loop.StopKind"
+            },
+            "naming": {}
+          },
+          {
+            "name": "limit",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "reported",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "limit_micro_usd",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "spent_micro_usd",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "name",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "reason",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "limit_ms",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "checkpoint_id",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "asked_again",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.StopKind": {
+      "name": "harness.loop.StopKind",
+      "body": {
+        "kind": "enum",
+        "variants": [
+          "completed",
+          "max-turns",
+          "max-input-tokens",
+          "max-output-tokens",
+          "max-cost",
+          "budget-unobservable",
+          "deadline",
+          "cancelled",
+          "awaiting-approval",
+          "provider-incomplete",
+          "unstructured"
+        ]
+      },
+      "naming": {}
+    }
+  },
+  "conversions": [],
+  "entities": {},
+  "commands": {
+    "harness.flow.Run": {
+      "name": "harness.flow.Run",
+      "domain": "harness.flow",
+      "input": [
+        {
+          "name": "document",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "json"
+          },
+          "naming": {}
+        },
+        {
+          "name": "script",
+          "type_ref": {
+            "kind": "list",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "refuse_entry",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "status",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "reached",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "ran",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "failed",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "skipped",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "retreats",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "paths",
+          "type_ref": {
+            "kind": "list",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "diagnostic",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "returned",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.Call": {
+      "name": "harness.loop.Call",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "name",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        },
+        {
+          "name": "approve",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        }
+      ],
+      "examples": {
+        "name": "read"
+      },
+      "response": [
+        {
+          "name": "failed",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        },
+        {
+          "name": "tool_calls",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "refusal",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "json"
+            }
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "returned",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.Run": {
+      "name": "harness.loop.Run",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "budget",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Budget"
+          },
+          "naming": {}
+        },
+        {
+          "name": "script",
+          "type_ref": {
+            "kind": "list",
+            "of": {
+              "kind": "primitive",
+              "name": "json"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "cancelled",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        },
+        {
+          "name": "approve",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "stop",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.Stop"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "text",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        },
+        {
+          "name": "turns",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "model_calls",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "tool_calls",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "failed_results",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "input_tokens",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "integer"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "output_tokens",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "integer"
+            }
+          },
+          "naming": {}
+        },
+        {
+          "name": "diagnostic",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "returned",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.ValidateBudget": {
+      "name": "harness.loop.ValidateBudget",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "budget",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Budget"
+          },
+          "naming": {}
+        },
+        {
+          "name": "priced",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "accepted",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        },
+        {
+          "name": "diagnostic",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "returned",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        }
+      ],
+      "naming": {}
+    }
+  },
+  "events": {},
+  "errors": {},
+  "views": {},
+  "actors": {},
+  "bindings": {},
+  "components": {
+    "harness-native": {
+      "name": "harness-native",
+      "owns": [
+        "harness.flow",
+        "harness.loop"
+      ],
+      "accepts": [
+        "harness.flow.Run",
+        "harness.loop.Call",
+        "harness.loop.Run",
+        "harness.loop.ValidateBudget"
+      ],
+      "publishes": [],
+      "naming": {
+        "summary": "Native AgentLoop and Flow library boundaries with explicit deterministic upstream ports."
+      }
+    }
+  },
+  "workloads": {}
+}

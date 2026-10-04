@@ -1,0 +1,22 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.loop",
+  "scenario": "call-write",
+  "summary": "call write",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.loop.Call",
+      "input": {
+        "name": "write",
+        "approve": false
+      },
+      "outcome": "returned",
+      "response": {
+        "failed": true,
+        "tool_calls": 0,
+        "refusal": null
+      }
+    }
+  ]
+}

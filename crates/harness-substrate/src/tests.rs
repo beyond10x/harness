@@ -243,10 +243,19 @@ fn a_run_that_declared_nothing_withholds_nothing() {
     // Absence stays absence (AGENTS.md invariant 7). A machine that cannot confine a process owes
     // no sentence to a run that never wanted to start one, and inventing the want here would put a
     // line about `run` in front of every read-only run there has ever been.
-    assert!(unconfined().withheld(&[], true).is_empty());
-    assert!(Facts::none().withheld(&[], false).is_empty());
+    assert_eq!(
+        unconfined().withheld(&[], true),
+        [] as [withheld::Withheld; 0]
+    );
+    assert_eq!(
+        Facts::none().withheld(&[], false),
+        [] as [withheld::Withheld; 0]
+    );
     // Nor does a machine that admits everything that was asked of it.
-    assert!(confined().withheld(&declared(), true).is_empty());
+    assert_eq!(
+        confined().withheld(&declared(), true),
+        [] as [withheld::Withheld; 0]
+    );
 }
 
 #[test]
@@ -259,15 +268,13 @@ fn the_provider_carries_the_record_of_what_it_was_not_given() {
         .to_vec();
     assert_eq!(withheld.len(), 1, "{withheld:?}");
     assert_eq!(withheld[0].tool, "run");
-    assert!(
-        provider(&confined(), Scripted::new(vec![]), &["cargo"])
-            .withheld()
-            .is_empty()
+    assert_eq!(
+        provider(&confined(), Scripted::new(vec![]), &["cargo"]).withheld(),
+        []
     );
-    assert!(
-        provider(&unconfined(), Scripted::new(vec![]), &[])
-            .withheld()
-            .is_empty()
+    assert_eq!(
+        provider(&unconfined(), Scripted::new(vec![]), &[]).withheld(),
+        []
     );
 }
 

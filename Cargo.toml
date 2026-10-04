@@ -7,6 +7,7 @@ members = [
     "crates/harness-responses",
     "crates/harness-messages",
     "crates/harness-loop",
+    "crates/harness-conformance",
     "crates/harness-flow",
     "crates/harness-toolchain",
     "crates/harness-substrate",

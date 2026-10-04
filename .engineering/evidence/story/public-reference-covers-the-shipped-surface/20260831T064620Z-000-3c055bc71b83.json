@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:46:20Z",
+  "actor": "human:timo",
+  "artifact": "story:public-reference-covers-the-shipped-surface",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask website-contract",
+    "reference": "website/docs/reference/cli.md"
+  }
+}

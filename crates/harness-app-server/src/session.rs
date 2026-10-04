@@ -637,10 +637,9 @@ mod tests {
 
     #[test]
     fn no_registration_means_no_tools_rather_than_an_error() {
-        assert!(
-            decode_dynamic_tools(None)
-                .expect("absent is fine")
-                .is_empty()
+        assert_eq!(
+            decode_dynamic_tools(None).expect("absent is fine"),
+            [] as [harness_wire::ToolSpec; 0]
         );
     }
 

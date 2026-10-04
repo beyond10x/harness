@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:55:45Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:history-carries-a-home-directory",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "operator, 2026-08-30: the decision stands — file it. The exposure (a username and a directory layout, already public in four sibling repositories) was weighed against a force-push invalidating every clone and metaharness's pinned harness commits; the rewrite was judged the higher cost",
+    "reference": ".engineering/planning/story/history-carries-a-home-directory.md"
+  }
+}

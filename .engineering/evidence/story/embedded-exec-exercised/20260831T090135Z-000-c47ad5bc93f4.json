@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T09:01:35Z",
+  "actor": "human:timo",
+  "artifact": "story:embedded-exec-exercised",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "authorized Anthropic Messages run, 2026-08-31, embedded substrate backend inside a delegated cgroup scope: the admitted Go toolchain built, formatted, tested and vetted a scratch todo server and web frontend; independent host checks then passed its frontend, health route and CRUD API",
+    "reference": "STATUS.md:30 and website/docs/status.md:43-47, both added by commit ee7a631 (2026-08-31 11:01:35 +0200, release 0.7.0), which removed the \"embedded driver exec is still unexercised\" clause in the same diff; reachable on origin/main"
+  }
+}

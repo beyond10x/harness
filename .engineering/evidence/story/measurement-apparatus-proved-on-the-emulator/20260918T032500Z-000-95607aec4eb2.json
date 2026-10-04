@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-18T03:25:00Z",
+  "actor": "human:timo",
+  "artifact": "story:measurement-apparatus-proved-on-the-emulator",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate on branch migration/2026-09-18-provable-lead-measurement, local, 2026-09-18",
+    "reference": "gate: green, exit 0. 1137 tests passed, 0 failed, with the new compaction scenario on both emulator fixtures and the_two_wires_serve_the_same_scenarios still holding. The apparatus produced the compaction figures end to end without a provider: measurements/runs/m1-dry-compaction-{16000,8000,4000,2500}.jsonl and m1-dry-responses-16000.jsonl, scored by measurements/score.py, plus prove-spend-ceiling.sh showing all three rate-card cases free. Contract steps: provider-wire 10 verified, command line 11 verified, app-server profiles 1 verified, public website contract clean, home paths 407 tracked files clean. Every record here is provider_emulated and none of it closes story:compaction-measured-live or story:flat-surface-measured."
+  }
+}

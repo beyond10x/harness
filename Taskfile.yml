@@ -1,0 +1,19 @@
+version: '3'
+
+tasks:
+  check:
+    desc: Run the full source gate, including ESS validation and native conformance
+    cmds:
+      - cargo xtask gate
+  spec:
+    desc: Validate the authored specification with its pinned ESS toolchain
+    cmds:
+      - ess specify validate --path spec --strict-requires
+  conformance:
+    desc: Compile, check synthesis drift and run the native ESS scenarios
+    cmds:
+      - cargo xtask specification
+  website:
+    desc: Validate, test and lint the independent documentation workspace
+    cmds:
+      - cargo xtask website

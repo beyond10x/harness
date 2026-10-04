@@ -5,22 +5,30 @@ description: Build Harness, inspect what it can do, and make one bounded read-on
 
 # First read-only run
 
-This tutorial builds Harness from source, inspects the exact tool catalogue, and makes one run that
-can read one workspace but cannot write a file or start a process.
+Start by inspecting a workspace without giving the model write or execution tools. This tutorial
+gets a binary, checks its catalogue, then makes one bounded run. Only the final step contacts your
+model endpoint.
 
 ## Prerequisites
 
-You need Rust 1.97 or newer and access to an endpoint serving either the OpenAI Responses or
-Anthropic Messages API. Harness has no published crate or prebuilt binary yet.
+You need Linux and access to an endpoint serving either the OpenAI Responses or Anthropic Messages
+API. Choose an endpoint and credential source you are authorized to use.
 
-From the repository root:
+The [release page](https://github.com/beyond10x/harness/releases) is the place to check for packaged
+binaries and checksums. The repository's release workflow targets Linux x86_64 and aarch64; macOS
+is not a build target because the embedded confinement host uses Linux namespaces.
+
+To build from source, install Rust 1.97 or newer and arrange Git access to the pinned foundation
+dependencies before building. Public source visibility alone does not grant access to every
+dependency. From the repository root:
 
 ```bash
 cargo build --release --locked -p b10x-harness-cli
 ./target/release/b10x-harness --version
 ```
 
-The remaining commands use `b10x-harness` as shorthand for that built binary.
+Put the installed or built binary on your `PATH`. The remaining commands use `b10x-harness`.
+The crates are not published on crates.io.
 
 ## 1. Inspect the safe default
 
@@ -65,13 +73,11 @@ name with a flag is read only and never renewed by Harness.
 
 See [Configure providers and profiles](./guides/profiles.md) before using a built-in provider.
 
-:::warning Credential handling
-
-Environment variables can be visible to processes allowed to inspect your environment. Credential
-files and provider stores have their own permissions and rotation rules. Use the source appropriate
-to your machine, and never paste a real token into a command, fixture, issue, or transcript.
-
-:::
+> **Credential handling**
+>
+> Environment variables can be visible to processes allowed to inspect your environment. Credential
+> files and provider stores have their own permissions and rotation rules. Use the source appropriate
+> to your machine, and never paste a real token into a command, fixture, issue, or transcript.
 
 ## 3. Make the run
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:46:20Z",
+  "actor": "human:timo",
+  "artifact": "story:credential-docs-name-defaults-and-renewal",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate",
+    "reference": "crates/harness-cli/src/lib.rs"
+  }
+}

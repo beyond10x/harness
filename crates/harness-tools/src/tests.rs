@@ -460,7 +460,7 @@ fn the_local_provider_offers_nothing_that_outlives_the_call() {
     let dir = tree();
     let local = LocalOperations::new(dir.path()).expect("opens");
     assert!(!local.writes());
-    assert!(local.programs().is_empty());
+    assert_eq!(local.programs(), [] as [String; 0]);
     for refused in [
         local.file_write("a.txt", "x"),
         local.file_edit("a.txt", "x", "y"),

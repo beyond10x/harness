@@ -1,0 +1,7 @@
+components:
+  - component: harness-native
+    summary: Native AgentLoop and Flow library boundaries with explicit deterministic upstream ports.
+    owns:
+      domains: [harness.loop, harness.flow]
+    accepts:
+      commands: [harness.loop.Run, harness.loop.Call, harness.loop.ValidateBudget, harness.flow.Run]

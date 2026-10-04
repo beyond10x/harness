@@ -1491,7 +1491,7 @@ fn a_refused_entering_skips_the_section_as_failed_and_names_every_step_inside_it
         !exhausted,
         "what stopped it was a refusal, not a bound it used up"
     );
-    assert!(gave.is_empty());
+    assert_eq!(gave.as_slice(), [] as [String; 0]);
 
     assert_eq!(report.ran, 1);
     assert_eq!(report.skipped, 3);
@@ -1517,7 +1517,7 @@ fn a_refused_entering_of_the_root_runs_nothing_at_all() {
         vec!["enter root 1"],
         "asked once, and then nothing"
     );
-    assert!(sink.steps_started().is_empty());
+    assert_eq!(sink.steps_started(), [] as [&str; 0]);
     assert_eq!(report.ran, 0);
     assert_eq!(report.skipped, 4, "every step in the document");
     assert!(!report.clean());

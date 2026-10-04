@@ -1,0 +1,60 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.loop",
+  "scenario": "run-output-limit",
+  "summary": "run output limit",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.loop.Run",
+      "input": {
+        "budget": {
+          "max_turns": null,
+          "max_input_tokens": null,
+          "max_output_tokens": 5,
+          "max_output_tokens_per_turn": null,
+          "max_duration_ms": null,
+          "max_cost_microunits": null
+        },
+        "script": [
+          {
+            "stop_reason": {
+              "kind": "end-turn"
+            },
+            "items": [
+              {
+                "kind": "assistant-text",
+                "text": "done"
+              }
+            ],
+            "usage": {
+              "model": "fixture",
+              "input_tokens": 10,
+              "output_tokens": 5,
+              "cached_input_tokens": 0,
+              "cache_creation_input_tokens": null
+            }
+          }
+        ],
+        "cancelled": false,
+        "approve": false
+      },
+      "outcome": "returned",
+      "response": {
+        "stop": {
+          "kind": "max-output-tokens",
+          "limit": 5,
+          "reported": 5
+        },
+        "text": "done",
+        "turns": 1,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "failed_results": 0,
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "diagnostic": null
+      }
+    }
+  ]
+}

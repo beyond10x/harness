@@ -872,7 +872,10 @@ mod tests {
                 "status": "completed", "output": []
             }}),
         ]);
-        assert!(outcome.expect("terminal is authoritative").items.is_empty());
+        assert_eq!(
+            outcome.expect("terminal is authoritative").items,
+            [] as [harness_wire::Item; 0]
+        );
     }
 
     #[test]

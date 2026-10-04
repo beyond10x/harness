@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-03T20:19:37Z",
+  "actor": "human:timo",
+  "artifact": "story:standalone-public-documentation",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check: gate green; Rust 1.97 workspace check; six independent website tests; desktop/mobile preview inspection",
+    "reference": "website/src/main.rs"
+  }
+}

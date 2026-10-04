@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:responses-pin-from-live-bytes
 kind: story
 status: proposed
@@ -7,7 +7,14 @@ title: The Responses wire is pinned from bytes a real endpoint sent
 relations:
 - derived_from: epic:wire-pins-from-live-bytes
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: inferred
+  path: contracts/provider-wires/openai-responses
+- confidence: inferred
+  path: crates/harness-responses/tests/contract.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 
@@ -31,6 +38,4 @@ green against that directory.
 
 ## Acceptance
 
-`contracts/provider-wires/openai-responses/<date>/` exists, its fixtures are bytes captured from an
-authorized live endpoint rather than from `fake_responses.py`, the version says which run it came
-from, and `python3 scripts/check-provider-wires.py` plus the crate's contract test pass against it.
+A new dated contracts/provider-wires/openai-responses/<date>/ contains sanitized fixtures captured from an authorized live endpoint, names the source run and its provenance, and passes both cargo xtask provider-contracts and cargo test -p b10x-harness-responses --test contract --locked. Leave released contract directories unchanged; historical emulator fixtures are not promoted to live evidence.

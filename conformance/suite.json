@@ -1,0 +1,5966 @@
+{
+  "coverage": {
+    "authored": [
+      "harness.flow/authored/flow-completed",
+      "harness.flow/authored/flow-cross-scope-dependency",
+      "harness.flow/authored/flow-duplicate-id",
+      "harness.flow/authored/flow-empty-group",
+      "harness.flow/authored/flow-entry-refused",
+      "harness.flow/authored/flow-failure-skips-dependent",
+      "harness.flow/authored/flow-missing-handoff-does-not-retreat",
+      "harness.flow/authored/flow-operator-pause",
+      "harness.flow/authored/flow-retreat-exhausted",
+      "harness.flow/authored/flow-retreat-then-success",
+      "harness.flow/authored/flow-self-dependency",
+      "harness.flow/authored/flow-zero-repeats",
+      "harness.loop/authored/budget-defaults",
+      "harness.loop/authored/budget-priced-cost",
+      "harness.loop/authored/budget-unpriced-cost",
+      "harness.loop/authored/budget-zero-max-cost-microunits",
+      "harness.loop/authored/budget-zero-max-duration-ms",
+      "harness.loop/authored/budget-zero-max-input-tokens",
+      "harness.loop/authored/budget-zero-max-output-tokens",
+      "harness.loop/authored/budget-zero-max-output-tokens-per-turn",
+      "harness.loop/authored/budget-zero-max-turns",
+      "harness.loop/authored/call-approved-write",
+      "harness.loop/authored/call-missing",
+      "harness.loop/authored/call-read",
+      "harness.loop/authored/call-write",
+      "harness.loop/authored/run-cancelled-before-provider",
+      "harness.loop/authored/run-completed",
+      "harness.loop/authored/run-input-budget-unobservable",
+      "harness.loop/authored/run-input-limit",
+      "harness.loop/authored/run-output-budget-unobservable",
+      "harness.loop/authored/run-output-limit",
+      "harness.loop/authored/run-provider-incomplete",
+      "harness.loop/authored/run-provider-output-limit",
+      "harness.loop/authored/run-tool-missing",
+      "harness.loop/authored/run-tool-read",
+      "harness.loop/authored/run-tool-write",
+      "harness.loop/authored/run-turn-limit",
+      "harness.loop/authored/run-usage-absent"
+    ],
+    "authored_sources": {
+      "scenarios/budget-defaults.yaml": {
+        "digest": "sha256:04a0d0c08eb81125a94b835c96fe9d912c53147a03838b5ce4b21e5c6e9f6253",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-defaults"
+      },
+      "scenarios/budget-priced-cost.yaml": {
+        "digest": "sha256:30d6732f68500906752848ecdda92a7ace1440efd6b045a816552eec7127c456",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-priced-cost"
+      },
+      "scenarios/budget-unpriced-cost.yaml": {
+        "digest": "sha256:bf8f5c58f8ddc342869ac3d7e85b5a58a9ebdf28a5230533cf290d7c1c7662a4",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-unpriced-cost"
+      },
+      "scenarios/budget-zero-max-cost-microunits.yaml": {
+        "digest": "sha256:8dc047bd2c0f2d691be55323ca2c27f5ffee0598f9d7060f1b1ea1aaba1f5bc8",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-cost-microunits"
+      },
+      "scenarios/budget-zero-max-duration-ms.yaml": {
+        "digest": "sha256:57cb179ee5e2b0dc5eb5110f47096af953093a6aa1f4939ea42e85bd2a6622ae",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-duration-ms"
+      },
+      "scenarios/budget-zero-max-input-tokens.yaml": {
+        "digest": "sha256:1e5e7ddf3cfcc8e2a3d6f1a2ed5999d0205dea4b15ee6e1f7235a41819d55fa1",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-input-tokens"
+      },
+      "scenarios/budget-zero-max-output-tokens-per-turn.yaml": {
+        "digest": "sha256:a48722f750e48b145b7a3e42e18ddfcbc57836e944be1ad2e26183f08e0f9e8b",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-output-tokens-per-turn"
+      },
+      "scenarios/budget-zero-max-output-tokens.yaml": {
+        "digest": "sha256:82f3aa273b344eda464e991fc816191d75fd371280219f8cd27de728751a3e29",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-output-tokens"
+      },
+      "scenarios/budget-zero-max-turns.yaml": {
+        "digest": "sha256:c6754734178e93716961735df63ab284ab22299b754bf84b28891847de43c453",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/budget-zero-max-turns"
+      },
+      "scenarios/call-approved-write.yaml": {
+        "digest": "sha256:885621616e354342f5581ae32ee1e569aa8a22ef4b67ee9675054da5fc001d04",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/call-approved-write"
+      },
+      "scenarios/call-missing.yaml": {
+        "digest": "sha256:90419e40ff266c68af01c24e4535b5e0716e591f0eb485ff77e1d971ab2b1148",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/call-missing"
+      },
+      "scenarios/call-read.yaml": {
+        "digest": "sha256:1d889a82627d84416b5d07af0bf9530043ef5e48864ae0ff6a8b81c9c366e684",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/call-read"
+      },
+      "scenarios/call-write.yaml": {
+        "digest": "sha256:649aece3df01e61d5b35e207e824221286c23ea7d10e2b5627bd161b0d7ae978",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/call-write"
+      },
+      "scenarios/flow-completed.yaml": {
+        "digest": "sha256:0c8f363f44dc4a65dbf3ed9eacdf32822d74a3fb6315a38f5981fe9a96785ce9",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-completed"
+      },
+      "scenarios/flow-cross-scope-dependency.yaml": {
+        "digest": "sha256:f0b20528dbf40ac8ba0d6c5c89443bfff05bd61172153e7a4e754aec898ff209",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-cross-scope-dependency"
+      },
+      "scenarios/flow-duplicate-id.yaml": {
+        "digest": "sha256:09ea349983b9a661731aab21e3bed7edcd814fcb9c12acc36018dd83617ef39c",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-duplicate-id"
+      },
+      "scenarios/flow-empty-group.yaml": {
+        "digest": "sha256:138bbd53ba197eda823261aeee127640a06a38d60bbc3d9c045d9cf745056d20",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-empty-group"
+      },
+      "scenarios/flow-entry-refused.yaml": {
+        "digest": "sha256:69c76896a9194c73d8e533af926d2ac831e7b07851eb8c20a6374d95ec507dbe",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-entry-refused"
+      },
+      "scenarios/flow-failure-skips-dependent.yaml": {
+        "digest": "sha256:e26f4f140f31a9715cfae93b71001c7340c0238d2a534ac71fabfe57bd493de4",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-failure-skips-dependent"
+      },
+      "scenarios/flow-missing-handoff-does-not-retreat.yaml": {
+        "digest": "sha256:d354c3dd5cc90faa8f7f261672142a976000c4ffd347e8c04b3d6e0e8d6ea247",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-missing-handoff-does-not-retreat"
+      },
+      "scenarios/flow-operator-pause.yaml": {
+        "digest": "sha256:37722320c4437879f90085b05b475f771af4e9b02e6bd0e525ece131f2042d05",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-operator-pause"
+      },
+      "scenarios/flow-retreat-exhausted.yaml": {
+        "digest": "sha256:e69547afd003fc736d3cea562cea63d071be524fcc8f0ed53a271c14654d9667",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-retreat-exhausted"
+      },
+      "scenarios/flow-retreat-then-success.yaml": {
+        "digest": "sha256:74872fa999556a07f202971d97b6e79282a2b864da7aecd3bcca9efd39e1de49",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-retreat-then-success"
+      },
+      "scenarios/flow-self-dependency.yaml": {
+        "digest": "sha256:2b36fe279061b51556f036482f08ffb5177f4898336f6d13306e4f5b1cce1ffd",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-self-dependency"
+      },
+      "scenarios/flow-zero-repeats.yaml": {
+        "digest": "sha256:83bddda8508e392aae3b4c6c9db6e836b7da9eaa30d50a86f60b9e8c8492970f",
+        "disposition": "accepted",
+        "scenario": "harness.flow/authored/flow-zero-repeats"
+      },
+      "scenarios/run-cancelled-before-provider.yaml": {
+        "digest": "sha256:27460cbe430208102ad957e66c6f4acb1593373f98df7c992eabf30c2260c871",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-cancelled-before-provider"
+      },
+      "scenarios/run-completed.yaml": {
+        "digest": "sha256:dda51d86d8d8aadb4f39e9c1238b3726b44ee8da53a3bb784214a4714f5c3cea",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-completed"
+      },
+      "scenarios/run-input-budget-unobservable.yaml": {
+        "digest": "sha256:10ea82d26629ac95693b5fe000cf16cc9252e00db3783d392451c6473ce6a62f",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-input-budget-unobservable"
+      },
+      "scenarios/run-input-limit.yaml": {
+        "digest": "sha256:cd33fc00463fe4e6f7f9a5b41dcf5fe9236831a3165fa3479d736991f55e81df",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-input-limit"
+      },
+      "scenarios/run-output-budget-unobservable.yaml": {
+        "digest": "sha256:e9d813d66fe090eebf2fb3f6f0ae582a6e4e94b29b28697b15db2042a3b2524e",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-output-budget-unobservable"
+      },
+      "scenarios/run-output-limit.yaml": {
+        "digest": "sha256:f247486063dabcaecf2b951243acc4e959fba8fcf6000c1d0735360f7bacda33",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-output-limit"
+      },
+      "scenarios/run-provider-incomplete.yaml": {
+        "digest": "sha256:69c91162f9ea047e57c9453d331d9f6332176b3401f0cf02bf22ef8115e1c8a5",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-provider-incomplete"
+      },
+      "scenarios/run-provider-output-limit.yaml": {
+        "digest": "sha256:59676b5673fb8f0239eceeadaede91e06206a8db80031212c56cde414470deb7",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-provider-output-limit"
+      },
+      "scenarios/run-tool-missing.yaml": {
+        "digest": "sha256:13fb667c4b546bdacf61825f666592e7bff4f5bf764f3a3bf87d0a3c24e8ea91",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-tool-missing"
+      },
+      "scenarios/run-tool-read.yaml": {
+        "digest": "sha256:524c81aae283e75406496596a28474b0a20bf5d1308b54d8d3b6d1a4669d80bc",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-tool-read"
+      },
+      "scenarios/run-tool-write.yaml": {
+        "digest": "sha256:baf1cca42add00028f46e7a3187e045788d280c6fdf09dffbcf61943911dd297",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-tool-write"
+      },
+      "scenarios/run-turn-limit.yaml": {
+        "digest": "sha256:9638047cb49ba90bfd65c02e043d18fda0710186beca9026cd8e58b6b45dbb9e",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-turn-limit"
+      },
+      "scenarios/run-usage-absent.yaml": {
+        "digest": "sha256:f04fc39cddb0d2733b0c8c6ac5034adfb7d9a74716400b5cba4d04f1db736476",
+        "disposition": "accepted",
+        "scenario": "harness.loop/authored/run-usage-absent"
+      }
+    },
+    "counts": {
+      "authored": 38,
+      "generated": 4,
+      "outside": 0,
+      "refused": 0
+    },
+    "generated": [
+      "harness.flow.Run/outcome/returned",
+      "harness.loop.Call/outcome/returned",
+      "harness.loop.Run/outcome/returned",
+      "harness.loop.ValidateBudget/outcome/returned"
+    ],
+    "knowledge": "complete_inventory",
+    "outside": [],
+    "refused": [],
+    "selection": {
+      "filter": {
+        "kind": "all"
+      },
+      "origins": "generated_and_authored",
+      "scope": {
+        "kind": "system"
+      }
+    }
+  },
+  "provenance": {
+    "contract_digest": "b66b92daa2ca4c4e22ea638f0450a7704af54d913281e7e7c0134a53676dfa7c",
+    "spec_digest": "4061ac1f6ba3f6b443dc0acb5873b593c3805870927041901582c377e0d9ab96",
+    "specification_version": "v1",
+    "suite_version": "ess-conformance/29",
+    "system": "harness"
+  },
+  "scenarios": {
+    "harness.flow.Run/outcome/returned": {
+      "purpose": "`harness.flow.Run` answers `returned` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "document": "document"
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": true
+            },
+            "script": {
+              "kind": "literal",
+              "value": []
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {},
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-completed": {
+      "purpose": "flow completed",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 0.0,
+              "paths": [
+                "root.first",
+                "root.second"
+              ],
+              "ran": 2.0,
+              "reached": 2.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": "Completed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-cross-scope-dependency": {
+      "purpose": "flow cross scope dependency",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "x",
+                      "needs": [
+                        "group.child"
+                      ]
+                    },
+                    {
+                      "id": "group",
+                      "nodes": [
+                        {
+                          "id": "child"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": "`root.x` needs `group.child`, which is not one of its siblings. An edge may only join siblings — to depend on something inside another group, depend on the group",
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": null
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-duplicate-id": {
+      "purpose": "flow duplicate id",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "x"
+                    },
+                    {
+                      "id": "x"
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": "`root` declares `x` twice: a name must be unique among its siblings",
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": null
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-empty-group": {
+      "purpose": "flow empty group",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": []
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": "`root` holds no nodes: a section that runs nothing is not a section",
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": null
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-entry-refused": {
+      "purpose": "flow entry refused",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": true
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 2.0,
+              "status": "Failed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-failure-skips-dependent": {
+      "purpose": "flow failure skips dependent",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "failed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 1.0,
+              "paths": [
+                "root.first"
+              ],
+              "ran": 1.0,
+              "reached": 1.0,
+              "retreats": 0.0,
+              "skipped": 1.0,
+              "status": "Failed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-missing-handoff-does-not-retreat": {
+      "purpose": "flow missing handoff does not retreat",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "gives": [
+                        "artifact"
+                      ],
+                      "id": "group",
+                      "nodes": [
+                        {
+                          "id": "first"
+                        }
+                      ],
+                      "repeat": {
+                        "max": 3.0
+                      }
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "group"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 0.0,
+              "paths": [
+                "root.group.first"
+              ],
+              "ran": 1.0,
+              "reached": 1.0,
+              "retreats": 0.0,
+              "skipped": 1.0,
+              "status": "Failed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-operator-pause": {
+      "purpose": "flow operator pause",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "paused"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 0.0,
+              "paths": [
+                "root.first"
+              ],
+              "ran": 0.0,
+              "reached": 1.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": "AwaitingOperator"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-retreat-exhausted": {
+      "purpose": "flow retreat exhausted",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ],
+                  "repeat": {
+                    "max": 2.0
+                  }
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "failed",
+                "failed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 2.0,
+              "paths": [
+                "root.first",
+                "root.first"
+              ],
+              "ran": 2.0,
+              "reached": 2.0,
+              "retreats": 1.0,
+              "skipped": 2.0,
+              "status": "Failed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-retreat-then-success": {
+      "purpose": "flow retreat then success",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "first"
+                    },
+                    {
+                      "id": "second",
+                      "needs": [
+                        "first"
+                      ]
+                    }
+                  ],
+                  "repeat": {
+                    "max": 2.0
+                  }
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "failed",
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": null,
+              "failed": 1.0,
+              "paths": [
+                "root.first",
+                "root.first",
+                "root.second"
+              ],
+              "ran": 3.0,
+              "reached": 3.0,
+              "retreats": 1.0,
+              "skipped": 1.0,
+              "status": "Completed"
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-self-dependency": {
+      "purpose": "flow self dependency",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "x",
+                      "needs": [
+                        "x"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": "`root.x` needs itself",
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": null
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.flow/authored/flow-zero-repeats": {
+      "purpose": "flow zero repeats",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.flow"
+        },
+        {
+          "kind": "command",
+          "name": "harness.flow.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.flow.Run",
+          "input": {
+            "document": {
+              "kind": "literal",
+              "value": {
+                "id": "fixture",
+                "root": {
+                  "id": "root",
+                  "nodes": [
+                    {
+                      "id": "x"
+                    }
+                  ],
+                  "repeat": {
+                    "max": 0.0
+                  }
+                }
+              }
+            },
+            "refuse_entry": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                "passed",
+                "passed"
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.flow.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.flow.Run",
+            "declarations": {},
+            "expected": {
+              "diagnostic": "`root` may repeat at most 0 times: a group that may run zero times is a group that is not there. Delete it, or say `max: 1`",
+              "failed": 0.0,
+              "paths": [],
+              "ran": 0.0,
+              "reached": 0.0,
+              "retreats": 0.0,
+              "skipped": 0.0,
+              "status": null
+            },
+            "fields": [
+              {
+                "name": "status",
+                "type": "Optional<String>"
+              },
+              {
+                "name": "reached",
+                "type": "Integer"
+              },
+              {
+                "name": "ran",
+                "type": "Integer"
+              },
+              {
+                "name": "failed",
+                "type": "Integer"
+              },
+              {
+                "name": "skipped",
+                "type": "Integer"
+              },
+              {
+                "name": "retreats",
+                "type": "Integer"
+              },
+              {
+                "name": "paths",
+                "type": "List<String>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.flow.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop.Call/outcome/returned": {
+      "purpose": "`harness.loop.Call` answers `returned` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "command",
+          "name": "harness.loop.Call"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Call",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": true
+            },
+            "name": {
+              "kind": "literal",
+              "value": "read"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Call",
+            "declarations": {},
+            "expected": {},
+            "fields": [
+              {
+                "name": "failed",
+                "type": "Boolean"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "refusal",
+                "type": "Optional<Json>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Call",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop.Run/outcome/returned": {
+      "purpose": "`harness.loop.Run` answers `returned` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": true
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": 1.0,
+                "max_duration_ms": 1.0,
+                "max_input_tokens": 1.0,
+                "max_output_tokens": 1.0,
+                "max_output_tokens_per_turn": 1.0,
+                "max_turns": 1.0
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": true
+            },
+            "script": {
+              "kind": "literal",
+              "value": []
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {},
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop.ValidateBudget/outcome/returned": {
+      "purpose": "`harness.loop.ValidateBudget` answers `returned` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": 1.0,
+                "max_duration_ms": 1.0,
+                "max_input_tokens": 1.0,
+                "max_output_tokens": 1.0,
+                "max_output_tokens_per_turn": 1.0,
+                "max_turns": 1.0
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {},
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-defaults": {
+      "purpose": "budget defaults",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": true,
+              "diagnostic": null
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-priced-cost": {
+      "purpose": "budget priced cost",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": 100.0,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": true,
+              "diagnostic": null
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-unpriced-cost": {
+      "purpose": "budget unpriced cost",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": 100.0,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_cost_microunits` cannot be enforced by this harness and was refused rather than ignored"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-cost-microunits": {
+      "purpose": "budget zero max cost microunits",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": 0.0,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_cost_microunits` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-duration-ms": {
+      "purpose": "budget zero max duration ms",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": 0.0,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_duration_ms` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-input-tokens": {
+      "purpose": "budget zero max input tokens",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": 0.0,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_input_tokens` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-output-tokens": {
+      "purpose": "budget zero max output tokens",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": 0.0,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_output_tokens` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-output-tokens-per-turn": {
+      "purpose": "budget zero max output tokens per turn",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": 0.0,
+                "max_turns": null
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_output_tokens_per_turn` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/budget-zero-max-turns": {
+      "purpose": "budget zero max turns",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.ValidateBudget"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.ValidateBudget",
+          "input": {
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": 0.0
+              }
+            },
+            "priced": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.ValidateBudget",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.ValidateBudget",
+            "declarations": {},
+            "expected": {
+              "accepted": false,
+              "diagnostic": "`max_turns` is zero, which admits nothing; omit it instead"
+            },
+            "fields": [
+              {
+                "name": "accepted",
+                "type": "Boolean"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.ValidateBudget",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/call-approved-write": {
+      "purpose": "call approved write",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Call"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Call",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": true
+            },
+            "name": {
+              "kind": "literal",
+              "value": "write"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Call",
+            "declarations": {},
+            "expected": {
+              "failed": false,
+              "refusal": null,
+              "tool_calls": 1.0
+            },
+            "fields": [
+              {
+                "name": "failed",
+                "type": "Boolean"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "refusal",
+                "type": "Optional<Json>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Call",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/call-missing": {
+      "purpose": "call missing",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Call"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Call",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "name": {
+              "kind": "literal",
+              "value": "missing"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Call",
+            "declarations": {},
+            "expected": {
+              "failed": true,
+              "refusal": null,
+              "tool_calls": 0.0
+            },
+            "fields": [
+              {
+                "name": "failed",
+                "type": "Boolean"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "refusal",
+                "type": "Optional<Json>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Call",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/call-read": {
+      "purpose": "call read",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Call"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Call",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "name": {
+              "kind": "literal",
+              "value": "read"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Call",
+            "declarations": {},
+            "expected": {
+              "failed": false,
+              "refusal": null,
+              "tool_calls": 1.0
+            },
+            "fields": [
+              {
+                "name": "failed",
+                "type": "Boolean"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "refusal",
+                "type": "Optional<Json>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Call",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/call-write": {
+      "purpose": "call write",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Call"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Call",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "name": {
+              "kind": "literal",
+              "value": "write"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Call",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Call",
+            "declarations": {},
+            "expected": {
+              "failed": true,
+              "refusal": null,
+              "tool_calls": 0.0
+            },
+            "fields": [
+              {
+                "name": "failed",
+                "type": "Boolean"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "refusal",
+                "type": "Optional<Json>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Call",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-cancelled-before-provider": {
+      "purpose": "run cancelled before provider",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": true
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": null,
+              "model_calls": 0.0,
+              "output_tokens": null,
+              "stop": {
+                "kind": "cancelled",
+                "reason": "the caller cancelled"
+              },
+              "text": "",
+              "tool_calls": 0.0,
+              "turns": 0.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-completed": {
+      "purpose": "run completed",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "completed"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-input-budget-unobservable": {
+      "purpose": "run input budget unobservable",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": 100.0,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": null
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": null,
+              "model_calls": 1.0,
+              "output_tokens": null,
+              "stop": {
+                "kind": "budget-unobservable",
+                "name": "max_input_tokens",
+                "reason": "a model request omitted usage"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-input-limit": {
+      "purpose": "run input limit",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": 10.0,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "max-input-tokens",
+                "limit": 10.0,
+                "reported": 10.0
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-output-budget-unobservable": {
+      "purpose": "run output budget unobservable",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": 100.0,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": null
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": null,
+              "model_calls": 1.0,
+              "output_tokens": null,
+              "stop": {
+                "kind": "budget-unobservable",
+                "name": "max_output_tokens",
+                "reason": "a model request omitted usage"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-output-limit": {
+      "purpose": "run output limit",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": 5.0,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "max-output-tokens",
+                "limit": 5.0,
+                "reported": 5.0
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-provider-incomplete": {
+      "purpose": "run provider incomplete",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "incomplete",
+                    "reason": "provider reason"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "provider-incomplete",
+                "reason": "provider reason"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-provider-output-limit": {
+      "purpose": "run provider output limit",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "max-output-tokens"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "provider-incomplete",
+                "reason": "max_output_tokens"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-tool-missing": {
+      "purpose": "run tool missing",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "arguments": {},
+                      "call_id": "c1",
+                      "kind": "tool-call",
+                      "name": "missing"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "tool-calls"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                },
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 1.0,
+              "input_tokens": 20.0,
+              "model_calls": 2.0,
+              "output_tokens": 10.0,
+              "stop": {
+                "kind": "completed"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 2.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-tool-read": {
+      "purpose": "run tool read",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "arguments": {},
+                      "call_id": "c1",
+                      "kind": "tool-call",
+                      "name": "read"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "tool-calls"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                },
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 20.0,
+              "model_calls": 2.0,
+              "output_tokens": 10.0,
+              "stop": {
+                "kind": "completed"
+              },
+              "text": "done",
+              "tool_calls": 1.0,
+              "turns": 2.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-tool-write": {
+      "purpose": "run tool write",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "arguments": {},
+                      "call_id": "c1",
+                      "kind": "tool-call",
+                      "name": "write"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "tool-calls"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                },
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 1.0,
+              "input_tokens": 20.0,
+              "model_calls": 2.0,
+              "output_tokens": 10.0,
+              "stop": {
+                "kind": "completed"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 2.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-turn-limit": {
+      "purpose": "run turn limit",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": 1.0
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "arguments": {},
+                      "call_id": "c1",
+                      "kind": "tool-call",
+                      "name": "read"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "tool-calls"
+                  },
+                  "usage": {
+                    "cache_creation_input_tokens": null,
+                    "cached_input_tokens": 0.0,
+                    "input_tokens": 10.0,
+                    "model": "fixture",
+                    "output_tokens": 5.0
+                  }
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": 10.0,
+              "model_calls": 1.0,
+              "output_tokens": 5.0,
+              "stop": {
+                "kind": "max-turns",
+                "limit": 1.0
+              },
+              "text": "",
+              "tool_calls": 1.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    },
+    "harness.loop/authored/run-usage-absent": {
+      "purpose": "run usage absent",
+      "source": [
+        {
+          "kind": "domain",
+          "name": "harness.loop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.Stop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.StopKind"
+        },
+        {
+          "kind": "command",
+          "name": "harness.loop.Run"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "command": "harness.loop.Run",
+          "input": {
+            "approve": {
+              "kind": "literal",
+              "value": false
+            },
+            "budget": {
+              "kind": "literal",
+              "value": {
+                "max_cost_microunits": null,
+                "max_duration_ms": null,
+                "max_input_tokens": null,
+                "max_output_tokens": null,
+                "max_output_tokens_per_turn": null,
+                "max_turns": null
+              }
+            },
+            "cancelled": {
+              "kind": "literal",
+              "value": false
+            },
+            "script": {
+              "kind": "literal",
+              "value": [
+                {
+                  "items": [
+                    {
+                      "kind": "assistant-text",
+                      "text": "done"
+                    }
+                  ],
+                  "stop_reason": {
+                    "kind": "end-turn"
+                  },
+                  "usage": null
+                }
+              ]
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.Run",
+            "outcome": "returned"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "response": {
+            "command": "harness.loop.Run",
+            "declarations": {
+              "harness.loop.Stop": {
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": "harness.loop.StopKind"
+                  },
+                  {
+                    "name": "limit",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "name",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "limit_ms",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "checkpoint_id",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "asked_again",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.StopKind": {
+                "kind": "enum",
+                "variants": [
+                  "completed",
+                  "max-turns",
+                  "max-input-tokens",
+                  "max-output-tokens",
+                  "max-cost",
+                  "budget-unobservable",
+                  "deadline",
+                  "cancelled",
+                  "awaiting-approval",
+                  "provider-incomplete",
+                  "unstructured"
+                ]
+              }
+            },
+            "expected": {
+              "diagnostic": null,
+              "failed_results": 0.0,
+              "input_tokens": null,
+              "model_calls": 1.0,
+              "output_tokens": null,
+              "stop": {
+                "kind": "completed"
+              },
+              "text": "done",
+              "tool_calls": 0.0,
+              "turns": 1.0
+            },
+            "fields": [
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "text",
+                "type": "String"
+              },
+              {
+                "name": "turns",
+                "type": "Integer"
+              },
+              {
+                "name": "model_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "tool_calls",
+                "type": "Integer"
+              },
+              {
+                "name": "failed_results",
+                "type": "Integer"
+              },
+              {
+                "name": "input_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "output_tokens",
+                "type": "Optional<Integer>"
+              },
+              {
+                "name": "diagnostic",
+                "type": "Optional<String>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.Run",
+              "outcome": "returned"
+            }
+          },
+          "step": "expect_direct_response"
+        }
+      ]
+    }
+  }
+}

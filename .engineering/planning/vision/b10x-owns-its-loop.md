@@ -1,11 +1,14 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: vision:b10x-owns-its-loop
 kind: vision
 status: approved
 title: The b10x agent loop is owned here, and nothing above it is embedded
 summary: A harness that talks to model APIs directly, depends only on substrate, and is embedded by others rather than embedding them.
 revision: 6
+transitions:
+- {from: "draft", to: "in_review", at: "2026-09-15T17:27:43Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "in_review", to: "approved", at: "2026-09-15T17:27:43Z", actor: "human:timo", revision: 5, imported: true}
 ---
 ## Evidence
 

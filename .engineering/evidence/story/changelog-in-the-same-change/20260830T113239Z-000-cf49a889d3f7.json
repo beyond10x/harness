@@ -1,0 +1,12 @@
+{
+  "at": "2026-08-30T11:32:39Z",
+  "actor": "human:timo",
+  "artifact": "story:changelog-in-the-same-change",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "gate.sh at 3000f49: exit 0, 944 passed, 0 failed"
+  }
+}

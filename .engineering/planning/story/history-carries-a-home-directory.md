@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:history-carries-a-home-directory
 kind: story
 status: rejected
@@ -7,6 +7,9 @@ title: Two published commits carry the operator's home directory
 relations:
 - derived_from: epic:adoption-follow-ups
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-29T23:55:45Z", actor: "agent:claude-session", revision: 3, decided_on: {"recorded":{"approval":1}}, imported: true}
+- {from: "proposed", to: "rejected", at: "2026-08-29T23:55:45Z", actor: "agent:claude-session", revision: 4, decided_on: {"recorded":{"approval":1}}, imported: true}
 ---
 ## What is true
 

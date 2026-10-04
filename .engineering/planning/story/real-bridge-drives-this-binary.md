@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:real-bridge-drives-this-binary
 kind: story
 status: proposed
@@ -7,7 +7,14 @@ title: The bridge that was written against this protocol drives this binary
 relations:
 - derived_from: epic:bridge-mode-proof
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: inferred
+  path: STATUS.md
+- confidence: inferred
+  path: crates/harness-cli/tests/bridge_mode.rs
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 

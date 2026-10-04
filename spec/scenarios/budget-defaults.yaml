@@ -1,0 +1,28 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.loop",
+  "scenario": "budget-defaults",
+  "summary": "budget defaults",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.loop.ValidateBudget",
+      "input": {
+        "budget": {
+          "max_turns": null,
+          "max_input_tokens": null,
+          "max_output_tokens": null,
+          "max_output_tokens_per_turn": null,
+          "max_duration_ms": null,
+          "max_cost_microunits": null
+        },
+        "priced": false
+      },
+      "outcome": "returned",
+      "response": {
+        "accepted": true,
+        "diagnostic": null
+      }
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: review-result:harness-0-5-0-full-review
 kind: review-result
 status: archived
@@ -12,6 +12,8 @@ tags:
 relations:
 - reviews: vision:b10x-owns-its-loop
 revision: 2
+transitions:
+- {from: "active", to: "archived", at: "2026-08-31T03:30:10Z", actor: "human:timo", revision: 2, imported: true}
 ---
 ## Scope
 

@@ -286,12 +286,10 @@ runs nothing and exits 2.
 A file naming `transition` is refused by a build that does not know the point, rather than being
 ignored — an older binary says so instead of running unguarded.
 
-:::warning Hooks are not confined
-
-A transition program runs on the operator's host, outside substrate confinement, like every other
-hook. See [Security boundary](../concepts/security-boundary.md).
-
-:::
+> **Hooks are not confined**
+>
+> A transition program runs on the operator's host, outside substrate confinement, like every other
+> hook. See [Security boundary](../concepts/security-boundary.md).
 
 ## Events
 

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:compaction-measured-live
 kind: story
 status: active
@@ -8,7 +8,15 @@ relations:
 - derived_from: epic:measured-not-emulated
 - serves: vision:b10x-owns-its-loop
 - depends_on: story:measurement-apparatus-proved-on-the-emulator
-revision: 4
+scope:
+- confidence: inferred
+  path: STATUS.md
+- confidence: inferred
+  path: measurements
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-09-18T01:22:16Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
 ---
 ## Evidence
 
@@ -20,13 +28,7 @@ revision: 4
 
 ## Context
 
-Three numbers decide whether a long run survives: when compaction fires, how far it frees, and
-whether the summary turn keeps enough for the model to continue. All three were chosen against an
-emulator that reports whatever input count the fixture says, so none of them has been tested against
-a provider's real accounting or a real model's ability to continue from the summary.
-
-The failure this guards against is not a crash: it is a run that compacts, continues, and produces
-worse work because the summary lost something. Only a live run shows that.
+The 2026-09-18 live Haiku run recorded in STATUS.md's Loop row and measurements/runs/m1-tier-a-2026-09-18.jsonl measured the trigger and freed ratio. That observation does not establish summary-turn quality or cost: the fallback summary branch still needs a live run that reaches it and completes afterwards. The earlier Evidence section records the original gap, not today's coverage. Retain the story as active for the remaining summary measurement rather than relabelling emulator evidence as vendor-live.
 
 ## Acceptance
 

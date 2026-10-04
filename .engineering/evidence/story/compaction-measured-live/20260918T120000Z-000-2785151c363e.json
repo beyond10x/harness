@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-18T12:00:00Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-measured-live",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "metric_observation",
+    "source": "one operator-authorized live run against https://api.anthropic.com/v1 on claude-haiku-4-5-20251001, 2026-09-18; scored by measurements/score.py",
+    "reference": "measurements/runs/m1-tier-a-2026-09-18.jsonl, declared --context-window 16000. compacted{elided_results:4, elided_bytes:31856, summarised_items:0, bytes_before:58650, bytes_after:27438, summary_turn:false}; fired at 14662 occupied tokens = 91.6% of the declared window, fired_on='loop estimate' not the provider-reported count; remaining_fraction 0.4678; finished{completed} in 9 turns, 0 retries; 8 of 8 chapter keys recoverable (observed once, a judgement about output, not arithmetic); usage 72511 input of which 42896 cache read and 23526 cache write, 824 output; 43905 micro-USD. vendor_live for the TRIGGER and the RATIO on this route and this model only - it promotes no contract and re-pins no wire. The SUMMARY PROMPT is still unmeasured: summary_turn fired at no window tried, free or paid, so this story stays open on that third figure, which needs a fixture whose weight is not in tool results."
+  }
+}

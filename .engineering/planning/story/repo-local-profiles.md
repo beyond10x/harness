@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:repo-local-profiles
 kind: story
 status: proposed
@@ -7,7 +7,14 @@ title: A repository may supply profiles, once a trust decision says how
 relations:
 - derived_from: epic:adoption-follow-ups
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: inferred
+  path: crates/harness-cli/src/profile.rs
+- confidence: inferred
+  path: website/docs/guides/profiles.md
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## What is missing
 
@@ -39,6 +46,4 @@ attempted.
 
 ## Acceptance
 
-Whatever is decided, the run's record still names every profile that contributed with a digest —
-`session.started.profiles` — because that record is the condition on which a file may carry a
-permission at all, and a repo-local file does not get an exemption from it.
+After decision-blocker:repository-profile-trust-policy is resolved, a run from a repository with a profile applies exactly the accepted trust rule, key restrictions and precedence, refuses untrusted or disallowed policy as that decision specifies, and records every contributing profile and digest in session.started.profiles. Compare against an otherwise identical run without that repository profile to demonstrate the selected values and permissions; no trust outcome is chosen by this draft.

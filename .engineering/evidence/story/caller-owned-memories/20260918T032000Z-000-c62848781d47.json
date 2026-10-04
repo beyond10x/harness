@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-18T03:20:00Z",
+  "actor": "human:timo",
+  "artifact": "story:caller-owned-memories",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate on branch migration/2026-09-18-provable-lead, local, 2026-09-18",
+    "reference": "gate: green, exit 0. 1165 tests passed, 0 failed, including 23 memory-vault refusal tests (13 in crates/harness-loop/src/memory.rs, 10 in crates/harness-cli/src/memories.rs) and 5 loop tests (a_run_handed_no_memories_publishes_no_recall_tool_at_all, a_recall_answers_the_body_and_the_record_names_every_memory_whatever_its_status, recalling_a_superseded_memory_names_its_replacement_rather_than_saying_no, a_delegate_observes_exactly_its_parents_vault_and_no_more, a_run_whose_port_already_answers_to_recall_is_refused_before_a_byte_goes_out). Contract steps: command line 12 pinned version(s) verified (2026-09-18 cut, 2026-09-02 byte-identical to origin/main), provider-wire 10 verified, app-server profiles 1 verified, public website contract clean, home paths 389 tracked files clean."
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-03T19:57:54Z",
+  "actor": "human:timo",
+  "artifact": "task:current-rust-gate-compatibility",
+  "kind": "task",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate, Rust 1.99.0, staged migration baseline: exit 0"
+  }
+}

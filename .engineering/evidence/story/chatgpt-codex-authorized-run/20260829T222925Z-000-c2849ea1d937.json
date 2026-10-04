@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T22:29:25Z",
+  "actor": "human:timo",
+  "artifact": "story:chatgpt-codex-authorized-run",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "b10x-harness 0.2.0 live run against https://chatgpt.com/backend-api/codex, wire openai-responses, model gpt-5.6-sol: 2 turns, file_read answered, finished{completed}, exit 0; control with an unparseable token to the same endpoint answered 401 unauthorized_unknown, exit 1",
+    "reference": "session 18d066fc428e5e98-0003a176 (~/.local/state/b10x-harness/sessions/18d066fc428e5e98-0003a176.json)"
+  }
+}

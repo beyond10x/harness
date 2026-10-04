@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:public-site-is-accurate-live-and-governed
 kind: epic
 status: implemented
@@ -12,6 +12,10 @@ relations:
 - informed_by: review-result:harness-public-site-sweep
 - serves: vision:b10x-owns-its-loop
 revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-31T06:30:39Z", actor: "human:timo", revision: 2, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-31T06:30:39Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-31T06:53:27Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}, imported: true}
 ---
 # Epic: The public Harness site is accurate, live, and governed
 

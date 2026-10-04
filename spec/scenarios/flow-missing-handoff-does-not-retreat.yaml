@@ -1,0 +1,60 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-missing-handoff-does-not-retreat",
+  "summary": "flow missing handoff does not retreat",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "group",
+                "gives": [
+                  "artifact"
+                ],
+                "repeat": {
+                  "max": 3
+                },
+                "nodes": [
+                  {
+                    "id": "first"
+                  }
+                ]
+              },
+              {
+                "id": "second",
+                "needs": [
+                  "group"
+                ]
+              }
+            ]
+          }
+        },
+        "script": [
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": "Failed",
+        "reached": 1,
+        "ran": 1,
+        "failed": 0,
+        "skipped": 1,
+        "retreats": 0,
+        "paths": [
+          "root.group.first"
+        ],
+        "diagnostic": null
+      }
+    }
+  ]
+}

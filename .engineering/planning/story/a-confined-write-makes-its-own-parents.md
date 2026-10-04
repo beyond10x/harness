@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:a-confined-write-makes-its-own-parents
 kind: story
 status: implemented
@@ -11,6 +11,10 @@ relations:
 - informed_by: review-result:harness-0-5-0-full-review
 - serves: vision:b10x-owns-its-loop
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-31T01:56:41Z", actor: "human:timo", revision: 2, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-31T01:56:41Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-31T03:29:32Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}, imported: true}
 ---
 ## Decision
 

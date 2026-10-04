@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:argv-pin-misdescribes-the-command-line
 kind: story
 status: implemented
@@ -9,6 +9,10 @@ relations:
 - derived_from: epic:pinned-interfaces-honest
 - serves: vision:b10x-owns-its-loop
 revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-30T12:36:46Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-30T12:36:46Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-30T14:50:06Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}, imported: true}
 ---
 ## Evidence
 

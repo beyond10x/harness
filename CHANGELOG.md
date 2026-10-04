@@ -7,6 +7,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Retrofit the shipped loop and workflow boundary into an ESS specification with 42 native
+  conformance scenarios. The source gate checks synthesis drift, executes the real libraries
+  through fixture ports and rejects an inert target; coverage limits remain explicit.
+- Add `task check`, `task spec`, `task conformance` and `task website` entry points.
+
+### Changed
+
+- Rebuild public documentation as an independent Rust workspace with static HTML/CSS, explicit
+  navigation, checked local links and anchors, and exact-source artifact provenance. Refresh the
+  landing page and getting-started guidance; keep live delivery on its existing route pending
+  publisher configuration.
+- Migrate the planning store to `aep.project/5` with the Git driver and pin the governing
+  documents to AEP 0.68.0. Preserve historical transitions and evidence, review the open plan
+  twice, and record unresolved policy choices as explicit blockers.
+- Run the home-path privacy check from Rust, retaining index and working-tree coverage and
+  a content-pinned exception for the historical evidence extracted from the former journal.
+
+### Fixed
+
+- Keep the source gate compatible with Rust 1.99's assertion diagnostics while retaining the
+  Rust 1.97 minimum and the existing atomic-update behavior.
+
 ## [0.13.3] — 2026-09-25
 
 ### Added

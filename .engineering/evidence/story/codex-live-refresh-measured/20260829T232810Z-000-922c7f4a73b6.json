@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:28:10Z",
+  "actor": "human:timo",
+  "artifact": "story:codex-live-refresh-measured",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "codex exec --skip-git-repo-check, against the file b10x-harness rewrote",
+    "reference": "2026-08-29T23:27Z, exit 0, model answered 'ok', 8793 tokens — the owner of the credential store authenticates against it after the rewrite. Plus scripts/gate.sh 38 suites / 894 passed covering renewal::tests"
+  }
+}

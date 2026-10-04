@@ -138,7 +138,7 @@ when every reachable tool is non-mutating and needs no approval and no hook is a
 surface, approvals, hooks, a port that cannot fork, or a budget that cannot divide takes the same
 delegates through the sequential path in model order.
 
-### Name an agent {#name-an-agent}
+### Name an agent
 
 `--agents-dir DIR`, or the `agents/` half of `--plugin-dir DIR`, describes delegates in advance in
 the on-disk shape Claude Code reads — `DIR/<name>.md`:
@@ -217,9 +217,7 @@ in the same file, under the same rules:
 
 See [Workflows](./workflows.md) for the document it receives and what each refusal does to the walk.
 
-:::warning Hooks are not confined
-
-Hook programs run on the operator's host, outside substrate confinement. They are named explicitly
-and never discovered from the workspace. See [Security boundary](../concepts/security-boundary.md).
-
-:::
+> **Hooks are not confined**
+>
+> Hook programs run on the operator's host, outside substrate confinement. They are named explicitly
+> and never discovered from the workspace. See [Security boundary](../concepts/security-boundary.md).

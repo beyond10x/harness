@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T06:46:21Z",
+  "actor": "human:timo",
+  "artifact": "story:website-drift-fails-the-rust-gate",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate",
+    "reference": "crates/harness-xtask/src/website_contract.rs"
+  }
+}

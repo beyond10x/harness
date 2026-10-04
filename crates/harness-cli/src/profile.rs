@@ -355,7 +355,7 @@ mod tests {
     fn a_missing_config_is_not_an_error_because_flags_alone_have_always_worked() {
         let absent = Path::new("/nonexistent/b10x/harness.toml");
         let config = load(absent).expect("an absent config is an empty one");
-        assert!(config.profiles.is_empty());
+        assert_eq!(config.profiles, [] as [Profile; 0]);
         assert_eq!(config.default, Profile::default());
     }
 

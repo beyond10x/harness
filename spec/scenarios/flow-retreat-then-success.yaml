@@ -1,0 +1,55 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-retreat-then-success",
+  "summary": "flow retreat then success",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "first"
+              },
+              {
+                "id": "second",
+                "needs": [
+                  "first"
+                ]
+              }
+            ],
+            "repeat": {
+              "max": 2
+            }
+          }
+        },
+        "script": [
+          "failed",
+          "passed",
+          "passed"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": "Completed",
+        "reached": 3,
+        "ran": 3,
+        "failed": 1,
+        "skipped": 1,
+        "retreats": 1,
+        "paths": [
+          "root.first",
+          "root.first",
+          "root.second"
+        ],
+        "diagnostic": null
+      }
+    }
+  ]
+}

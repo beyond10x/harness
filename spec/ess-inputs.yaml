@@ -1,0 +1,46 @@
+format: ess-inputs/2
+requires: ess 0.52.0
+specification:
+  - system.yaml
+  - components.yaml
+  - domains/loop.yaml
+  - domains/flow.yaml
+scenarios:
+  - scenarios/run-completed.yaml
+  - scenarios/run-usage-absent.yaml
+  - scenarios/run-provider-incomplete.yaml
+  - scenarios/run-provider-output-limit.yaml
+  - scenarios/run-input-limit.yaml
+  - scenarios/run-output-limit.yaml
+  - scenarios/run-turn-limit.yaml
+  - scenarios/run-tool-read.yaml
+  - scenarios/call-read.yaml
+  - scenarios/run-tool-write.yaml
+  - scenarios/call-write.yaml
+  - scenarios/run-tool-missing.yaml
+  - scenarios/call-missing.yaml
+  - scenarios/call-approved-write.yaml
+  - scenarios/budget-defaults.yaml
+  - scenarios/budget-zero-max-turns.yaml
+  - scenarios/budget-zero-max-input-tokens.yaml
+  - scenarios/budget-zero-max-output-tokens.yaml
+  - scenarios/budget-zero-max-output-tokens-per-turn.yaml
+  - scenarios/budget-zero-max-duration-ms.yaml
+  - scenarios/budget-zero-max-cost-microunits.yaml
+  - scenarios/budget-unpriced-cost.yaml
+  - scenarios/budget-priced-cost.yaml
+  - scenarios/flow-completed.yaml
+  - scenarios/flow-failure-skips-dependent.yaml
+  - scenarios/flow-operator-pause.yaml
+  - scenarios/flow-entry-refused.yaml
+  - scenarios/flow-retreat-then-success.yaml
+  - scenarios/flow-retreat-exhausted.yaml
+  - scenarios/run-cancelled-before-provider.yaml
+  - scenarios/run-input-budget-unobservable.yaml
+  - scenarios/run-output-budget-unobservable.yaml
+  - scenarios/flow-empty-group.yaml
+  - scenarios/flow-duplicate-id.yaml
+  - scenarios/flow-self-dependency.yaml
+  - scenarios/flow-cross-scope-dependency.yaml
+  - scenarios/flow-zero-repeats.yaml
+  - scenarios/flow-missing-handoff-does-not-retreat.yaml

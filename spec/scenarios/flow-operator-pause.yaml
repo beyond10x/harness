@@ -1,0 +1,48 @@
+{
+  "type": "ess-scenario/4",
+  "domain": "harness.flow",
+  "scenario": "flow-operator-pause",
+  "summary": "flow operator pause",
+  "timeline": [
+    {
+      "at": "2026-10-03T00:00:00Z",
+      "command": "harness.flow.Run",
+      "input": {
+        "document": {
+          "id": "fixture",
+          "root": {
+            "id": "root",
+            "nodes": [
+              {
+                "id": "first"
+              },
+              {
+                "id": "second",
+                "needs": [
+                  "first"
+                ]
+              }
+            ]
+          }
+        },
+        "script": [
+          "paused"
+        ],
+        "refuse_entry": false
+      },
+      "outcome": "returned",
+      "response": {
+        "status": "AwaitingOperator",
+        "reached": 1,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "retreats": 0,
+        "paths": [
+          "root.first"
+        ],
+        "diagnostic": null
+      }
+    }
+  ]
+}

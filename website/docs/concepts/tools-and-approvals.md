@@ -67,13 +67,11 @@ approver defaults to `auto`:
 
 The library default remains deny-all. A shell that wants another policy has to provide it.
 
-:::warning Unattended effects
-
-`--yes` is not a convenience alias for “safe.” It declares that no person is watching and approves
-every call that asks. Prefer a narrow tool catalogue, write scope, program list, budget, and
-confinement boundary even when approval is automatic.
-
-:::
+> **Unattended effects**
+>
+> `--yes` is not a convenience alias for “safe.” It declares that no person is watching and approves
+> every call that asks. Prefer a narrow tool catalogue, write scope, program list, budget, and
+> confinement boundary even when approval is automatic.
 
 ## Restrict writes by path
 

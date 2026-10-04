@@ -519,7 +519,10 @@ mod tests {
         let root = tempfile::tempdir().expect("a root");
         fs::write(root.path().join("README.txt"), "not an agent").expect("a file");
         fs::create_dir_all(root.path().join("a-directory")).expect("a directory");
-        assert!(agents_in(root.path()).expect("reads").is_empty());
+        assert_eq!(
+            agents_in(root.path()).expect("reads"),
+            [] as [harness_loop::Agent; 0]
+        );
     }
 }
 
@@ -581,6 +584,9 @@ mod plugin_tests {
         let root = tempfile::tempdir().expect("a root");
         let plugin = root.path().join("a-plugin");
         fs::create_dir_all(plugin.join("skills")).expect("a skills directory");
-        assert!(agents_in_plugin(&plugin).expect("reads").is_empty());
+        assert_eq!(
+            agents_in_plugin(&plugin).expect("reads"),
+            [] as [harness_loop::Agent; 0]
+        );
     }
 }

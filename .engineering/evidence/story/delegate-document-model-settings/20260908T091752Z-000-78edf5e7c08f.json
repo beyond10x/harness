@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-08T09:17:52Z",
+  "actor": "human:timo",
+  "artifact": "story:delegate-document-model-settings",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate: green; relocated actual Agentplugins compatibility: 2 passed"
+  }
+}

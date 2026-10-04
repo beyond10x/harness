@@ -384,7 +384,10 @@ mod tests {
     fn a_directory_holding_no_record_reads_as_none_rather_than_failing() {
         let root = tempfile::tempdir().expect("a root");
         fs::write(root.path().join("README.txt"), "not a record").expect("a file");
-        assert!(memories_in(root.path()).expect("reads").is_empty());
+        assert_eq!(
+            memories_in(root.path()).expect("reads"),
+            [] as [harness_loop::Memory; 0]
+        );
     }
 
     #[test]

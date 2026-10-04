@@ -1,3 +1,4 @@
+# Atlas-classified former Pages workflow: repository-owned validation only; deployment authority is forbidden.
 # Repository-owned validation and artifact production only; no deployment authority.
 name: Documentation validation
 
@@ -16,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build independent documentation
+    name: Build Docusaurus
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

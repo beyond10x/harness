@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:38Z",
+  "actor": "human:timo",
+  "artifact": "epic:full-review-remediation",
+  "kind": "epic",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "All child stories implemented; full gate, website build, MSRV, Rust audit, and atlas brand fence green",
+    "reference": ".engineering/planning/review-result/harness-0-5-0-full-review.md"
+  }
+}

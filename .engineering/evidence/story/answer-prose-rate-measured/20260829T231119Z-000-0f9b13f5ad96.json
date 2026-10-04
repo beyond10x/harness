@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:11:19Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:answer-prose-rate-measured",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "metric_observation",
+    "source": "two paid native walks, Haiku 4.5, 2026-08-30",
+    "reference": "metaharness native-eval.hUbOP5: 5 nudges, 3 unstructured stops; native-eval.ew4lFi after harness 32915bf: 6 nudges, 0 unstructured; rows 7-8 of metaharness evals/engineering-protocols/README.md"
+  }
+}

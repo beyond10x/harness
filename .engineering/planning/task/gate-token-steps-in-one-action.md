@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: task:gate-token-steps-in-one-action
 kind: task
 status: proposed
@@ -8,6 +8,8 @@ relations:
 - decomposes: epic:gate-stays-trustworthy
 - serves: vision:b10x-owns-its-loop
 revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:33Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## Evidence
 

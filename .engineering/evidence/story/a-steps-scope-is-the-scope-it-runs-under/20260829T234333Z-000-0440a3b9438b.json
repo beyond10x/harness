@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:43:33Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:a-steps-scope-is-the-scope-it-runs-under",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh in worktree ~/.cache/harness-wt-scope at commit 4419377 (branch wt/step-scope, not yet on main): exit 0, 903 passed, 0 failed",
+    "reference": "4419377"
+  }
+}

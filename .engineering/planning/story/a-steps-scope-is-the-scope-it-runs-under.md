@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:a-steps-scope-is-the-scope-it-runs-under
 kind: story
 status: implemented
@@ -12,6 +12,10 @@ tags:
 relations:
 - serves: vision:b10x-owns-its-loop
 revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-30T09:42:43Z", actor: "human:timo", revision: 2, decided_on: {"recorded":{"test_result":2}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-30T09:42:43Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"test_result":2}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-30T11:44:01Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":3}}, imported: true}
 ---
 # Story: a step's declared write scope is the scope it runs under
 

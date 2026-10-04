@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-15T17:26:02Z",
+  "actor": "human:timo",
+  "artifact": "epic:tracking-documents-current",
+  "kind": "epic",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "diff",
+    "source": "git log -1 -- STATUS.md, read in the fix4-harness worktree",
+    "reference": "f470a76b63a667c72d4a4fb97de6ea06b3278948"
+  }
+}

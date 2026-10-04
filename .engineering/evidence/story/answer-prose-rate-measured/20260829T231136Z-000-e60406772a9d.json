@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:11:36Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:answer-prose-rate-measured",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh, 2026-08-30, isolated worktree at HEAD plus the tool_choice hunks",
+    "reference": "867 passed, 1 ignored, green; the tests that pin the decision: a_turn_held_to_a_tool_it_does_not_publish_is_refused_before_it_is_sent, the_default_choice_is_absent_from_a_serialised_request, a_tool_choice_travels_in_this_routes_own_spelling_and_auto_is_absent (both wires), the_turn_a_nudge_opens_is_held_to_the_answer_tool_and_no_earlier_turn_is"
+  }
+}

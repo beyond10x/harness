@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: epic:embedded-by-a-consumer
 kind: epic
 status: proposed
@@ -8,6 +8,8 @@ summary: Phase 5's adapter, the workflow walked through the library, and one con
 relations:
 - decomposes: initiative:driven-from-outside
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:45Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:44:29Z",
+  "actor": "agent:claude-session",
+  "artifact": "story:bridge-interrupt-race-pinned",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "health_observation",
+    "source": "an_interrupt_queued_before_the_turn_starts_does_not_crash_the_server failed once under parallel gate load in worktree ~/.cache/harness-wt-sessions, 2026-08-30; passed 3/3 in isolation and in the two following full gate runs. Diff under test (c4034ec) touches no bridge code",
+    "reference": "crates/harness-cli/tests — bridge mode"
+  }
+}

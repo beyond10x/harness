@@ -1,0 +1,12 @@
+{
+  "at": "2026-08-30T11:44:01Z",
+  "actor": "human:timo",
+  "artifact": "story:section-sessions-name-every-attempt",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "metaharness run-native.sh --spend, 2026-08-30, native-eval.9kZNVc: 6 sessions filed, 6 unique ids, root.1/root.2 x receive/specify with per-attempt suffixes, 3 retreats and no id reused"
+  }
+}

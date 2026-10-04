@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:09:22Z",
+  "actor": "human:timo",
+  "artifact": "task:refusal-message-spacing",
+  "kind": "task",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "runtime, target/debug/b10x-harness 2026-08-30",
+    "reference": "XDG_CONFIG_HOME=/nonexistent-dir run --base-url … prints one sentence, single spaces throughout"
+  }
+}

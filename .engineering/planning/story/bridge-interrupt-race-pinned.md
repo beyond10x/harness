@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:bridge-interrupt-race-pinned
 kind: story
 status: implemented
@@ -8,6 +8,10 @@ relations:
 - derived_from: epic:gate-stays-trustworthy
 - serves: vision:b10x-owns-its-loop
 revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-30T09:42:42Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"health_observation":2}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-30T09:42:42Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"health_observation":2}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-30T11:32:39Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"health_observation":2}}, imported: true}
 ---
 ## Evidence
 

@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:repo-local-profiles
 kind: story
 status: proposed
@@ -8,6 +8,8 @@ relations:
 - derived_from: epic:adoption-follow-ups
 - serves: vision:b10x-owns-its-loop
 revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
 ---
 ## What is missing
 

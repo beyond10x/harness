@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-31T03:29:18Z",
+  "actor": "human:timo",
+  "artifact": "story:a-confined-write-makes-its-own-parents",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate — green in wave/full-review-remediation on 2026-08-31",
+    "reference": "crates/harness-xtask/src/main.rs"
+  }
+}

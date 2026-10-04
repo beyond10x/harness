@@ -1,0 +1,13 @@
+{
+  "at": "2026-08-29T23:09:22Z",
+  "actor": "human:timo",
+  "artifact": "story:missing-model-refuses-by-name",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "bash scripts/gate.sh",
+    "reference": "crates/harness-cli/tests/end_to_end.rs::a_machine_with_no_config_directory_is_told_what_to_type_rather_than_panicking; fixed in 6a87416; both refusal paths verified at runtime 2026-08-30, exit 1, no panic, no runs of spaces"
+  }
+}

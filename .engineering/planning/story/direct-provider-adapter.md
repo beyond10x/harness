@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:direct-provider-adapter
 kind: story
 status: proposed
@@ -8,6 +8,8 @@ relations:
 - derived_from: epic:embedded-by-a-consumer
 - serves: vision:b10x-owns-its-loop
 revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-09-15T17:26:41Z", actor: "human:timo", revision: 4, imported: true}
 ---
 ## Evidence
 

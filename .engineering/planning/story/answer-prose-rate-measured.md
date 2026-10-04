@@ -1,5 +1,5 @@
 ---
-format: aep.planning-md/1
+format: aep.planning-md/3
 id: story:answer-prose-rate-measured
 kind: story
 status: implemented
@@ -8,6 +8,10 @@ relations:
 - derived_from: epic:measured-not-emulated
 - serves: vision:b10x-owns-its-loop
 revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-08-29T23:11:19Z", actor: "agent:claude-session", revision: 3, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
+- {from: "proposed", to: "active", at: "2026-08-29T23:11:19Z", actor: "agent:claude-session", revision: 4, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-08-29T23:11:36Z", actor: "agent:claude-session", revision: 5, decided_on: {"recorded":{"test_result":1,"metric_observation":1}}, imported: true}
 ---
 ## Evidence
 

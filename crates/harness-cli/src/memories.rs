@@ -140,10 +140,10 @@ pub fn memory_at(document: &Path) -> Result<Memory, String> {
             .ok_or_else(|| named(format!("`{line}` is not `key: value`")))?;
         let value = value.trim();
         match key.trim() {
-            "kind" => kind = Some(parse_kind(value).map_err(&named)?),
+            "kind" => kind = Some(parse_kind(value).map_err(named)?),
             "summary" => summary = Some(value.to_owned()),
-            "trust" => trust = Some(parse_trust(value).map_err(&named)?),
-            "status" => status = Some(parse_status(value).map_err(&named)?),
+            "trust" => trust = Some(parse_trust(value).map_err(named)?),
+            "status" => status = Some(parse_status(value).map_err(named)?),
             "supersedes" => supersedes = Some(value.to_owned()),
             // **Refused, not ignored**, exactly as an unread skill frontmatter key is. A
             // `confidence:` or a `scope:` this build skipped would be a claim its writer made and

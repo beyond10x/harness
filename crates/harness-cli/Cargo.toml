@@ -17,21 +17,26 @@ workspace = true
 
 [dependencies]
 harness-app-server = { workspace = true }
-harness-credential = { workspace = true }
 harness-flow = { workspace = true }
 harness-loop = { workspace = true }
 harness-mcp = { workspace = true }
-harness-messages = { workspace = true }
-harness-responses = { workspace = true }
 harness-substrate = { workspace = true }
 harness-toolchain = { workspace = true }
 harness-tools = { workspace = true }
 harness-wire = { workspace = true }
+llm-blocking = { workspace = true }
+llm-core = { workspace = true }
+llm-credentials = { workspace = true, features = ["codex-renewal", "environment", "file", "json-pointer"] }
+llm-http = { workspace = true }
+llm-messages = { workspace = true }
+llm-providers = { workspace = true }
+llm-responses = { workspace = true }
 clap = { workspace = true }
 ctrlc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tokio = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]

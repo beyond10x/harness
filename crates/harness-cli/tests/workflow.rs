@@ -38,10 +38,8 @@ impl Wire {
     /// socket can say nothing was asked.
     fn recording(self, scenario: &str, record: Option<&Path>) -> Fixture {
         match self {
-            Self::Responses => {
-                Fixture::of("harness-responses", "fake_responses.py", scenario, record)
-            }
-            Self::Messages => Fixture::of("harness-messages", "fake_messages.py", scenario, record),
+            Self::Responses => Fixture::of("fake_responses.py", scenario, record),
+            Self::Messages => Fixture::of("fake_messages.py", scenario, record),
         }
     }
 
@@ -59,13 +57,13 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn of(crate_name: &str, script: &str, scenario: &str, record: Option<&Path>) -> Self {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join(crate_name)
-            .join("tests")
-            .join("fixtures")
-            .join(script);
+    fn of(script: &str, scenario: &str, record: Option<&Path>) -> Self {
+        let script = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+        )
+        .join("tests")
+        .join("fixtures")
+        .join(script);
         let mut command = Command::new("python3");
         command.arg(&script).arg("--scenario").arg(scenario);
         if let Some(record) = record {
@@ -959,14 +957,24 @@ fn a_flow_cost_ceiling_binds_at_equality_without_starting_another_step() {
             .find(|event| event["code"] == "step-stopped")
             .unwrap_or_else(|| panic!("{wire:?}: no step-stopped warning in {:?}", kinds(&events)));
         let message = warned["message"].as_str().expect("a message");
-        assert!(
-            message.contains("limit_micro_usd: 16"),
-            "{wire:?}: the ceiling is named: {message}"
-        );
-        assert!(
-            message.contains("spent_micro_usd: 16"),
-            "{wire:?}: and what went: {message}"
-        );
+        if matches!(wire, Wire::Messages) {
+            // llm parity row M25: this stream reports no `cache_creation_input_tokens`, so llm
+            // leaves the input total unknown and the request cannot be priced. The ceiling binds
+            // as unobservable rather than at a spend computed from a total nobody reported.
+            assert!(
+                message.contains("BudgetUnobservable") && message.contains("max_cost_microunits"),
+                "{wire:?}: the unpriceable ceiling is named: {message}"
+            );
+        } else {
+            assert!(
+                message.contains("limit_micro_usd: 16"),
+                "{wire:?}: the ceiling is named: {message}"
+            );
+            assert!(
+                message.contains("spent_micro_usd: 16"),
+                "{wire:?}: and what went: {message}"
+            );
+        }
         assert!(
             message.contains("`root.one`"),
             "{wire:?}: and which step reached the binding ceiling: {message}"

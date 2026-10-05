@@ -37,7 +37,7 @@
 //! it does not send to the model, and write to a file another program owns.** Both are stated
 //! rather than assumed: `providers show codex` prints the token endpoint and the client id before
 //! anything is spent, and a run that actually renewed emits `credential-renewed` naming the file it
-//! rewrote. See `harness_credential::renew_if_stale` for what the write itself guarantees.
+//! rewrote. See `llm_credentials::codex::CodexAuthFile::renew` for what the write itself guarantees.
 //!
 //! `claude` carries no renewal, and the reason is the rule above: `~/.claude/.credentials.json`
 //! holds a refresh token, but the authorization server and client id that would accept it have not

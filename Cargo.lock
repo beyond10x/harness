@@ -150,7 +150,6 @@ name = "b10x-harness-app-server"
 version = "0.13.3"
 dependencies = [
  "b10x-harness-loop",
- "b10x-harness-responses",
  "b10x-harness-wire",
  "serde",
  "serde_json",
@@ -163,16 +162,20 @@ name = "b10x-harness-cli"
 version = "0.13.3"
 dependencies = [
  "b10x-harness-app-server",
- "b10x-harness-credential",
  "b10x-harness-flow",
  "b10x-harness-loop",
  "b10x-harness-mcp",
- "b10x-harness-messages",
- "b10x-harness-responses",
  "b10x-harness-substrate",
  "b10x-harness-toolchain",
  "b10x-harness-tools",
  "b10x-harness-wire",
+ "b10x-llm-blocking",
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-messages",
+ "b10x-llm-providers",
+ "b10x-llm-responses",
  "b10x-mcp-config",
  "b10x-mcp-testkit",
  "b10x-mcp-types",
@@ -182,6 +185,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "tokio",
  "toml",
 ]
 
@@ -202,16 +206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "b10x-harness-credential"
-version = "0.13.3"
-dependencies = [
- "b10x-harness-http",
- "b10x-harness-wire",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "b10x-harness-flow"
 version = "0.13.3"
 dependencies = [
@@ -220,16 +214,6 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "b10x-harness-http"
-version = "0.13.3"
-dependencies = [
- "b10x-harness-wire",
- "reqwest 0.12.28",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -260,32 +244,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
-]
-
-[[package]]
-name = "b10x-harness-messages"
-version = "0.13.3"
-dependencies = [
- "b10x-harness-credential",
- "b10x-harness-http",
- "b10x-harness-loop",
- "b10x-harness-responses",
- "b10x-harness-wire",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "b10x-harness-responses"
-version = "0.13.3"
-dependencies = [
- "b10x-harness-http",
- "b10x-harness-loop",
- "b10x-harness-wire",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -352,6 +310,102 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+]
+
+[[package]]
+name = "b10x-llm-blocking"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "tokio",
+]
+
+[[package]]
+name = "b10x-llm-core"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio-util",
+]
+
+[[package]]
+name = "b10x-llm-credentials"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-http",
+ "base64 0.22.1",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "b10x-llm-http"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "bytes",
+ "httpdate",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "b10x-llm-messages"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-providers",
+ "http",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "b10x-llm-providers"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "http",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "b10x-llm-responses"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-providers",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1001,7 +1055,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3125,7 +3179,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3288,7 +3342,6 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -3310,12 +3363,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots",
 ]
@@ -3356,7 +3411,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -3419,15 +3474,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
 dependencies = [
  "bitflags 2.13.1",
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3485,7 +3540,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3914,7 +3969,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4039,6 +4094,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",
@@ -4371,6 +4427,19 @@ dependencies = [
 
 [[package]]
 name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "wasm-streams"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
@@ -4426,7 +4495,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

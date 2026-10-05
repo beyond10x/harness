@@ -73,7 +73,7 @@ jobs:
         run: cargo xtask gate
 
   msrv:
-    name: MSRV 1.97
+    name: MSRV 1.98
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -98,8 +98,8 @@ jobs:
             url."https://x-access-token:${TOKEN}@github.com/beyond10x/".insteadOf \
             "https://github.com/beyond10x/"
 
-      # `rust-version = "1.97"` in Cargo.toml is a promise to anyone who embeds these crates.
-      - uses: dtolnay/rust-toolchain@889fac408b4da0905346410f253f0c55fbcb6613 # 1.97.0
+      # `rust-version = "1.98"` in Cargo.toml is a promise to anyone who embeds these crates.
+      - uses: dtolnay/rust-toolchain@4dfd137a5aecc12897f37a01818006f58cf58347 # 1.98.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 

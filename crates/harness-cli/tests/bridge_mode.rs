@@ -40,12 +40,12 @@ struct Endpoint {
 
 impl Endpoint {
     fn start(scenario: &str) -> Self {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("harness-responses")
-            .join("tests")
-            .join("fixtures")
-            .join("fake_responses.py");
+        let script = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+        )
+        .join("tests")
+        .join("fixtures")
+        .join("fake_responses.py");
         let mut child = Command::new("python3")
             .arg(&script)
             .arg("--scenario")
@@ -1218,7 +1218,7 @@ fn an_interrupt_is_answered_before_the_terminal_frame_when_the_model_client_will
     // second `?` one line above it, on the model factory, with the same symptom and the same
     // cause: `crates/harness-app-server/src/lib.rs`'s `drive_turn` returned before it settled
     // what the turn owed. Reached from the shipped binary with nothing but a flag --
-    // `harness_responses::Endpoint::new` refuses a base URL that is not absolute http or https,
+    // `llm_providers::BaseUrl::new` refuses a base URL that is not absolute http or https,
     // and `model_client` runs per turn, so every turn on this connection fails to build a client
     // while the handshake and `thread/start` still work.
     //

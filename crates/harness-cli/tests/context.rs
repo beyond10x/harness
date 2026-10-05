@@ -35,12 +35,12 @@ struct Fixture {
 
 impl Fixture {
     fn start(scenario: &str, record: &Path) -> Self {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("harness-responses")
-            .join("tests")
-            .join("fixtures")
-            .join("fake_responses.py");
+        let script = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+        )
+        .join("tests")
+        .join("fixtures")
+        .join("fake_responses.py");
         let mut child = Command::new("python3")
             .arg(&script)
             .arg("--scenario")

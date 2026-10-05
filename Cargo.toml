@@ -2,10 +2,6 @@
 resolver = "3"
 members = [
     "crates/harness-wire",
-    "crates/harness-credential",
-    "crates/harness-http",
-    "crates/harness-responses",
-    "crates/harness-messages",
     "crates/harness-loop",
     "crates/harness-conformance",
     "crates/harness-flow",
@@ -21,17 +17,13 @@ members = [
 [workspace.package]
 version = "0.13.3"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.98"
 license = "LicenseRef-B10x-Proprietary"
 repository = "https://github.com/beyond10x/harness"
 publish = false
 
 [workspace.dependencies]
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
-harness-credential = { package = "b10x-harness-credential", path = "crates/harness-credential" }
-harness-http = { package = "b10x-harness-http", path = "crates/harness-http" }
-harness-responses = { package = "b10x-harness-responses", path = "crates/harness-responses" }
-harness-messages = { package = "b10x-harness-messages", path = "crates/harness-messages" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
 harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
 harness-toolchain = { package = "b10x-harness-toolchain", path = "crates/harness-toolchain" }
@@ -60,7 +52,6 @@ jsonschema = { version = "0.52.1", default-features = false }
 # groups and signals are OS primitives; this narrow feature set avoids hand-written unsafe FFI.
 nix = { version = "0.31.3", features = ["process", "signal"] }
 regex = "1.13"
-reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The workflow notation reads its own documents (`Flow::from_yaml`), so the CLI never parses one
@@ -68,9 +59,6 @@ serde_json = "1"
 serde_yaml_ng = "0.10"
 sha2 = "0.11.0"
 tempfile = "3.23"
-# `harness-http` exposes a blocking port to the loop but uses reqwest's asynchronous client behind
-# it so cancellation can drop an in-flight request or silent response body. Tokio is already in
-# reqwest's graph; this direct edge enables only the current-thread runtime, timer and select macro.
 tokio = { version = "1.53", features = ["rt", "time", "macros"] }
 # The config format the operator hand-edits: `~/.config/b10x/harness.toml`. Taken rather than
 # hand-parsed because a profile is executable policy and a half-read one grants what nobody wrote —
@@ -85,6 +73,14 @@ b10x-mcp-command = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fb
 b10x-mcp-client = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 b10x-mcp-config = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 b10x-mcp-types = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
+
+llm-blocking = { package = "b10x-llm-blocking", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-credentials = { package = "b10x-llm-credentials", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-http = { package = "b10x-llm-http", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-messages = { package = "b10x-llm-messages", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-providers = { package = "b10x-llm-providers", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-responses = { package = "b10x-llm-responses", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -691,6 +691,61 @@ fn a_filtered_search_says_what_it_withheld_so_a_filter_is_not_a_ceiling() {
     assert!(all.get("note").is_none());
 }
 
+#[test]
+fn the_search_and_find_entries_read_as_they_did_before_search_moved_to_tools() {
+    // `search` is served by `b10x-tool-search` and both entries name the walk's skipped directories
+    // and depth bound from `tool_fs::walk`, and the context cap from `tool_search`. The model reads
+    // the same bytes it read when both walks were harness's own.
+    let dir = tree();
+    let catalogue = Catalogue::of(LocalOperations::new(dir.path()).expect("opens"));
+    let entry = |name: &str| {
+        catalogue
+            .entries()
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("published")
+    };
+
+    let search = entry("search");
+    assert_eq!(
+        search.summary,
+        "Find text in the workspace's files. A literal substring by default; set `regex` for a \
+         regular expression. `glob` narrows which files are read and `context` answers the lines \
+         either side of each match. Two things are never searched and the reply cannot tell you \
+         afterwards: these directories and everything under them — .git, target, node_modules, \
+         .venv, __pycache__ — and anything more than 12 directories below where the search \
+         started, which the reply reports as `depth_bound_reached`. Start the search lower down \
+         to reach past either."
+    );
+    assert_eq!(
+        search.input_schema,
+        json!({
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "What to find: a literal substring, or a regular expression when `regex` is true."},
+                "path": {"type": "string", "description": "Directory or file to search."},
+                "regex": {"type": "boolean", "description": "Read `pattern` as a regular expression. Default false. One that does not compile is refused, never silently matched against nothing."},
+                "glob": {"type": "string", "description": "Only files matching this glob — `*.rs` is that name anywhere in the tree, `crates/**/*.rs` is the whole path."},
+                "context": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Lines either side of each match, under `before` and `after` with their own numbers. Default 0, capped at 5."},
+                "max_results": {"type": "integer", "description": "Ceiling on returned matches."},
+            },
+            "required": ["pattern"],
+            "additionalProperties": false,
+        })
+    );
+
+    assert_eq!(
+        entry("find").summary,
+        "List the files whose path matches a glob under the workspace. `*.rs` is that name at any \
+         depth; `crates/**/*.rs` matches the whole workspace-relative path. Use this instead of \
+         walking the tree one `dir_list` at a time. Two places it does not look, and an empty \
+         list will not tell you which: these directories and everything under them — .git, \
+         target, node_modules, .venv, __pycache__ — and anything more than 12 directories below \
+         where the walk started, which the reply reports as `depth_bound_reached`. Set `path` \
+         lower down to reach past either."
+    );
+}
+
 // --- the write scope ----------------------------------------------------------------------------
 
 /// The store's rule, in the shape a step map declares it.

@@ -2,11 +2,11 @@
 //!
 //! # The provider with no boundary, and why it still exists
 //!
-//! Reading a tree is [`tool_fs`]'s and writing one is [`tool_code_editor`]'s: every path check is
-//! that crate's own, canonicalising before a containment check. That is real and it is not
-//! confinement — nothing stops the *process*, only those functions, and a bug in them is the whole
-//! boundary. `search` and `run` stay here: `tools` `0.2.0` has no search toolset, and `run` moves
-//! onto its process toolset (`b10x-tool-process`) in `story:run-moves-onto-tool-process`.
+//! Reading a tree is [`tool_fs`]'s, searching it [`tool_search`]'s and writing one is
+//! [`tool_code_editor`]'s: every path check is that crate's own, canonicalising before a
+//! containment check. That is real and it is not confinement — nothing stops the *process*, only
+//! those functions, and a bug in them is the whole boundary. `run` stays here: it moves onto its
+//! process toolset (`b10x-tool-process`) in `story:run-moves-onto-tool-process`.
 //!
 //! It is the right provider for a run against the operator's own tree on their own machine, which
 //! is every run this component has ever had. A run that wants the effects confined passes
@@ -36,38 +36,22 @@
 //! declaration cannot drift from what the adapter calls.
 
 use std::fmt::Write as _;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tool_code_editor::{EditInput, Editor, WriteInput};
 use tool_fs::{Fs, GlobInput, ListInput, ReadInput};
+use tool_search::{GrepInput, Search};
 
 use crate::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
 
-const MAX_GREP_RESULTS: usize = 200;
-const MAX_GREP_FILE_BYTES: u64 = 1024 * 1024;
-/// How deep under its starting directory a walk descends before it stops.
-///
-/// A bound rather than none: a deep or cyclic tree would otherwise hold the run open. `pub(crate)`
-/// because `search` names the figure in its own description — a bound the model cannot read is one
-/// it cannot work around, and the entry answers `depth_bound_reached` when it bit.
-pub(crate) const MAX_GREP_DEPTH: usize = 12;
 const MAX_RUN_OUTPUT_BYTES: usize = 64 * 1024;
-/// The most lines of context a search may be asked for either side of a match.
-///
-/// Five is enough to see a function signature over a match and small enough that two hundred
-/// matches with context is still a reply and not a file dump.
-const MAX_SEARCH_CONTEXT: u64 = 5;
 /// How long an unconfined `run` may hold the turn open before it is killed.
 ///
 /// A bound rather than none: `wait` on a child that never exits stops the run with no record of
 /// why. Ten minutes is longer than any suite this has been pointed at and shorter than a night.
 const MAX_RUN_SECONDS: u64 = 600;
-/// How much of a matched line `search` reports. One minified file on a single line would otherwise
-/// bury every other result, so the line is cut — and the match says that it was.
-const MAX_MATCH_CHARS: usize = 400;
 
 /// The environment variables a declared program is started with, unless a caller names more.
 ///
@@ -95,15 +79,6 @@ const INHERITED_ENV: &[&str] = &[
     "SSL_CERT_DIR",
 ];
 
-/// Directories skipped while walking. Each is either machine output or another tool's private
-/// state, and including them buries the answer the person asked for.
-///
-/// `pub(crate)` because `search` names them one by one in its own description. "Build output and
-/// version-control directories are skipped" tells a model that something was left out and not
-/// *what*, so a model looking for a file under `target/` reads a complete-looking empty answer and
-/// concludes the file is not there.
-pub(crate) const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv", "__pycache__"];
-
 /// The **declared** harness-name↔tools-id correspondence: `(harness, tools)`.
 ///
 /// Not the router — each `Operations` method below calls its tools operation directly, by name, in
@@ -112,19 +87,20 @@ pub(crate) const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv",
 /// is what keeps it honest against the tools crates, so the declaration cannot drift from what the
 /// adapter actually calls.
 ///
-/// `search` and `run` are **not** here — `tools` `0.2.0` has no search toolset and `run` has not
-/// moved onto `b10x-tool-process` yet, so they stay local. The recorded operation name (`file.read`, `shell`) is a third thing and is not this
-/// table; metaharness reads that back, and renaming it is not renaming this.
+/// `run` is **not** here — it has not moved onto `b10x-tool-process` yet, so it stays local. The
+/// recorded operation name (`file.read`, `shell`) is a third thing and is not this table;
+/// metaharness reads that back, and renaming it is not renaming this.
 pub(crate) const MAPPING: &[(&str, &str)] = &[
     ("file_read", "fs.read"),
     ("dir_list", "fs.list"),
+    ("search", "search.grep"),
     ("find", "fs.glob"),
     ("file_write", "code.write"),
     ("file_edit", "code.edit"),
 ];
 
 /// The `tools` operation id a harness operation is performed by, or `None` for one that stays local
-/// (`search`, `run`).
+/// (`run`).
 #[must_use]
 pub fn tools_operation(harness: &str) -> Option<&'static str> {
     MAPPING
@@ -142,13 +118,15 @@ pub fn harness_operation(tools: &str) -> Option<&'static str> {
         .map(|(name, _)| *name)
 }
 
-/// A bounded view of one directory, read through [`tool_fs`] and written through
-/// [`tool_code_editor`], with `search` and `run` performed here.
+/// A bounded view of one directory, read through [`tool_fs`], searched through [`tool_search`] and
+/// written through [`tool_code_editor`], with `run` performed here.
 #[derive(Debug, Clone)]
 pub struct LocalOperations {
     root: PathBuf,
     /// Reads: `fs.read`, `fs.list`, `fs.glob`.
     fs: Fs,
+    /// Search: `search.grep`.
+    search: Search,
     /// Writes: `code.write`, `code.edit`. Held whether or not writing is offered; whether it is
     /// reachable is `programs`, exactly as the catalogue's gate reads it, so holding it publishes
     /// nothing.
@@ -196,10 +174,12 @@ impl LocalOperations {
 
     fn open(root: impl AsRef<Path>, programs: Option<Vec<String>>) -> Result<Self, String> {
         let fs = Fs::new(&root).map_err(|error| error.to_string())?;
+        let search = Search::new(&root).map_err(|error| error.to_string())?;
         let editor = Editor::new(&root).map_err(|error| error.to_string())?;
         Ok(Self {
             root: fs.root().to_path_buf(),
             fs,
+            search,
             editor,
             programs,
             inherited: Vec::new(),
@@ -208,30 +188,6 @@ impl LocalOperations {
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    /// Resolves a caller-supplied path inside the workspace, for `search` alone.
-    ///
-    /// Reads and writes resolve through the tools crates; this is the one place `search` reaches
-    /// the host filesystem, so it canonicalises before the containment check exactly as those do.
-    fn resolve(&self, relative: &str) -> Result<PathBuf, String> {
-        let candidate = self.root.join(relative);
-        let canonical = candidate
-            .canonicalize()
-            .map_err(|error| format!("`{relative}`: {error}"))?;
-        if !canonical.starts_with(&self.root) {
-            return Err(format!(
-                "`{relative}` resolves outside the workspace and was refused"
-            ));
-        }
-        Ok(canonical)
-    }
-
-    fn display(&self, path: &Path) -> String {
-        path.strip_prefix(&self.root)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned()
     }
 
     /// `fs.read` through [`tool_fs`], with the whole-file `sha256` stripped.
@@ -253,123 +209,6 @@ impl LocalOperations {
             object.remove("sha256");
         }
         Ok(value)
-    }
-
-    fn grep(
-        &self,
-        pattern: &str,
-        relative: &str,
-        options: &SearchOptions,
-    ) -> Result<Value, String> {
-        if pattern.is_empty() {
-            return Err("`pattern` is required and must not be empty".to_owned());
-        }
-        let limit = options
-            .max_results
-            .unwrap_or(MAX_GREP_RESULTS)
-            .min(MAX_GREP_RESULTS);
-        // Capped rather than refused: a caller who asked for forty lines of context wanted to see
-        // around the match, and five is seeing around it. The cap is in the entry's own schema —
-        // and the reply echoes the figure that was actually used when it differs from the one that
-        // was asked for, because a cap the reader cannot see is a bound they will not work around.
-        let asked_context = options.context.unwrap_or(0);
-        let context = usize::try_from(asked_context.min(MAX_SEARCH_CONTEXT)).unwrap_or(usize::MAX);
-        let expression = search_expression(pattern, options.regex)?;
-        let filter = options.glob.as_deref().map(PathGlob::compile).transpose()?;
-        let root = self.resolve(relative)?;
-
-        let mut matches = Vec::new();
-        let mut truncated = false;
-        let mut skipped_large_files = 0_u64;
-        let mut skipped_large_paths = Vec::new();
-        let boundary = self.root.clone();
-        let depth_bound_reached = walk(&root, &boundary, 0, &mut |file| {
-            if matches.len() >= limit {
-                truncated = true;
-                return false;
-            }
-            let shown = self.display(file);
-            if filter.as_ref().is_some_and(|glob| !glob.matches(&shown)) {
-                return true;
-            }
-            let Ok(metadata) = file.metadata() else {
-                return true;
-            };
-            if metadata.len() > MAX_GREP_FILE_BYTES {
-                skipped_large_files = skipped_large_files.saturating_add(1);
-                if skipped_large_paths.len() < 20 {
-                    skipped_large_paths.push(shown);
-                }
-                truncated = true;
-                return true;
-            }
-            let Ok(text) = fs::read_to_string(file) else {
-                // Binary or unreadable. Skipping is right; reporting each one is noise.
-                return true;
-            };
-            let lines: Vec<&str> = text.lines().collect();
-            for (index, line) in lines.iter().enumerate() {
-                if matches.len() >= limit {
-                    truncated = true;
-                    return false;
-                }
-                let hit = match &expression {
-                    Some(expression) => expression.is_match(line),
-                    None => line.contains(pattern),
-                };
-                if !hit {
-                    continue;
-                }
-                let mut hit = json!({
-                    "path": shown,
-                    "line": index + 1,
-                    "text": cut_to(line),
-                    // Always present, so the shape is stable and a reader who checks the flag
-                    // never has to wonder whether its absence means "whole" or "old reply".
-                    "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
-                });
-                // Only when context was asked for. Two empty arrays on every match of every
-                // search would be bytes replayed on every later turn to say *nothing here*.
-                if context > 0 {
-                    hit["before"] = around(&lines, index.saturating_sub(context)..index);
-                    hit["after"] =
-                        around(&lines, index + 1..(index + 1 + context).min(lines.len()));
-                }
-                matches.push(hit);
-            }
-            true
-        });
-
-        let mut answer = json!({
-            "pattern": pattern,
-            "matches": matches,
-            "truncated": truncated,
-            // Always present, like `truncated`, and for the same reason: a walk that stopped
-            // descending at [`MAX_GREP_DEPTH`] answered a subset of the tree, and a reply that said
-            // nothing about it reads exactly like one that searched everything.
-            "depth_bound_reached": depth_bound_reached,
-            "skipped_large_files": skipped_large_files,
-            "skipped_large_paths": skipped_large_paths,
-        });
-        // Echoed only when they were asked for, so a reader of the record can tell a literal
-        // search from a regular expression without holding the call beside the answer.
-        if options.regex {
-            answer["regex"] = json!(true);
-        }
-        if let Some(glob) = &options.glob {
-            answer["glob"] = json!(glob);
-        }
-        // Only when the cap bit. A caller who asked for forty lines got five, and a reply that did
-        // not say so leaves them reading five as though it were forty.
-        if asked_context > MAX_SEARCH_CONTEXT {
-            answer["context"] = json!(MAX_SEARCH_CONTEXT);
-            answer["note"] = json!(format!(
-                "`context` was {asked_context} and this build answers at most \
-                 {MAX_SEARCH_CONTEXT} lines either side of a match, so {MAX_SEARCH_CONTEXT} is \
-                 what these matches carry."
-            ));
-        }
-        Ok(answer)
     }
 
     fn exec(
@@ -492,8 +331,28 @@ impl Operations for LocalOperations {
         Ok(serde_json::to_value(output).expect("a list output serialises"))
     }
 
+    /// `search.grep` through [`tool_search`], its reply field for field and its refusals in its own
+    /// words.
+    ///
+    /// Nothing is stripped, unlike a read: every field `search.grep` answers is one harness's
+    /// `search` answered before it moved, and the substrate provider beside this one performs no
+    /// search to be compared with.
     fn search(&self, pattern: &str, path: &str, options: &SearchOptions) -> Result<Value, String> {
-        self.grep(pattern, path, options)
+        let input = GrepInput {
+            pattern: pattern.to_owned(),
+            path: Some(path.to_owned()),
+            regex: Some(options.regex),
+            glob: options.glob.clone(),
+            context: options.context,
+            max_results: options
+                .max_results
+                .map(|count| u64::try_from(count).unwrap_or(u64::MAX)),
+        };
+        let output = self
+            .search
+            .grep(&input)
+            .map_err(|error| error.to_string())?;
+        Ok(serde_json::to_value(output).expect("a grep output serialises"))
     }
 
     fn find(&self, glob: &str, path: &str, max_results: Option<usize>) -> Result<Value, String> {
@@ -582,24 +441,6 @@ impl Operations for LocalOperations {
     }
 }
 
-/// Compiles a model-supplied regular expression once, before walking anything.
-///
-/// Both program limits are explicit: the crate defaults would let one pattern choose far more
-/// memory. A compile failure is named instead of being misreported as an empty search result.
-fn search_expression(pattern: &str, enabled: bool) -> Result<Option<regex::Regex>, String> {
-    if !enabled {
-        return Ok(None);
-    }
-    regex::RegexBuilder::new(pattern)
-        .size_limit(1 << 20)
-        .dfa_size_limit(1 << 20)
-        .build()
-        .map(Some)
-        .map_err(|error| {
-            format!("`{pattern}` is not a regular expression this build can compile: {error}")
-        })
-}
-
 #[cfg(unix)]
 fn terminate(child: &mut std::process::Child) {
     use nix::sys::signal::{Signal, killpg};
@@ -614,123 +455,6 @@ fn terminate(child: &mut std::process::Child) {
 #[cfg(not(unix))]
 fn terminate(child: &mut std::process::Child) {
     let _ = child.kill();
-}
-
-/// A match's line, cut at [`MAX_MATCH_CHARS`] on a character boundary.
-fn cut_to(line: &str) -> String {
-    line.chars().take(MAX_MATCH_CHARS).collect()
-}
-
-/// The lines of `range`, each under its own number, for the context around a match.
-fn around(lines: &[&str], range: std::ops::Range<usize>) -> Value {
-    Value::Array(
-        lines[range.clone()]
-            .iter()
-            .zip(range)
-            .map(|(line, index)| {
-                json!({
-                    "line": index + 1,
-                    "text": cut_to(line),
-                    "line_truncated": line.chars().nth(MAX_MATCH_CHARS).is_some(),
-                })
-            })
-            .collect(),
-    )
-}
-
-/// One glob, matched the way a person means it.
-///
-/// **A glob with no `/` in it matches the file's name anywhere in the tree**; one with a `/`
-/// matches the whole workspace-relative path, and `*` does not cross a directory separator there.
-/// That is ripgrep's rule, taken rather than invented: a model that asks for `*.rs` means every
-/// Rust file, and answering it with the four in the workspace root would read as *there are four*.
-struct PathGlob {
-    matcher: globset::GlobMatcher,
-    by_name: bool,
-}
-
-impl PathGlob {
-    /// # Errors
-    ///
-    /// The glob does not compile, with globset's own words — a pattern nobody can match is refused
-    /// rather than quietly matching nothing.
-    fn compile(pattern: &str) -> Result<Self, String> {
-        let matcher = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-            .map_err(|error| format!("`{pattern}` is not a glob this build can compile: {error}"))?
-            .compile_matcher();
-        Ok(Self {
-            matcher,
-            by_name: !pattern.contains('/'),
-        })
-    }
-
-    fn matches(&self, relative: &str) -> bool {
-        let candidate = if self.by_name {
-            relative.rsplit('/').next().unwrap_or(relative)
-        } else {
-            relative
-        };
-        self.matcher.is_match(candidate)
-    }
-}
-
-/// Walks files under `directory`, calling `visit` until it returns `false`.
-///
-/// Every entry is re-checked against `boundary`. Checking only the path the caller supplied is not
-/// enough: `is_dir` and `read_dir` both follow symlinks, so a link inside the workspace pointing
-/// anywhere else would be walked and its contents returned under a workspace-relative name.
-///
-/// Depth is bounded so a deep or cyclic tree cannot hold the run open.
-///
-/// **Answers whether that bound stopped a descent**, which is the whole reason it returns anything.
-/// A walk that stopped at [`MAX_GREP_DEPTH`] visited a subset of the tree, and `search` answered
-/// `truncated: false` over it — a bound nothing reported, which is invariant 8. The caller puts it
-/// in the reply as `depth_bound_reached`.
-///
-/// [`SKIPPED`] directories are not reported the same way: they are named in the entry's own
-/// description, so a model reads *which* directories are not searched before it calls rather than
-/// afterwards.
-fn walk(
-    directory: &Path,
-    boundary: &Path,
-    depth: usize,
-    visit: &mut dyn FnMut(&Path) -> bool,
-) -> bool {
-    if depth > MAX_GREP_DEPTH {
-        return true;
-    }
-    if !contained(directory, boundary) {
-        return false;
-    }
-    if directory.is_file() {
-        visit(directory);
-        return false;
-    }
-    let Ok(entries) = fs::read_dir(directory) else {
-        return false;
-    };
-    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    let mut bounded = false;
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !contained(&path, boundary) {
-            continue;
-        }
-        if path.is_dir() {
-            if SKIPPED.contains(&name.as_ref()) {
-                continue;
-            }
-            bounded |= walk(&path, boundary, depth + 1, visit);
-        } else if !visit(&path) {
-            return bounded;
-        }
-    }
-    bounded
 }
 
 /// What one of a child's streams said, bounded at both ends.
@@ -841,12 +565,6 @@ fn whole_suffix(bytes: &[u8]) -> usize {
         .unwrap_or(bytes.len())
 }
 
-/// Whether `path` really lives inside `boundary`, following every link on the way.
-fn contained(path: &Path, boundary: &Path) -> bool {
-    path.canonicalize()
-        .is_ok_and(|resolved| resolved.starts_with(boundary))
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -878,23 +596,31 @@ mod tests {
                 "{tools} -> {harness}"
             );
         }
-        // `search` and `run` call no `tools` operation at 0.2.0 and stay local, so the table names
-        // neither — in either direction.
-        assert_eq!(tools_operation("search"), None);
+        // `search` is `search.grep` since tools `0.3.0`, read in both directions.
+        assert_eq!(tools_operation("search"), Some("search.grep"));
+        assert_eq!(harness_operation("search.grep"), Some("search"));
+        // `run` has not moved onto `b10x-tool-process` and stays local, so the table does not name
+        // it — in either direction.
         assert_eq!(tools_operation("run"), None);
         assert_eq!(harness_operation("fs.walk"), None);
     }
 
     #[test]
     fn every_mapped_id_is_an_operation_the_tools_crates_expose() {
-        // The table cannot name an id the tools crates do not answer: the `fs` toolset answers the
-        // three reads and the `code-editor` toolset the two writes, and nothing else is mapped.
-        let fs = ["fs.read", "fs.list", "fs.glob"];
-        let code = ["code.write", "code.edit"];
+        // The table cannot name an id the tools crates do not answer. The `fs` and `search` ids are
+        // read off the contract each crate carries; `b10x-tool-code-editor` keeps its parsed
+        // contract private, so its two writes are named here.
+        let mut exposed: Vec<String> = tool_fs::contract()
+            .operations
+            .iter()
+            .chain(&tool_search::contract().operations)
+            .map(|operation| operation.name.clone())
+            .collect();
+        exposed.extend(["code.write".to_owned(), "code.edit".to_owned()]);
         for (_, id) in MAPPING {
             assert!(
-                fs.contains(id) || code.contains(id),
-                "{id} is not an operation of the fs or code-editor toolset"
+                exposed.iter().any(|name| name == id),
+                "{id} is not an operation of the fs, search or code-editor toolset: {exposed:?}"
             );
         }
     }
@@ -937,6 +663,206 @@ mod tests {
             .expect("the search");
         assert_eq!(answer["matches"][0]["path"], serde_json::json!("notes.txt"));
         assert_eq!(answer["matches"][0]["line"], serde_json::json!(2));
+    }
+
+    #[test]
+    fn the_adapter_wires_every_search_option_into_search_grep_and_strips_nothing() {
+        // The adapter's wiring only: every `SearchOptions` field reaches `GrepInput`, and the reply
+        // comes back with nothing stripped or added. Both sides are `tool_search`, so a change in
+        // the pinned crate moves both and stays green here; the drift guard against 0.15.1's reply
+        // is `tests/search_against_0_15_1.rs`.
+        let dir = workspace();
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n",
+        )
+        .expect("the seed");
+        let options = SearchOptions {
+            regex: true,
+            glob: Some("*.rs".to_owned()),
+            context: Some(9),
+            max_results: Some(1),
+        };
+        let answer = writing(dir.path())
+            .search("fn (alpha|beta)", ".", &options)
+            .expect("the search");
+        let grep = tool_search::Search::new(dir.path())
+            .expect("a workspace")
+            .grep(&tool_search::GrepInput {
+                pattern: "fn (alpha|beta)".to_owned(),
+                path: Some(".".to_owned()),
+                regex: Some(true),
+                glob: Some("*.rs".to_owned()),
+                context: Some(9),
+                max_results: Some(1),
+            })
+            .expect("the grep");
+        assert_eq!(
+            answer,
+            serde_json::to_value(grep).expect("serialises"),
+            "{answer}"
+        );
+        assert_eq!(answer["context"], serde_json::json!(5), "the cap is echoed");
+        assert_eq!(answer["truncated"], serde_json::json!(true), "{answer}");
+    }
+
+    /// The paths of a search reply's matches, in order.
+    fn matched(answer: &serde_json::Value) -> Vec<&str> {
+        answer["matches"]
+            .as_array()
+            .expect("a list of matches")
+            .iter()
+            .map(|found| found["path"].as_str().expect("a path"))
+            .collect()
+    }
+
+    fn capped(max_results: usize) -> SearchOptions {
+        SearchOptions {
+            max_results: Some(max_results),
+            ..SearchOptions::default()
+        }
+    }
+
+    #[test]
+    fn exactly_max_results_matches_is_a_complete_answer() {
+        // harness's own grep tested the cap before every file and line, so exactly `max_results`
+        // matches followed by anything at all answered `truncated: true`. tools `0.3.0` says a
+        // match past the cap exists, and nothing else.
+        let dir = workspace();
+        std::fs::write(dir.path().join("a.txt"), "needle\nneedle\nother\n").expect("the seed");
+        std::fs::write(dir.path().join("b.txt"), "other\n").expect("the seed");
+        let operations = writing(dir.path());
+
+        let answer = operations
+            .search("needle", ".", &capped(2))
+            .expect("the search");
+        assert_eq!(matched(&answer), ["a.txt", "a.txt"]);
+        assert_eq!(answer["truncated"], serde_json::json!(false), "{answer}");
+
+        let answer = operations
+            .search("needle", ".", &capped(1))
+            .expect("the search");
+        assert_eq!(matched(&answer), ["a.txt"]);
+        assert_eq!(answer["truncated"], serde_json::json!(true), "{answer}");
+    }
+
+    #[test]
+    fn after_the_cap_a_search_counts_the_large_files_it_meets_before_the_next_match() {
+        let dir = workspace();
+        let large = format!(
+            "needle{}",
+            "x".repeat(usize::try_from(tool_search::MAX_GREP_FILE_BYTES).expect("fits"))
+        );
+        std::fs::write(dir.path().join("a.txt"), "needle\n").expect("the seed");
+        std::fs::write(dir.path().join("b.txt"), &large).expect("the seed");
+        std::fs::write(dir.path().join("c.txt"), "needle\n").expect("the seed");
+        std::fs::write(dir.path().join("d.txt"), &large).expect("the seed");
+        let answer = writing(dir.path())
+            .search("needle", ".", &capped(1))
+            .expect("the search");
+        assert_eq!(matched(&answer), ["a.txt"]);
+        assert_eq!(answer["truncated"], serde_json::json!(true));
+        assert_eq!(
+            answer["skipped_large_paths"],
+            serde_json::json!(["b.txt"]),
+            "b.txt is met before the match past the cap in c.txt; d.txt is never reached"
+        );
+        assert_eq!(answer["skipped_large_files"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn an_empty_pattern_is_refused_in_search_greps_own_words() {
+        let dir = workspace();
+        let refused = writing(dir.path())
+            .search("", ".", &SearchOptions::default())
+            .expect_err("an empty pattern is refused");
+        assert_eq!(
+            refused,
+            "`pattern` is required and must not be empty: a search has to name what it is \
+             looking for. Nothing was read."
+        );
+    }
+
+    #[test]
+    fn a_file_holding_a_nul_byte_is_binary_and_is_not_searched() {
+        let dir = workspace();
+        std::fs::write(dir.path().join("blob.dat"), "needle\0\0\x01\n").expect("the seed");
+        std::fs::write(dir.path().join("notes.txt"), "needle\n").expect("the seed");
+        let answer = writing(dir.path())
+            .search("needle", ".", &SearchOptions::default())
+            .expect("the search");
+        assert_eq!(matched(&answer), ["notes.txt"], "{answer}");
+    }
+
+    #[test]
+    fn an_entry_named_like_a_skipped_directory_is_not_searched() {
+        // A worktree's `.git` is a file, and the entry's own description says `.git` is never
+        // searched.
+        let dir = workspace();
+        std::fs::write(
+            dir.path().join(".git"),
+            "gitdir: ../main/.git/worktrees/x needle\n",
+        )
+        .expect("the seed");
+        std::fs::write(dir.path().join("notes.md"), "needle\n").expect("the seed");
+        let answer = writing(dir.path())
+            .search("needle", ".", &SearchOptions::default())
+            .expect("the search");
+        assert_eq!(matched(&answer), ["notes.md"], "{answer}");
+    }
+
+    #[test]
+    fn an_empty_glob_is_refused_rather_than_matching_no_file() {
+        let dir = workspace();
+        std::fs::write(dir.path().join("notes.txt"), "needle\n").expect("the seed");
+        let options = SearchOptions {
+            glob: Some(String::new()),
+            ..SearchOptions::default()
+        };
+        let refused = writing(dir.path())
+            .search("needle", ".", &options)
+            .expect_err("an empty glob names no file and is refused");
+        assert!(refused.contains("`glob` must not be empty"), "{refused}");
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_is_refused_whether_or_not_anything_is_there() {
+        let dir = workspace();
+        std::fs::write(dir.path().join("notes.txt"), "needle\n").expect("the seed");
+        let operations = writing(dir.path());
+        for path in ["..", "../nowhere-at-all"] {
+            let refused = operations
+                .search("needle", path, &SearchOptions::default())
+                .expect_err("a path out of the workspace is refused");
+            assert_eq!(
+                refused,
+                format!("`{path}` resolves outside the workspace and was refused"),
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_in_the_tree_is_passed_over_rather_than_read() {
+        // Opening a pipe for reading blocks until a writer comes, and none will: harness's own
+        // grep read every entry that was not a directory, so one pipe held the call open for good.
+        let dir = workspace();
+        std::fs::write(dir.path().join("own.txt"), "needle\n").expect("the seed");
+        let made = std::process::Command::new("mkfifo")
+            .arg(dir.path().join("pipe"))
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success(), "the pipe is made");
+        let operations = writing(dir.path());
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = answer.send(operations.search("needle", ".", &SearchOptions::default()));
+        });
+        let answer = answered
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the search answers rather than blocking on the pipe")
+            .expect("the search");
+        assert_eq!(matched(&answer), ["own.txt"], "{answer}");
     }
 
     #[test]

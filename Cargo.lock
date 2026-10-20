@@ -165,10 +165,9 @@ dependencies = [
  "b10x-harness-wire",
  "b10x-tool-code-editor",
  "b10x-tool-fs",
+ "b10x-tool-search",
  "b10x-tool-toolchain",
- "globset",
  "nix",
- "regex",
  "serde",
  "serde_json",
  "tempfile",
@@ -534,8 +533,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-code-editor"
-version = "0.2.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.2.0#60d4d0e32f558bb84a01ac8adb581f4f856c1230"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
 dependencies = [
  "b10x-tool-contract",
  "schemars 1.2.3",
@@ -547,8 +546,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-contract"
-version = "0.2.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.2.0#60d4d0e32f558bb84a01ac8adb581f4f856c1230"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
 dependencies = [
  "clap",
  "schemars 1.2.3",
@@ -561,8 +560,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-fs"
-version = "0.2.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.2.0#60d4d0e32f558bb84a01ac8adb581f4f856c1230"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
 dependencies = [
  "b10x-tool-contract",
  "globset",
@@ -574,12 +573,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "b10x-tool-toolchain"
-version = "0.2.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.2.0#60d4d0e32f558bb84a01ac8adb581f4f856c1230"
+name = "b10x-tool-process"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
 dependencies = [
  "b10x-tool-contract",
+ "nix",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "b10x-tool-search"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
+dependencies = [
+ "b10x-tool-contract",
+ "b10x-tool-fs",
  "regex",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "b10x-tool-toolchain"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.3.0#e89380d8f65f564d845711ca3ed77d543d9737a8"
+dependencies = [
+ "b10x-tool-contract",
+ "b10x-tool-process",
+ "regex",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "serde_yaml_ng",

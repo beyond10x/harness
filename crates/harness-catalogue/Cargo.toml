@@ -15,14 +15,13 @@ name = "harness_catalogue"
 workspace = true
 
 [dependencies]
-globset = { workspace = true }
 harness-wire = { workspace = true }
 nix = { workspace = true }
-regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tool-code-editor = { workspace = true }
 tool-fs = { workspace = true }
+tool-search = { workspace = true }
 tool-toolchain = { workspace = true }
 
 [dev-dependencies]

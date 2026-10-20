@@ -788,8 +788,8 @@ fn search() -> Entry {
              tell you afterwards: these directories and everything under them — {} — and anything \
              more than {} directories below where the search started, which the reply reports as \
              `depth_bound_reached`. Start the search lower down to reach past either.",
-            crate::local::SKIPPED.join(", "),
-            crate::local::MAX_GREP_DEPTH,
+            tool_fs::walk::SKIPPED.join(", "),
+            tool_fs::walk::MAX_WALK_DEPTH,
         ),
         input_schema: json!({
             "type": "object",
@@ -798,7 +798,7 @@ fn search() -> Entry {
                 "path": {"type": "string", "description": "Directory or file to search."},
                 "regex": {"type": "boolean", "description": "Read `pattern` as a regular expression. Default false. One that does not compile is refused, never silently matched against nothing."},
                 "glob": {"type": "string", "description": "Only files matching this glob — `*.rs` is that name anywhere in the tree, `crates/**/*.rs` is the whole path."},
-                "context": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Lines either side of each match, under `before` and `after` with their own numbers. Default 0, capped at 5."},
+                "context": {"type": "integer", "minimum": 0, "maximum": tool_search::MAX_SEARCH_CONTEXT, "description": format!("Lines either side of each match, under `before` and `after` with their own numbers. Default 0, capped at {}.", tool_search::MAX_SEARCH_CONTEXT)},
                 "max_results": {"type": "integer", "description": "Ceiling on returned matches."},
             },
             "required": ["pattern"],
@@ -820,8 +820,8 @@ fn find() -> Entry {
              them — {} — and anything more than {} directories below where the walk started, which \
              the reply reports as `depth_bound_reached`. Set `path` lower down to reach past \
              either.",
-            crate::local::SKIPPED.join(", "),
-            crate::local::MAX_GREP_DEPTH,
+            tool_fs::walk::SKIPPED.join(", "),
+            tool_fs::walk::MAX_WALK_DEPTH,
         ),
         input_schema: json!({
             "type": "object",

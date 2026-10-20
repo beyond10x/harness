@@ -7,6 +7,73 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- `search` is served by `b10x-tool-search` — harness 0.14.1's grep moved to `tools` — through the
+  `crates/harness-catalogue` adapter, as `find` is served by `b10x-tool-fs`:
+  `LocalOperations::search` calls `tool_search::Search::grep` and answers its reply field for
+  field, and `search → search.grep` joins the adapter's mapping (`tools_operation`,
+  `harness_operation`). harness's own grep and walk
+  (`grep`, `search_expression`, `cut_to`, `around`, `PathGlob`, `walk`, `contained`, and its copies
+  of the skipped directories and the depth bound) are deleted. The four `tools` crates move together
+  from tag `0.2.0` to `0.3.0` (`e89380d8`) and `b10x-tool-search` is added (atlas ADR 0097 decision
+  3); what `b10x-tool-toolchain` `0.3.0` changes for a toolchain call is under Security.
+  `harness-catalogue` no longer depends on `globset` or `regex` directly. The `search` and `find`
+  entries name `tool_fs::walk::SKIPPED` and `MAX_WALK_DEPTH` and `search`'s schema names
+  `tool_search::MAX_SEARCH_CONTEXT`; the values are the ones harness had, so both entries read to
+  the model byte for byte as before
+  (`the_search_and_find_entries_read_as_they_did_before_search_moved_to_tools`). The CLI contract
+  (`contracts/cli/b10x-harness/2026-09-18`) is unchanged. What `search` answers changes where tools
+  `0.3.0` changed `search.grep` against harness's grep.
+  `crates/harness-catalogue/tests/search_against_0_15_1.rs` holds the unchanged reply byte for byte
+  against 0.15.1's, and the tests in `crates/harness-catalogue/src/local.rs` hold the adapter's
+  wiring into `search.grep`, the two-way mapping, and each change below but the depth bound's,
+  which `b10x-tool-fs`'s `a_capped_glob_reports_the_depth_bound_only_where_it_bit_before_the_cap`
+  holds through `fs.glob`:
+  - `truncated` says that a match past `max_results` exists, and nothing else: exactly
+    `max_results` matches followed by anything at all answers `false`, where harness tested the cap
+    before every file and line and answered `true`. The search walks on after the cap until it
+    meets that next match, so `skipped_large_files` and `skipped_large_paths` count the files over
+    1 MiB met on the way, where harness stopped at the first file after the cap.
+  - An empty `glob` is refused ("`glob` must not be empty when it is given: …"), as `find` refuses
+    one, where harness compiled it into a filter that matched no file and answered no matches.
+  - A `path` is judged by where it lands, and one that names nothing by where its deepest existing
+    ancestor lands, its ancestors read as spelled, nearest first (`path` is resolved by `fs`'s
+    rule). When that ancestor is outside the workspace the answer is "`<path>` resolves outside
+    the workspace and was refused", where 0.15.1 answered "`<path>`: No such file or directory
+    (os error 2)": a `path` that climbs out to nothing (`../nowhere`), an absolute `path` that
+    names nothing outside the workspace, and a name under a link that leads out of it. When that
+    ancestor is inside, the answer is still the not-found error, so `missing/../..` answers
+    "`missing/../..`: No such file or directory (os error 2)" although it would climb out.
+  - `depth_bound_reached` reports a bound met before the search stopped. `tool_fs::walk` stops in
+    every frame once the search stops, where harness's walk kept iterating the frames above and
+    could report a bound it met after the stop.
+  - An empty `pattern` is refused as "`pattern` is required and must not be empty: a search has to
+    name what it is looking for. Nothing was read." (`search.InvalidPattern`'s own sentence), where
+    harness said "`pattern` is required and must not be empty".
+  - Unchanged: the reply's fields — `pattern`, `matches` (`path`, `line`, `text`, `line_truncated`,
+    and `before`/`after` only when context was asked for), `truncated`, `depth_bound_reached`,
+    `skipped_large_files` with `skipped_large_paths` beside it (the first 20, now
+    `tool_search::MAX_SKIPPED_PATHS`), and `regex`, `glob`, `context` and `note` only when they
+    apply — every bound (200 matches, 1 MiB, 5 lines of context, 400 characters, depth 12), the
+    regular-expression size limit and the wording of every other refusal.
+
+### Fixed
+
+- `search` passes over a named pipe, and anything else that is not a regular file, rather than
+  opening it: harness's grep read every entry that was not a directory, so one pipe in the tree held
+  the call open until a writer came, which none did (tools `0.3.0`, `search.grep`).
+- `search` does not search an entry named like a skipped directory (`.git`, `target`,
+  `node_modules`, `.venv`, `__pycache__`), whatever kind of entry it is — a worktree's `.git` file
+  among them — unless it is the `path` asked for. harness skipped those names on directories only,
+  while the entry's own description already said they are never searched (tools `0.3.0`).
+- `search` treats a file that holds a NUL byte as binary and does not search it, like one that is
+  not UTF-8, where harness searched it and answered its NUL bytes in `text` (tools `0.3.0`).
+
+### Security
+
+- A toolchain argument that begins with `-` is refused unless it follows a declared `--` (tools `0.3.0`); an advisory follows the release.
+
 ## [0.15.1] - 2026-10-20
 
 ### Added

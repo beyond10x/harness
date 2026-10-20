@@ -201,11 +201,15 @@ impl Catalogue {
     /// Why this operation may not touch this path under **either** layer, or [`None`] if it may.
     ///
     /// The run's answer first, so the refusal a person reads names the boundary they set when both
-    /// of them refuse.
+    /// of them refuse. A path that is a directory in the tree this catalogue writes is judged by
+    /// what it can hold and by every link beneath it ([`crate::written::refusal`]).
     fn refusal(&self, operation: &str, path: &str) -> Option<String> {
-        self.scope
-            .refusal(operation, path)
-            .or_else(|| self.step.refusal(operation, path))
+        crate::written::refusal(
+            [&self.scope, &self.step],
+            self.operations.host_root(),
+            operation,
+            path,
+        )
     }
 
     /// Whether anything at all was declared, by the run or by the step now running.
@@ -557,12 +561,10 @@ impl Catalogue {
             .into()));
         };
         let runner = ProviderRunner::new(&*self.operations, root);
-        let (scope, step) = (self.scope.clone(), self.step.clone());
+        let (scope, step, tree) = (self.scope.clone(), self.step.clone(), root.to_path_buf());
         let executor = match Executor::with_runner(&runner, self.toolchains.clone()) {
             Ok(executor) => executor.refusing_writes(move |path| {
-                scope
-                    .refusal("file.write", path)
-                    .or_else(|| step.refusal("file.write", path))
+                crate::written::refusal([&scope, &step], Some(&tree), "file.write", path)
             }),
             Err(error) => return Some(Err(error.to_string().into())),
         };

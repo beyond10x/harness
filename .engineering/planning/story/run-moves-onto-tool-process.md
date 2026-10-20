@@ -8,7 +8,7 @@ summary: 'After 0.15.0 and tools'' tool-process release: run is served by b10x-t
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 4}
@@ -34,14 +34,21 @@ tools fixes this in a `tool-process` toolset (tools 0.2.0). When `tool-process` 
 
 harness's `run` is served by the `tool-process` toolset from the `tools` repository; a run whose
 descendant holds stdout is bounded and answers `timed_out: true` when it exceeds its deadline; a
-`setsid` descendant does not escape the kill.
+`setsid` descendant does not hold the call past its bound.
 
 ## Acceptance
 
 `cargo xtask gate` exits 0 on a tree where `run` is served by `b10x-tool-process` (or harness's
 adapter over it), and a test shows `sh -c "sleep 3 &"` (a descendant holding stdout) against a
 300 ms bound answers `timed_out: true` within a small multiple of the bound, and a `setsid`
-descendant is killed with the group.
+descendant does not hold the call past its bound.
+
+Revised 2026-10-20 during the unit: the first wording said a `setsid` descendant "is killed with
+the group". `b10x-tool-process` kills the program's process group at the bound and does not
+reach a process that left it (tools `contracts/process/v1alpha1/semantics.md:70-74`): the local
+runner confines nothing, and only a confined run (Substrate) can stop such a process. The
+defect measured here was the call being held open past its bound, which tool-process fixes;
+that a `setsid` descendant may outlive the call is stated in `CHANGELOG.md`.
 
 ## Scope
 

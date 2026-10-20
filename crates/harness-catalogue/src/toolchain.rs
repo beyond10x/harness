@@ -1,4 +1,12 @@
-//! Catalogue integration for declarative toolchain providers.
+//! Catalogue integration for declarative toolchain providers: what the catalogue publishes.
+//!
+//! What moved to `tool_toolchain::executor` (tools `0.4.0`) is planning and execution: harness's
+//! own `plan` and `CommandPlan`, and the loop that ran a plan's argv, judged its written paths and
+//! shaped its answer. What stayed is `Catalogue::invoke_toolchain`, harness's adapter and the
+//! entry point of a toolchain call — it builds the executor over the active provider's
+//! `run_within` ([`crate::operations::ProviderRunner`]) and this run's write scope, and turns its
+//! answer and refusals into harness's — and publication, here, because an entry is harness's wire
+//! envelope, risk and approval decision, and those are not the tools crate's to make.
 
 use std::collections::BTreeMap;
 
@@ -7,10 +15,6 @@ use serde_json::{Value, json};
 use tool_toolchain::{ResolvedProvider, Role};
 
 use crate::Entry;
-
-pub(crate) struct CommandPlan {
-    pub groups: Vec<(String, tool_toolchain::CommandPlan)>,
-}
 
 pub(crate) fn entries(active: &[ResolvedProvider]) -> Vec<Entry> {
     let mut entries = active
@@ -81,59 +85,6 @@ pub fn entry_names(active: &[ResolvedProvider]) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn programs(active: &[ResolvedProvider]) -> Vec<String> {
-    let mut programs = active
-        .iter()
-        .flat_map(|provider| provider.programs.iter().cloned())
-        .collect::<Vec<_>>();
-    programs.sort();
-    programs.dedup();
-    programs
-}
-
-pub(crate) fn plan(
-    name: &str,
-    arguments: &Value,
-    active: &[ResolvedProvider],
-) -> Option<Result<CommandPlan, String>> {
-    if let Some(role_name) = name.strip_prefix("toolchain_") {
-        let role = [Role::Check, Role::Build, Role::Test, Role::FmtCheck]
-            .into_iter()
-            .find(|role| role.name() == role_name)?;
-        let result = active
-            .iter()
-            .map(|provider| {
-                let tool = provider
-                    .tools
-                    .iter()
-                    .find(|tool| tool.role == Some(role))
-                    .ok_or_else(|| {
-                        format!(
-                            "provider `{}` has no `{}` role implementation",
-                            provider.name,
-                            role.name()
-                        )
-                    })?;
-                let provider_arguments = arguments.get(&provider.name).ok_or_else(|| {
-                    format!("`{}` arguments are required by `{name}`", provider.name)
-                })?;
-                tool.plan(provider_arguments)
-                    .map(|plan| (provider.name.clone(), plan))
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(|groups| CommandPlan { groups });
-        return Some(result);
-    }
-    for provider in active {
-        if let Some(plan) = provider.plan(name, arguments) {
-            return Some(plan.map(|plan| CommandPlan {
-                groups: vec![(provider.name.clone(), plan)],
-            }));
-        }
-    }
-    None
-}
-
 fn process(writes: bool) -> Envelope {
     let mut effects = vec![Effect::Process, Effect::Filesystem];
     if writes {
@@ -162,9 +113,12 @@ mod tests {
                 Some(&["rust".to_owned()]),
             )
             .expect("installed providers");
-        let plan = plan("toolchain_test", &json!({"rust":{}}), &providers)
-            .expect("known")
-            .expect("valid");
+        // The plan the catalogue's toolchain entries run is the executor's.
+        let plan =
+            tool_toolchain::executor::plan("toolchain_test", &json!({"rust":{}}), &providers)
+                .expect("known")
+                .expect("valid");
         assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].provider, "rust");
     }
 }

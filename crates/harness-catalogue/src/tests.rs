@@ -62,6 +62,10 @@ impl Operations for Everything {
     fn writes(&self) -> bool {
         true
     }
+    /// The tree it reads, which is where a toolchain call's paths are judged.
+    fn host_root(&self) -> Option<&std::path::Path> {
+        self.local.host_root()
+    }
 }
 
 fn tree() -> tempfile::TempDir {

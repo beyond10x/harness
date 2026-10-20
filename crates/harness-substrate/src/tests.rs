@@ -1361,6 +1361,14 @@ fn resolved_provider_data_crosses_to_substrate_without_provider_branches() {
             ),
         ]),
         programs: vec!["example".to_owned()],
+        // The declaration `env` was expanded from, placeholders as written (tools 0.4.0).
+        sandbox: tool_toolchain::SandboxSpec {
+            programs: vec!["example".to_owned()],
+            env: std::collections::BTreeMap::from([
+                ("HOME".to_owned(), "{workspace}".to_owned()),
+                ("PATH".to_owned(), "{mount:sdk}/bin:/usr/bin".to_owned()),
+            ]),
+        },
         facts: Vec::new(),
         tools: Vec::new(),
         provenance: tool_toolchain::Provenance {
@@ -1424,5 +1432,206 @@ fn a_staged_driver_admits_one_file_and_never_the_directory_it_came_from() {
         driver.sha256(),
         "2262eae9d3b679fe881472d86f942cd94b6065a63ad65f47a1a87bee31c7a276",
         "the digest of the staged bytes, agreed by `sha256sum` on the same content"
+    );
+}
+
+#[test]
+fn a_toolchain_call_reaches_substrate_as_a_confined_exec_and_answers_its_observation() {
+    // The executor runs a toolchain call's argv through the active provider's `run_within`, so a
+    // confined workspace's call is the confined exec it always was: asked for by name, answered
+    // with substrate's own observation. Machine-independent, over the scripted socket; the
+    // conformance suite runs the same call through the embedded driver where it can confine one.
+    let tree = tempfile::tempdir().expect("a tree");
+    std::fs::write(tree.path().join("probe.lock"), "").expect("the project marker");
+    let spec = tempfile::tempdir().expect("a spec directory");
+    let file = spec.path().join("probe.yaml");
+    std::fs::write(
+        &file,
+        "version: 1\n\
+         toolchains:\n\
+         \x20 - name: probe\n\
+         \x20   description: One process that prints nothing of its own.\n\
+         \x20   project:\n\
+         \x20     all: [probe.lock]\n\
+         \x20   sandbox:\n\
+         \x20     programs: [\"true\"]\n\
+         \x20     env:\n\
+         \x20       HOME: \"{workspace}\"\n\
+         \x20       PATH: /usr/bin:/bin\n\
+         \x20   tools:\n\
+         \x20     - name: probe_true\n\
+         \x20       description: Run true.\n\
+         \x20       commands:\n\
+         \x20         - argv: [\"true\"]\n",
+    )
+    .expect("the spec");
+    let mut registry = tool_toolchain::Registry::builtins().expect("the built-ins");
+    registry.load_file(&file).expect("the probe spec loads");
+    let providers = registry
+        .resolve(tree.path(), Some(&["probe".to_owned()]))
+        .expect("the probe provider resolves");
+    let script = Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
+    ]);
+    let catalogue = Catalogue::of_with_toolchains(
+        harness_catalogue::Split::new(
+            harness_catalogue::LocalOperations::new(tree.path()).expect("the reading half"),
+            provider(&confined(), script.clone(), &["true"]),
+        ),
+        providers,
+    );
+
+    let answer = catalogue
+        .invoke("probe_true", &json!({}))
+        .expect("the confined call runs");
+
+    assert_eq!(answer["stdout"], json!("ok\n"), "{answer}");
+    assert_eq!(answer["exit"]["state"], json!("exited"), "{answer}");
+    assert_eq!(answer["output_complete"], json!(true), "{answer}");
+    let seen = script.seen.lock().expect("not poisoned");
+    let execs: Vec<&Value> = seen
+        .iter()
+        .filter(|(method, path, _)| method == "POST" && path == "/v1/execs")
+        .filter_map(|(_, _, body)| body.as_ref())
+        .collect();
+    assert_eq!(execs.len(), 1, "one argv, one exec: {seen:?}");
+    let sent = &execs[0]["input"];
+    assert_eq!(sent["argv"], json!(["true"]), "{sent}");
+    assert_eq!(sent["sandbox"]["require"], json!(true), "{sent}");
+    assert_eq!(
+        sent["sandbox"]["network"],
+        serde_json::to_value(substrate_wire::NetworkMode::None).expect("serialises"),
+        "{sent}"
+    );
+}
+
+/// A probe provider whose one tool writes each named path, served as `harness-cli` composes
+/// `--substrate-embedded`: `Split` over the local reader of `tree` and the confined provider,
+/// under `protected/**=denied`.
+fn writing_probe(tree: &std::path::Path, script: Scripted) -> Catalogue {
+    std::fs::write(tree.join("probe.lock"), "").expect("the project marker");
+    let spec = tempfile::tempdir().expect("a spec directory");
+    let file = spec.path().join("probe.yaml");
+    std::fs::write(
+        &file,
+        "version: 1\n\
+         toolchains:\n\
+         \x20 - name: probe\n\
+         \x20   description: Writes the named paths.\n\
+         \x20   project:\n\
+         \x20     all: [probe.lock]\n\
+         \x20   sandbox:\n\
+         \x20     programs: [\"true\"]\n\
+         \x20     env:\n\
+         \x20       HOME: \"{workspace}\"\n\
+         \x20       PATH: /usr/bin:/bin\n\
+         \x20   tools:\n\
+         \x20     - name: probe_write\n\
+         \x20       description: Write the named paths.\n\
+         \x20       workspace-writes: true\n\
+         \x20       parameters:\n\
+         \x20         paths: { kind: workspace-path-list, required: true, min-items: 1, max-items: 8 }\n\
+         \x20       writes: [paths]\n\
+         \x20       commands:\n\
+         \x20         - argv: [\"true\", { each: paths }]\n",
+    )
+    .expect("the spec");
+    let mut registry = tool_toolchain::Registry::builtins().expect("the built-ins");
+    registry.load_file(&file).expect("the probe spec loads");
+    let providers = registry
+        .resolve(tree, Some(&["probe".to_owned()]))
+        .expect("the probe provider resolves");
+    Catalogue::of_with_toolchains(
+        harness_catalogue::Split::new(
+            harness_catalogue::LocalOperations::new(tree).expect("the reading half"),
+            provider(&confined(), script, &["true"]),
+        ),
+        providers,
+    )
+    .scoped(harness_catalogue::Scope::of(vec![
+        harness_catalogue::ScopeRule::parse("protected/**=denied").expect("a rule"),
+    ]))
+}
+
+/// Every exec body the scripted transport was sent.
+fn execs_sent(script: &Scripted) -> Vec<Value> {
+    script
+        .seen
+        .lock()
+        .expect("not poisoned")
+        .iter()
+        .filter(|(method, path, _)| method == "POST" && path == "/v1/execs")
+        .filter_map(|(_, _, body)| body.clone())
+        .collect()
+}
+
+fn one_exec() -> Scripted {
+    Scripted::new(vec![
+        (200, MACHINE_WITH_SNAPSHOT),
+        (200, EXEC_EXITED),
+        (200, STDOUT_SLICE),
+        (200, STDERR_SLICE),
+    ])
+}
+
+#[test]
+fn a_confined_toolchain_write_through_a_link_into_a_refused_directory_sends_no_exec() {
+    // Through `Split` the executor judges where a written path lands under the reading half's
+    // root, the tree the embedded driver adopts. A link into `protected/` is refused before any
+    // exec reaches substrate; a path that lands where the scope admits it reaches substrate.
+    let tree = tempfile::tempdir().expect("a tree");
+    std::fs::create_dir(tree.path().join("protected")).expect("the refused directory");
+    std::fs::write(tree.path().join("protected/kept"), "").expect("a refused file");
+    std::fs::create_dir(tree.path().join("src")).expect("src");
+    std::fs::write(tree.path().join("src/ok"), "").expect("an admitted file");
+    std::os::unix::fs::symlink("../protected/kept", tree.path().join("src/alias"))
+        .expect("a link into the refused directory");
+    let script = one_exec();
+    let catalogue = writing_probe(tree.path(), script.clone());
+
+    let refused = catalogue
+        .invoke("probe_write", &json!({"paths": ["src/alias"]}))
+        .expect_err("the link lands in the refused directory");
+    assert!(
+        refused.message().contains("leads to `protected/kept`"),
+        "{refused}"
+    );
+    assert!(execs_sent(&script).is_empty(), "an exec reached substrate");
+
+    catalogue
+        .invoke("probe_write", &json!({"paths": ["src/ok"]}))
+        .expect("an admitted path runs confined");
+    let sent = execs_sent(&script);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["input"]["argv"], json!(["true", "src/ok"]));
+}
+
+#[test]
+#[ignore = "pre-existing; fixed by story:a-written-directory-is-judged-by-what-it-holds (next unit)"]
+fn a_confined_toolchain_write_naming_the_directory_that_holds_refused_files_sends_no_exec() {
+    // `--substrate-embedded` is the only composition `harness-cli` runs a toolchain under. A
+    // written path that names `protected` or the workspace itself hands the program every file
+    // beneath it, `protected/kept` included, and the confined workspace is writable to it.
+    let tree = tempfile::tempdir().expect("a tree");
+    std::fs::create_dir(tree.path().join("protected")).expect("the refused directory");
+    std::fs::write(tree.path().join("protected/kept"), "").expect("a refused file");
+    let script = one_exec();
+    let catalogue = writing_probe(tree.path(), script.clone());
+
+    let named = catalogue.invoke("probe_write", &json!({"paths": ["protected/kept"]}));
+    assert!(named.is_err(), "the file itself is refused: {named:?}");
+
+    let answer = catalogue.invoke("probe_write", &json!({"paths": ["."]}));
+
+    let sent = execs_sent(&script);
+    assert!(
+        sent.is_empty(),
+        "`.` holds `protected/kept` and reached substrate as {:?}: {answer:?}",
+        sent.iter()
+            .map(|body| body["input"]["argv"].clone())
+            .collect::<Vec<_>>()
     );
 }

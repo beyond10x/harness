@@ -110,6 +110,85 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
     twelve names. The refusal of a program outside the declared set keeps harness's words and its
     `Refusal::ProgramNotDeclared`, mapped from `process.ProgramNotDeclared`; the start-failure and
     empty-argv refusals keep theirs.
+- Toolchain calls — every typed toolchain tool and every `toolchain_<role>` entry — run through
+  `tool_toolchain::executor`, harness 0.14.1's toolchain executor moved to `tools`, with the
+  active provider's `Operations::run_within` as its runner (`ProviderRunner` in
+  `crates/harness-catalogue/src/operations.rs`), so a local and a Substrate-confined call run
+  through one executor (atlas ADR 0097 decision 3). The executor makes its checks before any argv
+  is handed over; each argv then reaches the provider as before: `LocalOperations` starts it
+  through `b10x-tool-process`, and `harness-substrate`'s confined provider through substrate with
+  the providers' declared environment and read-only roots applied by the embedded driver, exactly
+  as before. `Catalogue::invoke_toolchain`'s own loop and the plan half of
+  `crates/harness-catalogue/src/toolchain.rs` (`CommandPlan`, `plan`, `programs`) are deleted;
+  publication (`entries`, the entries' envelopes and `Risk::High`) stays harness's. The six `tools`
+  crates move together from tag `0.3.0` to `0.4.0` (`6017fccc`) in `[workspace.dependencies]`
+  (invariant 2); tools `0.4.0` changes the executor alone. `Operations` gains `host_root`, the
+  directory on this host a provider runs programs in, defaulted to `None`: `LocalOperations`
+  answers its root, and `Split` its effecting half's or else its reading half's, the one tree
+  `harness-cli` composes. `crates/harness-catalogue/tests/toolchain_against_0_15_1.rs` holds
+  0.15.1's reply to `rust_fmt_check` as a literal, `runs`, the shared deadline and its cut-short
+  marker, the judgement of a path where it lands, a role's `toolchains` answer and a provider's
+  named refusal, and `crates/harness-catalogue/tests/toolchain_adversary.rs` the empty plan, a
+  role that names every provider it planned, and the step's write scope; the substrate
+  conformance suite runs a
+  toolchain call through the embedded driver and, on a machine that confines a process, asserts
+  the providers' sandbox environment reached the program (on one that does not, that no toolchain
+  entry is published), and `harness-substrate`'s unit tests hold a toolchain call reaching
+  substrate as a confined exec on every machine. What a toolchain call answers changes where the
+  executor differs from harness's `invoke_toolchain`:
+  - `runs`: a tool whose plan can start several processes — one with more than one command, or
+    with a command run once per item of a list; among the built-ins, `rust_fmt` —
+    answers `{"runs": [...]}` however many it started, where 0.15.1 answered the run itself for
+    one process and a bare array for several. Every other tool answers the run itself, and a role
+    over several providers `{"toolchains": {<provider>: <answer>}}`, as before. Cause: the
+    `build-test` contract declares one shape per operation.
+  - One deadline per call: the time left is taken once when the call starts, each process gets
+    what remains of it, and once nothing remains no further process starts. A call that started
+    none is refused ("the call's deadline passed before `<name>` started a process; nothing was
+    started"); one that started some answers the runs that started, marked as cut short (next
+    item). 0.15.1 handed every process of a plan the whole time left. Cause: the executor's shared
+    deadline.
+  - A provider the deadline cut short says so: where any process it planned did not start, its
+    answer is `{"runs": [<the runs that started>], "deadline_passed": true, "not_started": <n>,
+    "note": "the call's deadline passed before <n> of the <planned> processes `<provider>` planned
+    could start; `runs` holds the <started> that did"}`, whatever its tool answers when whole, and
+    a role keeps the key of a provider none of whose processes started, answering that marker
+    with an empty `runs`. Cause: the executor answers only the runs that started and leaves a
+    provider that started none out of `toolchains`, so a cut-short answer read as a complete one
+    (invariant 8); 0.15.1 had no shared deadline and so no cut.
+  - A plan with no process to start — a command run once per item of an empty list — answers
+    `{"runs": []}`, and a role keeps that provider's key, answering `{"runs": []}` under it.
+    0.15.1 answered `[]` and kept the key. Cause: the executor refuses a call of one provider that
+    ran no process ("toolchain provider produced no output") and leaves such a provider out of a
+    role's `toolchains`; harness answers the contract's empty list of runs instead.
+  - Path arguments are judged where they land, before anything starts: the path arguments a call
+    names, read or written, are resolved under the provider's directory, and one that lands
+    outside it, or cannot be resolved to a place in it, is refused with or without a write scope
+    ("`<path>` lands outside the workspace; nothing was started" and its siblings). A written path
+    the plan declares goes through the write scope as spelled and then where it lands ("`<path>`
+    leads to `<landing>`, and …", the sentence a `file_write` uses), and the written paths a
+    role's providers declare are judged before the first process of the call starts, where 0.15.1
+    judged each provider's as it reached it. Cause: the executor's path judgement (tools `0.3.0`,
+    `0.4.0`).
+  - Refusals are the executor's, named `build-test.Refused` and `build-test.CheckFailed` in the
+    contract. harness answers both as it answered before — a failed outcome carrying the sentence,
+    with no `refusal` on the record, because `harness_wire::Refusal` names `ProgramNotDeclared`
+    alone — and the words of the refusals 0.15.1 had are unchanged: the registry's, the write
+    scope's and `formatting check failed: <stdout as a JSON string>`. A provider's own refusal
+    keeps its words and its name, so a `Refusal::ProgramNotDeclared` from `run_within` is still
+    named. The executor also checks every argv of a plan against the providers' declared programs
+    before the first starts, in `b10x-tool-process`'s words; a provider the registry validated
+    never plans one outside them.
+  - A provider with no directory on this host (`host_root` `None`) — `ConfinedOperations` handed to
+    a catalogue alone rather than in a `Split` — has its toolchain calls refused, nothing started
+    ("`<name>` was not run: a toolchain call's path arguments are judged where they land before
+    anything starts, and this workspace names no directory on this host to judge them in; nothing
+    was started"), where 0.15.1 ran them. Arguments the registry refuses are refused first, in its
+    words, as before. `harness-cli` always composes `Split`.
+  - Unchanged: each argv byte for byte (the plan is the same registry's); each run's answer,
+    which is the provider's own reply — `RunOutput`'s eight fields from `LocalOperations`,
+    substrate's observation, with the confinement it applied, from the confined provider; the
+    published entries; the CLI contract (`contracts/cli/b10x-harness/2026-09-18`).
 
 ### Fixed
 

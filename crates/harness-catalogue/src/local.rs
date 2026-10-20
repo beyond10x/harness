@@ -308,6 +308,11 @@ impl Operations for LocalOperations {
         self.editor.lands(path).map_err(|error| error.to_string())
     }
 
+    /// The root every tool here opened, which is where `run_within` starts a program.
+    fn host_root(&self) -> Option<&Path> {
+        Some(&self.root)
+    }
+
     fn programs(&self) -> &[String] {
         self.process.as_ref().map_or(&[], Process::programs)
     }

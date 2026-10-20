@@ -18,7 +18,9 @@ use std::collections::BTreeMap;
 
 use harness_wire::{AccessKind, Effect, Envelope, Idempotency, Risk, Subject, ToolName, ToolSpec};
 use serde_json::{Value, json};
+use tool_toolchain::executor::{Executor, RunError};
 
+use crate::operations::ProviderRunner;
 use crate::{Operations, Refused};
 
 /// One thing a run may do.
@@ -131,7 +133,7 @@ impl Catalogue {
             entries.push(file_write());
             entries.push(file_edit());
         }
-        let internal = crate::toolchain::programs(&toolchains);
+        let internal = tool_toolchain::executor::programs(&toolchains);
         let published_programs: Vec<String> = operations
             .programs()
             .iter()
@@ -259,15 +261,17 @@ impl Catalogue {
 
     /// Concrete process and file subjects for one entry call.
     pub fn subjects(&self, name: &str, arguments: &Value) -> Vec<Subject> {
-        if let Some(Ok(plan)) = crate::toolchain::plan(name, arguments, &self.toolchains) {
+        if let Some(Ok(plan)) = tool_toolchain::executor::plan(name, arguments, &self.toolchains) {
             return plan
                 .groups
                 .iter()
-                .flat_map(|(_, plan)| {
-                    plan.argv
+                .flat_map(|group| {
+                    group
+                        .plan
+                        .argv
                         .iter()
                         .filter_map(|argv| argv.first().map(Subject::process))
-                        .chain(plan.writes.iter().map(Subject::file))
+                        .chain(group.plan.writes.iter().map(Subject::file))
                 })
                 .collect();
         }
@@ -409,8 +413,9 @@ impl Catalogue {
 
     /// [`invoke`](Self::invoke), told how much of the run's wall-clock budget is left.
     ///
-    /// Only `run` has anything to bound; the figure is handed to
-    /// [`Operations::run_within`] and every other entry ignores it.
+    /// Only `run` and the toolchain entries have anything to bound. `run` hands the figure to
+    /// [`Operations::run_within`]; a toolchain call takes one deadline from it for all of its
+    /// processes, and starts no further one once it has passed. Every other entry ignores it.
     ///
     /// # Errors
     ///
@@ -422,8 +427,8 @@ impl Catalogue {
         remaining: Option<std::time::Duration>,
     ) -> Result<Value, Refused> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
-        if let Some(plan) = crate::toolchain::plan(name, arguments, &self.toolchains) {
-            return self.invoke_toolchain(plan?, remaining);
+        if let Some(answer) = self.invoke_toolchain(name, arguments, remaining) {
+            return answer;
         }
         // **Refused here, by the tool, because here is where this loop's policy lives.** Every
         // other arm adjudicates at a decision seam; this one has none and never grows one, so a
@@ -517,46 +522,62 @@ impl Catalogue {
         }
     }
 
+    /// A toolchain tool or role, run by `tool_toolchain::executor` over the provider this
+    /// catalogue holds, or [`None`] when `name` is neither.
+    ///
+    /// The checks of the `build-test` contract are the executor's, made before any argv is handed
+    /// over: the arguments the registry accepts, where the path arguments the call names land
+    /// under the provider's directory ([`Operations::host_root`]), this run's write scope on the
+    /// written paths the plan declares, as spelled and where they land, the declared programs,
+    /// and one deadline for the call. The scope asked is both layers, the run's and the step's,
+    /// exactly as a `file_write` asks them. Each argv that passes reaches the provider through
+    /// [`Operations::run_within`] — `b10x-tool-process` locally, substrate with the providers'
+    /// sandbox applied when confined — and each run in the answer is that provider's own reply,
+    /// every planned provider named in a role's answer, and a plan the deadline cut short marked
+    /// as cut ([`ProviderRunner::answered`]).
     fn invoke_toolchain(
         &self,
-        plan: crate::toolchain::CommandPlan,
+        name: &str,
+        arguments: &Value,
         remaining: Option<std::time::Duration>,
-    ) -> Result<Value, Refused> {
-        let mut grouped = serde_json::Map::new();
-        for (provider, provider_plan) in plan.groups {
-            for path in &provider_plan.writes {
-                if let Some(refusal) = self.refusal("file.write", path) {
-                    return Err(refusal.into());
-                }
+    ) -> Option<Result<Value, Refused>> {
+        // Planned here to learn whether `name` is a toolchain call at all, so that arguments the
+        // registry refuses are refused before anything about the host is asked, and so that the
+        // answer can name what was planned; the executor plans it again, from the same inputs.
+        let plan = match tool_toolchain::executor::plan(name, arguments, &self.toolchains)? {
+            Ok(plan) => plan,
+            Err(refusal) => return Some(Err(refusal.into())),
+        };
+        let Some(root) = self.operations.host_root() else {
+            return Some(Err(format!(
+                "`{name}` was not run: a toolchain call's path arguments are judged where they \
+                 land before anything starts, and this workspace names no directory on this host \
+                 to judge them in; nothing was started"
+            )
+            .into()));
+        };
+        let runner = ProviderRunner::new(&*self.operations, root);
+        let (scope, step) = (self.scope.clone(), self.step.clone());
+        let executor = match Executor::with_runner(&runner, self.toolchains.clone()) {
+            Ok(executor) => executor.refusing_writes(move |path| {
+                scope
+                    .refusal("file.write", path)
+                    .or_else(|| step.refusal("file.write", path))
+            }),
+            Err(error) => return Some(Err(error.to_string().into())),
+        };
+        let nothing_to_start = plan.groups.iter().all(|group| group.plan.argv.is_empty());
+        Some(match executor.run(name, arguments, remaining)? {
+            Ok(answer) => Ok(runner.answered(Some(answer), &plan)),
+            // The executor answers a call of one provider that ran no process with this refusal
+            // once every check has passed. For a plan with no process to start — a command run
+            // once per item of an empty list — that is an empty list of runs, as 0.15.1 answered.
+            Err(RunError::Refused(message)) if nothing_to_start && message == NOTHING_RAN => {
+                Ok(runner.answered(None, &plan))
             }
-            let mut outputs = Vec::with_capacity(provider_plan.argv.len());
-            for argv in provider_plan.argv {
-                let output = self.operations.run_within(&argv, remaining)?;
-                if provider_plan.empty_stdout
-                    && output
-                        .get("stdout")
-                        .and_then(Value::as_str)
-                        .is_some_and(|stdout| !stdout.trim().is_empty())
-                {
-                    return Err(format!("formatting check failed: {}", output["stdout"]).into());
-                }
-                outputs.push(output);
-            }
-            let value = if outputs.len() == 1 {
-                outputs.pop().unwrap_or(Value::Null)
-            } else {
-                Value::Array(outputs)
-            };
-            grouped.insert(provider, value);
-        }
-        if grouped.len() == 1 {
-            grouped
-                .into_values()
-                .next()
-                .ok_or_else(|| Refused::from("toolchain provider produced no output"))
-        } else {
-            Ok(json!({"toolchains": grouped}))
-        }
+            Err(RunError::Refused(message)) => Err(runner.refusal(message)),
+            Err(failed @ RunError::CheckFailed { .. }) => Err(failed.to_string().into()),
+        })
     }
 
     fn invoke_shell(
@@ -580,7 +601,7 @@ impl Catalogue {
             };
             argv.push(text.to_owned());
         }
-        if crate::toolchain::programs(&self.toolchains).contains(&argv[0]) {
+        if tool_toolchain::executor::programs(&self.toolchains).contains(&argv[0]) {
             return Err(Refused::from(format!(
                 "`{}` is admitted only through its typed toolchain tools; `run` cannot name it",
                 argv[0]
@@ -698,6 +719,14 @@ pub(crate) fn outcome(result: Result<Value, Refused>) -> harness_wire::ToolOutco
 /// more than the parallelism a handful of reads needs and small enough that the largest batch costs
 /// the same eight threads as the smallest one that fills them.
 const MAX_BATCH_THREADS: usize = 8;
+
+/// `tool_toolchain::executor`'s refusal of a call of one provider that ran no process, once every
+/// check has passed — the sentence harness 0.14.1's `invoke_toolchain` carried, ported with it.
+///
+/// Matched as words because `RunError::Refused` carries nothing else; a tools release that
+/// rewords it turns `a_tool_whose_plan_starts_no_process_answers_as_0_15_1_did` red rather than
+/// letting an empty plan read as a refusal again.
+const NOTHING_RAN: &str = "toolchain provider produced no output";
 
 /// What a caught panic said, where it said anything a reader can act on.
 ///

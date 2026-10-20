@@ -2,8 +2,8 @@
 //!
 //! # Why the catalogue does not perform anything
 //!
-//! `harness-catalogue` depends on `harness-wire`, the `tools` crates, `serde`, `globset` and
-//! `regex` — no substrate, no tokio, no async runtime. That is deliberate: metaharness embeds this
+//! `harness-catalogue` depends on `harness-wire`, the `tools` crates and `serde` — no substrate,
+//! no tokio, no async runtime. That is deliberate: metaharness embeds this
 //! crate to serve the same tools to Claude Code over MCP, and a workspace that links no async
 //! runtime cannot afford a catalogue that drags one in.
 //!

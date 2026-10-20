@@ -38,8 +38,8 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    below it are foundations, pinned and never sibling paths**: `substrate-host` and
    `substrate-wire` for confinement, the `b10x-mcp-*` client crates for outbound MCP protocol,
    transport and local credential mechanics, and the `b10x-tool-*` crates — `b10x-tool-contract`,
-   `b10x-tool-fs`, `b10x-tool-code-editor`, `b10x-tool-toolchain` — for the tool contracts and
-   default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2), and
+   `b10x-tool-fs`, `b10x-tool-search`, `b10x-tool-code-editor`, `b10x-tool-toolchain` — for the
+   tool contracts and default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2), and
    the `b10x-llm-*` client crates for every model call, which only this repository's own
    `b10x-harness-llm` crate depends on directly (invariant 3).
    All are pinned by git tag or revision, never by a path into the sibling `tools` checkout. A path
@@ -182,8 +182,8 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   its own gate and its own entry in `STATUS.md` — never a flag on an existing one. `--surface` is
   **not** such a flag: it chooses how the same catalogue is published, and both surfaces publish
   exactly what the machine admits and meet the same approval gate. The default implementations now
-  come from the `tools` crates: `b10x-tool-fs` reads, `b10x-tool-code-editor` writes. Linking a crate
-  is not publishing its tools — `b10x-tool-code-editor` is reached only through `Operations` behind
+  come from the `tools` crates: `b10x-tool-fs` reads, `b10x-tool-search` searches,
+  `b10x-tool-code-editor` writes. Linking a crate is not publishing its tools — `b10x-tool-code-editor` is reached only through `Operations` behind
   the `Catalogue` gate, which publishes the writer entries only when `operations.writes()`, at
   `Risk::Medium`, and `run` stays harness's own at `Risk::High` behind the approver. A test pins that
   a `run` entry built from the adapter is refused under `DenyAll`

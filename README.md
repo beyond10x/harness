@@ -23,7 +23,7 @@ foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrat
 each pinned by git tag or exact revision, never by a sibling path, and on nothing that could embed
 it.** At `0.15.1` those pins are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`,
 package `=0.7.17`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.8.1` (`3eb94989`)
-and tools tag `0.2.0` (`60d4d0e3`), all in `Cargo.toml` except substrate's. Substrate and mcp are
+and tools tag `0.3.0` (`e89380d8`), all in `Cargo.toml` except substrate's. Substrate and mcp are
 pinned by revision, each the commit a release tag points at; llm and tools by tag, which
 `Cargo.lock` resolves to that commit. The arrow points inward — something else embeds this, never
 the reverse.
@@ -476,7 +476,7 @@ comparison kept here.
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
-| `crates/harness-catalogue` | one catalogue, published flat or under three verbs, over the `tools` crates: the adapter that maps each operation onto `b10x-tool-fs` (reads) and `b10x-tool-code-editor` (writes), keeps `search` and `run` local, and re-exports `b10x-tool-toolchain`'s resolved providers |
+| `crates/harness-catalogue` | one catalogue, published flat or under three verbs, over the `tools` crates: the adapter that maps each operation onto `b10x-tool-fs` (reads), `b10x-tool-search` (search) and `b10x-tool-code-editor` (writes), keeps `run` local, and re-exports `b10x-tool-toolchain`'s resolved providers |
 | `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
 | `crates/harness-llm` | `b10x-harness-llm`, a public library: the model port over `llm`'s client crates (`client`, `LlmPort`, `Target`) and the credential sources that feed them (`Source::{key, file, environment, resolver}`), re-exporting `llm_credentials`, `Protocol` and `BoxFuture` so an embedder names them from the same `llm` |

@@ -32,24 +32,14 @@ harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 harness-llm = { package = "b10x-harness-llm", path = "crates/harness-llm" }
 
-# The tool contracts and default implementations harness consumes, pinned by git tag like substrate
-# and MCP, never a sibling path (atlas ADR 0097 decision 3, ADR 0095 phase T2). `tool-fs` and
-# `tool-code-editor` replace `harness-tools`'s reader and writer; `tool-toolchain` replaces
-# `harness-toolchain`; `tool-contract` is the `tool-contract/1` profile they are written against.
-tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
-tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
-tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
-tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
+tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.3.0", version = "=0.3.0" }
+tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.3.0", version = "=0.3.0" }
+tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.3.0", version = "=0.3.0" }
+tool-search = { package = "b10x-tool-search", git = "https://github.com/beyond10x/tools", tag = "0.3.0", version = "=0.3.0" }
+tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.3.0", version = "=0.3.0" }
 
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"
-# The two `harness-catalogue` takes to give `search` a regular expression and a file filter. Both are
-# BurntSushi's, both are what ripgrep itself matches with, and they share `regex-automata` and
-# `regex-syntax` — so the second costs `bstr` and `log` on top of the first rather than a tree of
-# its own. Hand-rolling either was the alternative: a glob matcher written here would be a second,
-# subtly different answer to *does this path match `crates/**/*.rs`* on every machine that reads a
-# run, and a hand-rolled regex engine is not a thing anyone should write twice.
-globset = "0.4.19"
 # Parses the standard HTTP date forms a peer may use in `Retry-After`. Reimplementing its three
 # legacy grammars would make retry timing depend on a partial parser at the security boundary.
 httpdate = "1.0.3"
@@ -60,7 +50,6 @@ jsonschema = { version = "0.52.1", default-features = false }
 # Hook and command timeouts stop the whole process group, not only the direct child. Unix process
 # groups and signals are OS primitives; this narrow feature set avoids hand-written unsafe FFI.
 nix = { version = "0.31.3", features = ["process", "signal"] }
-regex = "1.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The workflow notation reads its own documents (`Flow::from_yaml`), so the CLI never parses one

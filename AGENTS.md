@@ -189,7 +189,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   `Catalogue::refusal` answers it on the written paths the plan declares, the declared programs,
   one deadline per call) and hands each argv to the active
   `Operations::run_within` (`ProviderRunner`), so a Substrate-confined call keeps the providers'
-  sandbox the embedded driver applies; never route a toolchain argv around that runner. Linking a crate is not publishing its tools — `b10x-tool-code-editor` and `b10x-tool-process` are reached only through `Operations` behind
+  sandbox the embedded driver applies; never route a toolchain argv around that runner. The write
+  scope judges the paths a tool declares it writes: a written directory by everything it can hold
+  (`crates/harness-catalogue/src/written.rs`, a bounded on-disk walk that fails closed), and a
+  `rustfmt` call by every module file its named files reach (`src/modules.rs`). A toolchain tool
+  that writes the workspace without declaring paths (build, test, clippy) is a `Risk::High`
+  process call held by approval and confinement, not by the scope; do not describe the scope as
+  covering it. Linking a crate is not publishing its tools — `b10x-tool-code-editor` and `b10x-tool-process` are reached only through `Operations` behind
   the `Catalogue` gate, which publishes the writer entries only when `operations.writes()`, at
   `Risk::Medium`, and the `run` entry only when programs are declared; the `run` entry stays harness's own at `Risk::High` behind the approver. A test pins that
   a `run` entry built from the adapter is refused under `DenyAll`

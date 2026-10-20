@@ -59,9 +59,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use b10x_harness_substrate::{Backend, ConfinedOperations, Embedded, Facts};
+use b10x_harness_substrate::{
+    Backend, ConfinedOperations, Embedded, Facts, Toolchain, tool_toolchain,
+};
 use harness_catalogue::{
-    LocalOperations, Operations, ReadWindow, Refusal, Refused, SearchOptions, Split,
+    Catalogue, LocalOperations, Operations, ReadWindow, Refusal, Refused, SearchOptions, Split,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -1621,6 +1623,99 @@ fn the_pinned_cases_name_stories_by_their_exact_ids() {
         assert!(
             source.contains(id),
             "a pin points at `{id}` and nothing in this file spells it that way"
+        );
+    }
+}
+
+// --- a toolchain operation runs confined, through the executor ----------------------------------
+
+/// A provider whose one tool prints a variable that only its declared sandbox sets.
+///
+/// The local runner does not apply a provider's sandbox (tools `0.4.0`, `RunRequest::sandbox`), so
+/// `confined` on standard output is the program saying it ran with the sandbox the confined
+/// runner applies, and nowhere else.
+const SANDBOX_PROBE: &str = "version: 1\n\
+     toolchains:\n\
+     \x20 - name: probe\n\
+     \x20   description: Prints a variable only its declared sandbox sets.\n\
+     \x20   project:\n\
+     \x20     all: [probe.lock]\n\
+     \x20   sandbox:\n\
+     \x20     programs: [printenv]\n\
+     \x20     env:\n\
+     \x20       HOME: \"{workspace}\"\n\
+     \x20       PATH: /usr/bin:/bin\n\
+     \x20       PROBE_SANDBOX: confined\n\
+     \x20   tools:\n\
+     \x20     - name: probe_sandbox\n\
+     \x20       description: Print PROBE_SANDBOX.\n\
+     \x20       commands:\n\
+     \x20         - argv: [printenv, PROBE_SANDBOX]\n";
+
+/// A toolchain call runs through the executor and the confined provider, sandbox applied.
+///
+/// What `harness-cli` composes for `--substrate-embedded --toolchain`: the providers admitted
+/// read-only into the embedded driver, `Split` over the local reader and the confined workspace,
+/// and the catalogue's toolchain entries over both. On a machine that confines a process the call
+/// runs and answers substrate's own observation; on one that does not, no toolchain entry is
+/// published and the call is refused by name — asserted, not skipped.
+#[test]
+fn a_toolchain_operation_runs_confined_through_the_executor_with_the_providers_sandbox() {
+    let (root, tree) = tree();
+    std::fs::write(tree.join("probe.lock"), "").expect("the project marker");
+    let spec = root.path().join("probe.yaml");
+    std::fs::write(&spec, SANDBOX_PROBE).expect("the spec");
+    let mut registry = tool_toolchain::Registry::builtins().expect("the built-ins");
+    registry.load_file(&spec).expect("the probe spec loads");
+    let providers = registry
+        .resolve(&tree, Some(&["probe".to_owned()]))
+        .expect("the probe provider resolves");
+    let toolchain = Toolchain::from_providers(providers.clone()).expect("one closure");
+    let driver = Embedded::open_with(root.path(), cgroup_root(), toolchain.clone())
+        .expect("the embedded driver opens");
+    let machine = driver.machine().expect("the driver says what it can do");
+    let workspace = driver.workspace_adopt("work").expect("the tree is adopted");
+    let confined =
+        ConfinedOperations::new(driver, &machine, workspace, toolchain.programs().to_vec());
+    let catalogue = Catalogue::of_with_toolchains(
+        Split::new(
+            LocalOperations::new(&tree).expect("the reading half opens"),
+            confined,
+        ),
+        providers,
+    );
+
+    let answer = catalogue.invoke("probe_sandbox", &json!({}));
+    // Which half this machine asserted, for a reader of `--nocapture` output.
+    eprintln!(
+        "toolchain conformance: this machine {} confine a process",
+        if machine.confines_execution() {
+            "can"
+        } else {
+            "cannot"
+        }
+    );
+    if machine.confines_execution() {
+        let answer = answer.expect("the confined call runs");
+        assert_eq!(
+            answer["stdout"],
+            json!("confined\n"),
+            "the provider's sandbox environment reached the program: {answer}"
+        );
+        assert_eq!(answer["exit"]["exit"]["code"], json!(0), "{answer}");
+        assert!(
+            answer["exit"]["applied"].is_object(),
+            "substrate's observation of the confinement it applied is the run's answer: {answer}"
+        );
+    } else {
+        assert!(
+            catalogue.get("probe_sandbox").is_none(),
+            "a machine that cannot confine a process publishes no toolchain entry"
+        );
+        let refused = answer.expect_err("an entry that is not published is refused");
+        assert!(
+            refused.message().contains("not a tool this run has"),
+            "{refused}"
         );
     }
 }

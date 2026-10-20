@@ -183,7 +183,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   **not** such a flag: it chooses how the same catalogue is published, and both surfaces publish
   exactly what the machine admits and meet the same approval gate. The default implementations now
   come from the `tools` crates: `b10x-tool-fs` reads, `b10x-tool-search` searches,
-  `b10x-tool-code-editor` writes, `b10x-tool-process` runs the local `run`. Linking a crate is not publishing its tools — `b10x-tool-code-editor` and `b10x-tool-process` are reached only through `Operations` behind
+  `b10x-tool-code-editor` writes, `b10x-tool-process` runs the local `run`, and
+  `b10x-tool-toolchain`'s executor runs every toolchain call: it makes the checks of the
+  `build-test` contract (arguments, where the named path arguments land, the write scope as
+  `Catalogue::refusal` answers it on the written paths the plan declares, the declared programs,
+  one deadline per call) and hands each argv to the active
+  `Operations::run_within` (`ProviderRunner`), so a Substrate-confined call keeps the providers'
+  sandbox the embedded driver applies; never route a toolchain argv around that runner. Linking a crate is not publishing its tools — `b10x-tool-code-editor` and `b10x-tool-process` are reached only through `Operations` behind
   the `Catalogue` gate, which publishes the writer entries only when `operations.writes()`, at
   `Risk::Medium`, and the `run` entry only when programs are declared; the `run` entry stays harness's own at `Risk::High` behind the approver. A test pins that
   a `run` entry built from the adapter is refused under `DenyAll`

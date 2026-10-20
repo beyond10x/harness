@@ -49,6 +49,11 @@
 //! [`ResolvedProvider`] and the declarative toolchain registry are `b10x-tool-toolchain`'s, moved
 //! there from the former `harness-toolchain` crate (ADR 0097 decision 3). This crate re-exports the
 //! one type the catalogue names and keeps no copy of its own.
+//!
+//! So is the running of a toolchain call: `tool_toolchain::executor` plans it, makes every check
+//! of the `build-test` contract and hands each argv to a runner, and the runner is the provider
+//! the catalogue holds, through [`Operations::run_within`] — the local one or the confined one,
+//! one executor for both. What the catalogue publishes for a toolchain stays its own.
 
 mod catalogue;
 mod flat;

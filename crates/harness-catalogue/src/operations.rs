@@ -19,10 +19,15 @@
 //! them apart. Which one a run holds is a deployment decision, not a different set of things the
 //! model may do.
 
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
+use std::path::Path;
 use std::time::Duration;
 
 use harness_wire::Refusal;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
+use tool_toolchain::executor::{Group, Plan};
+use tool_toolchain::{RunOutput, RunRequest};
 
 /// Which part of a file one read answers with.
 ///
@@ -311,6 +316,24 @@ pub trait Operations: Send + Sync {
         Ok(path.to_owned())
     }
 
+    /// The directory on this host that [`run_within`](Self::run_within) starts a program in, if
+    /// this process can look at one.
+    ///
+    /// A toolchain call is judged before anything starts, and part of the judgement is where the
+    /// path arguments it names land: `tool_toolchain::executor` resolves them under this
+    /// directory, links followed, refuses one that lands outside it, and puts the landing of a
+    /// written path its plan declares through the write scope. A catalogue's toolchain entries
+    /// need it for that, and nothing else reads it.
+    ///
+    /// Defaulted to [`None`], which is a provider that names no such directory — substrate's
+    /// confined workspace is an identifier on the other side of the driver — and a toolchain call
+    /// through one is refused with nothing started: a path nobody can resolve is one the write
+    /// scope cannot be asked about where it lands. [`LocalOperations`](crate::LocalOperations)
+    /// answers its root, and [`Split`] its effecting half's, or else its reading half's.
+    fn host_root(&self) -> Option<&Path> {
+        None
+    }
+
     /// The programs [`run`](Self::run) will accept.
     ///
     /// Empty means execution is not offered at all, and the catalogue leaves the entry out — so the
@@ -406,11 +429,216 @@ impl Operations for Split {
         self.effects.lands(path)
     }
 
+    /// The effecting half's directory, or the reading half's where it names none.
+    ///
+    /// The composition `harness-cli` builds is one tree: substrate adopts the directory the local
+    /// reader reads, and the confined provider names no host directory of its own, so the reader's
+    /// root is where a confined program's paths land.
+    fn host_root(&self) -> Option<&Path> {
+        self.effects.host_root().or_else(|| self.reads.host_root())
+    }
+
     fn programs(&self) -> &[String] {
         self.effects.programs()
     }
 
     fn writes(&self) -> bool {
         self.effects.writes()
+    }
+}
+
+/// [`Operations::run_within`] as a `tool_toolchain` [`Runner`](tool_toolchain::Runner): the seam
+/// through which every argv of a toolchain call reaches the provider a catalogue holds.
+///
+/// # One executor, local and confined
+///
+/// `tool_toolchain::executor` makes the checks of the `build-test` contract — the arguments,
+/// where the path arguments the call names land, the write scope on the written paths its plan
+/// declares, the declared programs, one deadline for the whole call — and hands each argv that
+/// passes them to its runner. This is that runner, and all
+/// it does is call the provider: [`LocalOperations`](crate::LocalOperations) starts the program
+/// through `b10x-tool-process`, and `harness-substrate`'s confined provider through substrate,
+/// inside the sandbox its driver was opened with — the providers' declared environment and
+/// read-only roots, applied to this exec as to every other. The declared sandbox the executor
+/// hands over with each argv ([`RunRequest::sandbox`]) is therefore not read here: the confined
+/// provider applies the same declaration already, and the local one has nowhere to apply it.
+///
+/// # Each run answers the provider's own reply
+///
+/// The executor shapes a call's answer — one run, `runs`, or `toolchains` by provider — out of the
+/// [`RunOutput`] a runner returns, and reads nothing of it but `stdout`, for the `empty-stdout`
+/// check. A provider's reply is a [`Value`] of its own fields: the local provider's is a
+/// `RunOutput` field for field, and the confined one's is substrate's observation, which says what
+/// confinement was applied and has no place in a `RunOutput`. So each reply is kept, in the order
+/// the runs started, and [`answered`](Self::answered) puts it where the executor put its run.
+pub(crate) struct ProviderRunner<'a> {
+    operations: &'a dyn Operations,
+    root: &'a Path,
+    /// Each run's reply, with the provider whose tool planned it, in the order they ran.
+    replies: RefCell<Vec<(String, Value)>>,
+    /// The provider's last refusal, whole. The executor carries a runner's refusal as its
+    /// sentence alone, and a provider's [`Refusal`] is a name a reader of the record counts.
+    refused: RefCell<Option<Refused>>,
+}
+
+impl<'a> ProviderRunner<'a> {
+    /// Every argv through `operations`, in `root`: the directory it names on this host
+    /// ([`Operations::host_root`]).
+    pub(crate) fn new(operations: &'a dyn Operations, root: &'a Path) -> Self {
+        Self {
+            operations,
+            root,
+            replies: RefCell::new(Vec::new()),
+            refused: RefCell::new(None),
+        }
+    }
+
+    /// The executor's answer to `plan`, each run in it replaced by the provider's reply for that
+    /// run, every provider the plan names present in it, and a provider the deadline cut short
+    /// saying so.
+    ///
+    /// `answer` is [`None`] where the executor answered no output at all, which is a plan of one
+    /// provider with no process to start: a command run once per item of an empty list.
+    ///
+    /// # What the executor's answer leaves out, and this puts back
+    ///
+    /// The executor keeps a provider in a role's `toolchains` only when one of its processes ran,
+    /// so a provider with no process to start, and one the deadline passed before it started,
+    /// went missing, and an answer without them reads as a role they were never part of. Here
+    /// each planned provider has its key: an empty `{"runs": []}` for one with nothing to start,
+    /// and the cut-short marker for one that did not start ([`completed`]).
+    pub(crate) fn answered(&self, answer: Option<Value>, plan: &Plan) -> Value {
+        let mut replies: BTreeMap<String, VecDeque<Value>> = BTreeMap::new();
+        for (provider, reply) in self.replies.take() {
+            replies.entry(provider).or_default().push_back(reply);
+        }
+        let [group] = plan.groups.as_slice() else {
+            let mut executed = answer
+                .and_then(|mut answer| {
+                    answer
+                        .get_mut("toolchains")
+                        .and_then(Value::as_object_mut)
+                        .map(std::mem::take)
+                })
+                .unwrap_or_default();
+            let mut toolchains = Map::new();
+            for group in &plan.groups {
+                let ran = replies.remove(&group.provider).unwrap_or_default();
+                let answer = completed(executed.remove(&group.provider), ran, group);
+                toolchains.insert(group.provider.clone(), answer);
+            }
+            return json!({ "toolchains": toolchains });
+        };
+        let ran = replies.remove(&group.provider).unwrap_or_default();
+        completed(answer, ran, group)
+    }
+
+    /// What the executor refused with `message`: the provider's own refusal, its name kept, when
+    /// the sentence is the provider's, and the sentence alone when the executor wrote it.
+    pub(crate) fn refusal(&self, message: String) -> Refused {
+        match self.refused.take() {
+            Some(refused) if refused.message() == message => refused,
+            _ => Refused::from(message),
+        }
+    }
+}
+
+/// One provider's answer: the executor's with the provider's own replies in it, or an empty list
+/// of runs where it answered none — and, where the call's deadline passed before every process
+/// the provider planned had started, an answer that says so.
+///
+/// # A list the deadline cut short says it was cut (invariant 8)
+///
+/// The shared deadline stops a plan between processes, and the executor then answers the runs
+/// that started and nothing about the rest, so two runs of three read exactly like a plan of two.
+/// A provider with planned processes that did not start answers `runs` (those that did, possibly
+/// none), `deadline_passed: true`, `not_started` (how many did not) and a `note` saying it in
+/// words, whatever shape its tool answers when whole: the marker is the shape, so a cut-short
+/// answer cannot be read as a complete one. Nothing but the deadline leaves a planned process
+/// unstarted in an answer; a refusal and a failed check end the call as an error.
+fn completed(executed: Option<Value>, mut ran: VecDeque<Value>, group: &Group) -> Value {
+    let planned = group.plan.argv.len();
+    let started = ran.len();
+    let mut answer = match executed {
+        Some(mut answer) => {
+            restore(&mut answer, &mut ran);
+            answer
+        }
+        None => json!({ "runs": Vec::from(ran) }),
+    };
+    if started < planned {
+        let not_started = planned - started;
+        let mut cut = match answer {
+            Value::Object(object) if object.contains_key("runs") => object,
+            run => {
+                let mut object = Map::new();
+                object.insert("runs".to_owned(), Value::Array(vec![run]));
+                object
+            }
+        };
+        cut.insert("deadline_passed".to_owned(), Value::Bool(true));
+        cut.insert("not_started".to_owned(), json!(not_started));
+        cut.insert(
+            "note".to_owned(),
+            Value::String(format!(
+                "the call's deadline passed before {not_started} of the {planned} processes `{}` \
+                 planned could start; `runs` holds the {started} that did",
+                group.provider
+            )),
+        );
+        answer = Value::Object(cut);
+    }
+    answer
+}
+
+/// One provider's replies, put where the executor answered its runs.
+fn restore(group: &mut Value, replies: &mut VecDeque<Value>) {
+    if let Some(runs) = group.get_mut("runs").and_then(Value::as_array_mut) {
+        for run in runs {
+            if let Some(reply) = replies.pop_front() {
+                *run = reply;
+            }
+        }
+    } else if let Some(reply) = replies.pop_front() {
+        *group = reply;
+    }
+}
+
+impl tool_toolchain::Runner for &ProviderRunner<'_> {
+    type Error = Refused;
+
+    fn root(&self) -> &Path {
+        self.root
+    }
+
+    fn run(&self, request: RunRequest<'_>) -> Result<RunOutput, Refused> {
+        let reply = self
+            .operations
+            .run_within(request.argv, request.time_left)
+            .inspect_err(|refused| {
+                *self.refused.borrow_mut() = Some(refused.clone());
+            })?;
+        // The executor reads `stdout` of this and nothing else; every other field of the answer is
+        // the reply's own, put back by `answered`. A reply that is not a `RunOutput` is carried by
+        // its `stdout`, and what is filled in beside it never reaches an answer.
+        let output =
+            serde_json::from_value::<RunOutput>(reply.clone()).unwrap_or_else(|_| RunOutput {
+                argv: request.argv.to_vec(),
+                exit: None,
+                stdout: reply
+                    .get("stdout")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                stderr: String::new(),
+                truncated: false,
+                omitted_bytes: 0,
+                timed_out: false,
+                timeout_ms: 0,
+            });
+        self.replies
+            .borrow_mut()
+            .push((request.provider.to_owned(), reply));
+        Ok(output)
     }
 }

@@ -99,7 +99,8 @@ credential it was not pointed at, so a run can always be explained afterwards.
 re-read by `llm-credentials` on every request so a renewed token is followed without a restart. A
 token file is refused — on every request, naming `oauth-token-file` and never the path or the
 token — unless it is a regular file owned by you (or root), mode `0600` or stricter, with one hard
-link, under directories nobody else can write to.
+link, under directories nobody else can write to. Every directory on its path, from `/` down, must
+be owned by you or root as well (a root-owned sticky directory such as `/tmp` passes).
 
 | flag | effect |
 |---|---|

@@ -39,8 +39,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A subscription token file must be owner-only.** `--oauth-token-file` (and a provider's
   `oauth-token-file`) is read by `llm-credentials` on every request and refused unless it is a
   regular file owned by the caller or root, mode `0600` or stricter, with one hard link, under
-  directories nobody else can write to; the refusal names the reference and never the path or the
-  value. `measurements/prove-spend-ceiling.sh` writes its emulator token that way.
+  directories nobody else can write to; every directory on its path, from `/` down, must be owned
+  by the caller or root as well (a root-owned sticky directory such as `/tmp` passes). The
+  refusal names the reference and never the path or the value.
+  `measurements/prove-spend-ceiling.sh` writes its emulator token that way.
 - A credential source `llm` will not read reaches the operator as `Unauthorized`, not `Transport`:
   before anything is dispatched the only thing that can be unavailable is the credential.
 - `rust-version` 1.97 to 1.98, which `llm` requires; the MSRV job in `.github/workflows/gate.yml`

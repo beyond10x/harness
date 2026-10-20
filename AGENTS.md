@@ -137,8 +137,10 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   `harness-wire`'s `BearerSource`, `Bearer` and `StaticBearer` are the same contract for an
   embedder with its own model port, and a `StaticBearer` does hold the value for as long as the
   caller keeps it. What must never happen on either path is a **config struct or an error carrying
-  it**: `Bearer` and `Secret` have no `Display` and a redacted `Debug`, and a refusal names the
-  reference (`oauth-token-file`), never the path, the variable or the value. **There is no ambient
+  it**: `Bearer` and `Secret` have no `Display` and a redacted `Debug`, and a refusal never names
+  the value. The per-request refusal `llm` builds names only the reference (`oauth-token-file`); a
+  refusal at construction — a path `llm` will not read, a variable name it will not accept — may
+  name the path or variable the operator passed, which is the operator's own input. **There is no ambient
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
 - **Approvals are the review gate (invariant 12).** Adding a path that reaches a tool without

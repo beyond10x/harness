@@ -23,6 +23,7 @@ MODEL = "b10x-emulated"
 # same loop suite, and a suite the two sides could name differently is one that could drift
 # apart while both stayed green.
 SCENARIOS = [
+    "absent-cache-write",
     "answer-call",
     "answer-prose",
     "answer-stop-hook",
@@ -744,6 +745,14 @@ class Handler(BaseHTTPRequestHandler):
                     *terminal["response"]["output"],
                 ]
                 self._send_sse(events)
+        elif scenario == "absent-cache-write":
+            # The Messages emulator's scenario of this name omits `cache_creation_input_tokens`, a
+            # counter that wire's client needs for its inclusive input total (llm parity row M25).
+            # This wire's usage object has no such optional counter: `input_tokens` is the whole
+            # and `cached_tokens` a part of it, and `llm-responses` reads the total directly
+            # (`stream.rs` `usage`). So there is nothing to omit here and the scenario is a normal
+            # text turn; it exists so that both emulators name the same scenarios.
+            self._send_sse(text_events("provider emulation passed"))
         else:
             self._send_sse(text_events("provider emulation passed"))
 

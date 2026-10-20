@@ -437,6 +437,7 @@ impl ModelPort for LlmPort {
                 None => result.map_err(from_llm_error),
             }
         })?;
+        warn_about_dropped_usage(&result.observation, &self.model, sink);
         from_llm_outcome(result, &self.wire, &self.model)
     }
 
@@ -621,16 +622,64 @@ fn usage(observation: &llm_core::TurnObservation, model: &str) -> Option<Usage> 
     })
 }
 
+/// Invariant 7 for a figure Harness cannot file: `harness_wire::Usage` needs both totals, so a
+/// turn whose inclusive input total `llm` leaves unknown (llm parity row M25) files no usage. The
+/// parts the route did report are named instead of dropped silently.
+fn warn_about_dropped_usage(
+    observation: &llm_core::TurnObservation,
+    model: &str,
+    sink: &mut dyn StreamSink,
+) {
+    let Some(reported) = observation.usage.as_ref() else {
+        return;
+    };
+    if usage(observation, model).is_some() {
+        return;
+    }
+    let counters = [
+        ("input_tokens", reported.input_tokens),
+        ("output_tokens", reported.output_tokens),
+        ("cached_input_tokens", reported.cached_input_tokens),
+        (
+            "cache_creation_input_tokens",
+            reported.cache_creation_input_tokens,
+        ),
+    ];
+    let known: Vec<String> = counters
+        .into_iter()
+        .filter_map(|(name, count)| count.map(|count| format!("{name} {count}")))
+        .collect();
+    let unknown: Vec<&str> = counters
+        .into_iter()
+        .filter(|(_, count)| count.is_none())
+        .map(|(name, _)| name)
+        .collect();
+    sink.emit(StreamEvent::Warning {
+        code: "usage-incomplete".to_owned(),
+        message: format!(
+            "the route reported {} and left {} unknown, so this turn files no usage",
+            known.join(", "),
+            unknown.join(", ")
+        ),
+    });
+}
+
 /// `llm`'s failure as Harness's. The retry class is `llm`'s own decision ([`llm_core::Error::may_retry`]);
 /// the loop retries on it exactly as it retried on Harness's wires.
 fn from_llm_error(error: llm_core::Error) -> WireError {
     let retriable = error.may_retry();
     let code = match error.code {
         ErrorCode::InvalidRequest | ErrorCode::Protocol => WireErrorCode::Protocol,
-        // Before dispatch the only thing that can be unavailable is the credential source
-        // (`llm-providers` `secret_error`: a file that is not owner-only, a store that will not
-        // answer); every `Unavailable` the transport or a decoder produces was dispatched. That is
-        // the operator's to fix, not a network to wait for.
+        // Before dispatch the only thing that can be unavailable is the credential source, which
+        // is the operator's to fix and not a network to wait for. The arm keys on `Dispatch`, and
+        // the assumption behind it is read off llm 0.7.0's producers of `Unavailable`:
+        // `llm-providers/src/auth.rs:120` (`secret_error`) builds it with `Error::new`, so
+        // `NotSent`; the decoders (`llm-messages/src/decode.rs:716`,
+        // `llm-responses/src/stream.rs:462-466`) attach `Accepted`; `llm-http` builds `Transport`
+        // and `Deadline`, never `Unavailable`; `llm-blocking/src/lib.rs:71` builds one in
+        // `BlockingModel::new`, mapped at client construction and never reaching this function.
+        // A future pre-dispatch `Unavailable` from a transport (a connect failure classed that
+        // way) would need its own class rather than this arm.
         ErrorCode::Unavailable if error.dispatch == llm_core::Dispatch::NotSent => {
             WireErrorCode::Unauthorized
         }
@@ -781,6 +830,26 @@ mod tests {
         assert_eq!(account.auth_kind, AuthKind::Bearer);
         assert_eq!(account.billing_kind, BillingKind::Metered);
         assert!(account.api_key_header.is_none());
+    }
+
+    // Adversary pass 2 (story:harness-builds-on-llm-0-7), against 36a587c5; rewritten in
+    // correction round 2 to the rule AGENTS.md § Safety envelope *Credentials* now states.
+
+    #[test]
+    fn a_source_refusal_never_names_a_value_and_at_construction_names_what_the_operator_passed() {
+        // AGENTS.md § Safety envelope, *Credentials*: a refusal never names the value; the
+        // per-request refusal `llm` builds names only the reference (`oauth-token-file`), and a
+        // refusal at construction — a variable name `llm` will not accept, a path it will not
+        // read — may name the path or variable the operator passed, which is the operator's own
+        // input and not a secret.
+        let error = Source::environment("NOT=VALID", None).expect_err("llm refuses `=` in a name");
+        assert!(
+            error.contains("NOT=VALID"),
+            "the operator's own input is named: {error}"
+        );
+        let oversize = "k".repeat(llm_credentials::MAX_SECRET_BYTES + 1);
+        let error = Source::key(&oversize).expect_err("llm refuses a key past its bound");
+        assert!(!error.contains(&oversize[..64]), "never the value: {error}");
     }
 
     #[test]

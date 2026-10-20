@@ -2855,6 +2855,76 @@ fn a_messages_turn_that_reports_its_input_figures_files_usage_through_the_shippe
 }
 
 // ---------------------------------------------------------------------------------------------
+// Adversary pass 2, wave llm-1 (story:harness-builds-on-llm-0-7), against 36a587c5.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_two_emulators_offer_the_same_scenarios() {
+    // README.md § Two wires: "two deterministic emulators … whose scenario names are the same on
+    // both sides". The test that held that — the deleted `provider_emulated.rs` suites compared
+    // the two `--list-scenarios` answers — went with the crates, and nothing here replaced it.
+    let list = |script: &str| -> Value {
+        let path = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+        )
+        .join("tests")
+        .join("fixtures")
+        .join(script);
+        let output = Command::new("python3")
+            .arg(&path)
+            .arg("--list-scenarios")
+            .output()
+            .expect("the fixture lists its scenarios");
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{script}: {error}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            )
+        })
+    };
+    assert_eq!(
+        list("fake_responses.py"),
+        list("fake_messages.py"),
+        "a scenario one emulator serves and the other does not"
+    );
+}
+
+#[test]
+fn a_messages_turn_whose_reported_figures_are_dropped_says_so_without_a_budget() {
+    // The same stream as the correction's case, with no rate card and no ceiling: the route
+    // reported `output_tokens: 8` and `cache_read_input_tokens: 7`, llm leaves only the input
+    // total unknown, and the port files nothing at all because `harness_wire::Usage` has no
+    // optional input. AGENTS.md invariant 7: a figure the wire did not model is "preserved and
+    // warned about, never dropped". A run with no budget set is told nothing — the record reads
+    // like a provider that reported nothing, which is a different fact.
+    let fixture = Fixture::messages("absent-cache-write");
+    let workspace = workspace();
+    let output = run_against(
+        &fixture,
+        &["--wire", "anthropic-messages", "--json"],
+        workspace.path(),
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert!(
+        !kinds.contains(&"usage"),
+        "a total nobody reported is not filed, as documented: {kinds:?}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["kind"] == "warning"
+                && event.as_object().is_some_and(|fields| {
+                    fields
+                        .values()
+                        .any(|value| value.as_str().is_some_and(|text| text.contains("usage")))
+                })
+        }),
+        "the figures the route did report and this side dropped are warned about: {kinds:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // Correction round 1, wave llm-1 (story:harness-builds-on-llm-0-7).
 // ---------------------------------------------------------------------------------------------
 

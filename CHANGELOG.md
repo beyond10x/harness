@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-20
+
 ### Added
 
 - `b10x-harness-llm` (`crates/harness-llm`, lib `harness_llm`): the model port over `llm`'s client

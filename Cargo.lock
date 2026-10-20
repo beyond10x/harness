@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-app-server"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-catalogue"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-cli"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-catalogue",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-conformance"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-flow",
  "b10x-harness-loop",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-flow"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-wire",
  "serde",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-llm"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-wire",
  "b10x-llm-blocking",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-wire",
  "jsonschema",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-mcp"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-wire",
  "b10x-mcp-client",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-substrate"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-wire",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "httpdate",
  "serde",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-xtask"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "b10x-harness-cli",
  "b10x-tool-toolchain",

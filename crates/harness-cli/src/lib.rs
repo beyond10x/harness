@@ -2111,8 +2111,13 @@ fn prepare(
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let process_workspace_access =
         harness_substrate::process_workspace_access(&options.process_write_subtree)?;
+    let reading = harness_catalogue::LocalOperations::new(&options.workspace)?;
+    // The root the file tools act in, resolved once, by them. The record and the session name this
+    // one rather than resolving `--workspace` again: a symlink retargeted in between would make a
+    // second resolution a different directory from the one the tools use.
+    let root = reading.root().to_path_buf();
     let Publication { tools, withheld } = published(
-        harness_catalogue::LocalOperations::new(&options.workspace)?,
+        reading,
         workspace_name(&options.workspace),
         options.surface,
         &Confinement {
@@ -2133,7 +2138,7 @@ fn prepare(
     )?;
     let approvals = approver(options)?;
     let session_dir = session_dir(options)?;
-    let session = open_session(options, session_dir.as_deref())?;
+    let session = open_session(options, &root, session_dir.as_deref())?;
     // The schema arrives already read — from a file under `--output-schema`, or derived by the
     // caller, as `workflow run` derives one per section — because the instruction below names the
     // tool it publishes. A caller that resolved its own schema and left this `None` would get a run
@@ -2200,6 +2205,9 @@ fn prepare(
         // decided when the catalogue was built, and this is the sentence saying so.
         .with_credential_source(credential_source(options))
         .with_credential_renewal(renewed)
+        // The tools' own root, which the session is filed under too, so the record and the
+        // transcript name one directory however `--workspace` was spelled.
+        .with_cwd(recorded_cwd(options, &root))
         .with_profiles(applied_profiles(options))
         .with_toolchains(
             confined_toolchain
@@ -2486,7 +2494,21 @@ fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
     transcript::outside_workspace(&path, &options.workspace).map(Some)
 }
 
-/// The session this run continues, or a new one.
+/// What the `started` record names as the directory this run works in.
+///
+/// `root`, the canonical directory the file tools act in, exactly — or nothing. Nothing for a name
+/// that is not UTF-8, because a lossy rendering names a directory that does not exist. Nothing
+/// under `--substrate <socket>`, because writes and executions land in the daemon's
+/// `--workspace-id` workspace, which no host path names; `root` is only the read view there.
+/// `--substrate-embedded` adopts `root` itself, so it is named.
+fn recorded_cwd(options: &RunOptions, root: &Path) -> Option<String> {
+    if options.substrate.is_some() {
+        return None;
+    }
+    root.to_str().map(ToOwned::to_owned)
+}
+
+/// The session this run continues, or a new one, filed under `workspace` — the file tools' root.
 ///
 /// # Errors
 ///
@@ -2496,12 +2518,10 @@ fn session_dir(options: &RunOptions) -> Result<Option<PathBuf>, String> {
 /// that fixes it, instead of as a typed refusal from inside a turn nobody has paid for yet.
 fn open_session(
     options: &RunOptions,
+    workspace: &Path,
     dir: Option<&std::path::Path>,
 ) -> Result<transcript::Session, String> {
-    let workspace = options
-        .workspace
-        .canonicalize()
-        .unwrap_or_else(|_| options.workspace.clone());
+    let workspace = workspace.to_path_buf();
     let Some(which) = options.resume.as_deref() else {
         return Ok(transcript::Session::new(
             options.wire().id(),
@@ -4451,6 +4471,40 @@ mod tests {
         assert!(
             text.contains(&environment::utc_date(std::time::SystemTime::now())),
             "and today's date: {text}"
+        );
+    }
+
+    #[test]
+    fn the_started_record_names_the_tools_root_exactly_or_not_at_all() {
+        let root = std::path::Path::new("/srv/work/tree");
+        assert_eq!(
+            recorded_cwd(&options(&[]), root).as_deref(),
+            Some("/srv/work/tree")
+        );
+        // Embedded confinement adopts that same tree, so the host path is still where the tools
+        // act.
+        assert_eq!(
+            recorded_cwd(&options(&["--substrate-embedded"]), root).as_deref(),
+            Some("/srv/work/tree")
+        );
+        // Under a socket, writes and execs land in the daemon's `--workspace-id` workspace, and no
+        // host directory names that. Building the run needs a daemon; this decision does not.
+        assert_eq!(
+            recorded_cwd(&options(&["--substrate", "/run/substrate.sock"]), root),
+            None,
+            "the read view alone is not where this run works"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_root_whose_name_is_not_utf8_is_not_recorded_under_a_name_that_does_not_exist() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let root = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/srv/ws-latin1-\xe9t\xe9"));
+        assert_eq!(
+            recorded_cwd(&options(&[]), root),
+            None,
+            "the exact path or nothing, never a lossy rendering of it"
         );
     }
 

@@ -108,7 +108,7 @@ be owned by you or root as well (a root-owned sticky directory such as `/tmp` pa
 
 | flag | effect |
 |---|---|
-| `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations` and — only when there is one — `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
+| `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations`, `cwd` — the workspace the loop runs in, as an absolute path canonicalised as `--workspace` is — and, only when there is one, `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
 | `--prices <card>` | a JSON document of rates, with its own `source` and `as_of`; the record then carries the cost and the card that produced it |
 | `--substrate <socket>` / `--substrate-embedded` | write and execute inside a confined workspace. Named and not available — an invalid one-component workspace name, a driver that does not open, no daemon at the socket — **refuses the run** (exit 1) rather than quietly running read-only |
 | `--process-write-subtree <DIR>` | repeatable exact write authority for confined child processes. With none, `run` sees the adopted workspace read-only; this is separate from file-tool `--write-scope` |

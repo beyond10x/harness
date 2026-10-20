@@ -246,6 +246,25 @@ impl ApprovalCheckpoint {
     pub fn invoked(&self) -> &ToolSpec {
         &self.invoked
     }
+
+    /// Whether `current` is the configuration this checkpoint was taken under.
+    ///
+    /// Exactly, with one allowance: a checkpoint whose configuration names no directory matches
+    /// whatever [`LoopConfig::cwd`] the resuming run names. Such a checkpoint was written by a loop
+    /// older than the field, or by a caller that named none, and either way it recorded nothing
+    /// for the resuming run's directory to disagree with. A checkpoint that names one must be
+    /// resumed in exactly that one.
+    fn taken_under(&self, current: &LoopConfig) -> bool {
+        match self.config.cwd {
+            Some(_) => self.config == *current,
+            None => {
+                LoopConfig {
+                    cwd: current.cwd.clone(),
+                    ..self.config.clone()
+                } == *current
+            }
+        }
+    }
 }
 
 /// What a run spent, readable however the run ended.
@@ -402,6 +421,22 @@ pub struct LoopConfig {
     /// Where this run's credential came from, for the record: `named`, or `provider:<name>`.
     pub credential_source: String,
 
+    /// The directory this run works in, absolute, for the record. Acted on nowhere.
+    ///
+    /// The caller chose it and built the tool port over it; the loop changes no directory and
+    /// reads none, and only reports this at [`LoopEvent::Started`] for the reason `profiles` is
+    /// handed in: the loop owns the event stream. [`None`] is a caller that names none, and its
+    /// record says nothing rather than something the loop guessed. A delegate inherits it, because
+    /// it runs over the same port.
+    ///
+    /// Defaulted and skipped when absent because this struct crosses an [`ApprovalCheckpoint`],
+    /// which refuses unknown fields: a checkpoint that names no directory keeps the bytes it had,
+    /// and one written before the field still deserialises. It also resumes whatever directory
+    /// the resuming run names, because it recorded none to compare against; a checkpoint that
+    /// names a directory resumes only under that one ([`AgentLoop::resume_approval`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+
     /// A credential this run renewed before it started, when it did. Acted on nowhere.
     ///
     /// The renewal happened in the caller — it is a file read, an HTTP POST and a file write, none
@@ -502,6 +537,7 @@ impl LoopConfig {
             toolchains: Vec::new(),
             mcp: Vec::new(),
             credential_source: "named".to_owned(),
+            cwd: None,
             credential_renewal: None,
             admits: None,
             skills: None,
@@ -567,6 +603,16 @@ impl LoopConfig {
     #[must_use]
     pub fn with_credential_source(mut self, source: String) -> Self {
         self.credential_source = source;
+        self
+    }
+
+    /// Names the directory this run works in, for the record.
+    ///
+    /// Additive to the record and to nothing else: it is reported at [`LoopEvent::Started`], and
+    /// where the tools act is decided by the port the caller built, not by this.
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: Option<String>) -> Self {
+        self.cwd = cwd;
         self
     }
 
@@ -2191,7 +2237,7 @@ impl<'a> AgentLoop<'a> {
                 "the approval checkpoint is malformed".to_owned(),
             ));
         }
-        if checkpoint.config != self.config {
+        if !checkpoint.taken_under(&self.config) {
             return Err(LoopError::Config(
                 "the run configuration changed after the approval checkpoint".to_owned(),
             ));
@@ -2370,6 +2416,7 @@ impl<'a> AgentLoop<'a> {
             toolchains: self.config.toolchains.clone(),
             mcp: self.config.mcp.clone(),
             credential_source: self.config.credential_source.clone(),
+            cwd: self.config.cwd.clone(),
         });
         self.announce_prices(priced, sink);
 

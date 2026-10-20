@@ -485,6 +485,99 @@ fn json_mode_emits_one_event_per_line() {
     );
 }
 
+/// A `--json` run launched in `directory`, naming no `--workspace`, so the binary's own `.`
+/// default is what decides where the loop works.
+fn run_launched_in(fixture: &Fixture, extra: &[&str], directory: &Path) -> Output {
+    let output = Command::new(BINARY)
+        .args([
+            "run",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--api-key-env",
+            "B10X_HARNESS_TEST_KEY",
+            "--no-session",
+            "--json",
+            "--input",
+            "say hello",
+        ])
+        .args(extra)
+        .current_dir(directory)
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .output()
+        .expect("the binary runs");
+    Output {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// The `cwd` of the first `started` record of a `--json` run.
+fn started_cwd(output: &Output) -> Value {
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(output);
+    let started = events
+        .iter()
+        .find(|event| event["kind"] == "started")
+        .unwrap_or_else(|| panic!("a `started` record: {}", output.stdout));
+    started["cwd"].clone()
+}
+
+/// A consumer that attests where a run worked reads it from the loop's own record, not from the
+/// launcher's plan — and the plan a driven run most often has is *start it in that directory*.
+/// Launched there with no `--workspace`, the record names the directory absolute and canonical:
+/// `.` would be true and useless to a reader in any other process.
+#[test]
+fn the_started_record_names_the_directory_the_run_was_launched_in() {
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    let expected = workspace.path().canonicalize().expect("canonical");
+    assert!(expected.is_absolute(), "{}", expected.display());
+
+    let cwd = started_cwd(&run_launched_in(&fixture, &[], workspace.path()));
+    assert_eq!(
+        cwd,
+        Value::String(expected.display().to_string()),
+        "the directory the loop worked in, as an absolute path"
+    );
+}
+
+/// Canonical whatever spelling named it, which is how the CLI resolves its workspace everywhere
+/// else: two runs over one directory must not read as two directories.
+#[test]
+fn the_started_record_names_the_workspace_canonically_however_it_was_spelled() {
+    let fixture = Fixture::start("text");
+    let workspace = workspace();
+    fs::create_dir(workspace.path().join("nested")).expect("create");
+    let expected = workspace.path().canonicalize().expect("canonical");
+
+    let cwd = started_cwd(&run_launched_in(
+        &fixture,
+        &["--workspace", "nested/.."],
+        workspace.path(),
+    ));
+    assert_eq!(cwd, Value::String(expected.display().to_string()));
+}
+
+/// Embedded confinement adopts the workspace itself, so the tools still act in the host tree and
+/// the record names it — not the substrate root above it, and not the `/workspace` a confined
+/// program sees.
+#[test]
+fn under_embedded_confinement_the_started_record_names_the_host_tree() {
+    let fixture = Fixture::start("text");
+    let (_root, workspace) = adoptable_workspace("ws_cwd");
+    let expected = workspace.canonicalize().expect("canonical");
+
+    let cwd = started_cwd(&run_launched_in(
+        &fixture,
+        &["--substrate-embedded"],
+        &workspace,
+    ));
+    assert_eq!(cwd, Value::String(expected.display().to_string()));
+}
+
 #[test]
 fn a_run_that_stops_without_an_answer_exits_distinctly_from_a_failure() {
     let fixture = Fixture::start("incomplete");

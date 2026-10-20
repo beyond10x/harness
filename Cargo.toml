@@ -5,9 +5,8 @@ members = [
     "crates/harness-loop",
     "crates/harness-conformance",
     "crates/harness-flow",
-    "crates/harness-toolchain",
+    "crates/harness-catalogue",
     "crates/harness-substrate",
-    "crates/harness-tools",
     "crates/harness-mcp",
     "crates/harness-app-server",
     "crates/harness-cli",
@@ -26,15 +25,23 @@ publish = false
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
 harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
-harness-toolchain = { package = "b10x-harness-toolchain", path = "crates/harness-toolchain" }
+harness-catalogue = { package = "b10x-harness-catalogue", path = "crates/harness-catalogue" }
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
-harness-tools = { package = "b10x-harness-tools", path = "crates/harness-tools" }
 harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 
+# The tool contracts and default implementations harness consumes, pinned by git tag like substrate
+# and MCP, never a sibling path (atlas ADR 0097 decision 3, ADR 0095 phase T2). `tool-fs` and
+# `tool-code-editor` replace `harness-tools`'s reader and writer; `tool-toolchain` replaces
+# `harness-toolchain`; `tool-contract` is the `tool-contract/1` profile they are written against.
+tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
+tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
+tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
+tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
+
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"
-# The two `harness-tools` takes to give `search` a regular expression and a file filter. Both are
+# The two `harness-catalogue` takes to give `search` a regular expression and a file filter. Both are
 # BurntSushi's, both are what ripgrep itself matches with, and they share `regex-automata` and
 # `regex-syntax` — so the second costs `bstr` and `log` on top of the first rather than a tree of
 # its own. Hand-rolling either was the alternative: a glob matcher written here would be a second,

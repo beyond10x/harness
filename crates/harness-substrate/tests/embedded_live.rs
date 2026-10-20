@@ -9,7 +9,7 @@
 //! point is that the catalogue follows the machine, not that every machine is the same.
 
 use b10x_harness_substrate::{Backend, ConfinedOperations, Embedded};
-use harness_tools::Catalogue;
+use harness_catalogue::Catalogue;
 use serde_json::json;
 
 #[test]

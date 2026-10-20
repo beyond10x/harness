@@ -21,9 +21,9 @@ harness-flow = { workspace = true }
 harness-loop = { workspace = true }
 harness-mcp = { workspace = true }
 harness-substrate = { workspace = true }
-harness-toolchain = { workspace = true }
-harness-tools = { workspace = true }
+harness-catalogue = { workspace = true }
 harness-wire = { workspace = true }
+tool-toolchain = { workspace = true }
 llm-blocking = { workspace = true }
 llm-core = { workspace = true }
 llm-credentials = { workspace = true, features = ["codex-renewal", "environment", "file", "json-pointer"] }

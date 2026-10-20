@@ -36,12 +36,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    embeds nothing above it — not `metaharness`, `llmgw`, `identity` or `eventlog`. A dependency
    there would quietly re-couple the components the split exists to separate. **The dependencies
    below it are foundations, pinned and never sibling paths**: `substrate-host` and
-   `substrate-wire` for confinement, and the `b10x-mcp-*` client crates for outbound MCP protocol,
-   transport and local credential mechanics. A path into a sibling checkout builds against
-   whatever is checked out there, and `--locked` cannot lock it. Harness retains the authority in
-   both cases: the substrate crossing is argued in `crates/harness-substrate/src/embedded.rs`; MCP
-   discovery grants nothing until `crates/harness-mcp` intersects it with a locally reviewed,
-   digest-pinned Harness profile.
+   `substrate-wire` for confinement, the `b10x-mcp-*` client crates for outbound MCP protocol,
+   transport and local credential mechanics, and the `b10x-tool-*` crates — `b10x-tool-contract`,
+   `b10x-tool-fs`, `b10x-tool-code-editor`, `b10x-tool-toolchain` — for the tool contracts and
+   default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2).
+   All are pinned by git tag or revision, never by a path into the sibling `tools` checkout. A path
+   into a sibling checkout builds against whatever is checked out there, and `--locked` cannot lock
+   it. Harness retains the authority in every case: the substrate crossing is argued in
+   `crates/harness-substrate/src/embedded.rs`; MCP discovery grants nothing until
+   `crates/harness-mcp` intersects it with a locally reviewed, digest-pinned Harness profile; and
+   the tool crates are adapted in `crates/harness-catalogue`, which keeps every envelope, risk,
+   approval and publication decision harness's own.
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
    byte lives in a wire crate, and since llm `0.7.0` every wire crate is `llm`'s:
    `b10x-llm-responses` and `b10x-llm-messages` over `b10x-llm-http`, with the credential
@@ -178,7 +183,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 - **The shipped toolset is read-only.** Adding a tool that writes or executes is its own change, with
   its own gate and its own entry in `STATUS.md` — never a flag on an existing one. `--surface` is
   **not** such a flag: it chooses how the same catalogue is published, and both surfaces publish
-  exactly what the machine admits and meet the same approval gate.
+  exactly what the machine admits and meet the same approval gate. The default implementations now
+  come from the `tools` crates: `b10x-tool-fs` reads, `b10x-tool-code-editor` writes. Linking a crate
+  is not publishing its tools — `b10x-tool-code-editor` is reached only through `Operations` behind
+  the `Catalogue` gate, which publishes the writer entries only when `operations.writes()`, at
+  `Risk::Medium`, and `run` stays harness's own at `Risk::High` behind the approver. A test pins that
+  a `run` entry built from the adapter is refused under `DenyAll`
+  (`crates/harness-catalogue/tests/run_under_deny_all.rs`).
 - **A session is written outside the workspace and carries no credential.** `transcript::Session`
   writes to `$XDG_STATE_HOME/b10x-harness/sessions`, `0700`, never into the tree being worked on:
   a transcript holds whatever the model read, and one filed beside the code is one `git add -A`

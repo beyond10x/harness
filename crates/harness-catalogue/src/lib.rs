@@ -1,4 +1,5 @@
-//! One catalogue of tools, published to every harness under three verbs.
+//! One catalogue of tools, published to every harness under three verbs, performed by the `tools`
+//! repository's crates.
 //!
 //! # The problem this exists to remove
 //!
@@ -18,6 +19,16 @@
 //! tool_invoke   {name, arguments}   -> call it
 //! ```
 //!
+//! # Where the implementations come from (atlas ADR 0097, ADR 0095 phase T2)
+//!
+//! The default reading and writing of a tree are the `tools` repository's, pinned by tag: the `fs`
+//! toolset ([`tool_fs`]) answers the reader's `file_read`, `dir_list` and `find`, and the
+//! `code-editor` toolset ([`tool_code_editor`]) answers `file_write` and `file_edit`. The adapter
+//! ([`LocalOperations`]) maps each harness operation onto one `tools` operation — the mapping is
+//! [`tools_operation`], tested both ways — and keeps `search` and `run` here, because `tools`
+//! `0.1.0` has no search or process toolset. The whole-file `sha256` a `tools` read now carries is
+//! stripped by the adapter: it is a `tool-contract/1` property harness does not publish yet.
+//!
 //! # Three layers, and what each is allowed to know
 //!
 //! * [`Operations`] — who performs a tool. Two implementations: [`LocalOperations`] here, and a
@@ -31,19 +42,11 @@
 //!   `harness_wire::ToolPort` over one catalogue; which one a run publishes is a deployment
 //!   decision, and [`flat`](crate::Flat) carries what each costs.
 //!
-//! # This crate depends on `harness-wire`, serde, `regex`, `globset`, and nothing else
+//! # The toolchain types come from `tool-toolchain`
 //!
-//! The short list is deliberate: `metaharness` embeds this crate to serve the same tools to Claude
-//! Code over MCP, and that workspace links no async runtime and justifies every dependency it has.
-//! A catalogue that dragged in substrate or tokio could not go there.
-//!
-//! The two matching crates were added on 2026-08-29 with `search`'s `regex` and `glob`, and they
-//! are the two this workspace would otherwise have written by hand: a glob matcher of our own would
-//! be a second, subtly different answer to *does this path match `crates/**/*.rs`* on every machine
-//! that reads a run, and nobody should write a regular-expression engine twice. Both are the
-//! crates ripgrep itself matches with, by the same author, and they share `regex-automata` and
-//! `regex-syntax` — so the second costs `bstr` and `log` rather than a tree of its own. Neither
-//! links a runtime.
+//! [`ResolvedProvider`] and the declarative toolchain registry are the `tools` crate's, moved there
+//! with `harness-toolchain` (ADR 0097 decision 3). This crate re-exports the one type the catalogue
+//! names and keeps no copy of its own.
 
 mod catalogue;
 mod flat;
@@ -55,11 +58,11 @@ mod verbs;
 
 pub use catalogue::{Catalogue, Entry, entry_names, operation_of, subjects_of};
 pub use flat::Flat;
-pub use harness_toolchain::ResolvedProvider;
 pub use harness_wire::{Refusal, Subject};
-pub use local::LocalOperations;
+pub use local::{LocalOperations, harness_operation, tools_operation};
 pub use operations::{Operations, ReadWindow, Refused, SearchOptions, Split};
 pub use scope::{Scope, ScopeRule, WriteScope};
+pub use tool_toolchain::ResolvedProvider;
 pub use toolchain::entry_names as toolchain_entry_names;
 pub use verbs::{DESCRIBE_VERB, INVOKE_VERB, SEARCH_VERB, Verbs};
 

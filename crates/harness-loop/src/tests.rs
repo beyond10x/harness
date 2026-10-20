@@ -16,7 +16,7 @@ const WIRE: &str = "scripted";
 
 /// The verb a call names when the entry it wants is an argument.
 ///
-/// `harness_tools::verbs::INVOKE_VERB` spelled again rather than depended on: `harness-loop` does
+/// `harness_catalogue::verbs::INVOKE_VERB` spelled again rather than depended on: `harness-loop` does
 /// not know `harness-tools` exists, and a test that imported it would be asserting over the very
 /// coupling this crate refuses.
 const INVOKE_VERB: &str = "tool_invoke";
@@ -238,7 +238,7 @@ impl ScriptedTools {
 
     /// The catalogue this port's verbs stand over, which is what makes it a verb surface.
     ///
-    /// Both routes `harness_tools::Verbs::invoked_entry` answers: `tool_invoke {"name": …}`
+    /// Both routes `harness_catalogue::Verbs::invoked_entry` answers: `tool_invoke {"name": …}`
     /// reaches the entry the argument names, and a bare entry name reaches it directly. Neither
     /// entry is published — [`ToolPort::specs`] stays the verbs, whatever the catalogue holds.
     fn over(mut self, entries: Vec<ToolSpec>) -> Self {
@@ -287,8 +287,8 @@ impl ToolPort for ScriptedTools {
 
     /// The catalogue where there is one, and the published names where there is not.
     ///
-    /// The same split the two shipped surfaces make: `harness_tools::Verbs` answers its entries and
-    /// `harness_tools::Flat` takes the trait's default, because what it publishes is what it
+    /// The same split the two shipped surfaces make: `harness_catalogue::Verbs` answers its entries and
+    /// `harness_catalogue::Flat` takes the trait's default, because what it publishes is what it
     /// performs.
     fn reachable(&self) -> Vec<ToolName> {
         if self.hides_reach {

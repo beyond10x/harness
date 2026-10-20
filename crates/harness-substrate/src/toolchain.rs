@@ -75,7 +75,7 @@ pub struct Toolchain {
     env: BTreeMap<String, String>,
     driver: Option<StagedDriver>,
     programs: Vec<String>,
-    providers: Vec<harness_toolchain::ResolvedProvider>,
+    providers: Vec<tool_toolchain::ResolvedProvider>,
 }
 
 impl Toolchain {
@@ -88,7 +88,7 @@ impl Toolchain {
     ///
     /// Refuses providers that require conflicting values for the same sandbox environment key.
     pub fn from_providers(
-        providers: Vec<harness_toolchain::ResolvedProvider>,
+        providers: Vec<tool_toolchain::ResolvedProvider>,
     ) -> Result<Self, String> {
         let mut toolchain = Self::default();
         for provider in &providers {
@@ -230,7 +230,7 @@ impl Toolchain {
 
     /// The resolved provider definitions used to build this closure.
     #[must_use]
-    pub fn providers(&self) -> &[harness_toolchain::ResolvedProvider] {
+    pub fn providers(&self) -> &[tool_toolchain::ResolvedProvider] {
         &self.providers
     }
 }

@@ -3,7 +3,7 @@
 //! # Publication is the first gate, and it is the quiet one
 //!
 //! What this provider *admits* is computed from [`Facts`], once, and
-//! `harness_tools::Catalogue::of` turns that into which entries exist. On a machine with no
+//! `harness_catalogue::Catalogue::of` turns that into which entries exist. On a machine with no
 //! delegated cgroup root there is no `run` entry at all — the model is never told about a tool it
 //! cannot have, never plans around one, and never spends a turn being refused. On a machine with no
 //! substrate backend there are no writing entries either, and the harness is exactly the read-only
@@ -25,7 +25,7 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use harness_tools::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
+use harness_catalogue::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
 use serde_json::{Value, json};
 
 use crate::{Backend, Facts, ProcessWorkspaceAccess, Withheld};
@@ -33,7 +33,7 @@ use crate::{Backend, Facts, ProcessWorkspaceAccess, Withheld};
 /// What a confined workspace can do on this machine.
 pub struct ConfinedOperations {
     /// **`Send + Sync`, because the catalogue runs a turn's pure reads side by side.**
-    /// `harness_tools::Catalogue::invoke_batch` gives each call a thread, so the provider behind it
+    /// `harness_catalogue::Catalogue::invoke_batch` gives each call a thread, so the provider behind it
     /// is shared across them. Both backends already were — [`Client`](crate::Client) holds a
     /// `Box<dyn Transport + Send + Sync>` and opens a connection per call, and
     /// [`Embedded`](crate::Embedded) holds the driver in an `Arc` behind a runtime — so this is a
@@ -219,13 +219,19 @@ impl Operations for ConfinedOperations {
         // yields no extra empty line. What is *shown* keeps `lines()`'s own rule as well — a `\r`
         // is a line ending only when a newline follows it — because that is the text a model
         // quotes back to `file_edit`.
-        let rows: Vec<(&str, u64)> = whole
+        let rows: Vec<(&str, u64, bool)> = whole
             .split_inclusive('\n')
             .map(|row| {
                 let body = row.strip_suffix('\n');
-                let weight = body.unwrap_or(row).len() as u64 + 1;
+                // A separator is charged only where the row has one: a last line without a newline
+                // is a line, but there is no byte after it to count. The unconfined reader
+                // (`tool_fs::Fs::read`) charges the byte ceiling the same way, so the same stated
+                // `max_bytes` over the same bytes reaches the same line through both providers —
+                // the agreement the conformance suite's line-ending sweep pins.
+                let terminated = body.is_some();
+                let weight = body.unwrap_or(row).len() as u64 + u64::from(terminated);
                 let shown = body.map_or(row, |line| line.strip_suffix('\r').unwrap_or(line));
-                (shown, weight)
+                (shown, weight, terminated)
             })
             .collect();
         let total = rows.len() as u64;
@@ -261,7 +267,7 @@ impl Operations for ConfinedOperations {
         let mut answered_bytes: u64 = 0;
         let mut kept: u64 = 0;
         let mut last: u64 = 0;
-        for (index, &(line, weight)) in rows.iter().enumerate().skip(
+        for (index, &(line, weight, terminated)) in rows.iter().enumerate().skip(
             usize::try_from(offset - 1)
                 .unwrap_or(usize::MAX)
                 .min(rows.len()),
@@ -273,8 +279,9 @@ impl Operations for ConfinedOperations {
                 break;
             }
             let byte_ceiling_cut = kept == 0 && weight > ceiling;
+            // The cut leaves room for the separator only where the line has one, as `tool_fs` does.
             let visible = if byte_ceiling_cut {
-                utf8_prefix(line, ceiling.saturating_sub(1))
+                utf8_prefix(line, ceiling.saturating_sub(u64::from(terminated)))
             } else {
                 line
             };
@@ -320,7 +327,7 @@ impl Operations for ConfinedOperations {
     ///
     /// # Why the check is here as well as in the catalogue
     ///
-    /// [`Operations::writes`] is the single question `harness_tools::Catalogue::of` asks to decide
+    /// [`Operations::writes`] is the single question `harness_catalogue::Catalogue::of` asks to decide
     /// which entries exist, so a model can never reach this on a workspace that answered `false`.
     /// An **embedder** can: the trait is public and the unconfined provider has always answered a
     /// caller who went around the catalogue rather than serving one. Until this check existed, the
@@ -402,7 +409,7 @@ impl Operations for ConfinedOperations {
     ///
     /// `Backend` carries no way to walk a workspace, and walking the host filesystem to answer
     /// would step around the containment this provider exists for. A run that needs to find a file
-    /// gets it from the reading provider beside this one, which is what `harness_tools::Split`
+    /// gets it from the reading provider beside this one, which is what `harness_catalogue::Split`
     /// composes.
     fn find(&self, _glob: &str, _path: &str, _max: Option<usize>) -> Result<Value, String> {
         Err(Self::unavailable("find through a confined workspace"))

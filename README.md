@@ -232,7 +232,7 @@ not sent to the model.
 
 ## What the model sees
 
-One [catalogue](crates/harness-tools/src/catalogue.rs) whose entries are named by neutral
+One [catalogue](crates/harness-catalogue/src/catalogue.rs) whose entries are named by neutral
 operations, published under one of two surfaces.
 
 | entry | operation | what it does | needs |
@@ -262,7 +262,7 @@ so the provider validates arguments and nothing has to be discovered first. The 
 verbs — `tool_search`, `tool_describe`, `tool_invoke` — and the reason for them was neutral names
 across harnesses, since an evaluation compares arms that each spell one act differently (`Bash`
 here, `run` there, `Write` and `workspace_write`). That reason survives without the indirection:
-the **entry names are the vocabulary**, and `harness_tools::operation_of` maps them for a reader of
+the **entry names are the vocabulary**, and `harness_catalogue::operation_of` maps them for a reader of
 a finished run. What did not survive is the cost — across three live runs **33–44% of every tool
 call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` was an untyped object no
 provider could check.
@@ -472,8 +472,7 @@ comparison kept here.
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
-| `crates/harness-tools` | one catalogue, published flat or under three verbs |
-| `crates/harness-toolchain` | versioned declarative toolchain providers — Rust, Go, Taskfile, npm, Yarn and explicitly loaded operator documents — with read-only discovery and a typed argv compiler |
+| `crates/harness-catalogue` | one catalogue, published flat or under three verbs, over the `tools` crates: the adapter that maps each operation onto `b10x-tool-fs` (reads) and `b10x-tool-code-editor` (writes), keeps `search` and `run` local, and re-exports `b10x-tool-toolchain`'s resolved providers |
 | `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
 | `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts, the environment block, and `llm_port.rs`: the model port over `llm`'s client crates and the credential sources that feed them |

@@ -1,4 +1,4 @@
-//! One suite, asked of every implementation of `harness_tools::Operations`.
+//! One suite, asked of every implementation of `harness_catalogue::Operations`.
 //!
 //! # What an embedder is promised, and what was checking it
 //!
@@ -60,7 +60,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use b10x_harness_substrate::{Backend, ConfinedOperations, Embedded, Facts};
-use harness_tools::{
+use harness_catalogue::{
     LocalOperations, Operations, ReadWindow, Refusal, Refused, SearchOptions, Split,
 };
 use serde_json::{Value, json};
@@ -1076,7 +1076,7 @@ fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_work
 /// re-implementing containment here would make two answers to one question, and the wrong one would
 /// be the one nobody was looking at." Normalising `./` here is the first half of exactly that. The
 /// two places it could live are substrate's own path handling and
-/// `harness_tools::Catalogue`, which is the one gate every provider is reached through — and that
+/// `harness_catalogue::Catalogue`, which is the one gate every provider is reached through — and that
 /// second one changes what every entry receives, for every embedder, which is a design change with
 /// its own blast radius. Smaller than the parent-directory split above: nothing published tells a
 /// model that `./` is legal for `file_read`, so this is habit rather than a documented workflow.

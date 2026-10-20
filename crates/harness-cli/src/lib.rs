@@ -112,14 +112,14 @@ struct Owned<'a> {
 ///
 /// # Under `flat`, only the names go in — and that is deliberate
 ///
-/// [`harness_tools::Catalogue::brief`] renders every entry's **input schema**, and under a flat
+/// [`harness_catalogue::Catalogue::brief`] renders every entry's **input schema**, and under a flat
 /// surface those schemas are already in `tools`: one per published tool, on every request, in the
 /// half of the request a prompt cache holds. Pasting them here would send each schema twice per
 /// turn to say the same thing, and the copy in the instruction is the one the provider cannot
 /// validate against. So the instruction names the entries in one line — that is what a model needs
 /// to plan with — and the shapes stay where the provider reads them.
 fn standing_instruction(
-    catalogue: &harness_tools::Catalogue,
+    catalogue: &harness_catalogue::Catalogue,
     surface: Surface,
     context: &str,
     announce: bool,
@@ -204,15 +204,15 @@ fn standing_instruction(
 /// states the **run's** scope before the first turn, and a step of a walk is told its **node's**
 /// beside its prompt. A second table of words here is a second boundary as far as a model reading
 /// them is concerned.
-fn scope_lines(scope: &harness_tools::Scope) -> String {
+fn scope_lines(scope: &harness_catalogue::Scope) -> String {
     let mut text = String::new();
     for rule in scope.rules() {
         let word = match rule.write {
-            harness_tools::WriteScope::Allowed => "may be written or edited",
-            harness_tools::WriteScope::PartialOnly => {
+            harness_catalogue::WriteScope::Allowed => "may be written or edited",
+            harness_catalogue::WriteScope::PartialOnly => {
                 "may be edited in part, never replaced whole — use `file_edit`"
             }
-            harness_tools::WriteScope::Denied => "must not be changed at all",
+            harness_catalogue::WriteScope::Denied => "must not be changed at all",
         };
         let _ = writeln!(text, "- `{}` {word}", rule.paths);
     }
@@ -296,7 +296,7 @@ impl From<ApproveUpTo> for Risk {
 /// of every tool call was `tool_search` or `tool_describe`**, and `tool_invoke.arguments` is an
 /// untyped object the provider cannot validate, so a misspelled field becomes a failed call and
 /// another turn. The reason the verbs existed — neutral names across harnesses — is met by the
-/// entry names themselves, which is what `harness_tools::operation_of` maps.
+/// entry names themselves, which is what `harness_catalogue::operation_of` maps.
 ///
 /// `verbs` stays, and is not a legacy setting: metaharness serves the three-verb surface over MCP,
 /// and an evaluation arm that compares the two needs both to be reachable from a flag.
@@ -1849,7 +1849,7 @@ fn push_environment_context(
 
 fn push_toolchain_context(
     package: &mut ContextPackage,
-    providers: &[harness_toolchain::ResolvedProvider],
+    providers: &[tool_toolchain::ResolvedProvider],
     captured_at: &str,
 ) {
     for provider in providers {
@@ -1879,7 +1879,7 @@ fn push_toolchain_context(
 fn push_execution_context(
     package: &mut ContextPackage,
     options: &RunOptions,
-    catalogue: &harness_tools::Catalogue,
+    catalogue: &harness_catalogue::Catalogue,
     captured_at: &str,
 ) -> Result<(), String> {
     let process_access =
@@ -1948,10 +1948,10 @@ fn push_execution_context(
 /// The attributable instruction package for this run.
 fn instruction_package(
     options: &RunOptions,
-    catalogue: &harness_tools::Catalogue,
+    catalogue: &harness_catalogue::Catalogue,
     context_files: &[PathBuf],
     owned: Owned<'_>,
-    toolchains: &[harness_toolchain::ResolvedProvider],
+    toolchains: &[tool_toolchain::ResolvedProvider],
 ) -> Result<ContextPackage, String> {
     let captured_at = environment::utc_rfc3339(unix_now());
     let mut package = ContextPackage::new(vec![ContextLayer::new(
@@ -2001,7 +2001,7 @@ fn instruction_package(
 #[cfg(test)]
 fn instructions(
     options: &RunOptions,
-    catalogue: &harness_tools::Catalogue,
+    catalogue: &harness_catalogue::Catalogue,
     context: &str,
     owned: Owned<'_>,
 ) -> Result<String, String> {
@@ -2110,7 +2110,7 @@ fn prepare(
     let process_workspace_access =
         harness_substrate::process_workspace_access(&options.process_write_subtree)?;
     let Publication { tools, withheld } = published(
-        harness_tools::LocalOperations::new(&options.workspace)?,
+        harness_catalogue::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
         options.surface,
         &Confinement {
@@ -2811,12 +2811,12 @@ fn install_interrupt(cancel: &LoopCancel) {
 ///
 /// Names the rule that could not be read. A misspelling silently becoming "allowed" would be a
 /// boundary that quietly is not one.
-fn write_scope(declarations: &[String]) -> Result<harness_tools::Scope, String> {
+fn write_scope(declarations: &[String]) -> Result<harness_catalogue::Scope, String> {
     declarations
         .iter()
-        .map(|rule| harness_tools::ScopeRule::parse(rule))
+        .map(|rule| harness_catalogue::ScopeRule::parse(rule))
         .collect::<Result<Vec<_>, _>>()
-        .map(harness_tools::Scope::of)
+        .map(harness_catalogue::Scope::of)
 }
 
 /// The toolchain the caller declared, or none.
@@ -2832,7 +2832,7 @@ fn toolchain(
     driver: Option<&std::path::Path>,
     workspace: &std::path::Path,
 ) -> Result<harness_substrate::Toolchain, String> {
-    let mut registry = harness_toolchain::Registry::builtins()?;
+    let mut registry = tool_toolchain::Registry::builtins()?;
     for spec in specs {
         registry.load_file(spec)?;
     }
@@ -2908,7 +2908,7 @@ struct Confinement<'a> {
     process_workspace_access: harness_substrate::ProcessWorkspaceAccess,
     /// Where the run may write. Part of the confinement because it is the same decision: what this
     /// run may do, taken before it starts and not by it.
-    scope: harness_tools::Scope,
+    scope: harness_catalogue::Scope,
 }
 
 /// One catalogue, published under whichever surface the run asked for.
@@ -2918,8 +2918,8 @@ struct Confinement<'a> {
 /// catalogue is not on the trait, because no loop has any business asking what stands behind the
 /// tools it was given.
 enum Published {
-    Flat(harness_tools::Flat),
-    Verbs(harness_tools::Verbs),
+    Flat(harness_catalogue::Flat),
+    Verbs(harness_catalogue::Verbs),
     Augmented(Box<Augmented>),
 }
 
@@ -3048,7 +3048,7 @@ impl harness_wire::ToolPort for Augmented {
 
 impl Published {
     /// This run's catalogue, which is the same document whichever surface publishes it.
-    fn catalogue(&self) -> &harness_tools::Catalogue {
+    fn catalogue(&self) -> &harness_catalogue::Catalogue {
         match self {
             Self::Flat(flat) => flat.catalogue(),
             Self::Verbs(verbs) => verbs.catalogue(),
@@ -3059,10 +3059,10 @@ impl Published {
     /// The same catalogue, to narrow for one step of a walk.
     ///
     /// The only mutation a published toolset admits, and it can only take writing away
-    /// ([`harness_tools::Catalogue::narrow`]). Whatever the surface, the scope lives on the one
+    /// ([`harness_catalogue::Catalogue::narrow`]). Whatever the surface, the scope lives on the one
     /// catalogue behind it, so a walk narrows the same boundary under `--surface flat` and
     /// `--surface verbs`.
-    fn catalogue_mut(&mut self) -> &mut harness_tools::Catalogue {
+    fn catalogue_mut(&mut self) -> &mut harness_catalogue::Catalogue {
         match self {
             Self::Flat(flat) => flat.catalogue_mut(),
             Self::Verbs(verbs) => verbs.catalogue_mut(),
@@ -3205,7 +3205,7 @@ fn withheld_events(withheld: &[harness_substrate::Withheld]) -> Vec<harness_loop
 ///
 /// Names the confinement that was asked for and what stopped it being provided.
 fn published(
-    reading: harness_tools::LocalOperations,
+    reading: harness_catalogue::LocalOperations,
     workspace_name: Option<String>,
     surface: Surface,
     confinement: &Confinement<'_>,
@@ -3220,11 +3220,12 @@ fn published(
         process_workspace_access,
         scope,
     } = confinement;
-    let publish = |catalogue: harness_tools::Catalogue| match surface {
-        Surface::Flat => Published::Flat(harness_tools::Flat::new(catalogue)),
-        Surface::Verbs => Published::Verbs(harness_tools::Verbs::new(catalogue)),
+    let publish = |catalogue: harness_catalogue::Catalogue| match surface {
+        Surface::Flat => Published::Flat(harness_catalogue::Flat::new(catalogue)),
+        Surface::Verbs => Published::Verbs(harness_catalogue::Verbs::new(catalogue)),
     };
-    let read_only = || publish(harness_tools::Catalogue::of(reading.clone()).scoped(scope.clone()));
+    let read_only =
+        || publish(harness_catalogue::Catalogue::of(reading.clone()).scoped(scope.clone()));
 
     let active_toolchains = || toolchain.providers().to_vec();
 
@@ -3235,14 +3236,14 @@ fn published(
             .with_process_workspace_access(process_workspace_access.clone());
         let mut withheld = confined.withheld().to_vec();
         let active_toolchains = active_toolchains();
-        let admitted_toolchains = if harness_tools::Operations::programs(&confined).is_empty() {
+        let admitted_toolchains = if harness_catalogue::Operations::programs(&confined).is_empty() {
             if let Some(reason) = withheld
                 .iter()
                 .find(|item| item.tool == "run")
                 .map(|item| item.reason.clone())
             {
                 withheld.extend(
-                    harness_tools::toolchain_entry_names(&active_toolchains)
+                    harness_catalogue::toolchain_entry_names(&active_toolchains)
                         .into_iter()
                         .map(|tool| harness_substrate::Withheld {
                             tool,
@@ -3256,8 +3257,8 @@ fn published(
         };
         return Ok(Publication {
             tools: publish(
-                harness_tools::Catalogue::of_with_toolchains(
-                    harness_tools::Split::new(reading, confined),
+                harness_catalogue::Catalogue::of_with_toolchains(
+                    harness_catalogue::Split::new(reading, confined),
                     admitted_toolchains,
                 )
                 .scoped(scope.clone()),
@@ -3307,7 +3308,7 @@ fn published(
     let withheld = confined.withheld().to_vec();
     Ok(Publication {
         tools: publish(
-            harness_tools::Catalogue::of(harness_tools::Split::new(reading, confined))
+            harness_catalogue::Catalogue::of(harness_catalogue::Split::new(reading, confined))
                 .scoped(scope.clone()),
         ),
         withheld,
@@ -3377,7 +3378,7 @@ impl Adopted {
 /// Names which of the four things `--substrate-embedded` needs was not there. Each is a refusal
 /// rather than a quiet fall-back to reading, because the operator asked for write and execute.
 fn adopted(
-    reading: &harness_tools::LocalOperations,
+    reading: &harness_catalogue::LocalOperations,
     workspace_name: Option<String>,
     cgroup_root: Option<&std::path::Path>,
     toolchain: &harness_substrate::Toolchain,
@@ -3596,7 +3597,7 @@ fn providers_command(verb: &ProvidersCommand) -> Result<(), String> {
 /// `toolchains list|show|validate`, over the same registry a run resolves.
 fn toolchains_command(verb: &ToolchainsCommand) -> Result<(), String> {
     let registry = |specs: &[PathBuf]| {
-        let mut registry = harness_toolchain::Registry::builtins()?;
+        let mut registry = tool_toolchain::Registry::builtins()?;
         for spec in specs {
             registry.load_file(spec)?;
         }
@@ -3642,8 +3643,9 @@ fn toolchains_command(verb: &ToolchainsCommand) -> Result<(), String> {
 
 fn context_package(options: &ContextOptions) -> Result<ContextPackage, String> {
     let captured_at = environment::utc_rfc3339(unix_now());
-    let catalogue =
-        harness_tools::Catalogue::of(harness_tools::LocalOperations::new(&options.workspace)?);
+    let catalogue = harness_catalogue::Catalogue::of(harness_catalogue::LocalOperations::new(
+        &options.workspace,
+    )?);
     let mut package = ContextPackage::new(vec![ContextLayer::new(
         "harness.instructions",
         ContextKind::HarnessInstructions,
@@ -3732,7 +3734,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let process_workspace_access =
         harness_substrate::process_workspace_access(&options.process_write_subtree)?;
     let Publication { tools, withheld } = published(
-        harness_tools::LocalOperations::new(&options.workspace)?,
+        harness_catalogue::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
         options.surface,
         &Confinement {
@@ -4351,8 +4353,10 @@ mod tests {
     }
 
     /// A read-only catalogue over a temporary tree, for the instruction tests.
-    fn a_catalogue(dir: &std::path::Path) -> harness_tools::Catalogue {
-        harness_tools::Catalogue::of(harness_tools::LocalOperations::new(dir).expect("opens"))
+    fn a_catalogue(dir: &std::path::Path) -> harness_catalogue::Catalogue {
+        harness_catalogue::Catalogue::of(
+            harness_catalogue::LocalOperations::new(dir).expect("opens"),
+        )
     }
 
     #[test]
@@ -4523,8 +4527,8 @@ mod tests {
     #[test]
     fn a_declared_scope_is_stated_up_front_so_no_turn_is_spent_discovering_it() {
         let dir = tempfile::tempdir().expect("temporary directory");
-        let catalogue = a_catalogue(dir.path()).scoped(harness_tools::Scope::of(vec![
-            harness_tools::ScopeRule::parse(".engineering/planning/**=partial-only")
+        let catalogue = a_catalogue(dir.path()).scoped(harness_catalogue::Scope::of(vec![
+            harness_catalogue::ScopeRule::parse(".engineering/planning/**=partial-only")
                 .expect("a rule"),
         ]));
         let text = instructions(&options(&[]), &catalogue, "", Owned::default())
@@ -4539,8 +4543,8 @@ mod tests {
         // The experiment control. A run told the rule and a run refused the rule both end with the
         // rule kept; only the second shows that the toolset is what kept it.
         let dir = tempfile::tempdir().expect("temporary directory");
-        let scope = harness_tools::Scope::of(vec![
-            harness_tools::ScopeRule::parse(".engineering/planning/**=partial-only")
+        let scope = harness_catalogue::Scope::of(vec![
+            harness_catalogue::ScopeRule::parse(".engineering/planning/**=partial-only")
                 .expect("a rule"),
         ]);
         let catalogue = a_catalogue(dir.path()).scoped(scope);

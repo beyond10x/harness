@@ -7,6 +7,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Harness consumes the `tools` repository's crates at tag `0.1.0` instead of its own
+  `crates/harness-tools` and `crates/harness-toolchain` (atlas ADR 0097 decision 3, ADR 0095 phase
+  T2). The new `crates/harness-catalogue` holds the publication layer (`Catalogue`, `Flat`, `Verbs`,
+  `Scope`, the `Operations` trait) and the adapter that maps each operation onto a `tools` operation:
+  `file_read → fs.read`, `dir_list → fs.list`, `find → fs.glob` through `b10x-tool-fs`, and
+  `file_write → code.write`, `file_edit → code.edit` through `b10x-tool-code-editor`. `search` and
+  `run` stay local — `tools` `0.1.0` has no search or process toolset — with `run` at `Risk::High`.
+  `crates/harness-toolchain` is deleted; its callers take `b10x-tool-toolchain`. `b10x-tool-contract`,
+  `b10x-tool-fs`, `b10x-tool-code-editor` and `b10x-tool-toolchain` are pinned by git tag in
+  `[workspace.dependencies]`, never a sibling path (invariant 2).
+- Model-facing tool names, the CLI contract (`contracts/cli/b10x-harness/2026-09-18`) and the recorded
+  operation names are unchanged. A `tools` read now carries a whole-file `sha256` and a write carries
+  `sha256` and a unified `diff`; the adapter strips them, because they are `tool-contract/1` properties
+  harness does not publish yet, so the model-facing replies stay byte-for-byte what they were.
+
+### Fixed
+
+- The confined reader (`ConfinedOperations::file_read`) charged the byte ceiling a separator for a
+  last line with no trailing newline, which `b10x-tool-fs` does not; the two now charge it the same
+  way, so the same stated `max_bytes` over the same bytes reaches the same line through either
+  provider. The substrate conformance suite's line-ending sweep pins the agreement.
+
 ## [0.14.1] - 2026-10-20
 
 ### Security

@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The ESS toolchain moves from `0.52.0` to `0.66.0` (`145a1b9d`): `spec/ess-inputs.yaml`, the four
+  `ess-*` crates of `crates/harness-conformance` and its pinned-compiler check; the regenerated
+  `conformance/suite.json` is `ess-conformance/35`, and `cargo xtask specification` passes 42 of 42.
 - `search` is served by `b10x-tool-search` — harness 0.14.1's grep moved to `tools` — through the
   `crates/harness-catalogue` adapter, as `find` is served by `b10x-tool-fs`:
   `LocalOperations::search` calls `tool_search::Search::grep` and answers its reply field for

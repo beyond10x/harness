@@ -259,9 +259,10 @@
   },
   "provenance": {
     "contract_digest": "b66b92daa2ca4c4e22ea638f0450a7704af54d913281e7e7c0134a53676dfa7c",
+    "scenario_initial_state": "empty",
     "spec_digest": "4061ac1f6ba3f6b443dc0acb5873b593c3805870927041901582c377e0d9ab96",
     "specification_version": "v1",
-    "suite_version": "ess-conformance/29",
+    "suite_version": "ess-conformance/35",
     "system": "harness"
   },
   "scenarios": {
@@ -1920,14 +1921,7 @@
             },
             "budget": {
               "kind": "literal",
-              "value": {
-                "max_cost_microunits": 1.0,
-                "max_duration_ms": 1.0,
-                "max_input_tokens": 1.0,
-                "max_output_tokens": 1.0,
-                "max_output_tokens_per_turn": 1.0,
-                "max_turns": 1.0
-              }
+              "value": {}
             },
             "cancelled": {
               "kind": "literal",
@@ -2086,14 +2080,7 @@
           "input": {
             "budget": {
               "kind": "literal",
-              "value": {
-                "max_cost_microunits": 1.0,
-                "max_duration_ms": 1.0,
-                "max_input_tokens": 1.0,
-                "max_output_tokens": 1.0,
-                "max_output_tokens_per_turn": 1.0,
-                "max_turns": 1.0
-              }
+              "value": {}
             },
             "priced": {
               "kind": "literal",

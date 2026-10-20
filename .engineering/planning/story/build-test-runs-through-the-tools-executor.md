@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: story:build-test-runs-through-the-tools-executor
 kind: story
-status: draft
+status: active
 title: Toolchain operations run through the tools executor, local and confined
 summary: invoke_toolchain is replaced by tool_toolchain::executor over a runner that calls the active Operations; waits on the tools release that makes Executor generic over a runner.
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:54:39Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-20T17:54:39Z", actor: "human:timo", revision: 4}
 ---
 ## Context
 

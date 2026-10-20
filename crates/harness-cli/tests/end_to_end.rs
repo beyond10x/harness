@@ -3026,3 +3026,222 @@ fn a_token_file_readable_by_others_is_refused_as_a_credential_problem_not_a_tran
         "never the value: {stderr}"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Adversary pass 3, wave llm-1 (story:harness-builds-on-llm-0-7): the llm 0.8.0 move, 97ff3d7f.
+// ---------------------------------------------------------------------------------------------
+
+/// A provider failure after the caller was shown a text delta is final on llm 0.8.0: the run
+/// ends on the wire with the one delta it showed, nothing is attempted again and nothing is shown
+/// twice.
+fn final_after_shown_text(fixture: &Fixture, extra: &[&str], what: &str) {
+    let workspace = workspace();
+    let mut arguments = vec!["--json"];
+    arguments.extend_from_slice(extra);
+    let output = run_against(fixture, &arguments, workspace.path());
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert_eq!(
+        output.status,
+        Some(1),
+        "{what}: the run ends on the wire: stderr: {}",
+        output.stderr
+    );
+    assert!(
+        !kinds.contains(&"turn-retried"),
+        "{what}: a failure after output is final and never attempted again: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "text-delta").count(),
+        1,
+        "{what}: the one delta shown, shown once: {kinds:?}"
+    );
+    assert!(!kinds.contains(&"finished"), "{what}: {kinds:?}");
+}
+
+#[test]
+fn a_responses_server_error_after_a_text_delta_is_final_through_the_shipped_binary() {
+    final_after_shown_text(
+        &Fixture::start("failed-mid-output"),
+        &[],
+        "Responses `server_error` after a delta",
+    );
+}
+
+#[test]
+fn a_messages_api_error_after_a_text_delta_is_final_through_the_shipped_binary() {
+    final_after_shown_text(
+        &Fixture::messages("failed-mid-output"),
+        &["--wire", "anthropic-messages"],
+        "Messages `api_error` after a delta",
+    );
+}
+
+#[test]
+fn a_responses_server_error_after_lifecycle_payloads_only_is_retried_through_the_shipped_binary()
+{
+    // `response.created` and `response.in_progress` have not answered the turn (llm-responses
+    // `LIFECYCLE_EVENTS`), so the failure after them is still "before output".
+    retried_once_then_completed(
+        &Fixture::start("failed-after-keepalive"),
+        &[],
+        "Responses `server_error` after `response.in_progress`",
+    );
+}
+
+#[test]
+fn a_messages_overload_after_message_start_and_ping_only_is_retried_through_the_shipped_binary() {
+    // llm 0.8.0 CHANGELOG: retriable "when no payload but `message_start` and `ping` came before
+    // it".
+    retried_once_then_completed(
+        &Fixture::messages("failed-after-keepalive"),
+        &["--wire", "anthropic-messages"],
+        "Messages `overloaded_error` after `message_start` and `ping`",
+    );
+}
+
+#[test]
+fn a_responses_turn_keeps_the_text_it_showed_and_the_record_says_the_server_differed() {
+    // llm 0.8.0: a streamed turn's assistant text is the text deltas the caller was shown, and a
+    // message the server finished with other text takes the shown text with one `shown-text-kept`
+    // warning. Through the bridge: the warning reaches the record (invariant 7) and the session
+    // files the text a person read, not the server's.
+    let fixture = Fixture::start("shown-text-differs");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let output = run_with_session(&fixture, &["--json"], workspace.path(), sessions.path());
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let shown: String = events
+        .iter()
+        .filter(|event| event["kind"] == "text-delta")
+        .filter_map(|event| event["text"].as_str())
+        .collect();
+    assert_eq!(shown, "provider emulation passed");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "warning" && event["code"] == "shown-text-kept"),
+        "llm's warning that the server's text differed reaches the record: {:?}",
+        kinds(&events)
+    );
+    let session = only_session(sessions.path());
+    let texts: Vec<&str> = session["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter(|item| item["kind"] == "assistant-text")
+        .filter_map(|item| item["text"].as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["provider emulation passed"],
+        "the session keeps the text a person read, never the server's: {session}"
+    );
+}
+
+/// A fixture that writes what it received to `record`, one JSON line per request.
+fn recording(script: &str, scenario: &str, record: &Path) -> Fixture {
+    let path = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+    )
+    .join("tests")
+    .join("fixtures")
+    .join(script);
+    let mut child = Command::new("python3")
+        .arg(&path)
+        .arg("--scenario")
+        .arg(scenario)
+        .arg("--record")
+        .arg(record)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("the fixture starts; python3 must be available");
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().expect("piped stdout"))
+        .read_line(&mut line)
+        .expect("the fixture announces its address");
+    let ready: Value = serde_json::from_str(&line).expect("the announcement is JSON");
+    Fixture {
+        base_url: ready["base_url"].as_str().expect("a base url").to_owned(),
+        child,
+    }
+}
+
+fn recorded_turn(record: &Path, turn: u64) -> Value {
+    fs::read_to_string(record)
+        .expect("the record")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("a JSON line"))
+        .find(|entry| entry["turn"] == turn)
+        .unwrap_or_else(|| panic!("no turn {turn} in the record"))
+}
+
+/// What the loop tells the model when nobody may approve a call (`harness_loop::DenyAll`).
+const DENIED: &str = "needs a person's decision";
+
+#[test]
+fn a_denied_call_reaches_the_responses_wire_as_a_failed_result_carrying_the_refusal() {
+    // llm 0.8.0: a call the caller rejected before running it is sent as `failed: true` with the
+    // reason as the caller's text in `output`; on this wire the flag travels inside the
+    // `{"ok", "output"}` envelope of every `function_call_output`. Invariant 9: the model must
+    // see that the effect did not happen, and why.
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let record = dir.path().join("record.jsonl");
+    let fixture = recording("fake_responses.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace("ws_deny_wire");
+    let output = run_against(
+        &fixture,
+        &["--substrate-embedded", "--approve", "deny"],
+        &workspace,
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let second = recorded_turn(&record, 2);
+    let result = second["input"]
+        .as_array()
+        .expect("input")
+        .iter()
+        .find(|entry| entry["type"] == "function_call_output")
+        .unwrap_or_else(|| panic!("the refused call's result is replayed: {second}"));
+    let envelope: Value =
+        serde_json::from_str(result["output"].as_str().expect("llm's envelope is a string"))
+            .expect("llm's envelope is JSON");
+    assert_eq!(envelope["ok"], false, "{envelope}");
+    let text = envelope["output"].as_str().expect("the refusal as text");
+    assert!(text.contains(DENIED), "the refusal, in the loop's words: {text}");
+}
+
+#[test]
+fn a_denied_call_reaches_the_messages_wire_as_a_failed_result_carrying_the_refusal() {
+    // The same refusal on the second wire: a `tool_result` block with `is_error: true` and the
+    // loop's words as its content.
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let record = dir.path().join("record.jsonl");
+    let fixture = recording("fake_messages.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace("ws_deny_wire_2");
+    let output = run_against(
+        &fixture,
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--substrate-embedded",
+            "--approve",
+            "deny",
+        ],
+        &workspace,
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let second = recorded_turn(&record, 2);
+    let result = second["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter_map(|message| message["content"].as_array())
+        .flatten()
+        .find(|block| block["type"] == "tool_result")
+        .unwrap_or_else(|| panic!("the refused call's result is replayed: {second}"));
+    assert_eq!(result["is_error"], true, "{result}");
+    let text = result["content"].as_str().expect("the refusal as text");
+    assert!(text.contains(DENIED), "the refusal, in the loop's words: {text}");
+}

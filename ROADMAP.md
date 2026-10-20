@@ -101,7 +101,7 @@ values and failed on any difference but the framing.
 
 **Superseded on 2026-10-20 (atlas ADR 0097).** `harness-http`, `harness-responses`,
 `harness-messages` and `harness-credential` are removed; `llm`'s client crates, pinned by tag
-`0.7.0`, do every model call behind `crates/harness-cli/src/llm_port.rs`, and the two-wire
+`0.8.0`, do every model call behind `crates/harness-cli/src/llm_port.rs`, and the two-wire
 comparison above is `llm`'s parity table (`llm/docs/harness-parity.md`) now. The released
 `contracts/provider-wires/` versions stay, checked by `cargo xtask provider-contracts`.
 

@@ -38,6 +38,8 @@ SCENARIOS = [
     "delegate-pair",
     "dynamic-tool",
     "failed",
+    "failed-after-keepalive",
+    "failed-mid-output",
     "failed-once",
     "fails-after-turn",
     "flat-tool",
@@ -52,6 +54,7 @@ SCENARIOS = [
     "overloaded-once",
     "rate-limited-once",
     "reasoning",
+    "shown-text-differs",
     "slow",
     "stop-hook",
     "text",
@@ -513,6 +516,43 @@ class Handler(BaseHTTPRequestHandler):
                 )
             else:
                 self._send_sse(answered("provider emulation passed"))
+        elif scenario in ("failed-mid-output", "failed-after-keepalive"):
+            # Adversary pass 3 (llm 0.8.0): the route's own `error`, once, either after the caller
+            # was shown one text delta (`api_error`, final: a retry would answer twice) or after
+            # `message_start` and `ping` only (`overloaded_error`, still before output per llm's
+            # 0.8.0 changelog, so retried), then an answer on the next request.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                if scenario == "failed-mid-output":
+                    shown = [
+                        {
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                        {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "text_delta", "text": "half an answer"},
+                        },
+                    ]
+                    kind = "api_error"
+                else:
+                    shown = [{"type": "ping"}]
+                    kind = "overloaded_error"
+                self._send_sse(
+                    [
+                        message_start(),
+                        *shown,
+                        {"type": "error", "error": {"type": kind, "message": "not this time"}},
+                    ]
+                )
+            else:
+                self._send_sse(answered("provider emulation passed"))
+        elif scenario == "shown-text-differs":
+            # This route's terminal payloads carry no text of their own, so the shown text is the
+            # text; served so both emulators offer the same scenario names.
+            self._send_sse(answered("provider emulation passed"))
         elif scenario == "fails-after-turn":
             # A turn is bought and answered -- it carries usage, and it asks for one tool call the
             # loop comes back from -- and the request after it is refused. The only scenario where a

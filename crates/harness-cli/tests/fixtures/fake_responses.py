@@ -35,6 +35,8 @@ SCENARIOS = [
     "delegate-pair",
     "dynamic-tool",
     "failed",
+    "failed-after-keepalive",
+    "failed-mid-output",
     "failed-once",
     "fails-after-turn",
     "flat-tool",
@@ -49,6 +51,7 @@ SCENARIOS = [
     "overloaded-once",
     "rate-limited-once",
     "reasoning",
+    "shown-text-differs",
     "slow",
     "stop-hook",
     "text",
@@ -454,6 +457,71 @@ class Handler(BaseHTTPRequestHandler):
                 )
             else:
                 self._send_sse(text_events("provider emulation passed"))
+        elif scenario in ("failed-mid-output", "failed-after-keepalive"):
+            # Adversary pass 3 (llm 0.8.0): the same `server_error`, once, either after the caller
+            # was shown one text delta (final: a retry would answer twice) or after lifecycle
+            # payloads only (`response.in_progress`: still before output, so retried), then an
+            # answer on the next request.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                if scenario == "failed-mid-output":
+                    shown = [
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {**message_item(""), "content": []},
+                        },
+                        {
+                            "type": "response.output_text.delta",
+                            "item_id": "msg_b10x_001",
+                            "output_index": 0,
+                            "delta": "half an answer",
+                        },
+                    ]
+                else:
+                    shown = [
+                        {
+                            "type": "response.in_progress",
+                            "response": response_object("in_progress", [], None),
+                        }
+                    ]
+                self._send_sse(
+                    [
+                        {
+                            "type": "response.created",
+                            "response": response_object("in_progress", [], None),
+                        },
+                        *shown,
+                        {
+                            "type": "response.failed",
+                            "response": response_object(
+                                "failed",
+                                [],
+                                None,
+                                error={"message": "not this time", "code": "server_error"},
+                            ),
+                        },
+                    ]
+                )
+            else:
+                self._send_sse(text_events("provider emulation passed"))
+        elif scenario == "shown-text-differs":
+            # Adversary pass 3 (llm 0.8.0): the deltas say one thing and the server's terminal
+            # message says another. 0.8.0 keeps the text the caller was shown and warns
+            # `shown-text-kept`; 0.7.0 let the server's message outrank the deltas.
+            events = text_events("provider emulation passed")
+            events[-2] = {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": message_item("SERVER TEXT"),
+            }
+            events[-1] = {
+                "type": "response.completed",
+                "response": response_object(
+                    "completed", [message_item("SERVER TEXT")], usage_object(4)
+                ),
+            }
+            self._send_sse(events)
         elif scenario == "fails-after-turn":
             # A turn is bought and answered -- it carries usage, and it asks for one tool call the
             # loop comes back from -- and the request after it is refused. The only scenario where a

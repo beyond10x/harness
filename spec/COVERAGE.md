@@ -31,12 +31,13 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
 - **UNMAPPED: dynamic context and inventory narrowing.** Sources:
   `crates/harness-loop/src/context.rs:124`, `environment.rs`, and
   `crates/harness-cli/src/environment.rs`. Add real refresh/narrowing scenarios and boundary views.
-- **UNMAPPED: provider protocols and transport.** Sources:
-  `crates/harness-responses/src/lib.rs:141,588`, `crates/harness-messages/src/lib.rs:242,776`,
-  and `crates/harness-http/src/lib.rs`. Scripted native turns do not prove HTTP, streaming,
-  provider item replay or cancellation of network I/O. Extend from the existing contract fixtures.
-- **UNMAPPED: credential lifecycle.** Sources: `crates/harness-credential/src/lib.rs`,
-  `oauth.rs`, `renewal.rs`. Add synthetic secret-source and renewal scenarios; never use live secrets.
+- **UNMAPPED: provider protocols and transport.** Sources: `crates/harness-cli/src/llm_port.rs`
+  over `llm`'s `b10x-llm-responses`, `b10x-llm-messages` and `b10x-llm-http` (tag `0.8.0`).
+  Scripted native turns do not prove HTTP, streaming, provider item replay or cancellation of
+  network I/O. Extend from the existing contract fixtures.
+- **UNMAPPED: credential lifecycle.** Sources: `crates/harness-cli/src/llm_port.rs` (`Source`,
+  `renew_codex_login`) over `b10x-llm-credentials`. Add synthetic secret-source and renewal
+  scenarios; never use live secrets.
 - **UNMAPPED: session persistence and hosted app-server.** Sources:
   `crates/harness-cli/src/transcript.rs:47,393` and `crates/harness-app-server/src/lib.rs:78`.
   Add real temporary transcript and JSON-RPC round trips; loop return values alone do not prove them.

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T05:39:28Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-builds-on-llm-0-7",
+  "kind": "story",
+  "revision": 36,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "gate-steps.sh on wave/2026-10-20-w01 at 7d616ba5 then fmt fix 80f7135c: 17 steps, 16 exit 0 at 7d616ba5, fmt exit 1 fixed and re-checked exit 0 at 80f7135c; cargo test --workspace 955 passed 0 failed 1 ignored; cli lane re-run after fmt",
+    "reference": "~/.cache/harness-wave-2026-10-20-w01/gate/summary.txt"
+  }
+}

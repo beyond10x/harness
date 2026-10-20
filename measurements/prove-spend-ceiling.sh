@@ -36,13 +36,16 @@ scratch="$(mktemp -d)"
 announce="$(mktemp)"
 trap 'kill "${emulator:-}" 2>/dev/null || true; rm -rf "$scratch" "$announce"' EXIT
 
-python3 "$root/crates/harness-messages/tests/fixtures/fake_messages.py" \
+python3 "$root/crates/harness-cli/tests/fixtures/fake_messages.py" \
   --scenario text >"$announce" 2>/dev/null &
 emulator=$!
 for _ in $(seq 1 100); do [ -s "$announce" ] && break; sleep 0.1; done
 base_url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_url"])' "$announce")"
 
 printf '%s' '{"token": "emulator-only-not-a-credential"}' >"$scratch/token"
+# `llm-credentials` reads the token file on every request and refuses one that is not owner-only
+# with a single link, whatever its contents; the default umask leaves it group- and world-readable.
+chmod 600 "$scratch/token"
 mkdir -p "$scratch/config/b10x"
 cat >"$scratch/config/b10x/harness.toml" <<TOML
 [default]

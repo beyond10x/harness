@@ -43,18 +43,22 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    discovery grants nothing until `crates/harness-mcp` intersects it with a locally reviewed,
    digest-pinned Harness profile.
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
-   byte lives in a wire crate. It defines the credential *types* — `Bearer`, zeroized on drop, and
-   the `StaticBearer` a caller may hold for a process lifetime — but reads no credential from
-   anywhere and sends none.
+   byte lives in a wire crate, and since llm `0.7.0` every wire crate is `llm`'s:
+   `b10x-llm-responses` and `b10x-llm-messages` over `b10x-llm-http`, with the credential
+   presentation in `b10x-llm-providers` (atlas ADR 0097). `harness-wire` keeps the credential
+   *types* — `BearerSource`, `Bearer` (zeroized on drop) and the `StaticBearer` a caller may hold
+   for a process lifetime — for an embedder that brings its own model port; the shipped binary's
+   model port uses none of them, and the crate reads no credential from anywhere and sends none.
 
-   **`harness-http` is fenced from the other side, and holds no credential either.** It is the
-   crate that *does* the I/O and reads the back-off's clock, and it names **no vendor, no field, no
-   header and no endpoint path**: a wire hands it a URL, a body, a header list the wire built
-   itself and a decoder. A vendor-shaped name appearing in it means the boundary was drawn in the
-   wrong place — and the one route difference that could not be neutralised, whether `data: [DONE]`
-   ends a stream, is a **parameter both wires set explicitly** rather than a default one of them
-   inherits. The credential is fetched by the wire, per attempt, and reaches the transport already
-   inside a header value.
+   **`crates/harness-cli/src/llm_port.rs` is the one place Harness's values meet `llm`'s, and it
+   holds no credential either.** It translates a turn, a stream event, an outcome and an error,
+   and bridges two differences of execution model — a blocking loop whose sink is not `Send` over
+   an async client, and a cancellation flag over a token. Nothing vendor-shaped is written there: a
+   request body, a stream decoder, a header name or an endpoint path appearing in it means the
+   boundary was drawn in the wrong place. A credential is a `Source` — an `llm` resolver bound to
+   one reference — that `llm` asks per request, and the fetched value reaches the transport already
+   inside a header value `llm` built. The former `harness-http`, `harness-responses`,
+   `harness-messages` and `harness-credential` crates were removed with that move.
 4. **Turns are stateless.** Nothing is retained provider-side and no wire may use provider-side
    threading, because it would not survive the second wire.
 5. **An opaque provider item is replayed verbatim and never reinterpreted.** Replaying one into a
@@ -104,7 +108,12 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
     changelog. For `contracts/cli/` the two halves are `cargo xtask cli-contract` and
     `crates/harness-cli/src/contract.rs`, and the pinned document is **generated from clap's own
     definition** — a hand-written one would be a second description of the command line that
-    drifts from the first.
+    drifts from the first. For `contracts/provider-wires/` the checker half is
+    `cargo xtask provider-contracts`, which still verifies every released manifest against its
+    fixtures here; the Rust half — the test that the client produces exactly those bytes — is
+    `llm`'s since the wire crates were removed (atlas ADR 0097). The released versions stay byte
+    for byte and no new one is cut here: a change to what is sent or accepted is an `llm` change,
+    and this repository re-pins `llm`.
 15. **Bridge-mode method inventories are a copy of the client's, never an import** — copying is what
     keeps the components independent. **Nothing in this repository checks the copy against the
     original**: invariant 2 forbids reading it, and the profile contract only pins this side against
@@ -121,10 +130,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Safety envelope
 
-- **Credentials.** A credential is fetched from an injected `BearerSource` **at call time** and the
-  fetched `Bearer` is dropped when the call ends. A long-lived source such as `StaticBearer` does
-  hold the value for as long as the caller keeps it — what must never happen is a **config struct or
-  an error carrying it**, so `Bearer` has no `Display` and a redacted `Debug`. **There is no ambient
+- **Credentials.** In the shipped binary a credential is an `llm_port::Source` — an
+  `llm-credentials` resolver bound to one reference — that `llm` asks **at call time**; the fetched
+  `Secret` is zeroized when the call ends, and a source re-read on every request
+  (`--oauth-token-file`, `--oauth-token-env`) follows a renewed token without a restart.
+  `harness-wire`'s `BearerSource`, `Bearer` and `StaticBearer` are the same contract for an
+  embedder with its own model port, and a `StaticBearer` does hold the value for as long as the
+  caller keeps it. What must never happen on either path is a **config struct or an error carrying
+  it**: `Bearer` and `Secret` have no `Display` and a redacted `Debug`, and a refusal never names
+  the value. The per-request refusal `llm` builds names only the reference (`oauth-token-file`); a
+  refusal at construction — a path `llm` will not read, a variable name it will not accept — may
+  name the path or variable the operator passed, which is the operator's own input. **There is no ambient
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
 - **Approvals are the review gate (invariant 12).** Adding a path that reaches a tool without
@@ -253,7 +269,7 @@ transcribes it and nothing else decides. In order: `cargo test --workspace --loc
 `cargo test -p b10x-harness-substrate --locked --test conformance`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo xtask provider-contracts`,
 `cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask website`, `cargo xtask toolchain-specs`,
-`cargo xtask toolchain-docs --check`, the in-process HTTP boundary guard, `cargo xtask specification`,
+`cargo xtask toolchain-docs --check`, `cargo xtask specification`,
 `python3 scripts/check-app-server-profile.py`, `cargo xtask home-paths` and strict
 rustdoc. Three of them — the CLI contract checker, the toolchain specs checker and
 `home-paths` — run **twice**: `--self-test` first, on planted fixtures, then the tree.

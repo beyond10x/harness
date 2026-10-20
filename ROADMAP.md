@@ -88,16 +88,22 @@ none of it is vendor-shaped. It is *transport*-shaped, and the first wire could 
 difference while it was the only one. The copy was left standing on purpose for one release, so
 that the second wire was the evidence rather than a guess acting on itself.
 
-**Acted on: `crates/harness-http`.** That half is one crate beneath both wires, and each wire is now
-its projection, its URL and its headers over `harness_http::HttpTransport` — neither depends on
-`reqwest`. No behaviour moved with it: the two pinned contract suites, the provider contract checker and
-both `provider_emulated` suites pass with no fixture, manifest or case edited. The extraction found
-exactly **one** real difference between the two copies, and it is now named instead of implied —
-the first route ends its stream with `data: [DONE]` and the second has no sentinel at all, so
-`Framing` is a per-wire setting. Everything else was identical, including the status table: 529 was
-already covered by the 5xx range on both sides and only the comments differed. What keeps them
-honest is `crates/harness-messages/tests/transport.rs`, which compares whole settings values and
-fails on any difference but the framing.
+**Acted on: `crates/harness-http`.** That half became one crate beneath both wires, and each wire
+was its projection, its URL and its headers over `harness_http::HttpTransport` — neither depended
+on `reqwest`. No behaviour moved with it: the two pinned contract suites, the provider contract
+checker and both `provider_emulated` suites passed with no fixture, manifest or case edited. The
+extraction found exactly **one** real difference between the two copies, and it was named instead
+of implied — the first route ends its stream with `data: [DONE]` and the second has no sentinel at
+all, so `Framing` was a per-wire setting. Everything else was identical, including the status
+table: 529 was already covered by the 5xx range on both sides and only the comments differed. What
+kept them honest was `crates/harness-messages/tests/transport.rs`, which compared whole settings
+values and failed on any difference but the framing.
+
+**Superseded on 2026-10-20 (atlas ADR 0097).** `harness-http`, `harness-responses`,
+`harness-messages` and `harness-credential` are removed; `llm`'s client crates, pinned by tag
+`0.8.0`, do every model call behind `crates/harness-cli/src/llm_port.rs`, and the two-wire
+comparison above is `llm`'s parity table (`llm/docs/harness-parity.md`) now. The released
+`contracts/provider-wires/` versions stay, checked by `cargo xtask provider-contracts`.
 
 ## Phase 4: subscription authentication
 
@@ -109,7 +115,8 @@ does not.
 
 Done:
 
-- `harness_credential::SubscriptionToken`, a `BearerSource` that reads a token from a file or an
+- a subscription-token source — `harness_credential::SubscriptionToken` until 2026-10-20, and
+  `llm_port::Source` over `llm-credentials` since — that reads a token from a file or an
   environment variable the caller **names**, optionally at a caller-named JSON pointer. No default
   path, no vendor directory, no fallback when the named source is missing — the harness reads
   nothing it was not pointed at, and a source that searched on failure would be an ambient

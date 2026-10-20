@@ -11,6 +11,7 @@ pub mod approve;
 pub mod contract;
 pub mod environment;
 pub mod hooks;
+mod llm_port;
 pub mod memories;
 mod metaharness;
 pub mod profile;
@@ -25,7 +26,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
 use harness_app_server::ServerConfig;
@@ -33,7 +33,7 @@ use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, ContextCacheClass, ContextKind, ContextLayer,
     ContextPackage, ContextTrust, DenyAll, LoopCancel, LoopConfig, LoopStop, RunLedger,
 };
-use harness_wire::{ModelPort, Risk, Sampling, StaticBearer, ToolPort};
+use harness_wire::{ModelPort, Risk, Sampling, ToolPort};
 
 pub use render::Renderer;
 
@@ -238,20 +238,27 @@ enum Wire {
 impl Wire {
     /// The identifier this wire tags its opaque items with.
     ///
-    /// Taken from each wire crate's own constant rather than written out again here: a session
-    /// refused for being on the wrong wire has to compare the same bytes the loop compares, or the
+    /// Taken from the model port's own constant rather than written out again here: a session
+    /// refused for being on the wrong wire has to compare the same bytes the port compares, or the
     /// refusal would be about a name only this file believes in.
     ///
     /// # Panics
     ///
-    /// Only if a wire crate's own constant stops being a legal wire identifier, which its own
-    /// tests pin.
+    /// Only if the port's own constant stops being a legal wire identifier.
     fn id(self) -> harness_wire::WireId {
         let name = match self {
-            Self::OpenaiResponses => harness_responses::WIRE,
-            Self::AnthropicMessages => harness_messages::WIRE,
+            Self::OpenaiResponses => llm_port::RESPONSES_WIRE,
+            Self::AnthropicMessages => llm_port::MESSAGES_WIRE,
         };
-        harness_wire::WireId::new(name).expect("a wire crate's own identifier is valid")
+        harness_wire::WireId::new(name).expect("the port's own identifier is valid")
+    }
+
+    /// The `llm` protocol this wire is.
+    fn protocol(self) -> llm_core::Protocol {
+        match self {
+            Self::OpenaiResponses => llm_core::Protocol::Responses,
+            Self::AnthropicMessages => llm_core::Protocol::Messages,
+        }
     }
 }
 
@@ -1517,22 +1524,23 @@ fn renew_credential(
     ) else {
         return Ok(None);
     };
-    let now = unix_now();
-    let renewed = harness_credential::renew_if_stale(
-        &harness_credential::AuthDocument {
-            path: path.clone(),
-            access_pointer: access_pointer.clone(),
-            refresh_pointer: renewal.refresh_pointer.clone(),
-            id_token_pointer: renewal.id_token_pointer.clone(),
-            renewed_at_pointer: renewal.renewed_at_pointer.clone(),
-        },
-        &harness_credential::TokenEndpoint {
-            url: renewal.token_endpoint.clone(),
-            client_id: renewal.client_id.clone(),
-        },
-        now,
+    // `llm` renews one document layout, Codex's own. A provider table naming another layout is
+    // refused rather than renewed at pointers this build no longer reads.
+    if access_pointer != "/tokens/access_token"
+        || renewal.refresh_pointer != "/tokens/refresh_token"
+        || renewal.id_token_pointer.as_deref() != Some("/tokens/id_token")
+        || renewal.renewed_at_pointer.as_deref() != Some("/last_refresh")
+    {
+        return Err(format!(
+            "the credential provider `{provider_name}` names a login layout other than Codex's, \
+             which is the only one llm renews"
+        ));
+    }
+    let renewed = llm_port::renew_codex_login(
+        path,
+        &renewal.token_endpoint,
+        &renewal.client_id,
         RENEWAL_MARGIN,
-        &environment::utc_rfc3339(now),
     )
     .map_err(|error| {
         format!(
@@ -1543,13 +1551,17 @@ fn renew_credential(
             path.display()
         )
     })?;
-    Ok(renewed.map(|renewed| harness_loop::CredentialRenewal {
-        source: path.display().to_string(),
-        provider: provider_name.clone(),
-        expires_unix: renewed.expires_unix,
-        refresh_token_rotated: renewed.refresh_token_rotated,
-        byte_preserving: renewed.byte_preserving,
-    }))
+    Ok(renewed.map(
+        |(expires_unix, refresh_token_rotated)| harness_loop::CredentialRenewal {
+            source: path.display().to_string(),
+            provider: provider_name.clone(),
+            expires_unix,
+            refresh_token_rotated,
+            // `llm` replaces each value at its own position and has no re-serialising fallback,
+            // so every renewal it completes is byte-preserving (llm parity row C13).
+            byte_preserving: true,
+        },
+    ))
 }
 
 fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
@@ -1557,7 +1569,7 @@ fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
         options.oauth_token_file.as_ref(),
         options.oauth_token_env.as_ref(),
         options.oauth_token_pointer.as_ref(),
-    ) {
+    )? {
         return Ok(Credential::Subscription(token));
     }
     Ok(
@@ -1609,10 +1621,10 @@ enum Credential {
     ///
     /// Held as the source and not as a value: nothing in this process ever holds the token, which
     /// is what makes an expired one recoverable without restarting the run.
-    Subscription(harness_credential::SubscriptionToken),
+    Subscription(llm_port::Source),
     /// A source the caller already built, for a server that makes one client per turn and must
     /// hand each of them the same source rather than resolving the flags again.
-    Shared(Arc<dyn harness_wire::BearerSource>),
+    Shared(llm_port::Source),
 }
 
 impl std::fmt::Debug for Credential {
@@ -1630,13 +1642,12 @@ impl std::fmt::Debug for Credential {
 }
 
 impl Credential {
-    fn source(self) -> Option<Arc<dyn harness_wire::BearerSource>> {
-        match self {
+    fn source(self) -> Result<Option<llm_port::Source>, String> {
+        Ok(match self {
             Self::Unnamed => None,
-            Self::Key(value) => Some(Arc::new(StaticBearer::new(value))),
-            Self::Subscription(token) => Some(Arc::new(token)),
-            Self::Shared(source) => Some(source),
-        }
+            Self::Key(value) => Some(llm_port::Source::key(&value)?),
+            Self::Subscription(source) | Self::Shared(source) => Some(source),
+        })
     }
 }
 
@@ -1644,17 +1655,13 @@ fn subscription_token(
     file: Option<&PathBuf>,
     variable: Option<&String>,
     pointer: Option<&String>,
-) -> Option<harness_credential::SubscriptionToken> {
-    let source = match (file, variable) {
-        (Some(path), _) => harness_credential::NamedSource::file(path),
-        (None, Some(name)) => harness_credential::NamedSource::environment(name),
-        (None, None) => return None,
-    };
-    let token = harness_credential::SubscriptionToken::new(source);
-    Some(match pointer {
-        Some(pointer) => token.at_pointer(pointer),
-        None => token,
-    })
+) -> Result<Option<llm_port::Source>, String> {
+    let pointer = pointer.map(String::as_str);
+    match (file, variable) {
+        (Some(path), _) => llm_port::Source::file(path, pointer).map(Some),
+        (None, Some(name)) => llm_port::Source::environment(name, pointer).map(Some),
+        (None, None) => Ok(None),
+    }
 }
 
 /// A client for this endpoint on the wire the caller named, authenticated or deliberately not.
@@ -1671,47 +1678,28 @@ fn model_client(
     credential: Credential,
     cancel: &LoopCancel,
 ) -> Result<Box<dyn ModelPort>, String> {
-    let bearer = credential.source();
-    match wire {
-        Wire::OpenaiResponses => {
-            let endpoint = harness_responses::Endpoint::new(base_url, model, context_window)
-                .map_err(|error| error.to_string())?;
-            match bearer {
-                Some(source) => harness_responses::ResponsesClient::new(endpoint, source),
-                None => harness_responses::ResponsesClient::unauthenticated(endpoint),
-            }
-            .map(|client| Box::new(client.with_cancel(cancel.clone())) as Box<dyn ModelPort>)
-        }
-        Wire::AnthropicMessages => {
-            let mut endpoint = harness_messages::Endpoint::new(base_url, model, context_window)
-                .map_err(|error| error.to_string())?;
-            // This route requires an output bound, so a run that named one has named this too;
-            // one that did not gets the endpoint's declared number rather than a silent absence.
-            if let Some(limit) = max_output_tokens_per_turn {
-                endpoint = endpoint
-                    .with_max_output_tokens(limit)
-                    .map_err(|error| error.to_string())?;
-            }
-            match bearer {
-                Some(source) => harness_messages::MessagesClient::new(endpoint, source),
-                None => harness_messages::MessagesClient::unauthenticated(endpoint),
-            }
-            .map(|client| Box::new(client.with_cancel(cancel.clone())) as Box<dyn ModelPort>)
-        }
-    }
-    .map_err(|error| error.to_string())
+    let target = llm_port::Target {
+        protocol: wire.protocol(),
+        base_url,
+        model,
+        context_window,
+        // The Messages route requires an output bound, so a run that named one has named this
+        // too; one that did not gets the binding's declared number rather than a silent absence.
+        max_output_tokens: max_output_tokens_per_turn,
+    };
+    llm_port::client(&target, credential.source()?, cancel)
 }
 
 fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
-    let bearer: Option<Arc<dyn harness_wire::BearerSource>> = match subscription_token(
+    let bearer: Option<llm_port::Source> = match subscription_token(
         options.oauth_token_file.as_ref(),
         options.oauth_token_env.as_ref(),
         options.oauth_token_pointer.as_ref(),
-    ) {
-        Some(token) => Credential::Subscription(token).source(),
+    )? {
+        Some(token) => Credential::Subscription(token).source()?,
         None => {
             match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())? {
-                Some(value) => Credential::Key(value).source(),
+                Some(value) => Credential::Key(value).source()?,
                 None => None,
             }
         }
@@ -1731,7 +1719,7 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
     let mut new_model = |cancel: harness_wire::Cancel| {
         let credential = match &bearer {
             None => Credential::Unnamed,
-            Some(source) => Credential::Shared(Arc::clone(source)),
+            Some(source) => Credential::Shared(source.clone()),
         };
         model_client(
             options.wire,

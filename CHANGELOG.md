@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-21
+
 ### Added
 
 - `harness_wire::ToolPort::undeclared(&self, call) -> Option<String>`, a provided method defaulting to `None` (additive: an existing port compiles and behaves as before). `Flat`, `Verbs` and their forks answer it from `Catalogue::undeclared`, unwrapping `tool_invoke` to its entry; the shell's published and MCP-augmented ports delegate it.

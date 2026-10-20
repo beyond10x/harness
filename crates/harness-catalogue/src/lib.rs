@@ -21,14 +21,15 @@
 //!
 //! # Where the implementations come from (atlas ADR 0097, ADR 0095 phase T2)
 //!
-//! The default reading, searching and writing of a tree are the `tools` repository's, pinned by
-//! tag: the `fs` toolset ([`tool_fs`]) answers the reader's `file_read`, `dir_list` and `find`, the
-//! `search` toolset ([`tool_search`]) answers `search`, and the `code-editor` toolset
-//! ([`tool_code_editor`]) answers `file_write` and `file_edit`. The adapter ([`LocalOperations`])
-//! maps each harness operation onto one `tools` operation — the mapping is [`tools_operation`],
-//! tested both ways — and keeps `run` here: it has not moved onto its process toolset yet. The
+//! The default reading, searching, writing and running in a tree are the `tools` repository's,
+//! pinned by tag: the `fs` toolset ([`tool_fs`]) answers the reader's `file_read`, `dir_list` and
+//! `find`, the `search` toolset ([`tool_search`]) answers `search`, the `code-editor` toolset
+//! ([`tool_code_editor`]) answers `file_write` and `file_edit`, and the `process` toolset
+//! ([`tool_process`]) answers `run`. The adapter ([`LocalOperations`]) maps each harness operation
+//! onto one `tools` operation — the mapping is [`tools_operation`], tested both ways. The
 //! whole-file `sha256` a `tools` read now carries is stripped by the adapter: it is a
-//! `tool-contract/1` property harness does not publish yet.
+//! `tool-contract/1` property harness does not publish yet. The `run` entry, its `Risk::High` and
+//! the refusal of a program outside the declared set stay harness's own.
 //!
 //! # Three layers, and what each is allowed to know
 //!

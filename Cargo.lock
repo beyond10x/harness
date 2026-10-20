@@ -165,6 +165,7 @@ dependencies = [
  "b10x-harness-wire",
  "b10x-tool-code-editor",
  "b10x-tool-fs",
+ "b10x-tool-process",
  "b10x-tool-search",
  "b10x-tool-toolchain",
  "nix",

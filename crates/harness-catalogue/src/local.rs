@@ -2,11 +2,12 @@
 //!
 //! # The provider with no boundary, and why it still exists
 //!
-//! Reading a tree is [`tool_fs`]'s, searching it [`tool_search`]'s and writing one is
-//! [`tool_code_editor`]'s: every path check is that crate's own, canonicalising before a
-//! containment check. That is real and it is not confinement — nothing stops the *process*, only
-//! those functions, and a bug in them is the whole boundary. `run` stays here: it moves onto its
-//! process toolset (`b10x-tool-process`) in `story:run-moves-onto-tool-process`.
+//! Reading a tree is [`tool_fs`]'s, searching it [`tool_search`]'s, writing one
+//! [`tool_code_editor`]'s and running a declared program in it [`tool_process`]'s: every path check
+//! is that crate's own, canonicalising before a containment check, and the declared set, the
+//! cleared environment and the bound on a run are `tool_process`'s. That is real and it is not
+//! confinement — nothing stops the *process*, only those functions, and a bug in them is the whole
+//! boundary.
 //!
 //! It is the right provider for a run against the operator's own tree on their own machine, which
 //! is every run this component has ever had. A run that wants the effects confined passes
@@ -35,49 +36,16 @@
 //! checks the round trip and that every id is an operation the tools crates actually expose, so the
 //! declaration cannot drift from what the adapter calls.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use tool_code_editor::{EditInput, Editor, WriteInput};
 use tool_fs::{Fs, GlobInput, ListInput, ReadInput};
+use tool_process::{Process, ProcessError, RunInput};
 use tool_search::{GrepInput, Search};
 
 use crate::{Operations, ReadWindow, Refusal, Refused, SearchOptions};
-
-const MAX_RUN_OUTPUT_BYTES: usize = 64 * 1024;
-/// How long an unconfined `run` may hold the turn open before it is killed.
-///
-/// A bound rather than none: `wait` on a child that never exits stops the run with no record of
-/// why. Ten minutes is longer than any suite this has been pointed at and shorter than a night.
-const MAX_RUN_SECONDS: u64 = 600;
-
-/// The environment variables a declared program is started with, unless a caller names more.
-///
-/// An allow list rather than a deny list, because the parent process's environment is where this
-/// run's credentials live and the child's arguments came from the model. Naming what may cross
-/// keeps a token nobody thought about out of a program somebody else chose.
-///
-/// The toolchain names are here because the first list did not have them and `cargo` under a
-/// relocated rustup then started with `HOME` and `PATH` alone, looked in `~/.rustup`, and failed
-/// with *no default toolchain configured* — a build failure that read as the workspace's. None of
-/// them carries a secret: each is a path. A proxy URL can carry one, so `HTTPS_PROXY` and its kin
-/// are not here; a caller that needs them names them with [`LocalOperations::inheriting`].
-const INHERITED_ENV: &[&str] = &[
-    "PATH",
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "TERM",
-    "TMPDIR",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "RUSTUP_TOOLCHAIN",
-    "CARGO_TARGET_DIR",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-];
 
 /// The **declared** harness-name↔tools-id correspondence: `(harness, tools)`.
 ///
@@ -87,7 +55,7 @@ const INHERITED_ENV: &[&str] = &[
 /// is what keeps it honest against the tools crates, so the declaration cannot drift from what the
 /// adapter actually calls.
 ///
-/// `run` is **not** here — it has not moved onto `b10x-tool-process` yet, so it stays local. The
+/// Every harness operation is here, `run` included since it moved onto `b10x-tool-process`. The
 /// recorded operation name (`file.read`, `shell`) is a third thing and is not this table;
 /// metaharness reads that back, and renaming it is not renaming this.
 pub(crate) const MAPPING: &[(&str, &str)] = &[
@@ -97,10 +65,11 @@ pub(crate) const MAPPING: &[(&str, &str)] = &[
     ("find", "fs.glob"),
     ("file_write", "code.write"),
     ("file_edit", "code.edit"),
+    ("run", "process.run"),
 ];
 
-/// The `tools` operation id a harness operation is performed by, or `None` for one that stays local
-/// (`run`).
+/// The `tools` operation id a harness operation is performed by, or `None` for a name that is not
+/// a harness operation.
 #[must_use]
 pub fn tools_operation(harness: &str) -> Option<&'static str> {
     MAPPING
@@ -118,8 +87,8 @@ pub fn harness_operation(tools: &str) -> Option<&'static str> {
         .map(|(name, _)| *name)
 }
 
-/// A bounded view of one directory, read through [`tool_fs`], searched through [`tool_search`] and
-/// written through [`tool_code_editor`], with `run` performed here.
+/// A bounded view of one directory, read through [`tool_fs`], searched through [`tool_search`],
+/// written through [`tool_code_editor`] and run in through [`tool_process`].
 #[derive(Debug, Clone)]
 pub struct LocalOperations {
     root: PathBuf,
@@ -128,14 +97,12 @@ pub struct LocalOperations {
     /// Search: `search.grep`.
     search: Search,
     /// Writes: `code.write`, `code.edit`. Held whether or not writing is offered; whether it is
-    /// reachable is `programs`, exactly as the catalogue's gate reads it, so holding it publishes
+    /// reachable is `process`, exactly as the catalogue's gate reads it, so holding it publishes
     /// nothing.
     editor: Editor,
-    /// `None` is read-only. `Some` is the declared program set, which may itself be empty — a
-    /// provider that writes files and starts nothing.
-    programs: Option<Vec<String>>,
-    /// Environment variables a declared program is started with, beyond [`INHERITED_ENV`].
-    inherited: Vec<String>,
+    /// Runs: `process.run`. `None` is read-only. `Some` holds the declared program set, which may
+    /// itself be empty — a provider that writes files and starts nothing.
+    process: Option<Process>,
 }
 
 impl LocalOperations {
@@ -148,14 +115,16 @@ impl LocalOperations {
         Self::open(root, None)
     }
 
-    /// Names more of this process's environment that a declared program may see.
+    /// Names more of this process's environment that a declared program may see, beyond
+    /// [`tool_process::INHERITED_ENV`].
     ///
     /// The default list is what a toolchain needs and nothing that carries a credential. A run
     /// that needs a proxy, or a variable its build reads, names it here — by name, at the call
-    /// site, where a reader can see what was let through.
+    /// site, where a reader can see what was let through. A read-only view starts nothing, so on
+    /// one this lets nothing through.
     #[must_use]
     pub fn inheriting(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.inherited.extend(names.into_iter().map(Into::into));
+        self.process = self.process.map(|process| process.inheriting(names));
         self
     }
 
@@ -176,13 +145,16 @@ impl LocalOperations {
         let fs = Fs::new(&root).map_err(|error| error.to_string())?;
         let search = Search::new(&root).map_err(|error| error.to_string())?;
         let editor = Editor::new(&root).map_err(|error| error.to_string())?;
+        let process = programs
+            .map(|programs| Process::new(&root, programs))
+            .transpose()
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             root: fs.root().to_path_buf(),
             fs,
             search,
             editor,
-            programs,
-            inherited: Vec::new(),
+            process,
         })
     }
 
@@ -209,112 +181,6 @@ impl LocalOperations {
             object.remove("sha256");
         }
         Ok(value)
-    }
-
-    fn exec(
-        &self,
-        argv: &[String],
-        programs: &[String],
-        remaining: Option<Duration>,
-    ) -> Result<Value, Refused> {
-        let Some(program) = argv.first() else {
-            return Err("`argv` must name a program".into());
-        };
-        if !programs.iter().any(|allowed| allowed == program) {
-            // Named, not only worded. The sentence is [`Refusal::message`]'s and is what the model
-            // reads; the value beside it is what makes *the run would not start this* countable on
-            // the record instead of being one more failed call.
-            return Err(Refusal::ProgramNotDeclared {
-                program: program.clone(),
-                declared: programs.to_vec(),
-            }
-            .into());
-        }
-
-        let mut command = std::process::Command::new(program);
-        command
-            .args(&argv[1..])
-            .current_dir(&self.root)
-            // Cleared, then filled from [`INHERITED_ENV`] alone. A child started here inherits the
-            // whole of this process's environment otherwise, which is how a credential held for the
-            // harness reaches a program the model picked the arguments for.
-            .env_clear()
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt as _;
-            // A private process group makes the timeout cover descendants that inherited the
-            // output pipes, not only the shell directly returned by `spawn`.
-            command.process_group(0);
-        }
-        // `var_os`, not `var`: a value that is not UTF-8 is still the value, and `var` would drop
-        // it without a word.
-        for name in INHERITED_ENV
-            .iter()
-            .copied()
-            .chain(self.inherited.iter().map(String::as_str))
-        {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|error| Refused::from(format!("`{program}`: {error}")))?;
-
-        // Drained on threads rather than after `wait`: a child that fills a pipe buffer blocks
-        // until somebody reads it, and a `wait` that has not read is the deadlock.
-        let out = child.stdout.take().expect("stdout was piped");
-        let err = child.stderr.take().expect("stderr was piped");
-        let out = std::thread::spawn(move || drain(out));
-        let err = std::thread::spawn(move || drain(err));
-
-        // The smaller of this module's ceiling and what the run has left: the loop's deadline
-        // check between calls cannot reach into this one, so the bound has to be set here.
-        let ceiling = Duration::from_secs(MAX_RUN_SECONDS);
-        let bound = remaining.map_or(ceiling, |left| left.min(ceiling));
-        let deadline = Instant::now() + bound;
-        let mut killed = false;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {}
-                Err(error) => return Err(format!("`{program}`: {error}").into()),
-            }
-            if Instant::now() >= deadline {
-                killed = true;
-                terminate(&mut child);
-                break child
-                    .wait()
-                    .map_err(|error| Refused::from(format!("`{program}`: {error}")))?;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-
-        let empty = || Drained {
-            text: String::new(),
-            omitted: 0,
-        };
-        let stdout = out.join().unwrap_or_else(|_| empty());
-        let stderr = err.join().unwrap_or_else(|_| empty());
-        let omitted = stdout.omitted + stderr.omitted;
-        Ok(json!({
-            "argv": argv,
-            "exit": status.code(),
-            "stdout": stdout.text,
-            "stderr": stderr.text,
-            "truncated": omitted > 0,
-            // Across both streams. Each stream's own marker names its share, in the place the
-            // bytes were dropped from, so a reader never has to work out which one was cut.
-            "omitted_bytes": omitted,
-            // Named, because a killed process's exit code says nothing about the task.
-            "timed_out": killed,
-            // And how long it was given, so a kill at the run's deadline is not read as the
-            // program's own slowness.
-            "timeout_ms": u64::try_from(bound.as_millis()).unwrap_or(u64::MAX),
-        }))
     }
 }
 
@@ -370,7 +236,7 @@ impl Operations for LocalOperations {
     // went around the catalogue, who is answered rather than served.
 
     fn file_write(&self, path: &str, text: &str) -> Result<Value, String> {
-        if self.programs.is_none() {
+        if self.process.is_none() {
             return Err(Self::unavailable("file_write"));
         }
         let input = WriteInput {
@@ -392,7 +258,7 @@ impl Operations for LocalOperations {
     }
 
     fn file_edit(&self, path: &str, old: &str, new: &str) -> Result<Value, String> {
-        if self.programs.is_none() {
+        if self.process.is_none() {
             return Err(Self::unavailable("file_edit"));
         }
         let input = EditInput {
@@ -419,11 +285,21 @@ impl Operations for LocalOperations {
         self.run_within(argv, None)
     }
 
+    /// `process.run` through [`tool_process`], its reply field for field.
+    ///
+    /// The call names no `timeout_ms` — the `run` entry publishes none — so the bound is
+    /// `tool_process`'s ceiling capped by `remaining`, what the run has left, exactly as before
+    /// `run` moved. The declared-set refusal stays harness's named one (`refused`).
     fn run_within(&self, argv: &[String], remaining: Option<Duration>) -> Result<Value, Refused> {
-        let Some(programs) = self.programs.as_deref() else {
+        let Some(process) = &self.process else {
             return Err(Self::unavailable("run").into());
         };
-        self.exec(argv, programs, remaining)
+        let input = RunInput {
+            argv: argv.to_vec(),
+            timeout_ms: None,
+        };
+        let output = process.run(&input, remaining).map_err(refused)?;
+        Ok(serde_json::to_value(output).expect("a run output serialises"))
     }
 
     /// The same resolution a write does, answered as the workspace-relative name the write would
@@ -433,141 +309,33 @@ impl Operations for LocalOperations {
     }
 
     fn programs(&self) -> &[String] {
-        self.programs.as_deref().unwrap_or_default()
+        self.process.as_ref().map_or(&[], Process::programs)
     }
 
     fn writes(&self) -> bool {
-        self.programs.is_some()
+        self.process.is_some()
     }
 }
 
-#[cfg(unix)]
-fn terminate(child: &mut std::process::Child) {
-    use nix::sys::signal::{Signal, killpg};
-    use nix::unistd::Pid;
-
-    if let Ok(pid) = i32::try_from(child.id()) {
-        let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
-    }
-    let _ = child.kill();
-}
-
-#[cfg(not(unix))]
-fn terminate(child: &mut std::process::Child) {
-    let _ = child.kill();
-}
-
-/// What one of a child's streams said, bounded at both ends.
-struct Drained {
-    text: String,
-    omitted: u64,
-}
-
-/// Reads a child's stream to the end, keeping the first and last half of
-/// [`MAX_RUN_OUTPUT_BYTES`].
+/// A `process.run` refusal in harness's terms.
 ///
-/// # The head is not where the answer is
-///
-/// This kept the **first** 64 KiB and dropped the rest. For the one program a run cares most about
-/// — a test suite — the head is the compiler's progress and the answer is the last twenty lines:
-/// `test result: FAILED. 3 passed; 1 failed`, and which test. A model handed the head learns that
-/// something was compiled. So both ends are kept, and the middle says how many bytes went missing
-/// between them.
-///
-/// It keeps reading after the cap rather than stopping: a reader that walked away would block the
-/// child on a full pipe, and the point of the cap is the size of the answer, not the child's fate.
-/// Memory stays at the cap — the tail is a ring, not a buffer of everything seen so far.
-fn drain(stream: impl std::io::Read) -> Drained {
-    let half = MAX_RUN_OUTPUT_BYTES / 2;
-    let (head, tail, beyond_head) = read_ends(stream, half);
-    keep_both_ends(&head, &tail, head.len() as u64 + beyond_head)
-}
-
-/// Reads `stream` to the end, keeping its first `half` bytes and its last `half` bytes.
-///
-/// The third answer is how many bytes came **after** the head — enough, with the two ends, to say
-/// how many went missing between them.
-fn read_ends(mut stream: impl std::io::Read, half: usize) -> (Vec<u8>, Vec<u8>, u64) {
-    let mut head: Vec<u8> = Vec::new();
-    let mut tail: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
-    let mut beyond_head: u64 = 0;
-    let mut buffer = [0_u8; 8192];
-    while let Ok(read) = stream.read(&mut buffer) {
-        if read == 0 {
-            break;
+/// A program outside the declared set is harness's own named
+/// [`Refusal::ProgramNotDeclared`], in its own words, as it was before `run` moved: the name is
+/// what a reader of the record counts, and the sentence beside it is harness's to word. Every
+/// other refusal is `tool_process`'s sentence, unnamed, as it was.
+fn refused(error: ProcessError) -> Refused {
+    match error {
+        ProcessError::ProgramNotDeclared { program, declared } => {
+            Refusal::ProgramNotDeclared { program, declared }.into()
         }
-        let mut bytes = &buffer[..read];
-        let room = half.saturating_sub(head.len());
-        if room > 0 {
-            let taken = room.min(bytes.len());
-            head.extend_from_slice(&bytes[..taken]);
-            bytes = &bytes[taken..];
-        }
-        beyond_head += bytes.len() as u64;
-        // A chunk at a time, then one drain: a program that prints a hundred megabytes would
-        // otherwise pay a push and a pop per byte to keep a 32 KiB window.
-        tail.extend(bytes.iter().copied());
-        if tail.len() > half {
-            tail.drain(..tail.len() - half);
-        }
+        other => other.to_string().into(),
     }
-    (head, tail.into_iter().collect(), beyond_head)
-}
-
-/// Joins the two ends of a stream of `total` bytes, with a marker naming what fell between them.
-///
-/// Its own function, and pure, because the arithmetic here is the part that can be wrong — the
-/// character boundaries, the count in the marker, whether the last line survives — and the only
-/// test of it drove a real child process, so it returned early on any machine without
-/// `/usr/bin/seq` and checked nothing there at all.
-///
-/// `head` and `tail` are the two ends as [`read_ends`] kept them; `total` is the whole stream's
-/// length. When the two ends are the whole stream, nothing is omitted and no marker is written.
-fn keep_both_ends(head: &[u8], tail: &[u8], total: u64) -> Drained {
-    if head.len() as u64 + tail.len() as u64 >= total {
-        let mut whole = head.to_vec();
-        whole.extend_from_slice(tail);
-        return Drained {
-            text: String::from_utf8_lossy(&whole).into_owned(),
-            omitted: 0,
-        };
-    }
-
-    // Both cuts land on character boundaries. A cut through a multi-byte character becomes U+FFFD,
-    // which reads as damage to the program's output rather than to this reply.
-    let head = &head[..whole_prefix(head)];
-    let tail = &tail[whole_suffix(tail)..];
-    // Counted from what is actually in the reply, so the bytes dropped for a character boundary
-    // are in the figure too. A marker that undercounted would be a smaller lie than a silent cut
-    // and still a lie.
-    let omitted = total - head.len() as u64 - tail.len() as u64;
-    let mut text = String::from_utf8_lossy(head).into_owned();
-    let _ = write!(text, "\n… {omitted} bytes omitted here …\n");
-    text.push_str(&String::from_utf8_lossy(tail));
-    Drained { text, omitted }
-}
-
-/// How much of `bytes` is whole UTF-8, so a cut lands between characters rather than inside one.
-fn whole_prefix(bytes: &[u8]) -> usize {
-    match std::str::from_utf8(bytes) {
-        // "the bytes ran out mid-character" is the cut this made; anything else is the stream's
-        // own encoding and is reported lossily, as it always was.
-        Err(error) if error.error_len().is_none() => error.valid_up_to(),
-        Ok(_) | Err(_) => bytes.len(),
-    }
-}
-
-/// Where the whole characters start in `bytes`, so a tail does not open mid-character.
-fn whole_suffix(bytes: &[u8]) -> usize {
-    bytes
-        .iter()
-        .position(|byte| byte & 0b1100_0000 != 0b1000_0000)
-        .unwrap_or(bytes.len())
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::{Duration, Instant};
 
     use tempfile::TempDir;
 
@@ -599,28 +367,34 @@ mod tests {
         // `search` is `search.grep` since tools `0.3.0`, read in both directions.
         assert_eq!(tools_operation("search"), Some("search.grep"));
         assert_eq!(harness_operation("search.grep"), Some("search"));
-        // `run` has not moved onto `b10x-tool-process` and stays local, so the table does not name
-        // it — in either direction.
-        assert_eq!(tools_operation("run"), None);
+        // `run` is `process.run`, read in both directions: every harness operation is now
+        // performed by a tools operation.
+        assert_eq!(tools_operation("run"), Some("process.run"));
+        assert_eq!(harness_operation("process.run"), Some("run"));
+        // The recorded operation name is not the table, and an id no harness operation uses maps
+        // to nothing.
+        assert_eq!(tools_operation("shell"), None);
         assert_eq!(harness_operation("fs.walk"), None);
     }
 
     #[test]
     fn every_mapped_id_is_an_operation_the_tools_crates_expose() {
-        // The table cannot name an id the tools crates do not answer. The `fs` and `search` ids are
-        // read off the contract each crate carries; `b10x-tool-code-editor` keeps its parsed
-        // contract private, so its two writes are named here.
+        // The table cannot name an id the tools crates do not answer. The `fs`, `search` and
+        // `process` ids are read off the contract each crate carries; `b10x-tool-code-editor`
+        // keeps its parsed contract private, so its two writes are named here.
         let mut exposed: Vec<String> = tool_fs::contract()
             .operations
             .iter()
             .chain(&tool_search::contract().operations)
+            .chain(&tool_process::contract().operations)
             .map(|operation| operation.name.clone())
             .collect();
         exposed.extend(["code.write".to_owned(), "code.edit".to_owned()]);
         for (_, id) in MAPPING {
             assert!(
                 exposed.iter().any(|name| name == id),
-                "{id} is not an operation of the fs, search or code-editor toolset: {exposed:?}"
+                "{id} is not an operation of the fs, search, process or code-editor toolset: \
+                 {exposed:?}"
             );
         }
     }
@@ -877,5 +651,201 @@ mod tests {
             .run(&["/bin/false".to_owned()])
             .expect_err("an undeclared program is refused");
         assert!(refused.refusal().is_some(), "the refusal is named");
+    }
+
+    // --- `run` on `process.run` ------------------------------------------------------------------
+
+    fn running(root: &Path) -> LocalOperations {
+        LocalOperations::unconfined(root, vec!["/bin/sh".to_owned()]).expect("a workspace")
+    }
+
+    fn sh(script: &str) -> Vec<String> {
+        vec!["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()]
+    }
+
+    /// The bound the acceptance cases run under, and the most a call may be held against it: a
+    /// small multiple, room for the kill and for the half second `process.run` waits after it.
+    const BOUND: Duration = Duration::from_millis(300);
+    const HELD_AT_MOST: Duration = Duration::from_millis(1_500);
+
+    /// The pid a script wrote to `file` in the workspace, and whether that process was still alive
+    /// when asked; a live one is killed here, so no case leaves it running.
+    #[cfg(unix)]
+    fn reap(root: &Path, file: &str) -> (i32, bool) {
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+
+        let text = std::fs::read_to_string(root.join(file)).expect("the script wrote the pid");
+        let pid: i32 = text.trim().parse().expect("a pid");
+        let alive = kill(Pid::from_raw(pid), None).is_ok();
+        if alive {
+            let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
+        }
+        (pid, alive)
+    }
+
+    /// Whether `setsid` is on this process's search path, which is the one a started program gets.
+    fn setsid_is_installed() -> bool {
+        std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path).any(|dir| dir.join("setsid").is_file())
+        })
+    }
+
+    #[test]
+    fn run_answers_process_runs_reply_field_for_field() {
+        // The adapter's wiring only: the declared set reaches `Process`, the argv reaches
+        // `RunInput`, and the reply comes back with nothing stripped or added. Both sides are
+        // `tool_process`; the drift guard against 0.15.1's reply is `tests/run_against_0_15_1.rs`.
+        let dir = workspace();
+        let argv = sh("printf out; printf err >&2; exit 3");
+        let answer = running(dir.path())
+            .run(&argv)
+            .expect("the declared program runs");
+        let direct = tool_process::Process::new(dir.path(), vec!["/bin/sh".to_owned()])
+            .expect("a workspace")
+            .run(&tool_process::RunInput::argv(argv.clone()), None)
+            .expect("the run");
+        assert_eq!(
+            answer,
+            serde_json::to_value(direct).expect("serialises"),
+            "{answer}"
+        );
+    }
+
+    #[test]
+    fn what_the_run_has_left_is_the_bound_process_run_is_given() {
+        let dir = workspace();
+        let operations = running(dir.path());
+        let answer = operations
+            .run_within(&sh("exit 0"), Some(Duration::from_millis(1_234)))
+            .expect("the run");
+        assert_eq!(answer["timeout_ms"], serde_json::json!(1_234), "{answer}");
+        let answer = operations
+            .run_within(&sh("exit 0"), Some(Duration::from_secs(3_600)))
+            .expect("the run");
+        assert_eq!(
+            answer["timeout_ms"],
+            serde_json::json!(600_000),
+            "capped at the ten-minute ceiling: {answer}"
+        );
+    }
+
+    #[test]
+    fn a_name_given_to_inheriting_reaches_the_program_and_no_other_does() {
+        // `cargo test` starts this binary with `CARGO_PKG_NAME` set, and it is off the allow-list.
+        assert!(
+            std::env::var_os("CARGO_PKG_NAME").is_some(),
+            "precondition: the test process holds a variable off the allow-list"
+        );
+        let dir = workspace();
+        let argv = sh("printf '%s' \"${CARGO_PKG_NAME-unset}\"");
+        let cleared = running(dir.path()).run(&argv).expect("the run");
+        assert_eq!(cleared["stdout"], serde_json::json!("unset"), "{cleared}");
+        let named = running(dir.path())
+            .inheriting(["CARGO_PKG_NAME"])
+            .run(&argv)
+            .expect("the run");
+        assert_eq!(
+            named["stdout"],
+            serde_json::json!(env!("CARGO_PKG_NAME")),
+            "{named}"
+        );
+    }
+
+    #[test]
+    fn a_workspace_removed_after_it_opened_is_refused_as_the_workspace_and_not_the_program() {
+        // A start in a root that is gone fails the same way as a program that is missing; 0.15.1
+        // answered "`/bin/sh`: No such file or directory", blaming the program.
+        let dir = workspace();
+        let root = dir.path().join("tree");
+        std::fs::create_dir(&root).expect("the root");
+        let canonical = root.canonicalize().expect("the canonical root");
+        let operations = running(&root);
+        std::fs::remove_dir(&root).expect("the root is removed");
+        let refused = operations.run(&sh("exit 0")).expect_err("refused");
+        assert_eq!(
+            refused.message(),
+            format!(
+                "workspace `{}`: No such file or directory (os error 2)",
+                canonical.display()
+            ),
+        );
+        assert_eq!(
+            refused.refusal(),
+            None,
+            "a failure, not a rule of the run's"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_stdout_does_not_hold_the_run_past_its_bound() {
+        // story:run-moves-onto-tool-process's acceptance, argv for argv: the shell ends at once
+        // and its background `sleep` keeps stdout open. harness's own runner stopped watching the
+        // clock once the program ended and joined the streams with no deadline.
+        let dir = workspace();
+        let started = Instant::now();
+        let answer = running(dir.path())
+            .run_within(&sh("sleep 3 &"), Some(BOUND))
+            .expect("the declared program runs");
+        let held = started.elapsed();
+        assert_eq!(answer["timed_out"], serde_json::json!(true), "{answer}");
+        assert_eq!(answer["timeout_ms"], serde_json::json!(300), "{answer}");
+        // The shell ended by itself and only its descendant was killed, so `exit` is the shell's.
+        assert_eq!(answer["exit"], serde_json::json!(0), "{answer}");
+        assert!(
+            held < HELD_AT_MOST,
+            "held {held:?} against a bound of {BOUND:?}: {answer}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_descendant_holding_stdout_is_killed_with_the_group_at_the_bound() {
+        let dir = workspace();
+        let started = Instant::now();
+        let answer = running(dir.path())
+            .run_within(
+                &sh("sleep 3 & printf '%s' \"$!\" > descendant.pid"),
+                Some(BOUND),
+            )
+            .expect("the declared program runs");
+        let held = started.elapsed();
+        let (pid, alive) = reap(dir.path(), "descendant.pid");
+        assert_eq!(answer["timed_out"], serde_json::json!(true), "{answer}");
+        assert!(
+            held < HELD_AT_MOST,
+            "held {held:?} against a bound of {BOUND:?}: {answer}"
+        );
+        assert!(!alive, "descendant {pid} outlived the call: {answer}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_setsid_descendant_does_not_hold_the_run_past_its_bound() {
+        // story:run-moves-onto-tool-process's acceptance (revision 5): "a `setsid` descendant does
+        // not hold the call past its bound". `process.run` kills the program's group only; a
+        // process that left it is not killed and may outlive the call, so this case reaps it.
+        if !setsid_is_installed() {
+            eprintln!(
+                "skipped: `setsid` is not on PATH, so no descendant can leave the group here"
+            );
+            return;
+        }
+        let dir = workspace();
+        let started = Instant::now();
+        let answer = running(dir.path())
+            .run_within(
+                &sh("setsid sleep 3 & printf '%s' \"$!\" > escaped.pid"),
+                Some(BOUND),
+            )
+            .expect("the declared program runs");
+        let held = started.elapsed();
+        let _ = reap(dir.path(), "escaped.pid");
+        assert_eq!(answer["timed_out"], serde_json::json!(true), "{answer}");
+        assert!(
+            held < HELD_AT_MOST,
+            "held {held:?} against a bound of {BOUND:?}: {answer}"
+        );
     }
 }

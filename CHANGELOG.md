@@ -57,8 +57,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
     `tool_search::MAX_SKIPPED_PATHS`), and `regex`, `glob`, `context` and `note` only when they
     apply — every bound (200 matches, 1 MiB, 5 lines of context, 400 characters, depth 12), the
     regular-expression size limit and the wording of every other refusal.
+- `run` is served by `b10x-tool-process` — harness 0.14.1's local process runner moved to `tools` —
+  through the `crates/harness-catalogue` adapter: `LocalOperations::run` and `run_within` call
+  `tool_process::Process::run` with the declared program set as `Process`'s programs and the time
+  the run has left as its `remaining`, and `run → process.run` joins the adapter's mapping
+  (`tools_operation`, `harness_operation`), so every harness operation is now a `tools` operation.
+  `LocalOperations::inheriting` hands its names to `Process::inheriting`. harness's own runner
+  (`exec`, `terminate`, `Drained`, `drain`, `read_ends`, `keep_both_ends`, `whole_prefix`,
+  `whole_suffix`, and its copies of `MAX_RUN_OUTPUT_BYTES`, `MAX_RUN_SECONDS` and `INHERITED_ENV`)
+  is deleted, and `harness-catalogue` depends on `nix` only in its tests. `b10x-tool-process` joins
+  the other `tools` crates at tag `0.3.0` (`e89380d8`) in `[workspace.dependencies]` (atlas ADR 0097
+  decision 3). The `run` entry — name, schema, summary, `Risk::High`, published only when programs
+  are declared — and the CLI contract (`contracts/cli/b10x-harness/2026-09-18`) are unchanged. The
+  substrate-confined `run` (`harness-substrate`) does not move; a typed toolchain call answered by
+  `LocalOperations` runs on the same runner, because it goes through the same `run_within`.
+  `crates/harness-catalogue/tests/run_against_0_15_1.rs` holds 0.15.1's reply as literals for an
+  ordinary run, one ended by a signal, and the declared-set, start-failure and empty-argv
+  refusals, and the tests in `crates/harness-catalogue/src/local.rs` hold the adapter's wiring into
+  `process.run`, the two-way mapping and each change below. What `run` answers changes where tools
+  changed `process.run` against harness's runner (tools `0.2.0`):
+  - A run is over when the program **and** both of its output streams have ended, and the bound
+    holds after the program exits: at the bound the whole process group is killed whether or not
+    the program has already ended, and the reply says `timed_out: true`. `exit` is then the
+    program's own code when it had ended by itself and only processes it left behind were killed,
+    and `null` when it was killed. 0.15.1 stopped watching the clock once the program exited and
+    waited for the streams with no deadline (under Fixed).
+  - After the kill the run waits at most 500 ms for the streams to end and the group to be gone,
+    then answers with what the streams held by then. A process that left the program's process
+    group is not killed and may outlive the call: the run stops waiting for it after those 500 ms,
+    where 0.15.1 waited for it with no deadline.
+  - A cut moves only for a character it broke, decided by the bytes on both sides of the cut.
+    0.15.1 moved the head's cut only when the whole head was valid UTF-8 up to an unfinished last
+    character, so one invalid byte anywhere in the head left a broken character at the cut, and it
+    dropped every continuation byte a tail opened with, including the stream's own stray ones,
+    counting them as omitted. Any invalid UTF-8 in a kept end, however far from the cut, can move
+    the cut and so change `stdout`, `stderr` and `omitted_bytes` against 0.15.1's; a valid UTF-8
+    stream is cut exactly where 0.15.1 cut it.
+  - A workspace root that was removed, is no longer a directory or can no longer be entered is
+    refused as "workspace `<root>`: <reason>" before anything starts, and asked again when a start
+    fails, where 0.15.1 tried the start and answered "`<program>`: <reason>", blaming the program.
+  - When the system refuses to report on a started program, its process group is killed before
+    the refusal, where 0.15.1 returned and left it running. The refusal's words are unchanged.
+  - Unchanged: the reply's fields and their types — `argv`, `exit` (an integer, or `null` for a
+    program ended by a signal), `stdout`, `stderr`, `truncated`, `omitted_bytes`, `timed_out`,
+    `timeout_ms` — with none added, removed or renamed; the bounds (each stream's first and last
+    32768 bytes, the marker `\n… N bytes omitted here …\n`, ten minutes capped by what the run has
+    left, answered in `timeout_ms`); no standard input and a process group of the program's own;
+    and the environment. 0.15.1 already started the program with its environment cleared and
+    filled only from `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`, `CARGO_HOME`,
+    `RUSTUP_HOME`, `RUSTUP_TOOLCHAIN`, `CARGO_TARGET_DIR`, `SSL_CERT_FILE`, `SSL_CERT_DIR` and the
+    names given to `LocalOperations::inheriting`, and `tool_process::INHERITED_ENV` is the same
+    twelve names. The refusal of a program outside the declared set keeps harness's words and its
+    `Refusal::ProgramNotDeclared`, mapped from `process.ProgramNotDeclared`; the start-failure and
+    empty-argv refusals keep theirs.
 
 ### Fixed
+
+- `run` ends at its bound when the program has exited and something it started still holds its
+  output: the whole process group is killed at the bound and the reply says `timed_out: true`.
+  Pre-existing since 0.14.1 and carried into `harness-catalogue` by the move: after the program
+  exited, harness's runner waited for the output streams with no deadline, so such a run held the
+  call past its bound and answered `timed_out: false` (tools `0.2.0`, `process.run`).
 
 - `search` passes over a named pipe, and anything else that is not a regular file, rather than
   opening it: harness's grep read every entry that was not a directory, so one pipe in the tree held
@@ -73,6 +132,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Security
 
 - A toolchain argument that begins with `-` is refused unless it follows a declared `--` (tools `0.3.0`); an advisory follows the release.
+
+### Known issues
+
+- `b10x-tool-process` 0.3.0 may signal a process-group id after the program that held it was reaped; the fix is requested upstream and harness pins it when a tools tag carries it.
 
 ## [0.15.1] - 2026-10-20
 

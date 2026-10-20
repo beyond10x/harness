@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:started-record-carries-the-loops-cwd
 kind: story
-status: active
+status: implemented
 title: The started record carries the loop's working directory
 summary: LoopEvent::Started gains cwd (absolute, canonicalised as the CLI resolves its workspace); the metaharness converter writes it to session.started.cwd. Additive.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T12:28:48Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-20T12:28:48Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-20T14:09:47Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

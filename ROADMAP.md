@@ -101,7 +101,7 @@ values and failed on any difference but the framing.
 
 **Superseded on 2026-10-20 (atlas ADR 0097).** `harness-http`, `harness-responses`,
 `harness-messages` and `harness-credential` are removed; `llm`'s client crates, pinned by tag
-`0.8.0`, do every model call behind `crates/harness-cli/src/llm_port.rs`, and the two-wire
+`0.8.0`, do every model call behind `crates/harness-llm`, and the two-wire
 comparison above is `llm`'s parity table (`llm/docs/harness-parity.md`) now. The released
 `contracts/provider-wires/` versions stay, checked by `cargo xtask provider-contracts`.
 
@@ -116,7 +116,7 @@ does not.
 Done:
 
 - a subscription-token source — `harness_credential::SubscriptionToken` until 2026-10-20, and
-  `llm_port::Source` over `llm-credentials` since — that reads a token from a file or an
+  `harness_llm::Source` over `llm-credentials` since — that reads a token from a file or an
   environment variable the caller **names**, optionally at a caller-named JSON pointer. No default
   path, no vendor directory, no fallback when the named source is missing — the harness reads
   nothing it was not pointed at, and a source that searched on failure would be an ambient

@@ -438,8 +438,8 @@ is the whole reason a second wire cost a second projection instead of a second l
 
 Both wires are `llm`'s client crates since llm `0.7.0` — `b10x-llm-responses` and
 `b10x-llm-messages` over `b10x-llm-http`, with the credential presentation in
-`b10x-llm-providers` — and [`crates/harness-cli/src/llm_port.rs`](crates/harness-cli/src/llm_port.rs)
-is the one module where Harness's neutral values meet theirs: it translates a turn, a stream event,
+`b10x-llm-providers` — and [`crates/harness-llm`](crates/harness-llm/src/lib.rs)
+is the one crate where Harness's neutral values meet theirs: it translates a turn, a stream event,
 an outcome and an error, and bridges a blocking loop whose sink is not `Send` onto an async client.
 The request body, the stream decoder, the SSE framing, the retry rule, the status mapping and every
 header name are `llm`'s (atlas ADR 0097). Compaction, the mid-stream retry, the run ledger and the
@@ -468,14 +468,15 @@ comparison kept here.
 
 | crate | owns |
 |---|---|
-| `crates/harness-wire` | neutral values plus `ModelPort` and `ToolPort`. No I/O, no clock, no vendor field name. It keeps the credential types (`BearerSource`, `Bearer`, `StaticBearer`) for an embedder with its own model port; the shipped binary's credential path is `llm`'s (`llm_port::Source`), and the crate reads and sends none |
+| `crates/harness-wire` | neutral values plus `ModelPort` and `ToolPort`. No I/O, no clock, no vendor field name. It keeps the credential types (`BearerSource`, `Bearer`, `StaticBearer`) for an embedder with its own model port; the shipped binary's credential path is `llm`'s (`harness_llm::Source`), and the crate reads and sends none |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-catalogue` | one catalogue, published flat or under three verbs, over the `tools` crates: the adapter that maps each operation onto `b10x-tool-fs` (reads) and `b10x-tool-code-editor` (writes), keeps `search` and `run` local, and re-exports `b10x-tool-toolchain`'s resolved providers |
 | `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
-| `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts, the environment block, and `llm_port.rs`: the model port over `llm`'s client crates and the credential sources that feed them |
+| `crates/harness-llm` | `b10x-harness-llm`, a public library: the model port over `llm`'s client crates (`client`, `LlmPort`, `Target`) and the credential sources that feed them (`Source::{key, file, environment, resolver}`), re-exporting `llm_credentials`, `Protocol` and `BoxFuture` so an embedder names them from the same `llm` |
+| `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block, over `crates/harness-llm` for every model call |
 
 | path | holds |
 |---|---|

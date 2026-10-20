@@ -39,7 +39,9 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    `substrate-wire` for confinement, the `b10x-mcp-*` client crates for outbound MCP protocol,
    transport and local credential mechanics, and the `b10x-tool-*` crates — `b10x-tool-contract`,
    `b10x-tool-fs`, `b10x-tool-code-editor`, `b10x-tool-toolchain` — for the tool contracts and
-   default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2).
+   default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2), and
+   the `b10x-llm-*` client crates for every model call, which only this repository's own
+   `b10x-harness-llm` crate depends on directly (invariant 3).
    All are pinned by git tag or revision, never by a path into the sibling `tools` checkout. A path
    into a sibling checkout builds against whatever is checked out there, and `--locked` cannot lock
    it. Harness retains the authority in every case: the substrate crossing is argued in
@@ -55,13 +57,16 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    for a process lifetime — for an embedder that brings its own model port; the shipped binary's
    model port uses none of them, and the crate reads no credential from anywhere and sends none.
 
-   **`crates/harness-cli/src/llm_port.rs` is the one place Harness's values meet `llm`'s, and it
-   holds no credential either.** It translates a turn, a stream event, an outcome and an error,
-   and bridges two differences of execution model — a blocking loop whose sink is not `Send` over
-   an async client, and a cancellation flag over a token. Nothing vendor-shaped is written there: a
-   request body, a stream decoder, a header name or an endpoint path appearing in it means the
-   boundary was drawn in the wrong place. A credential is a `Source` — an `llm` resolver bound to
-   one reference — that `llm` asks per request, and the fetched value reaches the transport already
+   **`crates/harness-llm` (`b10x-harness-llm`; until 2026-10-20 `harness-cli`'s private module
+   `llm_port`) is the one place Harness's values meet `llm`'s, and it holds no credential
+   either.** It is a public library crate that `harness-cli` depends on, so an embedder builds its
+   model port from it rather than copying it. It translates a turn, a stream event, an outcome and
+   an error, and bridges two differences of execution model — a blocking loop whose sink is not
+   `Send` over an async client, and a cancellation flag over a token. Nothing vendor-shaped is
+   written there: a request body, a stream decoder, a header name or an endpoint path appearing in
+   it means the boundary was drawn in the wrong place. A credential is a `Source` — an `llm`
+   resolver bound to one reference, the caller's own through `Source::resolver` — that `llm` asks
+   per request, and the fetched value reaches the transport already
    inside a header value `llm` built. The former `harness-http`, `harness-responses`,
    `harness-messages` and `harness-credential` crates were removed with that move.
 4. **Turns are stateless.** Nothing is retained provider-side and no wire may use provider-side
@@ -135,7 +140,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Safety envelope
 
-- **Credentials.** In the shipped binary a credential is an `llm_port::Source` — an
+- **Credentials.** In the shipped binary a credential is a `harness_llm::Source` — an
   `llm-credentials` resolver bound to one reference — that `llm` asks **at call time**; the fetched
   `Secret` is zeroized when the call ends, and a source re-read on every request
   (`--oauth-token-file`, `--oauth-token-env`) follows a renewed token without a restart.

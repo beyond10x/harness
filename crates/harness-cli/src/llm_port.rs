@@ -853,28 +853,55 @@ mod tests {
     }
 
     #[test]
-    fn an_in_stream_provider_failure_before_any_output_is_offered_for_another_attempt() {
-        // The classes the former wires retried on (`harness-responses` `response.failed` with
-        // `server_error`, `harness-messages` `error` `api_error`/`overloaded_error`) arrive from
-        // llm 0.7.0 as `Unavailable`/`Transport`/`RateLimited` with `retriable` unset (llm parity
-        // rows R28, M27), so this port hands the loop a final failure where it used to hand it a
-        // retriable one. Each error here is built exactly as llm 0.7.0's decoders build it.
-        for (code, what) in [
+    fn the_retry_flag_llms_decoders_set_before_output_is_carried_through_and_never_added() {
+        // The classes the former wires retried on — Responses `server_error` and
+        // `rate_limit_exceeded`, Messages `overloaded_error` and `api_error` — are marked
+        // retriable by llm 0.8.0's decoders when they arrive before any output, and final after
+        // it (llm `CHANGELOG.md` `[0.8.0]`; parity rows R28, M27). The end-to-end cases
+        // `*_before_any_output_is_retried_through_the_shipped_binary` prove the decoders set the
+        // flag; this case proves the port does not drop it — and does not add it either, since
+        // the retry class is llm's decision (`a_retry_class_is_llms_own_decision`). Each error is
+        // built as the decoders build it: the code, `Dispatch::Accepted`, and the flag as set
+        // before output or left unset after it.
+        for (code, expected, what) in [
             (
                 ErrorCode::Unavailable,
+                WireErrorCode::Transport,
                 "Responses `server_error`, Messages `overloaded_error`",
             ),
-            (ErrorCode::RateLimited, "Responses `rate_limit_exceeded`"),
-            (ErrorCode::Transport, "Messages `api_error`"),
+            (
+                ErrorCode::RateLimited,
+                WireErrorCode::RateLimited,
+                "Responses `rate_limit_exceeded`",
+            ),
+            (
+                ErrorCode::Transport,
+                WireErrorCode::Transport,
+                "Messages `api_error`",
+            ),
         ] {
-            let error = llm_core::Error::new(code, "not this time")
-                .with_dispatch(llm_core::Dispatch::Accepted);
-            let wire = from_llm_error(error);
+            let before_output = llm_core::Error::new(code, "not this time")
+                .with_dispatch(llm_core::Dispatch::Accepted)
+                .with_retriable(true);
+            let wire = from_llm_error(before_output);
             assert!(
                 wire.retriable,
-                "{what}: the far side's own failure before any output is worth another attempt \
-                 (the loop retries on this flag and nothing else): {wire:?}"
+                "{what}: the flag llm set before any output reaches the loop, which retries on \
+                 this flag and nothing else: {wire:?}"
             );
+            assert_eq!(
+                wire.code, expected,
+                "{what}: and the code is kept: {wire:?}"
+            );
+
+            let after_output = llm_core::Error::new(code, "not this time")
+                .with_dispatch(llm_core::Dispatch::Accepted);
+            let wire = from_llm_error(after_output);
+            assert!(
+                !wire.retriable,
+                "{what}: the same failure after output is final, as llm marked it: {wire:?}"
+            );
+            assert_eq!(wire.code, expected, "{what}: {wire:?}");
         }
     }
 }

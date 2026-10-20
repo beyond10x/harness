@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- **Every model call goes through `llm`'s client crates**, pinned by tag `0.7.0`
+- **Every model call goes through `llm`'s client crates**, pinned by tag `0.8.0`
   (`b10x-llm-core`, `-blocking`, `-credentials`, `-http`, `-messages`, `-providers`,
   `-responses`; atlas ADR 0097). `crates/harness-cli/src/llm_port.rs` is the one module where
   Harness's values meet `llm`'s; compaction, mid-stream retry, the run ledger and approvals stay
@@ -24,9 +24,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `anthropic-messages` is presented as `llm`'s `AuthKind::SubscriptionOauth` — `authorization:
   Bearer` plus `anthropic-beta: oauth-2025-04-20`, `llm`'s client preamble as the first `system`
   block with the instruction after it, billed as a subscription — where the spike bridge refused
-  it; on `openai-responses` `llm` 0.7.0 sends a subscription token as a plain bearer, because it
+  it; on `openai-responses` `llm` sends a subscription token as a plain bearer, because it
   admits `SubscriptionOauth` over Messages only. `--reasoning-effort max` is declared to `llm`,
-  which the Messages wire sends as `max` and the Responses wire as its highest, `xhigh`. Two
+  which the Messages wire sends as `max` and the Responses wire as its highest, `xhigh`. The four
+  provider failures the former wires retried before any output — Responses `server_error` and
+  `rate_limit_exceeded`, Messages `overloaded_error` and `api_error` — are retried again: `llm`
+  0.7.0 read them as final, 0.8.0 marks them retriable before output and final after it (llm
+  `CHANGELOG.md` `[0.8.0]`; parity rows R28, M27), and the loop retries on that flag alone. Two
   places `llm` is stricter than the former wires: a turn held to `answer` — the one a prose-ending
   run is given after its nudge — that ends in prose again is refused on the wire (`Protocol: model
   terminal reason contradicts its tool obligations`, llm parity row R45), so such a run exits 1

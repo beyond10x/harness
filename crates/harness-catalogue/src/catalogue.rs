@@ -532,13 +532,14 @@ impl Catalogue {
     /// The checks of the `build-test` contract are the executor's, made before any argv is handed
     /// over: the arguments the registry accepts, where the path arguments the call names land
     /// under the provider's directory ([`Operations::host_root`]), this run's write scope on the
-    /// written paths the plan declares, as spelled and where they land, the declared programs,
-    /// and one deadline for the call. The scope asked is both layers, the run's and the step's,
-    /// exactly as a `file_write` asks them. Each argv that passes reaches the provider through
-    /// [`Operations::run_within`] — `b10x-tool-process` locally, substrate with the providers'
-    /// sandbox applied when confined — and each run in the answer is that provider's own reply,
-    /// every planned provider named in a role's answer, and a plan the deadline cut short marked
-    /// as cut ([`ProviderRunner::answered`]).
+    /// written paths the plan declares, as spelled and where they land, and on every module file
+    /// a written path an argv hands to `rustfmt` declares ([`crate::modules`]), the declared
+    /// programs, and one deadline for the call. The scope asked is both layers, the run's and the
+    /// step's, exactly as a `file_write` asks them. Each argv that passes reaches the provider
+    /// through [`Operations::run_within`] — `b10x-tool-process` locally, substrate with the
+    /// providers' sandbox applied when confined — and each run in the answer is that provider's
+    /// own reply, every planned provider named in a role's answer, and a plan the deadline cut
+    /// short marked as cut ([`ProviderRunner::answered`]).
     fn invoke_toolchain(
         &self,
         name: &str,
@@ -562,9 +563,20 @@ impl Catalogue {
         };
         let runner = ProviderRunner::new(&*self.operations, root);
         let (scope, step, tree) = (self.scope.clone(), self.step.clone(), root.to_path_buf());
+        // A written path a `rustfmt` argv names is judged with every module it declares, which
+        // rustfmt rewrites with it ([`crate::modules`]).
+        let formatted = crate::modules::formatted(&plan);
         let executor = match Executor::with_runner(&runner, self.toolchains.clone()) {
             Ok(executor) => executor.refusing_writes(move |path| {
-                crate::written::refusal([&scope, &step], Some(&tree), "file.write", path)
+                crate::written::refusal([&scope, &step], Some(&tree), "file.write", path).or_else(
+                    || {
+                        formatted
+                            .iter()
+                            .any(|named| named == path)
+                            .then(|| crate::modules::refusal([&scope, &step], &tree, path))
+                            .flatten()
+                    },
+                )
             }),
             Err(error) => return Some(Err(error.to_string().into())),
         };

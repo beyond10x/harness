@@ -1,7 +1,7 @@
 //! Adversary cases for story:a-written-directory-is-judged-by-what-it-holds, driven through the
 //! public catalogue against the story's own acceptance statement and outcome.
 //!
-//! Most cases record every argv a provider is asked to start and start none. Three run the
+//! Most cases record every argv a provider is asked to start and start none. Four run the
 //! built-in Go or Rust provider and need `go`/`gofmt`, or a rustup `stable` toolchain, on this
 //! host.
 
@@ -109,18 +109,61 @@ toolchains:
           - argv: [gofmt, -w, { each: paths }]
 "#;
 
+/// Shaped like the built-in `rust_fmt`: `rustfmt <path>` once per written path.
+const RUST_FMT_SHAPED: &str = r#"version: 1
+toolchains:
+  - name: rustfmtlike
+    description: Rewrites every named Rust file in place.
+    project:
+      all: [probe.lock]
+    sandbox:
+      programs: [rustfmt]
+      env:
+        HOME: "{workspace}"
+        PATH: /usr/local/bin:/usr/bin:/bin
+    tools:
+      - name: rustfmtlike_fmt
+        description: Format only the explicitly named Rust source files.
+        workspace-writes: true
+        parameters:
+          paths: { kind: workspace-path-list, required: true, min-items: 1, max-items: 128 }
+        writes: [paths]
+        commands:
+          - for-each: paths
+            argv: [rustfmt, { item: true }]
+"#;
+
 /// The `gofmt -w`-shaped catalogue over a [`Recorder`] in `root`, and every argv it was asked to
 /// start.
 fn recording(root: &Path) -> (Catalogue, Arc<Mutex<Vec<Vec<String>>>>) {
+    recording_with(root, GO_FMT_SHAPED, "fmtlike", "gofmt")
+}
+
+/// The catalogue `spec` declares as `provider`, running `program`, over a [`Recorder`] in
+/// `root`, and every argv it was asked to start.
+fn recording_with(
+    root: &Path,
+    spec: &str,
+    provider: &str,
+    program: &str,
+) -> (Catalogue, Arc<Mutex<Vec<Vec<String>>>>) {
     let started = Arc::new(Mutex::new(Vec::new()));
     let operations = Recorder {
         tree: LocalOperations::new(root).expect("a workspace"),
-        programs: vec!["gofmt".to_owned()],
+        programs: vec![program.to_owned()],
         started: Arc::clone(&started),
     };
-    let catalogue =
-        Catalogue::of_with_toolchains(operations, resolve(root, GO_FMT_SHAPED, &["fmtlike"]));
+    let catalogue = Catalogue::of_with_toolchains(operations, resolve(root, spec, &[provider]));
     (catalogue, started)
+}
+
+/// Writes each file of `files`, a path and its text, under `root`.
+fn holding(root: &Path, files: &[(&str, &str)]) {
+    for (path, text) in files {
+        let at = root.join(path);
+        std::fs::create_dir_all(at.parent().expect("a parent")).expect("its directory");
+        std::fs::write(at, text).expect("a file");
+    }
 }
 
 fn formatting(catalogue: &Catalogue, path: &str) -> Result<Value, Refused> {
@@ -241,7 +284,6 @@ fn go_fmt_on_a_directory_writes_nothing_outside_the_workspace_through_a_link_ben
 // --- outside the class: a written file whose program reaches other files ----------------------
 
 #[test]
-#[ignore = "fixed by the next unit (rust_fmt's declared modules are judged)"]
 fn rust_fmt_on_a_named_file_rewrites_no_module_file_the_scope_refuses() {
     // The built-in `rust_fmt`, "Format only the explicitly named Rust source files", runs
     // `rustfmt <path>`, and rustfmt formats every out-of-line module the named file declares.
@@ -273,6 +315,144 @@ fn rust_fmt_on_a_named_file_rewrites_no_module_file_the_scope_refuses() {
         "`rust_fmt` on `src/lib.rs` rewrote `src/generated.rs` under `src/generated.rs=denied`: \
          {answer:?}"
     );
+}
+
+#[test]
+fn rust_fmt_on_a_file_the_model_wrote_rewrites_no_module_its_path_attribute_names() {
+    // The adversary's variant: the model writes a file the scope admits, declaring a module in
+    // a file the scope refuses through `#[path]`, and then formats it. Needs a rustup `stable`
+    // toolchain under `$RUSTUP_HOME` or `~/.rustup`.
+    let dir = tempfile::tempdir().expect("a workspace");
+    let unformatted = "pub   fn   kept( ) {}\n";
+    holding(
+        dir.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            ("src/lib.rs", ""),
+            ("protected/x.rs", unformatted),
+        ],
+    );
+    let providers = tool_toolchain::Registry::builtins()
+        .expect("the built-ins")
+        .resolve(dir.path(), Some(&["rust".to_owned()]))
+        .expect("the built-in Rust provider resolves where rustup `stable` is installed");
+    let catalogue = local(dir.path(), providers).scoped(rules(&["protected/**=denied"]));
+    catalogue
+        .invoke(
+            "file_write",
+            &json!({"path": "src/evil.rs", "text": "#[path = \"../protected/x.rs\"]\nmod k;\n"}),
+        )
+        .expect("`src/evil.rs` is admitted");
+
+    let refused = catalogue
+        .invoke("rust_fmt", &json!({"paths": ["src/evil.rs"]}))
+        .expect_err("the module it declares is refused");
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("protected/x.rs")).expect("read"),
+        unformatted,
+        "`rust_fmt` on `src/evil.rs` rewrote `protected/x.rs` under `protected/**=denied`"
+    );
+    assert_eq!(
+        refused.message(),
+        "`src/evil.rs:2` declares the module `k` in `src/../protected/x.rs`, which `rustfmt \
+         src/evil.rs` rewrites as well, and `src/../protected/x.rs` is outside what this run may \
+         change. Nothing here writes to it; if the work needs that path, the run was scoped \
+         wrongly and a person should say so. Name the files to format, none of which declares a \
+         refused module."
+    );
+}
+
+#[test]
+fn a_formatting_call_on_a_crate_none_of_whose_modules_a_rule_refuses_starts_as_before() {
+    // Under the default profile and under a narrower one: every module is read and judged, none
+    // is refused, and the argv started is the one the plan names, byte for byte.
+    let dir = tempfile::tempdir().expect("a workspace");
+    holding(
+        dir.path(),
+        &[
+            (
+                "src/lib.rs",
+                "mod a;\nmod i {\n    mod j;\n}\n#[path = \"other/k.rs\"]\nmod k;\n",
+            ),
+            ("src/a.rs", "mod b;\n"),
+            ("src/a/b.rs", ""),
+            ("src/i/j.rs", ""),
+            ("src/other/k.rs", ""),
+        ],
+    );
+    let (catalogue, started) =
+        recording_with(dir.path(), RUST_FMT_SHAPED, "rustfmtlike", "rustfmt");
+    let mut catalogue = catalogue.scoped(rules(&[".git/**=denied", "**=allowed"]));
+    let call = json!({"paths": ["src/lib.rs"]});
+
+    catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect("no module is refused under the default profile");
+    catalogue.narrow(rules(&["protected/**=denied"]));
+    catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect("nor under a step that refuses another directory");
+
+    assert_eq!(
+        *started.lock().expect("not poisoned"),
+        vec![vec!["rustfmt".to_owned(), "src/lib.rs".to_owned()]; 2]
+    );
+    catalogue.narrow(rules(&["src/a/b.rs=denied"]));
+    let refused = catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect_err("a module two files down is refused");
+    assert!(
+        refused.message().starts_with(
+            "`src/a.rs:1` declares the module `b` in `src/a/b.rs`, which `rustfmt src/lib.rs` \
+             rewrites as well, and "
+        ),
+        "{refused}"
+    );
+    assert_eq!(
+        started.lock().expect("not poisoned").len(),
+        2,
+        "nothing started"
+    );
+}
+
+#[test]
+fn with_no_refusing_rule_a_formatting_call_reads_no_module() {
+    // `#[cfg_attr(…, path = …)]` is refused wherever the modules are read, so an admission is a
+    // call that read none.
+    let dir = tempfile::tempdir().expect("a workspace");
+    holding(
+        dir.path(),
+        &[
+            ("src/lib.rs", "#[cfg_attr(unix, path = \"u.rs\")]\nmod k;\n"),
+            ("src/u.rs", ""),
+            ("src/k.rs", ""),
+        ],
+    );
+    let (catalogue, started) =
+        recording_with(dir.path(), RUST_FMT_SHAPED, "rustfmtlike", "rustfmt");
+    let call = json!({"paths": ["src/lib.rs"]});
+    catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect("no scope, nothing read");
+    let mut catalogue = catalogue.scoped(rules(&["**=allowed"]));
+    catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect("a scope that refuses nothing, nothing read");
+    catalogue.narrow(rules(&["protected/**=denied"]));
+    let refused = catalogue
+        .invoke("rustfmtlike_fmt", &call)
+        .expect_err("read once a layer refuses something");
+    assert!(
+        refused
+            .message()
+            .contains("with an attribute that carries `path`"),
+        "{refused}"
+    );
+    assert_eq!(started.lock().expect("not poisoned").len(), 2);
 }
 
 // --- the bounds at their real values, and the step layer --------------------------------------

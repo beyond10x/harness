@@ -58,6 +58,7 @@
 mod catalogue;
 mod flat;
 mod local;
+mod modules;
 mod operations;
 mod scope;
 mod toolchain;

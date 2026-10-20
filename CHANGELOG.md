@@ -208,6 +208,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `search` treats a file that holds a NUL byte as binary and does not search it, like one that is
   not UTF-8, where harness searched it and answered its NUL bytes in `text` (tools `0.3.0`).
 - A tool's written path that names a directory is refused when the write scope refuses anything the directory can hold, including through a link inside it to a place outside the workspace; under the default profile a formatter call on a directory holding `.git` (the workspace root) is therefore refused; name the subdirectories or files instead.
+- A Rust formatting call is refused when a module the named files reach is one the write scope refuses, or one that cannot be told from the source; name files that declare none.
 
 ### Security
 

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-20T10:19:04Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-port-is-a-public-crate",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-llm-port-pass-1",
+    "review": "review-result:adversary-llm-port-pass-1",
+    "outcome": "fixed"
+  }
+}

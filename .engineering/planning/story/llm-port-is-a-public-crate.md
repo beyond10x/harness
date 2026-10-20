@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:llm-port-is-a-public-crate
 kind: story
-status: active
+status: implemented
 title: The llm adapter is a public crate consumers can import
 summary: Move mod llm_port (907 lines) unchanged into b10x-harness-llm; harness-cli depends on it; a short wave after tools-1, released in 0.15.0.
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
 - depends_on: story:harness-consumes-tools-crates
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T09:11:50Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-20T09:11:50Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-20T10:26:37Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

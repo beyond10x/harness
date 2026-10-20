@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-20T10:26:37Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-port-is-a-public-crate",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "harness-llm-port-gate-steps.sh on wave/2026-10-20-llm-port at 62f44050: 17 steps all exit 0 (test-workspace 106s, specification 38s, clippy 43s, ...) (~/.cache/harness-llm-port-gate/summary.txt)"
+  }
+}

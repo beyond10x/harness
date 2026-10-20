@@ -614,7 +614,7 @@ fn operations(value: &Value) -> Vec<&'static str> {
         };
     }
     entry_of(value)
-        .and_then(harness_tools::operation_of)
+        .and_then(harness_catalogue::operation_of)
         .into_iter()
         .collect()
 }
@@ -635,12 +635,12 @@ fn subjects(value: &Value) -> Vec<String> {
     let Some(entry) = entry_of(value) else {
         return Vec::new();
     };
-    let arguments = if value["name"].as_str() == Some(harness_tools::INVOKE_VERB) {
+    let arguments = if value["name"].as_str() == Some(harness_catalogue::INVOKE_VERB) {
         &value["arguments"]["arguments"]
     } else {
         &value["arguments"]
     };
-    harness_tools::subjects_of(entry, arguments)
+    harness_catalogue::subjects_of(entry, arguments)
         .into_iter()
         .map(|subject| subject.as_str().to_owned())
         .collect()
@@ -652,7 +652,7 @@ fn subjects(value: &Value) -> Vec<String> {
 /// performed nothing, which is why the two callers treat them the same.
 fn entry_of(value: &Value) -> Option<&str> {
     let name = value["name"].as_str()?;
-    if name == harness_tools::INVOKE_VERB {
+    if name == harness_catalogue::INVOKE_VERB {
         return value["arguments"]["name"].as_str();
     }
     Some(name)
@@ -1156,7 +1156,7 @@ mod operation_tests {
         ] {
             assert_eq!(
                 operations(&json!({
-                    "name": harness_tools::INVOKE_VERB,
+                    "name": harness_catalogue::INVOKE_VERB,
                     "arguments": {"name": entry, "arguments": {}}
                 })),
                 expected,
@@ -1164,7 +1164,10 @@ mod operation_tests {
             );
         }
 
-        for verb in [harness_tools::SEARCH_VERB, harness_tools::DESCRIBE_VERB] {
+        for verb in [
+            harness_catalogue::SEARCH_VERB,
+            harness_catalogue::DESCRIBE_VERB,
+        ] {
             assert!(
                 operations(&json!({"name": verb, "arguments": {}})).is_empty(),
                 "{verb} asks what the run may do; it does none of it"
@@ -1173,7 +1176,7 @@ mod operation_tests {
 
         assert!(
             operations(&json!({
-                "name": harness_tools::INVOKE_VERB,
+                "name": harness_catalogue::INVOKE_VERB,
                 "arguments": {"name": "Bash", "arguments": {}}
             }))
             .is_empty(),
@@ -1212,7 +1215,7 @@ mod operation_tests {
         ] {
             let flat = json!({"name": entry, "arguments": arguments.clone()});
             let behind_a_verb = json!({
-                "name": harness_tools::INVOKE_VERB,
+                "name": harness_catalogue::INVOKE_VERB,
                 "arguments": {"name": entry, "arguments": arguments},
             });
             assert_eq!(operations(&flat), vec![operation], "{entry}");

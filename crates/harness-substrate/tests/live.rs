@@ -12,7 +12,7 @@
 //! component has spoken to something real, it did.
 
 use b10x_harness_substrate::{Client, ConfinedOperations};
-use harness_tools::Operations as _;
+use harness_catalogue::Operations as _;
 
 fn socket() -> Option<String> {
     std::env::var("B10X_SUBSTRATE_SOCKET")
@@ -98,7 +98,7 @@ fn a_confined_workspace_takes_a_write_reads_it_back_and_runs_a_declared_program(
     assert!(
         matches!(
             refused.refusal(),
-            Some(harness_tools::Refusal::ProgramNotDeclared { program, .. }) if program == "sh"
+            Some(harness_catalogue::Refusal::ProgramNotDeclared { program, .. }) if program == "sh"
         ),
         "the confined provider names its refusal too: {refused}"
     );

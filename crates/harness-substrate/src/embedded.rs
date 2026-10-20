@@ -32,7 +32,7 @@
 //! every operation is `block_on`.
 //!
 //! **Work does reach it concurrently**, which it did not when this was written:
-//! `harness_tools::Catalogue::invoke_batch` gives each call of a batch its own thread, and all of
+//! `harness_catalogue::Catalogue::invoke_batch` gives each call of a batch its own thread, and all of
 //! them `block_on` this one runtime. A current-thread runtime serialises them, so a batch of reads
 //! costs the same wall clock here as the same reads one after another — the threads queue instead
 //! of the calls.

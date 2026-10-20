@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 
-use harness_toolchain::{ResolvedProvider, Role};
 use harness_wire::{AccessKind, Effect, Envelope, Idempotency, Risk};
 use serde_json::{Value, json};
+use tool_toolchain::{ResolvedProvider, Role};
 
 use crate::Entry;
 
 pub(crate) struct CommandPlan {
-    pub groups: Vec<(String, harness_toolchain::CommandPlan)>,
+    pub groups: Vec<(String, tool_toolchain::CommandPlan)>,
 }
 
 pub(crate) fn entries(active: &[ResolvedProvider]) -> Vec<Entry> {
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn generic_roles_require_namespaced_provider_arguments() {
-        let registry = harness_toolchain::Registry::builtins().expect("built-ins");
+        let registry = tool_toolchain::Registry::builtins().expect("built-ins");
         let providers = registry
             .resolve(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

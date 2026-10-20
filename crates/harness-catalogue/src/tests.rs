@@ -97,7 +97,7 @@ fn output(outcome: &ToolOutcome) -> String {
 #[test]
 fn typed_toolchain_tools_do_not_require_publishing_raw_run() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let providers = harness_toolchain::Registry::builtins()
+    let providers = tool_toolchain::Registry::builtins()
         .expect("built-ins")
         .resolve(&root, Some(&["rust".to_owned()]))
         .expect("installed Rust provider");

@@ -210,15 +210,15 @@ live run exists whose evidence is not confused with provider emulation.
 
 ## Phase 6: `harness-workspace`, one trait over three ways to hold a tree
 
-**Status: done, under a different name.** The trait is `harness_tools::Operations` and the crate is
-`harness-tools`; it arrived as part of the one-tool-surface work rather than on its own, because the
+**Status: done, under a different name.** The trait is `harness_catalogue::Operations` and the crate
+is `harness-catalogue`; it arrived as part of the one-tool-surface work rather than on its own, because the
 same question — *what does this run admit?* — had to be answered once for the b10x loop and for the
 MCP server metaharness serves to Claude Code.
 
 What landed against the exit criteria below: `harness-cli` builds a `Catalogue` from whatever
 provider it was handed and publishes what that admits, with no branch on which one it got; the
 publication gate lives in `Catalogue::of` alone; and `ToolPort` has one implementation,
-`harness_tools::Verbs`. The third implementation — substrate over a socket — exists as
+`harness_catalogue::Verbs`. The third implementation — substrate over a socket — exists as
 `harness-substrate::Client` behind the same `ConfinedOperations`, so it is a deployment choice and
 not a different set of things the model may do. The shared conformance suite is
 `crates/harness-substrate/tests/conformance.rs`: 34 cases asked of all three implementations, run

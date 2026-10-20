@@ -72,7 +72,7 @@ impl Entry {
 pub struct Catalogue {
     operations: Box<dyn Operations>,
     entries: Vec<Entry>,
-    toolchains: Vec<harness_toolchain::ResolvedProvider>,
+    toolchains: Vec<tool_toolchain::ResolvedProvider>,
     /// Where this run may write. Empty restricts nothing — see [`crate::Scope`].
     scope: crate::Scope,
     /// Where the **step** now running may write, on top of `scope`.
@@ -124,7 +124,7 @@ impl Catalogue {
     /// The provider-admitted catalogue plus fixed tools from the active toolchain providers.
     pub fn of_with_toolchains(
         operations: impl Operations + 'static,
-        toolchains: Vec<harness_toolchain::ResolvedProvider>,
+        toolchains: Vec<tool_toolchain::ResolvedProvider>,
     ) -> Self {
         let mut entries = vec![file_read(), dir_list(), search(), find()];
         if operations.writes() {

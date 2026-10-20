@@ -10,7 +10,7 @@
 //! **before** the effect, so an answer cannot arrive after the fact. And what is named to the
 //! person is the **entry** the loop resolved — `file_write`, `run` — never the verb `tool_invoke`
 //! it travelled through, because a person asked to approve `tool_invoke` is being asked to approve
-//! everything the catalogue can do (`harness_tools::Verbs::invoked`).
+//! everything the catalogue can do (`harness_catalogue::Verbs::invoked`).
 //!
 //! What is *not* here is a default: nothing in this module decides that a run should be
 //! interactive. [`stdio_is_interactive`] answers the question the caller asks before choosing, and
@@ -207,7 +207,7 @@ pub fn stdio_is_interactive() -> bool {
 /// publishing tools flat one day changes nothing a person sees.
 fn entry_arguments(call: &ToolCall) -> &Value {
     static NONE: Value = Value::Null;
-    if call.name.as_str() == harness_tools::INVOKE_VERB {
+    if call.name.as_str() == harness_catalogue::INVOKE_VERB {
         call.arguments.get("arguments").unwrap_or(&NONE)
     } else {
         &call.arguments
@@ -340,7 +340,7 @@ mod tests {
     fn invoke(entry: &str, arguments: &Value) -> ToolCall {
         ToolCall {
             call_id: CallId::new("call-1").expect("a valid call id"),
-            name: ToolName::new(harness_tools::INVOKE_VERB).expect("a valid tool name"),
+            name: ToolName::new(harness_catalogue::INVOKE_VERB).expect("a valid tool name"),
             arguments: json!({"name": entry, "arguments": arguments}),
         }
     }
@@ -503,7 +503,7 @@ mod tests {
         assert!(prompt.contains("src/main.rs"), "{prompt}");
         assert!(prompt.contains("12 bytes"), "{prompt}");
         assert!(
-            !prompt.contains(harness_tools::INVOKE_VERB),
+            !prompt.contains(harness_catalogue::INVOKE_VERB),
             "a person decides on the entry, never on the verb: {prompt}"
         );
     }

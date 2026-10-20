@@ -466,7 +466,7 @@ fn the_probe_asks_the_one_route_the_contract_names() {
 
 // --- what a confined workspace admits, and what the catalogue makes of it ----------------------
 
-use harness_tools::{Catalogue, Operations, ReadWindow, SearchOptions};
+use harness_catalogue::{Catalogue, Operations, ReadWindow, SearchOptions};
 use std::sync::Arc;
 
 /// One thing the scripted transport was asked: method, path, and the body if there was one.
@@ -785,7 +785,7 @@ fn a_program_outside_the_declared_set_is_refused_locally_and_the_set_is_listed()
     // And named, so a reader of the record counts it without matching that sentence.
     assert_eq!(
         refused.refusal(),
-        Some(&harness_tools::Refusal::ProgramNotDeclared {
+        Some(&harness_catalogue::Refusal::ProgramNotDeclared {
             program: "sh".to_owned(),
             declared: vec!["cargo".to_owned()],
         }),
@@ -1300,7 +1300,7 @@ fn an_edit_that_names_one_place_writes_the_whole_file_back_with_that_one_change(
 fn a_confined_workspace_lists_searches_and_finds_through_nothing_and_says_so() {
     // `Backend` carries no listing route, and reading the host filesystem to fake one would step
     // around the containment this provider exists for. A run that needs a listing gets it from the
-    // reading provider beside this one, which is what `harness_tools::Split` composes.
+    // reading provider beside this one, which is what `harness_catalogue::Split` composes.
     let confined_provider = provider(&confined(), Scripted::new(vec![]), &[]);
     for refused in [
         confined_provider.dir_list("."),
@@ -1345,10 +1345,10 @@ fn an_exec_identity_is_the_shape_substrate_admits() {
 #[test]
 fn resolved_provider_data_crosses_to_substrate_without_provider_branches() {
     let host = tempfile::tempdir().expect("a provider root");
-    let provider = harness_toolchain::ResolvedProvider {
+    let provider = tool_toolchain::ResolvedProvider {
         name: "example".to_owned(),
         description: "fixture".to_owned(),
-        roots: vec![harness_toolchain::ResolvedRoot {
+        roots: vec![tool_toolchain::ResolvedRoot {
             name: "sdk".to_owned(),
             host: host.path().canonicalize().expect("canonical root"),
             mount: "/toolchain/example".to_owned(),
@@ -1363,7 +1363,7 @@ fn resolved_provider_data_crosses_to_substrate_without_provider_branches() {
         programs: vec!["example".to_owned()],
         facts: Vec::new(),
         tools: Vec::new(),
-        provenance: harness_toolchain::Provenance {
+        provenance: tool_toolchain::Provenance {
             source: "builtin:fixture".to_owned(),
             sha256: "00".repeat(32),
         },

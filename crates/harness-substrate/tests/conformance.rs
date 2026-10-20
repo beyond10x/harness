@@ -1,4 +1,4 @@
-//! One suite, asked of every implementation of `harness_tools::Operations`.
+//! One suite, asked of every implementation of `harness_catalogue::Operations`.
 //!
 //! # What an embedder is promised, and what was checking it
 //!
@@ -9,8 +9,8 @@
 //! handing it a local one. Each had its own tests and nothing asked them the same question, so the
 //! promise was a comment.
 //!
-//! This is here rather than in `harness-tools` because this is the only crate that can see all
-//! three: `harness-substrate` depends on `harness-tools`, and a dependency the other way would
+//! This is here rather than in `harness-catalogue` because this is the only crate that can see all
+//! three: `harness-substrate` depends on `harness-catalogue`, and a dependency the other way would
 //! invert the layering the boundary rule exists to keep.
 //!
 //! # What is asserted, and what is deliberately not
@@ -60,7 +60,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use b10x_harness_substrate::{Backend, ConfinedOperations, Embedded, Facts};
-use harness_tools::{
+use harness_catalogue::{
     LocalOperations, Operations, ReadWindow, Refusal, Refused, SearchOptions, Split,
 };
 use serde_json::{Value, json};
@@ -1003,12 +1003,12 @@ const FIVE_CRLF_LINES: &str = "alpha\r\nbeta\r\ngamma\r\ndelta\r\nepsilon\r\n";
 /// Not the carve-out the module header makes. That one is about each provider's *own* default
 /// ceiling, "at figures each names". This is `max_bytes`, which the caller states and
 /// `Catalogue::of`'s `file_read` schema publishes to the model
-/// (`harness-tools/src/catalogue.rs:646`), so a model can and does name it. `ReadWindow::max_bytes`
+/// (`harness-catalogue/src/catalogue.rs`), so a model can and does name it. `ReadWindow::max_bytes`
 /// is documented as "How many bytes of the file this read may take" — one number, one meaning.
 ///
-/// It has two meanings on a CRLF file. `LocalOperations` charges the `\r` to the ceiling by name
-/// (`harness-tools/src/local.rs`, `Line::length`: "separator excluded, `\r` included. What the byte
-/// ceiling is charged"); `ConfinedOperations` splits with `str::lines`, which dropped the `\r`
+/// It has two meanings on a CRLF file. `LocalOperations` reads through `b10x-tool-fs`, which charges
+/// the `\r` to the ceiling by name (`tool_fs`'s `Line::length`: "separator excluded, `\r` included.
+/// What the byte ceiling is charged"); `ConfinedOperations` splits with `str::lines`, which dropped the `\r`
 /// before the weight was taken (`harness-substrate/src/tools.rs:194,216`). One byte a line, so the
 /// two answer a different number of lines of the same file under the same stated ceiling.
 #[test]
@@ -1076,7 +1076,7 @@ fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_work
 /// re-implementing containment here would make two answers to one question, and the wrong one would
 /// be the one nobody was looking at." Normalising `./` here is the first half of exactly that. The
 /// two places it could live are substrate's own path handling and
-/// `harness_tools::Catalogue`, which is the one gate every provider is reached through — and that
+/// `harness_catalogue::Catalogue`, which is the one gate every provider is reached through — and that
 /// second one changes what every entry receives, for every embedder, which is a design change with
 /// its own blast radius. Smaller than the parent-directory split above: nothing published tells a
 /// model that `./` is legal for `file_read`, so this is habit rather than a documented workflow.
@@ -1511,6 +1511,100 @@ fn the_parent_directory_pin_notices_a_write_that_left_something_behind() {
         outcome.is_err(),
         "the write left `{left_behind:?}` at `deep/down/new.txt` and reported a failure, and the \
          conformance check answered {outcome:?}"
+    );
+}
+
+// --- third adversarial pass (tools-1 u1): offset and the byte ceiling, together ------------------
+
+/// Every workspace answers the same when `offset` and `max_bytes` are named in the **same** window.
+///
+/// # Why this gap is worth a test of its own
+///
+/// `every_line_ending_shape_answers_the_same_under_every_window_in_every_workspace` sweeps windows
+/// that set *either* a line range *or* a byte ceiling, never both: its `lines(..)` windows leave
+/// `max_bytes` `None` and its `max_bytes(..)` windows leave `offset`/`limit` `None`. The byte
+/// ceiling the tools-1 separator fix changed is charged against the **first answered** line, which
+/// is the `offset` line when `offset > 1`, so the one window that exercises the fixed arithmetic on
+/// a line reached *after a skip* — `offset > 1` and a biting `max_bytes` in one call — is exactly
+/// the one the sweep above does not cover. This asks all three implementations that window over the
+/// shapes where an early line is long enough for a small ceiling to cut the line the skip landed on.
+#[test]
+fn combined_offset_and_byte_ceiling_windows_answer_the_same_in_every_workspace() {
+    fn outcome(result: Result<Value, String>) -> Value {
+        result.unwrap_or_else(|_| json!("refused"))
+    }
+
+    // Shapes whose second and third lines are long enough that a small ceiling bites the line an
+    // `offset` skip lands on, plus the line-ending ends the fix is about (CRLF, lone CR, no
+    // trailing newline, a multibyte line) reached after a skip.
+    let shapes: &[(&str, &str)] = &[
+        ("short_then_long_lf", "aa\nbbbbbbbb\ncc\n"),
+        ("short_then_long_crlf", "aa\r\nbbbbbbbb\r\ncc\r\n"),
+        ("long_unterminated_last", "aa\nbbbbbbbb"),
+        ("cr_then_long", "aa\rbbbbbbbb\rcc"),
+        ("multibyte_second_line", "aa\nhéllo wörld\ncc\n"),
+        ("blank_then_long_crlf", "aa\r\n\r\nbbbbbbbb\r\n"),
+        ("five_lf", FIVE_LINES),
+        ("five_crlf", FIVE_CRLF_LINES),
+    ];
+
+    // Both an `offset` and a `max_bytes` in every window, across the limits that close a window
+    // first and the ceilings that fall inside, on, or past the line the skip lands on.
+    let mut windows: Vec<(String, ReadWindow)> = Vec::new();
+    for offset in 1..=4u64 {
+        for limit in [None, Some(1u64), Some(2u64)] {
+            for ceiling in 0..=12u64 {
+                windows.push((
+                    format!("offset({offset}),limit({limit:?}),max_bytes({ceiling})"),
+                    ReadWindow {
+                        offset: Some(offset),
+                        limit,
+                        max_bytes: Some(ceiling),
+                    },
+                ));
+            }
+        }
+    }
+
+    let spaces = workspaces(DECLARED);
+    let mut differences: Vec<String> = Vec::new();
+    for (shape, content) in shapes {
+        let file = format!("{shape}.txt");
+        for workspace in &spaces {
+            workspace.seed(&file, content);
+        }
+        for (window_name, window) in &windows {
+            let answers: Vec<(&str, Value)> = spaces
+                .iter()
+                .map(|workspace| {
+                    (
+                        workspace.name,
+                        outcome(workspace.operations.file_read(&file, *window)),
+                    )
+                })
+                .collect();
+            let (first, expected) = &answers[0];
+            for (name, answer) in &answers[1..] {
+                if answer != expected {
+                    differences.push(format!(
+                        "  {shape} @ {window_name}:\n    {first}: {expected}\n    {name}: {answer}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        differences.is_empty(),
+        "offset and max_bytes in one window must answer the same through every workspace; {} of \
+         {} questions differ:\n{}",
+        differences.len(),
+        shapes.len() * windows.len(),
+        differences
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 

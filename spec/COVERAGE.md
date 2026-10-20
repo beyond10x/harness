@@ -42,7 +42,7 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
   `crates/harness-cli/src/transcript.rs:47,393` and `crates/harness-app-server/src/lib.rs:78`.
   Add real temporary transcript and JSON-RPC round trips; loop return values alone do not prove them.
 - **UNMAPPED: confinement and effectful tools.** Sources:
-  `crates/harness-substrate/src/embedded.rs:80`, `crates/harness-tools/src/lib.rs` and
+  `crates/harness-substrate/src/embedded.rs:80`, `crates/harness-catalogue/src/lib.rs` and
   `crates/harness-substrate/tests/conformance.rs`. The counting ToolPort performs no confined OS
   effect. Retain the existing substrate conformance gate while modeling this boundary separately.
 - **UNMAPPED: MCP discovery, transport and local admission.** Sources:

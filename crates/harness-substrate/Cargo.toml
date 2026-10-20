@@ -12,9 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-harness-toolchain = { workspace = true }
-harness-tools = { workspace = true }
+harness-catalogue = { workspace = true }
 harness-wire = { workspace = true }
+tool-toolchain = { workspace = true }
 # **The confinement dependency, and both boundaries it crosses are argued in
 # `src/embedded.rs`.** substrate's own README says cross-component consumers use the released
 # daemon artifact and the wire contract; this imports the driver. Embedding stays because it needs
@@ -39,6 +39,6 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-harness-tools = { workspace = true }
+harness-catalogue = { workspace = true }
 harness-wire = { workspace = true }
 tempfile = { workspace = true }

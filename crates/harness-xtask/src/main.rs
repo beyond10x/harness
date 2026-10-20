@@ -191,7 +191,7 @@ fn specification(root: &Path) -> Result<(), String> {
 
 fn toolchain_specs(self_test: bool) -> Result<(), String> {
     if !self_test {
-        let registry = harness_toolchain::Registry::builtins()?;
+        let registry = tool_toolchain::Registry::builtins()?;
         println!(
             "toolchain specs: {} built-ins valid",
             registry.names().len()
@@ -199,15 +199,15 @@ fn toolchain_specs(self_test: bool) -> Result<(), String> {
         return Ok(());
     }
     let bad_version = "version: 2\ntoolchains: []\n";
-    if harness_toolchain::Registry::validate(bad_version, "planted-version.yaml").is_ok() {
+    if tool_toolchain::Registry::validate(bad_version, "planted-version.yaml").is_ok() {
         return Err("toolchain spec self-test accepted an unsupported version".to_owned());
     }
     let unknown = "version: 1\nunknown: true\ntoolchains: []\n";
-    if harness_toolchain::Registry::validate(unknown, "planted-unknown.yaml").is_ok() {
+    if tool_toolchain::Registry::validate(unknown, "planted-unknown.yaml").is_ok() {
         return Err("toolchain spec self-test accepted an unknown field".to_owned());
     }
     let collision = "version: 1\ntoolchains:\n  - &p\n    name: duplicate\n    description: first\n    tools: [{name: duplicate_test, description: test, commands: [{argv: [\"true\"]}]}]\n    sandbox: {programs: [\"true\"]}\n  - *p\n";
-    if harness_toolchain::Registry::validate(collision, "planted-collision.yaml").is_ok() {
+    if tool_toolchain::Registry::validate(collision, "planted-collision.yaml").is_ok() {
         return Err("toolchain spec self-test accepted a provider collision".to_owned());
     }
     println!("toolchain spec checker self-test: rejected planted defects");
@@ -216,7 +216,7 @@ fn toolchain_specs(self_test: bool) -> Result<(), String> {
 
 fn toolchain_docs(root: &Path, check: bool) -> Result<(), String> {
     let path = root.join("website/docs/reference/toolchains.md");
-    let expected = harness_toolchain::builtin_reference()?;
+    let expected = tool_toolchain::builtin_reference()?;
     if check {
         let actual = std::fs::read_to_string(&path)
             .map_err(|error| format!("reading generated `{}`: {error}", path.display()))?;

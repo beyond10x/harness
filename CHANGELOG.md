@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A Messages turn whose `message_start.message` carries `container` — which the live route now
+  sends, `null` or the container a container tool ran in — is no longer refused. llm `0.8.0`
+  refused it as `Unsupported` ("Messages field is outside the declared subset:
+  message_start.message.container"); the seven `b10x-llm-*` crates are pinned at tag `0.8.1`
+  (`3eb94989`), which accepts it, and the other documented empty values (`diagnostics`,
+  `stop_details`, `usage.speed`, `toolset_name`, `caller: direct`), without consuming them.
+  `crates/harness-llm`'s `a_message_start_carrying_a_container_completes_the_turn` holds it.
+
 ## [0.15.0] - 2026-10-20
 
 ### Added

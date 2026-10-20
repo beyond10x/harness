@@ -1003,6 +1003,16 @@ mod tests {
 
     impl Endpoint {
         fn start() -> Self {
+            Self::serving(
+                TURN_EVENTS
+                    .iter()
+                    .map(|(name, data)| ((*name).to_owned(), (*data).to_owned()))
+                    .collect(),
+            )
+        }
+
+        /// The same endpoint answering every request with `events` instead of [`TURN_EVENTS`].
+        fn serving(events: Vec<(String, String)>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
             let base_url = format!("http://{}/v1", listener.local_addr().expect("bound"));
             let keys = Arc::new(Mutex::new(Vec::new()));
@@ -1010,7 +1020,7 @@ mod tests {
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(stream) = stream else { return };
-                    answer(stream, &seen);
+                    answer(stream, &seen, &events);
                 }
             });
             Self { base_url, keys }
@@ -1031,7 +1041,7 @@ mod tests {
         }
     }
 
-    fn answer(stream: TcpStream, seen: &Mutex<Vec<String>>) {
+    fn answer(stream: TcpStream, seen: &Mutex<Vec<String>>, events: &[(String, String)]) {
         let mut reader = BufReader::new(stream);
         let (mut length, mut key) = (0, String::new());
         loop {
@@ -1058,7 +1068,7 @@ mod tests {
         stream
             .write_all(b"HTTP/1.0 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
             .expect("the response head");
-        for (name, data) in TURN_EVENTS {
+        for (name, data) in events {
             write!(stream, "event: {name}\ndata: {data}\n\n").expect("an event");
         }
     }
@@ -1096,6 +1106,50 @@ mod tests {
                     version: SecretVersion::new(format!("lease-{call}"))?,
                 })
             })
+        }
+    }
+
+    #[test]
+    fn a_message_start_carrying_a_container_completes_the_turn() {
+        // The live Messages route sends `container` on `message_start.message`: `null`, or the
+        // container a container tool ran in. llm 0.8.0 refused the whole turn as `Unsupported`
+        // ("Messages field is outside the declared subset: message_start.message.container");
+        // llm 0.8.1 accepts both documented shapes and consumes neither.
+        for container in [
+            "null",
+            r#"{"id":"container_1","expires_at":"2026-01-01T00:00:00Z"}"#,
+        ] {
+            let mut events: Vec<(String, String)> = TURN_EVENTS
+                .iter()
+                .map(|(name, data)| ((*name).to_owned(), (*data).to_owned()))
+                .collect();
+            let start = events[0].1.replacen(
+                r#""stop_reason":null,"#,
+                &format!(r#""stop_reason":null,"container":{container},"#),
+                1,
+            );
+            assert!(
+                start.contains("\"container\""),
+                "the fixture carries the field"
+            );
+            events[0].1 = start;
+            let endpoint = Endpoint::serving(events);
+            let mut port = client(
+                &endpoint.target(),
+                Some(Source::key("synthetic-key").expect("a source")),
+                &Cancel::new(),
+            )
+            .expect("a client");
+            let outcome = port
+                .turn(&request(), &mut VecSink::new())
+                .unwrap_or_else(|error| panic!("container {container}: {error:?}"));
+            assert_eq!(
+                outcome.items,
+                vec![Item::AssistantText {
+                    text: "done".to_owned()
+                }],
+                "container {container}"
+            );
         }
     }
 

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-20T22:41:43Z",
+  "actor": "human:timo",
+  "artifact": "story:a-written-directory-is-judged-by-what-it-holds",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "harness-0-16-0-gate-steps.sh at ccba6e6e (tag 0.16.0): 17 steps all exit 0 (~/.cache/harness-0-16-0-gate/summary.txt); PR #33 5/5 checks pass"
+  }
+}

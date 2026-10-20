@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:search-moves-onto-tool-search
 kind: story
-status: active
+status: implemented
 title: Harness's search is served by b10x-tool-search
 summary: LocalOperations::search calls tool_search (tools 0.3.0); harness's grep and walk code is deleted; reply changes from tools 0.3.0 listed in the CHANGELOG.
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T14:22:20Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-20T14:22:20Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-20T22:41:43Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

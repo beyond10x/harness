@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:run-moves-onto-tool-process
 kind: story
-status: active
+status: implemented
 title: Harness's run moves onto the tools repository's tool-process toolset
 summary: 'After 0.15.0 and tools'' tool-process release: run is served by b10x-tool-process, which bounds a descendant holding stdout and kills a setsid descendant; fixes a pre-existing unbounded output-thread join.'
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-20T22:41:43Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

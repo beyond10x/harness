@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-20T22:41:43Z",
+  "actor": "human:timo",
+  "artifact": "story:run-moves-onto-tool-process",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-run-pass-1",
+    "review": "review-result:adversary-run-pass-1",
+    "outcome": "fixed"
+  }
+}

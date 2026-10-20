@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-21
+
 ### Changed
 
 - The ESS toolchain moves from `0.52.0` to `0.66.0` (`145a1b9d`): `spec/ess-inputs.yaml`, the four

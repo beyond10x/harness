@@ -627,6 +627,13 @@ fn from_llm_error(error: llm_core::Error) -> WireError {
     let retriable = error.may_retry();
     let code = match error.code {
         ErrorCode::InvalidRequest | ErrorCode::Protocol => WireErrorCode::Protocol,
+        // Before dispatch the only thing that can be unavailable is the credential source
+        // (`llm-providers` `secret_error`: a file that is not owner-only, a store that will not
+        // answer); every `Unavailable` the transport or a decoder produces was dispatched. That is
+        // the operator's to fix, not a network to wait for.
+        ErrorCode::Unavailable if error.dispatch == llm_core::Dispatch::NotSent => {
+            WireErrorCode::Unauthorized
+        }
         ErrorCode::Transport | ErrorCode::Deadline | ErrorCode::Unavailable => {
             WireErrorCode::Transport
         }
@@ -722,6 +729,26 @@ mod tests {
     }
 
     #[test]
+    fn a_credential_source_refusal_is_a_credential_problem_not_a_transport_failure() {
+        // `llm-providers` reports a source it will not read (`secret_error`: unsafe, unavailable)
+        // as `Unavailable` built with `Error::new`, so never dispatched; every `Unavailable` the
+        // transport or a decoder produces was dispatched (`Dispatch::Unknown`/`Accepted`). Before
+        // dispatch the only thing that can be unavailable is the credential, which is the
+        // operator's to fix (story:harness-builds-on-llm-0-7, correction round 1).
+        let refused = llm_core::Error::new(
+            ErrorCode::Unavailable,
+            "secret reference `oauth-token-file` refused: secret source does not satisfy the \
+             required access protections",
+        );
+        let wire = from_llm_error(refused);
+        assert_eq!(wire.code, WireErrorCode::Unauthorized, "{wire:?}");
+        assert!(!wire.retriable);
+        let upstream = llm_core::Error::new(ErrorCode::Unavailable, "server_error")
+            .with_dispatch(llm_core::Dispatch::Accepted);
+        assert_eq!(from_llm_error(upstream).code, WireErrorCode::Transport);
+    }
+
+    #[test]
     fn a_retry_class_is_llms_own_decision() {
         let cut = llm_core::Error::new(ErrorCode::Transport, "cut").with_retriable(true);
         assert!(from_llm_error(cut).retriable);
@@ -729,5 +756,56 @@ mod tests {
         let refused = from_llm_error(refused);
         assert!(!refused.retriable);
         assert_eq!(refused.code, WireErrorCode::Unauthorized);
+    }
+
+    // Adversary pass 1 (story:harness-builds-on-llm-0-7).
+
+    #[test]
+    fn an_api_key_is_never_a_subscription_account_on_either_wire() {
+        // The mutant this pins: a `billing_kind`/`auth_kind` match that answered the subscription
+        // presentation for every source would still pass the two subscription cases above.
+        let key = Source::key("k").expect("a source");
+        let messages = binding(&target(Protocol::Messages), Some(&key)).expect("binds");
+        let account = &messages.declaration().account;
+        assert_eq!(account.auth_kind, AuthKind::ApiKey);
+        assert_eq!(account.billing_kind, BillingKind::Metered);
+        assert_eq!(
+            account
+                .api_key_header
+                .as_ref()
+                .map(|h| h.as_str().to_owned()),
+            Some("x-api-key".to_owned())
+        );
+        let responses = binding(&target(Protocol::Responses), Some(&key)).expect("binds");
+        let account = &responses.declaration().account;
+        assert_eq!(account.auth_kind, AuthKind::Bearer);
+        assert_eq!(account.billing_kind, BillingKind::Metered);
+        assert!(account.api_key_header.is_none());
+    }
+
+    #[test]
+    fn an_in_stream_provider_failure_before_any_output_is_offered_for_another_attempt() {
+        // The classes the former wires retried on (`harness-responses` `response.failed` with
+        // `server_error`, `harness-messages` `error` `api_error`/`overloaded_error`) arrive from
+        // llm 0.7.0 as `Unavailable`/`Transport`/`RateLimited` with `retriable` unset (llm parity
+        // rows R28, M27), so this port hands the loop a final failure where it used to hand it a
+        // retriable one. Each error here is built exactly as llm 0.7.0's decoders build it.
+        for (code, what) in [
+            (
+                ErrorCode::Unavailable,
+                "Responses `server_error`, Messages `overloaded_error`",
+            ),
+            (ErrorCode::RateLimited, "Responses `rate_limit_exceeded`"),
+            (ErrorCode::Transport, "Messages `api_error`"),
+        ] {
+            let error = llm_core::Error::new(code, "not this time")
+                .with_dispatch(llm_core::Dispatch::Accepted);
+            let wire = from_llm_error(error);
+            assert!(
+                wire.retriable,
+                "{what}: the far side's own failure before any output is worth another attempt \
+                 (the loop retries on this flag and nothing else): {wire:?}"
+            );
+        }
     }
 }

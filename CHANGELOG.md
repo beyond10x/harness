@@ -34,7 +34,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   exits 0 over prose; and on `anthropic-messages` the inclusive input total is stated only when
   `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` are all reported,
   so a stream that omits one leaves the turn's usage and cost unknown rather than summing the
-  rest (llm parity row M25).
+  rest, and a spend ceiling on such a run is refused as unobservable (llm parity row M25; the
+  vendor always reports the cache-write counter, and the Messages emulator now does too).
+- **A subscription token file must be owner-only.** `--oauth-token-file` (and a provider's
+  `oauth-token-file`) is read by `llm-credentials` on every request and refused unless it is a
+  regular file owned by the caller or root, mode `0600` or stricter, with one hard link, under
+  directories nobody else can write to; the refusal names the reference and never the path or the
+  value. `measurements/prove-spend-ceiling.sh` writes its emulator token that way.
+- A credential source `llm` will not read reaches the operator as `Unauthorized`, not `Transport`:
+  before anything is dispatched the only thing that can be unavailable is the credential.
 - `rust-version` 1.97 to 1.98, which `llm` requires; the MSRV job in `.github/workflows/gate.yml`
   builds on `1.98.0`.
 - The gate no longer runs the in-process HTTP boundary guard: the crate it fenced is gone.

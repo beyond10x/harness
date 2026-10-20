@@ -45,9 +45,10 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
    byte lives in a wire crate, and since llm `0.7.0` every wire crate is `llm`'s:
    `b10x-llm-responses` and `b10x-llm-messages` over `b10x-llm-http`, with the credential
-   presentation in `b10x-llm-providers` (atlas ADR 0097). `harness-wire` defines the credential
-   *types* — `Bearer`, zeroized on drop, and the `StaticBearer` a caller may hold for a process
-   lifetime — but reads no credential from anywhere and sends none.
+   presentation in `b10x-llm-providers` (atlas ADR 0097). `harness-wire` keeps the credential
+   *types* — `BearerSource`, `Bearer` (zeroized on drop) and the `StaticBearer` a caller may hold
+   for a process lifetime — for an embedder that brings its own model port; the shipped binary's
+   model port uses none of them, and the crate reads no credential from anywhere and sends none.
 
    **`crates/harness-cli/src/llm_port.rs` is the one place Harness's values meet `llm`'s, and it
    holds no credential either.** It translates a turn, a stream event, an outcome and an error,
@@ -129,10 +130,15 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Safety envelope
 
-- **Credentials.** A credential is fetched from an injected `BearerSource` **at call time** and the
-  fetched `Bearer` is dropped when the call ends. A long-lived source such as `StaticBearer` does
-  hold the value for as long as the caller keeps it — what must never happen is a **config struct or
-  an error carrying it**, so `Bearer` has no `Display` and a redacted `Debug`. **There is no ambient
+- **Credentials.** In the shipped binary a credential is an `llm_port::Source` — an
+  `llm-credentials` resolver bound to one reference — that `llm` asks **at call time**; the fetched
+  `Secret` is zeroized when the call ends, and a source re-read on every request
+  (`--oauth-token-file`, `--oauth-token-env`) follows a renewed token without a restart.
+  `harness-wire`'s `BearerSource`, `Bearer` and `StaticBearer` are the same contract for an
+  embedder with its own model port, and a `StaticBearer` does hold the value for as long as the
+  caller keeps it. What must never happen on either path is a **config struct or an error carrying
+  it**: `Bearer` and `Secret` have no `Display` and a redacted `Debug`, and a refusal names the
+  reference (`oauth-token-file`), never the path, the variable or the value. **There is no ambient
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
 - **Approvals are the review gate (invariant 12).** Adding a path that reaches a tool without

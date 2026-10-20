@@ -26,6 +26,7 @@ MODEL = "b10x-emulated"
 # The scenarios both emulators serve. Kept in one obvious place on each side so the equality test
 # reads as a comparison of two declarations rather than of two implementations.
 SCENARIOS = [
+    "absent-cache-write",
     "answer-call",
     "answer-prose",
     "answer-stop-hook",
@@ -37,6 +38,7 @@ SCENARIOS = [
     "delegate-pair",
     "dynamic-tool",
     "failed",
+    "failed-once",
     "fails-after-turn",
     "flat-tool",
     "flat-write",
@@ -47,6 +49,8 @@ SCENARIOS = [
     "incomplete",
     "malformed",
     "no-usage",
+    "overloaded-once",
+    "rate-limited-once",
     "reasoning",
     "slow",
     "stop-hook",
@@ -66,9 +70,11 @@ DELEGATED = "DELEGATE-TASK"
 RECORD_LOCK = threading.Lock()
 
 
-def usage_object(input_tokens=42, cache_read=7, cache_creation=None, output_tokens=1):
+def usage_object(input_tokens=42, cache_read=7, cache_creation=0, output_tokens=1):
     usage = {
-        # Disjoint on this wire: `input_tokens` excludes both cache classes. The client sums them.
+        # Disjoint on this wire: `input_tokens` excludes both cache classes. The client sums them,
+        # and only when all three are reported (llm parity row M25): the vendor always sends the
+        # cache-write counter, so this object does too, and only `absent-cache-write` omits it.
         "input_tokens": input_tokens,
         "cache_read_input_tokens": cache_read,
         "output_tokens": output_tokens,
@@ -186,12 +192,19 @@ def answered(text, leading=(), usage=None):
     ]
 
 
-def called(name, arguments, leading=(), usage=None):
+def called(name, arguments, leading=(), usage=None, nth=1):
+    """One turn that asks for one call.
+
+    `nth` gives the call its id. A scenario that asks for a call on several turns of one
+    conversation must number them, as the vendor's ids are distinct: the whole transcript is
+    replayed every turn, and llm refuses a request carrying two calls with one id
+    (`llm-core` `TurnRequest::validate`, `duplicate tool call id`), which the former wire sent.
+    """
     index = 1 if leading else 0
     return [
         message_start(usage),
         *leading,
-        *tool_use_events(name, arguments, index=index),
+        *tool_use_events(name, arguments, index=index, nth=nth),
         *message_end("tool_use", 8),
     ]
 
@@ -479,6 +492,27 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 ]
             )
+        elif scenario in ("failed-once", "rate-limited-once", "overloaded-once"):
+            # Adversary pass 1 (story:harness-builds-on-llm-0-7): the route's own in-stream
+            # `error` event, once, before any content block, then an answer. The far side's state
+            # and not this request's, so the loop is expected to attempt the turn again
+            # (`turn-retried`), as it did on the former wire. The three types are the three this
+            # route uses for its own trouble.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                kind = {
+                    "failed-once": "api_error",
+                    "rate-limited-once": "rate_limit_error",
+                    "overloaded-once": "overloaded_error",
+                }[scenario]
+                self._send_sse(
+                    [
+                        message_start(),
+                        {"type": "error", "error": {"type": kind, "message": "not this time"}},
+                    ]
+                )
+            else:
+                self._send_sse(answered("provider emulation passed"))
         elif scenario == "fails-after-turn":
             # A turn is bought and answered -- it carries usage, and it asks for one tool call the
             # loop comes back from -- and the request after it is refused. The only scenario where a
@@ -571,7 +605,12 @@ class Handler(BaseHTTPRequestHandler):
             elif compaction_reads(transcript) < COMPACTION_CHAPTERS:
                 nth = compaction_reads(transcript) + 1
                 self._send_sse(
-                    called("file_read", {"path": f"chapters/chapter-{nth:02d}.md"}, usage=usage)
+                    called(
+                        "file_read",
+                        {"path": f"chapters/chapter-{nth:02d}.md"},
+                        usage=usage,
+                        nth=nth,
+                    )
                 )
             else:
                 self._send_sse(answered(compaction_answer(transcript), usage=usage))
@@ -745,6 +784,14 @@ class Handler(BaseHTTPRequestHandler):
                     called("tool_invoke", {"name": "file_read", "arguments": {"path": "README.md"}},
                            leading=leading)
                 )
+        elif scenario == "absent-cache-write":
+            # A usage object with no `cache_creation_input_tokens` at all, which the vendor never
+            # sends. llm parity row M25: the client states the inclusive input total only when all
+            # three parts are reported and keeps an absent counter unknown, never zero, so a turn
+            # from here files no usage and no cost (story:harness-builds-on-llm-0-7).
+            self._send_sse(
+                answered("provider emulation passed", usage=usage_object(cache_creation=None))
+            )
         else:
             self._send_sse(answered("provider emulation passed"))
 

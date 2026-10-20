@@ -670,14 +670,21 @@ fn a_thinking_round_trip_completes_through_the_shipped_binary() {
         serde_json::json!({"kind": "completed"}),
         "{kinds:?}"
     );
-    // This wire reports its input figures disjointly — 42 fresh, 7 read from cache — and the
-    // emulator names no cache write. llm parity row M25: llm states the inclusive input total only
-    // when all three parts are reported, where Harness summed the two it had. The total is
-    // unknown, so no usage reaches the record: absent, never zero
-    // (story:harness-builds-on-llm-0-7).
-    assert!(
-        !kinds.contains(&"usage"),
-        "a total nobody reported must not be filed: {kinds:?}"
+    let usage: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "usage")
+        .collect();
+    assert!(!usage.is_empty(), "no usage reached the record: {kinds:?}");
+    // 42 fresh plus 7 read from cache. This wire reports the two disjointly and the client sums
+    // them, because the neutral `input_tokens` is the whole and cached is a part of it — a run
+    // that reported 42 here would price every cached turn low. llm sums only when the cache-write
+    // counter is reported too (llm parity row M25), as the vendor and the emulator both report it.
+    assert_eq!(usage[0]["input_tokens"], 49, "{}", usage[0]);
+    assert_eq!(
+        usage[0]["cached_input_tokens"],
+        Value::from(7),
+        "{}",
+        usage[0]
     );
 }
 
@@ -1233,15 +1240,10 @@ fn a_run_that_broke_on_the_wire_files_what_it_bought_on_the_second_wire_too() {
     let session = only_session(sessions.path());
     assert_eq!(session["wire"], "anthropic-messages");
     assert_eq!(session["turns"], 2, "{session}");
-    // llm parity row M25: this stream reports no `cache_creation_input_tokens`, and llm states
-    // the inclusive input total only when all three parts are reported, where Harness summed the
-    // two it had. The input total is unknown, so the turn files no usage and the run no cost:
-    // absent, never zero.
-    assert!(
-        session["usage"].as_array().expect("usage").is_empty(),
-        "{session}"
-    );
-    assert!(session["cost_micro_usd"].is_null(), "{session}");
+    assert_eq!(session["usage"].as_array().expect("usage").len(), 1);
+    assert_eq!(session["usage"][0]["input_tokens"], 49, "{session}");
+    assert_eq!(session["usage"][0]["cached_input_tokens"], 7, "{session}");
+    assert_eq!(session["cost_micro_usd"], 59, "{session}");
 }
 
 #[test]
@@ -2728,4 +2730,229 @@ fn the_shipped_table_offers_both_openai_routes_under_different_names() {
     for name in ["claude", "openai", "codex"] {
         assert!(text.contains(name), "`{name}` is not in:\n{text}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Adversary pass 1, wave llm-1 (story:harness-builds-on-llm-0-7), against 5bd3f9b3.
+// ---------------------------------------------------------------------------------------------
+
+/// A run whose first request the far side fails on its own account, before any output, and
+/// whose second request it answers. The loop's mid-stream retry stayed here (atlas ADR 0097), and
+/// it retries on exactly one thing: the wire's `retriable` flag. So the record must carry one
+/// `turn-retried` and the run must finish `completed`, as it did on both former wires.
+fn retried_once_then_completed(fixture: &Fixture, extra: &[&str], what: &str) {
+    let workspace = workspace();
+    let mut arguments = vec!["--json"];
+    arguments.extend_from_slice(extra);
+    let output = run_against(fixture, &arguments, workspace.path());
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert!(
+        kinds.contains(&"turn-retried"),
+        "{what}: the far side's own failure before any output is attempted again: {kinds:?}\n\
+         stderr: {}",
+        output.stderr
+    );
+    assert_eq!(
+        output.status,
+        Some(0),
+        "{what}: the second attempt answers: stderr: {}",
+        output.stderr
+    );
+    assert_eq!(
+        events.last().expect("a terminal event")["stop"],
+        serde_json::json!({"kind": "completed"}),
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn a_responses_server_error_before_any_output_is_retried_through_the_shipped_binary() {
+    // `response.failed` with `code: server_error`, once. The former wire read it as transport
+    // class and retriable (`harness-responses` `provider_emulated.rs`, `failed`); llm 0.7.0 reads
+    // it as `Unavailable` and final (llm parity row R28), so the run ends on the first attempt.
+    retried_once_then_completed(
+        &Fixture::start("failed-once"),
+        &[],
+        "Responses `server_error`",
+    );
+}
+
+#[test]
+fn a_responses_rate_limit_before_any_output_is_retried_through_the_shipped_binary() {
+    // `response.failed` with `code: rate_limit_exceeded`, once: `RateLimited` and final on llm
+    // 0.7.0 (llm parity row R28).
+    retried_once_then_completed(
+        &Fixture::start("rate-limited-once"),
+        &[],
+        "Responses `rate_limit_exceeded`",
+    );
+}
+
+#[test]
+fn a_responses_overload_before_any_output_is_retried_through_the_shipped_binary() {
+    // The one in-stream code llm 0.7.0 does keep retriable, `server_is_overloaded`: the control
+    // that shows the loop's retry still works through the port when the flag is set.
+    retried_once_then_completed(
+        &Fixture::start("overloaded-once"),
+        &[],
+        "Responses `server_is_overloaded`",
+    );
+}
+
+#[test]
+fn a_cold_gateway_is_retried_through_the_shipped_binary() {
+    // A 503 once, then an answer. `llm-http` keeps 408, 429 and 5xx retriable, so this is the
+    // control for the HTTP-status class: the deleted `provider_emulated.rs` suites covered it and
+    // nothing in this crate did.
+    retried_once_then_completed(&Fixture::start("cold-once"), &[], "Responses HTTP 503");
+}
+
+#[test]
+fn a_messages_overload_before_any_output_is_retried_through_the_shipped_binary() {
+    // The route's `error` event with `type: overloaded_error`, once: `Unavailable` and final on
+    // llm 0.7.0 (llm parity row M27), where `harness-messages` retried it.
+    retried_once_then_completed(
+        &Fixture::messages("overloaded-once"),
+        &["--wire", "anthropic-messages"],
+        "Messages `overloaded_error`",
+    );
+}
+
+#[test]
+fn a_messages_api_error_before_any_output_is_retried_through_the_shipped_binary() {
+    // The route's `error` event with `type: api_error`, once: `Transport` and final on llm 0.7.0
+    // (llm parity row M27).
+    retried_once_then_completed(
+        &Fixture::messages("failed-once"),
+        &["--wire", "anthropic-messages"],
+        "Messages `api_error`",
+    );
+}
+
+#[test]
+fn a_messages_turn_that_reports_its_input_figures_files_usage_through_the_shipped_binary() {
+    // The emulator reports `input_tokens` and `cache_read_input_tokens` on every turn and names
+    // no cache write, exactly as every scenario in `fake_messages.py` does (`usage_object`). On
+    // the base, 42 + 7 arrived as a `usage` event of 49 and priced the turn; the measurement
+    // apparatus (`measurements/dry-run-compaction.sh`, `prove-spend-ceiling.sh`, the recorded
+    // `measurements/runs/m1-dry-*.jsonl` with nine `usage` and nine `cost` events each) reads
+    // those events off this wire. A Messages turn that reported its figures must still file them.
+    let fixture = Fixture::messages("text");
+    let workspace = workspace();
+    let output = run_against(
+        &fixture,
+        &["--wire", "anthropic-messages", "--json"],
+        workspace.path(),
+    );
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert!(
+        kinds.contains(&"usage"),
+        "a turn whose provider reported its input figures files them: {kinds:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Correction round 1, wave llm-1 (story:harness-builds-on-llm-0-7).
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_messages_turn_whose_usage_omits_the_cache_write_counter_files_no_usage_and_the_run_says_so() {
+    // The vendor's usage object always carries `cache_creation_input_tokens`, and the emulator
+    // sends it on every scenario but this one. llm parity row M25: llm states the inclusive input
+    // total only when `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens`
+    // are all reported, and keeps an absent counter unknown rather than zero (adr-changes,
+    // 2026-10-20: no llm change). So the turn files no `usage` and no `cost`, and a run holding a
+    // spend ceiling is refused as unobservable rather than priced from a total nobody reported.
+    let fixture = Fixture::messages("absent-cache-write");
+    let workspace = workspace();
+    let cards = tempfile::tempdir().expect("a temporary directory");
+    let card = rate_card(cards.path());
+    let output = run_against(
+        &fixture,
+        &[
+            "--wire",
+            "anthropic-messages",
+            "--json",
+            "--prices",
+            card.to_str().expect("utf-8 path"),
+            "--max-cost-microunits",
+            "1000000",
+        ],
+        workspace.path(),
+    );
+    assert_eq!(output.status, Some(2), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert!(
+        !kinds.contains(&"usage"),
+        "a total nobody reported is not filed: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"cost"),
+        "and nothing is priced from it: {kinds:?}"
+    );
+    let stop = &events.last().expect("a terminal event")["stop"];
+    assert_eq!(stop["kind"], "budget-unobservable", "{stop}");
+    assert_eq!(stop["name"], "max_cost_microunits", "{stop}");
+    assert!(
+        output.stderr.contains("BudgetUnobservable"),
+        "the run says so where a person reads: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_token_file_readable_by_others_is_refused_as_a_credential_problem_not_a_transport_failure() {
+    // `llm-credentials` reads `--oauth-token-file` on every request and refuses a file that is
+    // not owner-only with one link; `llm-providers` reports that as `Unavailable` before anything
+    // is sent. To the operator that is a credential to fix, not a network to wait for, so the
+    // port reads an `Unavailable` that was never dispatched as `Unauthorized`.
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::messages("text");
+    let workspace = workspace();
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let token = dir.path().join("token");
+    fs::write(&token, "emulator-only-not-a-credential\n").expect("write");
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).expect("chmod");
+
+    let output = Command::new(BINARY)
+        .args([
+            "run",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--wire",
+            "anthropic-messages",
+            "--oauth-token-file",
+            token.to_str().expect("utf-8 path"),
+            "--no-session",
+            "--input",
+            "read the readme and tell me what it says",
+        ])
+        .arg("--workspace")
+        .arg(workspace.path())
+        .output()
+        .expect("the binary runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(
+        stderr.contains("Unauthorized"),
+        "a credential problem, by class: {stderr}"
+    );
+    assert!(
+        stderr.contains("`oauth-token-file`"),
+        "and which reference: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Transport"),
+        "not a network failure: {stderr}"
+    );
+    assert!(
+        !stderr.contains("emulator-only-not-a-credential"),
+        "never the value: {stderr}"
+    );
 }

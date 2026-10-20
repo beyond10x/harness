@@ -95,6 +95,12 @@ cargo run -p b10x-harness-cli -- run \
 `--api-key-env <NAME>` is the alternative. **There is no ambient fallback** — the harness reads no
 credential it was not pointed at, so a run can always be explained afterwards.
 
+`--oauth-token-file <path>` or `--oauth-token-env <NAME>` names a subscription token instead,
+re-read by `llm-credentials` on every request so a renewed token is followed without a restart. A
+token file is refused — on every request, naming `oauth-token-file` and never the path or the
+token — unless it is a regular file owned by you (or root), mode `0600` or stricter, with one hard
+link, under directories nobody else can write to.
+
 | flag | effect |
 |---|---|
 | `--json` | one event per line on stdout instead of prose. The first, `started`, carries `published_tools`, `operations` and — only when there is one — `withheld`, a tool this run declared and the machine would not admit, with the predicate that decided |
@@ -461,7 +467,7 @@ comparison kept here.
 
 | crate | owns |
 |---|---|
-| `crates/harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`. No I/O, no clock, no vendor field name. It defines the credential types; it reads and sends none |
+| `crates/harness-wire` | neutral values plus `ModelPort` and `ToolPort`. No I/O, no clock, no vendor field name. It keeps the credential types (`BearerSource`, `Bearer`, `StaticBearer`) for an embedder with its own model port; the shipped binary's credential path is `llm`'s (`llm_port::Source`), and the crate reads and sends none |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |

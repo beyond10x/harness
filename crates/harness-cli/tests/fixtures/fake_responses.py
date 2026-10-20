@@ -34,6 +34,7 @@ SCENARIOS = [
     "delegate-pair",
     "dynamic-tool",
     "failed",
+    "failed-once",
     "fails-after-turn",
     "flat-tool",
     "flat-write",
@@ -44,6 +45,8 @@ SCENARIOS = [
     "incomplete",
     "malformed",
     "no-usage",
+    "overloaded-once",
+    "rate-limited-once",
     "reasoning",
     "slow",
     "stop-hook",
@@ -148,8 +151,12 @@ def text_events(text, extra_output=(), input_tokens=42):
     return events
 
 
-def function_call_events(name, arguments, input_tokens=42):
-    item = function_call_item(name, arguments)
+def function_call_events(name, arguments, input_tokens=42, nth=1):
+    # `nth` gives the call its id. A scenario that asks for a call on several turns of one
+    # conversation must number them, as the vendor's ids are distinct: the whole transcript is
+    # replayed every turn, and llm refuses a request carrying two calls with one id (`llm-core`
+    # `TurnRequest::validate`, `duplicate tool call id`), which the former wire sent.
+    item = function_call_item(name, arguments, nth=nth)
     added = {**item, "status": "in_progress", "arguments": ""}
     return [
         {"type": "response.created", "response": response_object("in_progress", [], None)},
@@ -419,6 +426,33 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 ]
             )
+        elif scenario in ("failed-once", "rate-limited-once", "overloaded-once"):
+            # Adversary pass 1 (story:harness-builds-on-llm-0-7): the provider's own in-stream
+            # failure, once, before any output, then an answer. The far side's state and not this
+            # request's, so the loop is expected to attempt the turn again (`turn-retried`), as it
+            # did on the former wire. The three codes are the three the Responses route uses.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                code = {
+                    "failed-once": "server_error",
+                    "rate-limited-once": "rate_limit_exceeded",
+                    "overloaded-once": "server_is_overloaded",
+                }[scenario]
+                self._send_sse(
+                    [
+                        {
+                            "type": "response.failed",
+                            "response": response_object(
+                                "failed",
+                                [],
+                                None,
+                                error={"message": "not this time", "code": code},
+                            ),
+                        }
+                    ]
+                )
+            else:
+                self._send_sse(text_events("provider emulation passed"))
         elif scenario == "fails-after-turn":
             # A turn is bought and answered -- it carries usage, and it asks for one tool call the
             # loop comes back from -- and the request after it is refused. The only scenario where a
@@ -534,6 +568,7 @@ class Handler(BaseHTTPRequestHandler):
                         "file_read",
                         {"path": f"chapters/chapter-{nth:02d}.md"},
                         input_tokens=reported,
+                        nth=nth,
                     )
                 )
             else:

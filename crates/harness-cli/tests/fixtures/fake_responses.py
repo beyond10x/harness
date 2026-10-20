@@ -23,6 +23,7 @@ MODEL = "b10x-emulated"
 # same loop suite, and a suite the two sides could name differently is one that could drift
 # apart while both stayed green.
 SCENARIOS = [
+    "absent-cache-write",
     "answer-call",
     "answer-prose",
     "answer-stop-hook",
@@ -34,6 +35,9 @@ SCENARIOS = [
     "delegate-pair",
     "dynamic-tool",
     "failed",
+    "failed-after-keepalive",
+    "failed-mid-output",
+    "failed-once",
     "fails-after-turn",
     "flat-tool",
     "flat-write",
@@ -44,7 +48,10 @@ SCENARIOS = [
     "incomplete",
     "malformed",
     "no-usage",
+    "overloaded-once",
+    "rate-limited-once",
     "reasoning",
+    "shown-text-differs",
     "slow",
     "stop-hook",
     "text",
@@ -148,8 +155,12 @@ def text_events(text, extra_output=(), input_tokens=42):
     return events
 
 
-def function_call_events(name, arguments, input_tokens=42):
-    item = function_call_item(name, arguments)
+def function_call_events(name, arguments, input_tokens=42, nth=1):
+    # `nth` gives the call its id. A scenario that asks for a call on several turns of one
+    # conversation must number them, as the vendor's ids are distinct: the whole transcript is
+    # replayed every turn, and llm refuses a request carrying two calls with one id (`llm-core`
+    # `TurnRequest::validate`, `duplicate tool call id`), which the former wire sent.
+    item = function_call_item(name, arguments, nth=nth)
     added = {**item, "status": "in_progress", "arguments": ""}
     return [
         {"type": "response.created", "response": response_object("in_progress", [], None)},
@@ -419,14 +430,107 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 ]
             )
+        elif scenario in ("failed-once", "rate-limited-once", "overloaded-once"):
+            # Adversary pass 1 (story:harness-builds-on-llm-0-7): the provider's own in-stream
+            # failure, once, before any output, then an answer. The far side's state and not this
+            # request's, so the loop is expected to attempt the turn again (`turn-retried`), as it
+            # did on the former wire. The three codes are the three the Responses route uses.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                code = {
+                    "failed-once": "server_error",
+                    "rate-limited-once": "rate_limit_exceeded",
+                    "overloaded-once": "server_is_overloaded",
+                }[scenario]
+                self._send_sse(
+                    [
+                        {
+                            "type": "response.failed",
+                            "response": response_object(
+                                "failed",
+                                [],
+                                None,
+                                error={"message": "not this time", "code": code},
+                            ),
+                        }
+                    ]
+                )
+            else:
+                self._send_sse(text_events("provider emulation passed"))
+        elif scenario in ("failed-mid-output", "failed-after-keepalive"):
+            # Adversary pass 3 (llm 0.8.0): the same `server_error`, once, either after the caller
+            # was shown one text delta (final: a retry would answer twice) or after lifecycle
+            # payloads only (`response.in_progress`: still before output, so retried), then an
+            # answer on the next request.
+            Handler.requests += 1
+            if Handler.requests == 1:
+                if scenario == "failed-mid-output":
+                    shown = [
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {**message_item(""), "content": []},
+                        },
+                        {
+                            "type": "response.output_text.delta",
+                            "item_id": "msg_b10x_001",
+                            "output_index": 0,
+                            "delta": "half an answer",
+                        },
+                    ]
+                else:
+                    shown = [
+                        {
+                            "type": "response.in_progress",
+                            "response": response_object("in_progress", [], None),
+                        }
+                    ]
+                self._send_sse(
+                    [
+                        {
+                            "type": "response.created",
+                            "response": response_object("in_progress", [], None),
+                        },
+                        *shown,
+                        {
+                            "type": "response.failed",
+                            "response": response_object(
+                                "failed",
+                                [],
+                                None,
+                                error={"message": "not this time", "code": "server_error"},
+                            ),
+                        },
+                    ]
+                )
+            else:
+                self._send_sse(text_events("provider emulation passed"))
+        elif scenario == "shown-text-differs":
+            # Adversary pass 3 (llm 0.8.0): the deltas say one thing and the server's terminal
+            # message says another. 0.8.0 keeps the text the caller was shown and warns
+            # `shown-text-kept`; 0.7.0 let the server's message outrank the deltas.
+            events = text_events("provider emulation passed")
+            events[-2] = {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": message_item("SERVER TEXT"),
+            }
+            events[-1] = {
+                "type": "response.completed",
+                "response": response_object(
+                    "completed", [message_item("SERVER TEXT")], usage_object(4)
+                ),
+            }
+            self._send_sse(events)
         elif scenario == "fails-after-turn":
             # A turn is bought and answered -- it carries usage, and it asks for one tool call the
             # loop comes back from -- and the request after it is refused. The only scenario where a
             # run breaks on the wire with spend already on the meter, which is the case a session
             # has to keep the figures of.
             #
-            # 400 rather than a 5xx or a 429: `harness_http::status_error` maps it to `Refused` and
-            # not retriable, so the wire gives up on the first request and this costs no wall clock.
+            # 400 rather than a 5xx or a 429: the client (`llm-http` since llm 0.7.0,
+            # `harness_http::status_error` before it) maps it to `Refused` and not retriable, so
+            # the wire gives up on the first request and this costs no wall clock.
             # A retriable status reaches the same failure after sleeping 1 + 2 + 4 s of back-off.
             if has_function_output(body):
                 self._send_json(
@@ -533,6 +637,7 @@ class Handler(BaseHTTPRequestHandler):
                         "file_read",
                         {"path": f"chapters/chapter-{nth:02d}.md"},
                         input_tokens=reported,
+                        nth=nth,
                     )
                 )
             else:
@@ -623,8 +728,9 @@ class Handler(BaseHTTPRequestHandler):
             # the flow aborts rather than recording a network blip as a failure.
             #
             # 400 rather than a closed socket or a 5xx, for the reason `fails-after-turn` gives:
-            # `harness_http::status_error` maps it to `Refused` and not retriable, so the failure
-            # lands on the first request and costs no wall clock, while a stream cut mid-event is
+            # the client (`llm-http` since llm 0.7.0, `harness_http::status_error` before it)
+            # maps it to `Refused` and not retriable, so the failure lands on the first request
+            # and costs no wall clock, while a stream cut mid-event is
             # a truncation the loop retries.
             if Handler.turn_count >= 2:
                 self._send_json(
@@ -707,6 +813,14 @@ class Handler(BaseHTTPRequestHandler):
                     *terminal["response"]["output"],
                 ]
                 self._send_sse(events)
+        elif scenario == "absent-cache-write":
+            # The Messages emulator's scenario of this name omits `cache_creation_input_tokens`, a
+            # counter that wire's client needs for its inclusive input total (llm parity row M25).
+            # This wire's usage object has no such optional counter: `input_tokens` is the whole
+            # and `cached_tokens` a part of it, and `llm-responses` reads the total directly
+            # (`stream.rs` `usage`). So there is nothing to omit here and the scenario is a normal
+            # text turn; it exists so that both emulators name the same scenarios.
+            self._send_sse(text_events("provider emulation passed"))
         else:
             self._send_sse(text_events("provider emulation passed"))
 

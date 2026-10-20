@@ -38,10 +38,8 @@ impl Wire {
     /// socket can say nothing was asked.
     fn recording(self, scenario: &str, record: Option<&Path>) -> Fixture {
         match self {
-            Self::Responses => {
-                Fixture::of("harness-responses", "fake_responses.py", scenario, record)
-            }
-            Self::Messages => Fixture::of("harness-messages", "fake_messages.py", scenario, record),
+            Self::Responses => Fixture::of("fake_responses.py", scenario, record),
+            Self::Messages => Fixture::of("fake_messages.py", scenario, record),
         }
     }
 
@@ -59,13 +57,13 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn of(crate_name: &str, script: &str, scenario: &str, record: Option<&Path>) -> Self {
-        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join(crate_name)
-            .join("tests")
-            .join("fixtures")
-            .join(script);
+    fn of(script: &str, scenario: &str, record: Option<&Path>) -> Self {
+        let script = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest directory"),
+        )
+        .join("tests")
+        .join("fixtures")
+        .join(script);
         let mut command = Command::new("python3");
         command.arg(&script).arg("--scenario").arg(scenario);
         if let Some(record) = record {

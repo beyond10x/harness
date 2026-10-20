@@ -33,7 +33,7 @@ arm() {
   local announce; announce="$(mktemp)"
   printf 'hello harness\n' >"$workspace/README.md"
 
-  python3 "$root/crates/harness-messages/tests/fixtures/fake_messages.py" \
+  python3 "$root/crates/harness-cli/tests/fixtures/fake_messages.py" \
     --scenario "$scenario" >"$announce" 2>/dev/null &
   local emulator=$!
   for _ in $(seq 1 100); do [ -s "$announce" ] && break; sleep 0.1; done

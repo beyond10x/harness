@@ -124,7 +124,6 @@ fn gate(root: &Path) -> Result<(), String> {
     toolchain_specs(true)?;
     toolchain_specs(false)?;
     toolchain_docs(root, true)?;
-    check_http_boundary(root)?;
     specification(root)?;
 
     // The untouched app-server profile checker remains until its next material change.
@@ -251,62 +250,4 @@ fn run_command(label: &str, command: &mut Command) -> Result<(), String> {
     } else {
         Err(format!("`{label}` failed with {status}"))
     }
-}
-
-fn check_http_boundary(root: &Path) -> Result<(), String> {
-    const FORBIDDEN: &[&str] = &[
-        "anthropic",
-        "openai",
-        "harness-messages",
-        "harness-responses",
-        "oauth",
-        "bearer",
-        "authorization",
-        "access_token",
-        "refresh_token",
-        "api-key",
-        "x-api-key",
-    ];
-    let directory = root.join("crates/harness-http");
-    let mut failures = Vec::new();
-    for file in files_under(&directory)? {
-        let body = std::fs::read_to_string(&file)
-            .map_err(|error| format!("reading `{}`: {error}", file.display()))?;
-        let lower = body.to_ascii_lowercase();
-        for forbidden in FORBIDDEN {
-            if lower.contains(forbidden) {
-                failures.push(format!(
-                    "{} names forbidden route semantics `{forbidden}`",
-                    file.strip_prefix(root).unwrap_or(&file).display()
-                ));
-            }
-        }
-    }
-    if failures.is_empty() {
-        println!("generic HTTP boundary: clean");
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
-    }
-}
-
-fn files_under(directory: &Path) -> Result<Vec<PathBuf>, String> {
-    fn visit(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-        for entry in std::fs::read_dir(directory)
-            .map_err(|error| format!("reading `{}`: {error}", directory.display()))?
-        {
-            let entry = entry.map_err(|error| format!("reading directory entry: {error}"))?;
-            let path = entry.path();
-            if path.is_dir() {
-                visit(&path, files)?;
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                files.push(path);
-            }
-        }
-        Ok(())
-    }
-    let mut files = Vec::new();
-    visit(directory, &mut files)?;
-    files.sort();
-    Ok(files)
 }

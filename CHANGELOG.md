@@ -16,6 +16,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **Every model call goes through `llm`'s client crates**, pinned by tag `0.8.0`
+  (`b10x-llm-core`, `-blocking`, `-credentials`, `-http`, `-messages`, `-providers`,
+  `-responses`; atlas ADR 0097). `crates/harness-cli/src/llm_port.rs` is the one module where
+  Harness's values meet `llm`'s; compaction, mid-stream retry, the run ledger and approvals stay
+  here. What a run sees: a subscription token (`--oauth-token-file`, `--oauth-token-env`) on
+  `anthropic-messages` is presented as `llm`'s `AuthKind::SubscriptionOauth` — `authorization:
+  Bearer` plus `anthropic-beta: oauth-2025-04-20`, `llm`'s client preamble as the first `system`
+  block with the instruction after it, billed as a subscription — where the spike bridge refused
+  it; on `openai-responses` `llm` sends a subscription token as a plain bearer, because it
+  admits `SubscriptionOauth` over Messages only. `--reasoning-effort max` is declared to `llm`,
+  which the Messages wire sends as `max` and the Responses wire as its highest, `xhigh`. The four
+  provider failures the former wires retried before any output — Responses `server_error` and
+  `rate_limit_exceeded`, Messages `overloaded_error` and `api_error` — are retried again: `llm`
+  0.7.0 read them as final, 0.8.0 marks them retriable before output and final after it (llm
+  `CHANGELOG.md` `[0.8.0]`; parity rows R28, M27), and the loop retries on that flag alone. Two
+  places `llm` is stricter than the former wires: a turn held to `answer` — the one a prose-ending
+  run is given after its nudge — that ends in prose again is refused on the wire (`Protocol: model
+  terminal reason contradicts its tool obligations`, llm parity row R45), so such a run exits 1
+  with the refusal on stderr where it used to stop `unstructured` and exit 2, and still never
+  exits 0 over prose; and on `anthropic-messages` the inclusive input total is stated only when
+  `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` are all reported,
+  so a stream that omits one leaves the turn's usage and cost unknown rather than summing the
+  rest, and a spend ceiling on such a run is refused as unobservable (llm parity row M25; the
+  vendor always reports the cache-write counter, and the Messages emulator now does too).
+- **A subscription token file must be owner-only.** `--oauth-token-file` (and a provider's
+  `oauth-token-file`) is read by `llm-credentials` on every request and refused unless it is a
+  regular file owned by the caller or root, mode `0600` or stricter, with one hard link, under
+  directories nobody else can write to; every directory on its path, from `/` down, must be owned
+  by the caller or root as well (a root-owned sticky directory such as `/tmp` passes). The
+  refusal names the reference and never the path or the value.
+  `measurements/prove-spend-ceiling.sh` writes its emulator token that way.
+- A credential source `llm` will not read reaches the operator as `Unauthorized`, not `Transport`:
+  before anything is dispatched the only thing that can be unavailable is the credential.
+- `rust-version` 1.97 to 1.98, which `llm` requires; the MSRV job in `.github/workflows/gate.yml`
+  builds on `1.98.0`.
+- The gate no longer runs the in-process HTTP boundary guard: the crate it fenced is gone.
 - Rebuild public documentation as an independent Rust workspace with static HTML/CSS, explicit
   navigation, checked local links and anchors, and exact-source artifact provenance. Refresh the
   landing page and getting-started guidance; keep live delivery on its existing route pending
@@ -25,6 +61,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   twice, and record unresolved policy choices as explicit blockers.
 - Run the home-path privacy check from Rust, retaining index and working-tree coverage and
   a content-pinned exception for the historical evidence extracted from the former journal.
+
+### Removed
+
+- `crates/harness-http`, `crates/harness-responses`, `crates/harness-messages` and
+  `crates/harness-credential`, with their `contract.rs`, `provider_emulated.rs`, `transport.rs` and
+  `summary_request.rs` suites. `contracts/provider-wires/` stays byte for byte and
+  `cargo xtask provider-contracts` still checks every released version against its fixtures; the
+  Rust half of each provider-wire contract is `llm`'s. The two emulators moved to
+  `crates/harness-cli/tests/fixtures/`.
 
 ### Fixed
 

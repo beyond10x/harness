@@ -25,8 +25,8 @@
 //! toolset ([`tool_fs`]) answers the reader's `file_read`, `dir_list` and `find`, and the
 //! `code-editor` toolset ([`tool_code_editor`]) answers `file_write` and `file_edit`. The adapter
 //! ([`LocalOperations`]) maps each harness operation onto one `tools` operation — the mapping is
-//! [`tools_operation`], tested both ways — and keeps `search` and `run` here, because `tools`
-//! `0.1.0` has no search or process toolset. The whole-file `sha256` a `tools` read now carries is
+//! [`tools_operation`], tested both ways — and keeps `search` and `run` here: `tools` `0.2.0` has
+//! no search toolset, and `run` has not moved onto its process toolset yet. The whole-file `sha256` a `tools` read now carries is
 //! stripped by the adapter: it is a `tool-contract/1` property harness does not publish yet.
 //!
 //! # Three layers, and what each is allowed to know

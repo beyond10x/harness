@@ -36,10 +36,10 @@ harness-llm = { package = "b10x-harness-llm", path = "crates/harness-llm" }
 # and MCP, never a sibling path (atlas ADR 0097 decision 3, ADR 0095 phase T2). `tool-fs` and
 # `tool-code-editor` replace `harness-tools`'s reader and writer; `tool-toolchain` replaces
 # `harness-toolchain`; `tool-contract` is the `tool-contract/1` profile they are written against.
-tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
-tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
-tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
-tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.1.0", version = "=0.1.0" }
+tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
+tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
+tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
+tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.2.0", version = "=0.2.0" }
 
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"

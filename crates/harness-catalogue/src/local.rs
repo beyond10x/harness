@@ -5,8 +5,8 @@
 //! Reading a tree is [`tool_fs`]'s and writing one is [`tool_code_editor`]'s: every path check is
 //! that crate's own, canonicalising before a containment check. That is real and it is not
 //! confinement — nothing stops the *process*, only those functions, and a bug in them is the whole
-//! boundary. `search` and `run` stay here, because `tools` `0.1.0` has no search or process
-//! toolset.
+//! boundary. `search` and `run` stay here: `tools` `0.2.0` has no search toolset, and `run` moves
+//! onto its process toolset (`b10x-tool-process`) in `story:run-moves-onto-tool-process`.
 //!
 //! It is the right provider for a run against the operator's own tree on their own machine, which
 //! is every run this component has ever had. A run that wants the effects confined passes
@@ -112,8 +112,8 @@ pub(crate) const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv",
 /// is what keeps it honest against the tools crates, so the declaration cannot drift from what the
 /// adapter actually calls.
 ///
-/// `search` and `run` are **not** here — `tools` `0.1.0` has no search or process toolset, so they
-/// stay local. The recorded operation name (`file.read`, `shell`) is a third thing and is not this
+/// `search` and `run` are **not** here — `tools` `0.2.0` has no search toolset and `run` has not
+/// moved onto `b10x-tool-process` yet, so they stay local. The recorded operation name (`file.read`, `shell`) is a third thing and is not this
 /// table; metaharness reads that back, and renaming it is not renaming this.
 pub(crate) const MAPPING: &[(&str, &str)] = &[
     ("file_read", "fs.read"),
@@ -878,7 +878,7 @@ mod tests {
                 "{tools} -> {harness}"
             );
         }
-        // `search` and `run` have no `tools` operation in 0.1.0 and stay local, so the table names
+        // `search` and `run` call no `tools` operation at 0.2.0 and stay local, so the table names
         // neither — in either direction.
         assert_eq!(tools_operation("search"), None);
         assert_eq!(tools_operation("run"), None);

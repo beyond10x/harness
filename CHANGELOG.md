@@ -28,24 +28,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Harness consumes the `tools` repository's crates at tag `0.1.0` instead of its own
+- Harness consumes the `tools` repository's crates at tag `0.2.0` (`60d4d0e3`) instead of its own
   `crates/harness-tools` and `crates/harness-toolchain` (atlas ADR 0097 decision 3, ADR 0095 phase
   T2). The new `crates/harness-catalogue` holds the publication layer (`Catalogue`, `Flat`, `Verbs`,
   `Scope`, the `Operations` trait) and the adapter that maps each operation onto a `tools` operation:
   `file_read → fs.read`, `dir_list → fs.list`, `find → fs.glob` through `b10x-tool-fs`, and
   `file_write → code.write`, `file_edit → code.edit` through `b10x-tool-code-editor`. `search` and
-  `run` stay local — `tools` `0.1.0` has no search or process toolset — with `run` at `Risk::High`.
+  `run` stay local, with `run` at `Risk::High`: `tools` has no search toolset, and `run` moves onto
+  `tools`' process toolset (`b10x-tool-process`, new in `0.2.0`) in a later release.
   `crates/harness-toolchain` is deleted; its callers take `b10x-tool-toolchain`. `b10x-tool-contract`,
   `b10x-tool-fs`, `b10x-tool-code-editor` and `b10x-tool-toolchain` are pinned by git tag in
-  `[workspace.dependencies]`, never a sibling path (invariant 2).
+  `[workspace.dependencies]`, never a sibling path (invariant 2). At `0.2.0` every `tools` crate is
+  Apache-2.0; `0.1.0` had released `b10x-tool-fs`, `b10x-tool-code-editor` and
+  `b10x-tool-toolchain` as `LicenseRef-B10x-Proprietary`.
 - Model-facing tool names, the CLI contract (`contracts/cli/b10x-harness/2026-09-18`) and the recorded
   operation names are unchanged. A `tools` read now carries a whole-file `sha256` and a write carries
   `sha256` and a unified `diff`; the adapter strips them, because they are `tool-contract/1` properties
   harness does not publish yet, so the model-facing replies stay byte-for-byte what they were.
-- The only model-facing reply change from the move is `dir_list`: a non-regular entry (socket, FIFO,
+- Two model-facing replies change with the move. `dir_list`: a non-regular entry (socket, FIFO,
   device) is now reported as `kind: "other"` with `bytes: null`, where it was `kind: "file"` with the
   length of the directory entry — `b10x-tool-fs` names an entry by its own type, which is more
-  correct. Regular files, directories and symlinks are unchanged.
+  correct. Regular files, directories and symlinks are unchanged. `find` with `max_results`: the
+  walk stops once that many paths match (`tools` `0.2.0`: 4 entries visited instead of 211 on a
+  1,110-entry tree with `max_results: 1`); `paths` and `truncated` are unchanged, and a capped
+  `find` that stops before reaching a directory past the depth bound now answers
+  `depth_bound_reached: false`, where it answered `true`.
 
 ### Fixed
 

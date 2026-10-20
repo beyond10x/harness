@@ -164,6 +164,21 @@ pub trait ToolPort {
         None
     }
 
+    /// Why this call carries a field that what it invokes does not declare, or [`None`] if it
+    /// carries none.
+    ///
+    /// Asked by the loop **before** the approver and before any hook, so a call refused by the
+    /// published schema alone never puts a question to a person, never fires `before-call`, and
+    /// never reaches `after-call` as the outcome of a tool that did not run. Per call and
+    /// unwrapped like [`ToolPort::invoked`]: a verb over a catalogue judges its own schema and then
+    /// the entry the call names, against that entry's schema.
+    ///
+    /// The answer is the sentence the model reads. Defaulted to [`None`], so a port that does not
+    /// answer is unchanged; a port that does still refuses the same call when it is performed.
+    fn undeclared(&self, _call: &ToolCall) -> Option<String> {
+        None
+    }
+
     /// What **this call** invokes, for the gate that decides whether a person is asked.
     ///
     /// # Why this is per call and not per spec

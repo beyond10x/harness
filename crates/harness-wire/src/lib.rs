@@ -15,6 +15,7 @@ mod item;
 mod port;
 mod retry_after;
 mod turn;
+mod undeclared;
 
 pub use bearer::{Bearer, BearerSource, CredentialKind, StaticBearer};
 pub use bound::{
@@ -30,6 +31,7 @@ pub use retry_after::retry_after;
 pub use turn::{
     Approval, Sampling, StopReason, ToolChoice, ToolSpec, TurnOutcome, TurnRequest, Usage,
 };
+pub use undeclared::{UndeclaredField, undeclared_field};
 
 /// Why a model wire refused, in terms the loop can decide on without knowing the vendor.
 #[derive(

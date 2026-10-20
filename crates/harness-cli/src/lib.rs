@@ -3035,6 +3035,13 @@ impl harness_wire::ToolPort for Augmented {
         )
     }
 
+    fn undeclared(&self, call: &harness_wire::ToolCall) -> Option<String> {
+        self.external_for(&call.name).map_or_else(
+            || self.local.undeclared(call),
+            |port| harness_wire::ToolPort::undeclared(port, call),
+        )
+    }
+
     fn reachable(&self) -> Vec<harness_wire::ToolName> {
         self.specs.iter().map(|spec| spec.name.clone()).collect()
     }
@@ -3137,6 +3144,10 @@ impl harness_wire::ToolPort for Published {
 
     fn invoked(&self, call: &harness_wire::ToolCall) -> Option<harness_wire::ToolSpec> {
         self.as_port().invoked(call)
+    }
+
+    fn undeclared(&self, call: &harness_wire::ToolCall) -> Option<String> {
+        self.as_port().undeclared(call)
     }
 
     fn operations(&self) -> Vec<&'static str> {
@@ -4818,5 +4829,48 @@ mod tests {
             "one line, because the tool's own description carries the rest: {with}"
         );
         assert!(with.contains("Finish by calling `answer`"), "{with}");
+    }
+
+    #[test]
+    fn every_published_shape_answers_an_undeclared_field_ahead_of_the_call() {
+        // Taken as the trait's default, `undeclared` answers nothing and the loop's check ahead of
+        // the approver and the hooks is silently gone; the in-port refusal would still come, after
+        // a person was asked. So each shape the shell publishes is asked directly.
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let call = |name: &str, arguments: serde_json::Value| harness_wire::ToolCall {
+            call_id: harness_wire::CallId::new("c-1").expect("valid"),
+            name: harness_wire::ToolName::new(name).expect("valid"),
+            arguments,
+        };
+        let extra = serde_json::json!({"path": "a.txt", "expected_sha256": "00"});
+        let invoke = serde_json::json!({"name": "file_read", "arguments": extra});
+        let shapes = [
+            (
+                "flat",
+                Published::Flat(harness_catalogue::Flat::new(a_catalogue(dir.path()))),
+                call("file_read", extra.clone()),
+            ),
+            (
+                "verbs",
+                Published::Verbs(harness_catalogue::Verbs::new(a_catalogue(dir.path()))),
+                call(harness_catalogue::INVOKE_VERB, invoke.clone()),
+            ),
+            (
+                "augmented",
+                Published::Augmented(Box::new(
+                    Augmented::new(
+                        Published::Verbs(harness_catalogue::Verbs::new(a_catalogue(dir.path()))),
+                        Vec::new(),
+                    )
+                    .expect("no external tools to collide with"),
+                )),
+                call(harness_catalogue::INVOKE_VERB, invoke.clone()),
+            ),
+        ];
+        for (shape, published, call) in &shapes {
+            let said = harness_wire::ToolPort::undeclared(published, call)
+                .unwrap_or_else(|| panic!("{shape}: answered nothing ahead of the call"));
+            assert!(said.contains("`expected_sha256`"), "{shape}: {said}");
+        }
     }
 }

@@ -3416,7 +3416,8 @@ impl<'a> AgentLoop<'a> {
     }
 
     /// What one owned call must get past before the tool behind it runs: the argument bound, then
-    /// the operator's `before-call` hook.
+    /// a field its published schema closes out ([`harness_wire::undeclared_field`]), then the
+    /// operator's `before-call` hook.
     ///
     /// `Err` is the refusal the model reads. Neither refusal reaches `after-call`, because no tool
     /// ran and that point is about what a tool did.
@@ -3431,6 +3432,16 @@ impl<'a> AgentLoop<'a> {
                 "the arguments for `{}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound",
                 call.name
             )));
+        }
+        // Judged against the schema the model was shown, which for `delegate` is the one naming
+        // this run's agents and not the bare one `invoked` carries.
+        if let Some(field) = self
+            .owned_specs()
+            .iter()
+            .find(|spec| spec.name == call.name)
+            .and_then(|spec| harness_wire::undeclared_field(&spec.input_schema, &call.arguments))
+        {
+            return Err(ToolOutcome::failed(field.refusal(call.name.as_str())));
         }
         match self.before_call_hook(call, invoked, sink) {
             Some(refusal) => Err(refusal),
@@ -4109,6 +4120,11 @@ impl<'a> AgentLoop<'a> {
         if exceeds(&call.arguments, MAX_TOOL_ARGUMENT_BYTES) {
             return false;
         }
+        // Out of the group for the reason the narrowing is: refused in `invoke`, in one set of
+        // words, rather than performed by the port and refused there.
+        if self.tools.undeclared(call).is_some() {
+            return false;
+        }
         let invoked = self
             .tools
             .invoked(call)
@@ -4337,6 +4353,21 @@ impl<'a> AgentLoop<'a> {
                 "the arguments for `{}` are over the {MAX_TOOL_ARGUMENT_BYTES} byte bound",
                 call.name
             ));
+        }
+
+        // **Refused by the published schema alone, before anybody is asked.** A field the entry
+        // closes out is the port's to name ([`ToolPort::undeclared`]), and asking first means a
+        // person is never put a question about a call that cannot run as sent, `before-call` never
+        // guards it and `after-call` never hears of a tool that did not run — the order the loop's
+        // own tools meet in `gate_owned`. The port refuses the same call again if it is performed.
+        if let Some(refusal) = self.tools.undeclared(call) {
+            if resumed_decision.is_some() {
+                sink.emit(LoopEvent::ApprovalResolved {
+                    call_id: call.call_id.clone(),
+                    approved: false,
+                });
+            }
+            return ToolOutcome::failed(refusal);
         }
 
         if let Some(refusal) = self.approval_gate(

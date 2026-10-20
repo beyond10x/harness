@@ -402,6 +402,19 @@ impl Catalogue {
         text
     }
 
+    /// Why a call of entry `name` with these arguments carries a field the entry's published schema
+    /// closes out, or [`None`] if it carries none or `name` is no entry here.
+    ///
+    /// The sentence names the field and what the entry accepts ([`harness_wire::UndeclaredField`]).
+    /// What both surfaces answer [`ToolPort::undeclared`](harness_wire::ToolPort::undeclared) with,
+    /// and what [`invoke_within`](Self::invoke_within) refuses on.
+    #[must_use]
+    pub fn undeclared(&self, name: &str, arguments: &Value) -> Option<String> {
+        let entry = self.get(name)?;
+        harness_wire::undeclared_field(&entry.input_schema, arguments)
+            .map(|field| field.refusal(name))
+    }
+
     /// Perform one entry.
     ///
     /// # Errors
@@ -431,6 +444,14 @@ impl Catalogue {
         remaining: Option<std::time::Duration>,
     ) -> Result<Value, Refused> {
         let entry = self.get(name).ok_or_else(|| self.no_such(name))?;
+        // A field the entry's published schema does not declare is refused before anything else
+        // is asked, whichever surface the call came through: ignoring it is how a stale
+        // `expected_sha256` used to reach a `file_write` that replaced the file anyway. The loop
+        // asks the same question ahead of the approver ([`Self::undeclared`]); this is the same
+        // answer again for a caller that performs the call without asking first.
+        if let Some(refusal) = self.undeclared(&entry.name, arguments) {
+            return Err(refusal.into());
+        }
         if let Some(answer) = self.invoke_toolchain(name, arguments, remaining) {
             return answer;
         }

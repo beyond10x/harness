@@ -7487,3 +7487,205 @@ fn a_checkpoint_carries_its_directory_across_a_process_and_resumes_only_in_it() 
         "{error:?}"
     );
 }
+
+// --- an undeclared field --------------------------------------------------------------------------
+
+/// The field no published schema declares.
+const UNDECLARED: &str = "undeclared_probe";
+
+/// An answer schema that refuses what it does not declare, as an operator may write one.
+fn closed_verdict_schema() -> OutputSchema {
+    OutputSchema::new(json!({
+        "type": "object",
+        "properties": {"verdict": {"type": "string"}},
+        "required": ["verdict"],
+        "additionalProperties": false,
+    }))
+    .expect("an object schema is accepted")
+}
+
+fn two_skills() -> Skills {
+    Skills::new(vec![
+        Skill {
+            name: "planning".to_owned(),
+            description: "Plan work in a governed store.".to_owned(),
+            body: "# Planning\n\nUse the CLI.\n".to_owned(),
+        },
+        Skill {
+            name: "schema-contracts".to_owned(),
+            description: "Pin a schema.".to_owned(),
+            body: "# Schemas\n".to_owned(),
+        },
+    ])
+}
+
+/// A run that publishes all four of the loop's own tools, ending on a valid answer.
+fn owning_everything(first: TurnOutcome) -> Harness {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(first),
+            Ok(asks_for(&[(
+                "call-end",
+                "answer",
+                json!({"verdict": "green"}),
+            )])),
+        ]),
+        ScriptedTools::new(vec![spec("file_read", Approval::NotRequired)]),
+    )
+    .answering_in(closed_verdict_schema())
+    .delegating(Delegation::default());
+    harness.config = harness
+        .config
+        .clone()
+        .with_skills(Some(two_skills()))
+        .with_memories(Some(a_vault()));
+    harness
+}
+
+#[test]
+fn every_loop_owned_tool_with_a_closed_schema_refuses_an_undeclared_field_by_name() {
+    // What the model was offered, read from the request itself rather than listed here, so a
+    // fifth owned tool or a reopened schema changes what this walks.
+    let mut published = owning_everything(asks_for(&[(
+        "call-1",
+        "answer",
+        json!({"verdict": "green"}),
+    )]));
+    let _ = published.run();
+    let port: Vec<String> = published
+        .tools
+        .specs()
+        .iter()
+        .map(|spec| spec.name.as_str().to_owned())
+        .collect();
+    let owned: Vec<ToolSpec> = published.model.seen[0]
+        .tools
+        .iter()
+        .filter(|spec| !port.contains(&spec.name.as_str().to_owned()))
+        .cloned()
+        .collect();
+
+    let mut walked = Vec::new();
+    for spec in &owned {
+        if spec.input_schema.get("additionalProperties") != Some(&json!(false)) {
+            continue;
+        }
+        let name = spec.name.as_str();
+        let mut harness =
+            owning_everything(asks_for(&[("call-1", name, json!({UNDECLARED: true}))]));
+        let (outcome, _) = harness.run();
+        let outcome = outcome.expect("the run goes on to its answer");
+        let (failed, output) = result_of(&outcome, "call-1");
+        let words = output
+            .as_str()
+            .map_or_else(|| output.to_string(), ToOwned::to_owned);
+        assert!(failed, "`{name}` accepted an undeclared field: {words}");
+        assert!(
+            words.contains(&format!("`{UNDECLARED}`")),
+            "`{name}`'s refusal does not name the field: {words}"
+        );
+        for accepted in spec.input_schema["properties"]
+            .as_object()
+            .expect("an object schema declares properties")
+            .keys()
+        {
+            assert!(
+                words.contains(&format!("`{accepted}`")),
+                "`{name}`'s refusal does not name `{accepted}`, which it accepts: {words}"
+            );
+        }
+        walked.push(name.to_owned());
+    }
+    walked.sort();
+    assert_eq!(walked, ["answer", "delegate", "recall", "skill"]);
+}
+
+#[test]
+fn a_skill_call_carrying_an_undeclared_field_beside_its_name_loads_nothing() {
+    let mut harness = owning_everything(asks_for(&[(
+        "call-1",
+        "skill",
+        json!({"name": "planning", "expected_sha256": "0000"}),
+    )]));
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("the run goes on to its answer");
+    let (failed, output) = result_of(&outcome, "call-1");
+    assert!(failed, "{output}");
+    let words = output.as_str().unwrap_or_default();
+    assert!(words.contains("`expected_sha256`"), "{words}");
+    assert!(
+        !words.contains("Use the CLI."),
+        "the body was loaded: {words}"
+    );
+}
+
+#[test]
+fn an_answer_schema_that_does_not_close_itself_accepts_an_extra_field_as_before() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(asks_for(&[(
+            "call-1",
+            "answer",
+            json!({"verdict": "green", UNDECLARED: 1}),
+        )]))]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .answering_in(verdict_schema());
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("the answer is accepted");
+    assert_eq!(
+        outcome.structured,
+        Some(json!({"verdict": "green", UNDECLARED: 1}))
+    );
+}
+
+// --- adversary: an undeclared field ---------------------------------------------------------------
+
+#[test]
+fn an_answer_valid_against_its_closed_schema_is_accepted_whatever_items_says_of_prefix_items() {
+    // JSON Schema 2020-12, the validator's default: `items` judges only the elements after
+    // `prefixItems`. The first row here is governed by `prefixItems[0]` alone, so `title` is a
+    // field its own schema declares, and 0.16.0 accepted this answer.
+    let schema = OutputSchema::new(json!({
+        "type": "object",
+        "properties": {
+            "rows": {
+                "type": "array",
+                "prefixItems": [{
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                    "additionalProperties": false,
+                }],
+                "items": {
+                    "type": "object",
+                    "properties": {"cell": {"type": "string"}},
+                    "additionalProperties": false,
+                },
+            },
+        },
+        "required": ["rows"],
+        "additionalProperties": false,
+    }))
+    .expect("an object schema is accepted");
+    let answer = json!({"rows": [{"title": "t"}, {"cell": "c"}]});
+    assert_eq!(
+        schema.validate(&answer),
+        Ok(()),
+        "the answer is valid against the exact schema that was published"
+    );
+
+    // A second turn, so that a refused first answer still ends the run and its words are readable.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[("call-1", "answer", answer.clone())])),
+            Ok(asks_for(&[("call-2", "answer", json!({"rows": []}))])),
+        ]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .answering_in(schema);
+    let (outcome, _) = harness.run();
+    let outcome = outcome.expect("the run ends");
+    let (failed, output) = result_of(&outcome, "call-1");
+    assert!(!failed, "a valid answer was refused: {output}");
+    assert_eq!(outcome.structured, Some(answer));
+}

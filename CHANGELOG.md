@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `harness_wire::ToolPort::undeclared(&self, call) -> Option<String>`, a provided method defaulting to `None` (additive: an existing port compiles and behaves as before). `Flat`, `Verbs` and their forks answer it from `Catalogue::undeclared`, unwrapping `tool_invoke` to its entry; the shell's published and MCP-augmented ports delegate it.
+
+### Fixed
+
+- A tool call carrying a field its published input schema does not declare, where that schema says `additionalProperties: false`, is refused before anything runs, naming the field and what the tool accepts: every catalogue entry on both surfaces (the three verbs, what `tool_invoke` reaches, a bare entry name, batches, toolchain tools and roles including their nested provider objects) and the loop's own `answer`, `delegate`, `skill` and `recall` (`harness_wire::undeclared_field`). The loop asks before the approver and before any hook, so such a call puts no question to a person, fires neither `before-call` nor `after-call`, and is never batched; the port refuses it again if it is performed. `file_write` and `file_edit` used to ignore such a field and write, so a stale `expected_sha256` replaced the file; a schema that does not close itself accepts extra fields as before. Arrays are read as JSON Schema 2020-12 reads them (`prefixItems`, then `items`), and a schema level carrying a keyword the check does not model (`$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `patternProperties`, `dependentSchemas`, `unevaluated*` and their older-draft relatives) or naming another `$schema` dialect is not judged, nor anything beneath it.
+
 ## [0.16.0] - 2026-10-21
 
 ### Changed

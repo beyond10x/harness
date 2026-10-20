@@ -93,6 +93,12 @@ impl Flat {
         self.catalogue.subjects(call.name.as_str(), &call.arguments)
     }
 
+    /// The call is the entry, so the entry's schema judges the arguments the model sent.
+    fn undeclared_in(&self, call: &ToolCall) -> Option<String> {
+        self.catalogue
+            .undeclared(call.name.as_str(), &call.arguments)
+    }
+
     fn invoke(&self, call: &ToolCall, remaining: Option<Duration>) -> ToolOutcome {
         // Including the unknown name: `invoke_within` refuses it by name, listing every tool this
         // run has, which is the answer the model's next move needs.
@@ -132,6 +138,10 @@ impl ToolPort for Flat {
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.subjects_of(call)
+    }
+
+    fn undeclared(&self, call: &ToolCall) -> Option<String> {
+        self.undeclared_in(call)
     }
 
     fn operation(&self, call: &ToolCall) -> Option<String> {
@@ -183,6 +193,10 @@ impl ToolPort for Forked<'_> {
 
     fn subjects(&self, call: &ToolCall) -> Vec<Subject> {
         self.0.subjects_of(call)
+    }
+
+    fn undeclared(&self, call: &ToolCall) -> Option<String> {
+        self.0.undeclared_in(call)
     }
 
     fn operation(&self, call: &ToolCall) -> Option<String> {

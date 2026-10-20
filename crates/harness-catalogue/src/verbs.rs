@@ -129,6 +129,9 @@ impl Verbs {
     /// [`call_batch`](ToolPort::call_batch) needs to answer the verbs that are not invocations
     /// while the invocations are running on their own threads.
     fn answer(&self, call: &ToolCall, remaining: Option<Duration>) -> Result<Value, Refused> {
+        if let Some(refusal) = self.verb_undeclared(call) {
+            return Err(refusal.into());
+        }
         let arguments = &call.arguments;
         match call.name.as_str() {
             SEARCH_VERB => Ok(self.catalogue.search(
@@ -152,6 +155,26 @@ impl Verbs {
             // the catalogue, listing every name this run does have.
             other => self.catalogue.invoke_within(other, arguments, remaining),
         }
+    }
+
+    /// The refusal for a verb called with a field its own published schema does not declare.
+    ///
+    /// The verb's schema only: what `tool_invoke` carries in `arguments` is judged against the
+    /// entry it names, by [`Catalogue::invoke_within`], and a bare entry name is not a verb.
+    fn verb_undeclared(&self, call: &ToolCall) -> Option<String> {
+        let spec = self.specs.iter().find(|spec| spec.name == call.name)?;
+        harness_wire::undeclared_field(&spec.input_schema, &call.arguments)
+            .map(|field| field.refusal(call.name.as_str()))
+    }
+
+    /// Both questions, in the order a performed call meets them: the verb's own schema, then the
+    /// schema of the entry the call reaches — unwrapped from `tool_invoke`, or the entry a bare
+    /// name routes to — exactly as [`Self::answer`] and [`Catalogue::invoke_within`] refuse.
+    fn undeclared_in(&self, call: &ToolCall) -> Option<String> {
+        self.verb_undeclared(call).or_else(|| {
+            self.invoked_entry(call)
+                .and_then(|(entry, arguments)| self.catalogue.undeclared(&entry.name, arguments))
+        })
     }
 }
 
@@ -208,9 +231,14 @@ impl Verbs {
     /// [`Catalogue::invoke_batch`](crate::Catalogue::invoke_batch). Positions are kept either way,
     /// because the loop matches outcomes to calls by index.
     fn answer_all(&self, calls: &[ToolCall], remaining: Option<Duration>) -> Vec<ToolOutcome> {
+        // A verb carrying a field it does not declare is not routed: answered in place, it is
+        // refused by `answer` exactly as it would be alone.
         let routed: Vec<Option<(&str, &Value)>> = calls
             .iter()
             .map(|call| {
+                if self.verb_undeclared(call).is_some() {
+                    return None;
+                }
                 self.invoked_entry(call)
                     .map(|(entry, arguments)| (entry.name.as_str(), arguments))
             })
@@ -278,6 +306,10 @@ impl ToolPort for Verbs {
             .map(|(entry, _)| entry.operation.to_owned())
     }
 
+    fn undeclared(&self, call: &ToolCall) -> Option<String> {
+        self.undeclared_in(call)
+    }
+
     fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {
         self.spec_invoked(call)
     }
@@ -337,6 +369,10 @@ impl ToolPort for Forked<'_> {
 
     fn operation(&self, call: &ToolCall) -> Option<String> {
         self.0.operation(call)
+    }
+
+    fn undeclared(&self, call: &ToolCall) -> Option<String> {
+        self.0.undeclared_in(call)
     }
 
     fn invoked(&self, call: &ToolCall) -> Option<ToolSpec> {

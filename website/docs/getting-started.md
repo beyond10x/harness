@@ -18,7 +18,7 @@ The [release page](https://github.com/beyond10x/harness/releases) is the place t
 binaries and checksums. The repository's release workflow targets Linux x86_64 and aarch64; macOS
 is not a build target because the embedded confinement host uses Linux namespaces.
 
-To build from source, install Rust 1.97 or newer and arrange Git access to the pinned foundation
+To build from source, install Rust 1.98 or newer and arrange Git access to the pinned foundation
 dependencies before building. Public source visibility alone does not grant access to every
 dependency. From the repository root:
 

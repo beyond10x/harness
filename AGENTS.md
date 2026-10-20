@@ -21,8 +21,8 @@ A change here that moves none of these is a question for the operator, not a tas
 
 ## What this repository owns
 
-The b10x agent loop: turn assembly, tool round trips, approvals, budgets. A harness that talks to
-LLM APIs **directly** rather than driving someone else's.
+The b10x agent loop: turn assembly, tool round trips, approvals, budgets. A harness that makes its
+own model calls, through `llm`'s client crates, rather than driving someone else's loop.
 
 ## Invariants
 
@@ -50,25 +50,18 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    the tool crates are adapted in `crates/harness-catalogue`, which keeps every envelope, risk,
    approval and publication decision harness's own.
 3. **`harness-wire` performs no I/O, reads no clock and names no vendor field.** Every vendor-shaped
-   byte lives in a wire crate, and since llm `0.7.0` every wire crate is `llm`'s:
-   `b10x-llm-responses` and `b10x-llm-messages` over `b10x-llm-http`, with the credential
-   presentation in `b10x-llm-providers` (atlas ADR 0097). `harness-wire` keeps the credential
-   *types* — `BearerSource`, `Bearer` (zeroized on drop) and the `StaticBearer` a caller may hold
-   for a process lifetime — for an embedder that brings its own model port; the shipped binary's
-   model port uses none of them, and the crate reads no credential from anywhere and sends none.
+   byte lives in `llm`'s wire crates, and `crates/harness-llm` (`b10x-harness-llm`) is the one
+   place Harness's values meet `llm`'s; which crates those are and what that crate translates is
+   [README § Wires](README.md#wires). `harness-wire` keeps the credential *types* —
+   `BearerSource`, `Bearer` (zeroized on drop) and the `StaticBearer` a caller may hold for a
+   process lifetime — for an embedder that brings its own model port; the shipped binary's model
+   port uses none of them, and the crate reads no credential from anywhere and sends none.
 
-   **`crates/harness-llm` (`b10x-harness-llm`; until 2026-10-20 `harness-cli`'s private module
-   `llm_port`) is the one place Harness's values meet `llm`'s, and it holds no credential
-   either.** It is a public library crate that `harness-cli` depends on, so an embedder builds its
-   model port from it rather than copying it. It translates a turn, a stream event, an outcome and
-   an error, and bridges two differences of execution model — a blocking loop whose sink is not
-   `Send` over an async client, and a cancellation flag over a token. Nothing vendor-shaped is
-   written there: a request body, a stream decoder, a header name or an endpoint path appearing in
-   it means the boundary was drawn in the wrong place. A credential is a `Source` — an `llm`
-   resolver bound to one reference, the caller's own through `Source::resolver` — that `llm` asks
-   per request, and the fetched value reaches the transport already
-   inside a header value `llm` built. The former `harness-http`, `harness-responses`,
-   `harness-messages` and `harness-credential` crates were removed with that move.
+   **`crates/harness-llm` holds no credential and writes nothing vendor-shaped.** A request body,
+   a stream decoder, a header name or an endpoint path appearing in it means the boundary was
+   drawn in the wrong place. A credential is a `Source` that `llm` asks per request
+   (§ Safety envelope, *Credentials*), and the fetched value reaches the transport already inside
+   a header value `llm` built.
 4. **Turns are stateless.** Nothing is retained provider-side and no wire may use provider-side
    threading, because it would not survive the second wire.
 5. **An opaque provider item is replayed verbatim and never reinterpreted.** Replaying one into a

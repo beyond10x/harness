@@ -1,7 +1,7 @@
 # harness
 
-The b10x agent loop — ours, not a vendor's. It talks to LLM APIs directly and owns the cycle: one
-turn out, tool calls back, results in, next turn out.
+The b10x agent loop — ours, not a vendor's. It makes its own model calls, through `llm`'s client
+crates, and owns the cycle: one turn out, tool calls back, results in, next turn out.
 
 **[Read the public documentation](https://beyond10x.github.io/harness/)** for the quickstart,
 execution model, safety boundary, operational guides and reference.
@@ -15,14 +15,18 @@ to hold a loop, registering every tool through that vendor's mechanism, and livi
 budgets that vendor happens to enforce. Owning the loop makes tool names, budgets, cost accounting
 and approval decisions ours.
 
-It is deliberately small and carries no bridges to vendor binaries. **It depends on two other
-foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrate) for confinement and
-[mcp](https://github.com/beyond10x/mcp) for the outbound client protocol — each pinned by an exact
-git revision, never by a sibling path, and on nothing that could embed it.** At `0.14.1` those
-revisions are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`, package `=0.7.17`) and mcp
-`bf7f9415` (`Cargo.toml`, release `0.1.2`); each happens to be the commit a release tag points at,
-but the pin the manifests carry is the revision. The arrow points inward — something else embeds
-this, never the reverse.
+It is deliberately small and carries no bridges to vendor binaries. **It depends on four other
+foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrate) for confinement,
+[mcp](https://github.com/beyond10x/mcp) for the outbound client protocol,
+[llm](https://github.com/beyond10x/llm) for every model call and
+[tools](https://github.com/beyond10x/tools) for the tool contracts and default implementations —
+each pinned by git tag or exact revision, never by a sibling path, and on nothing that could embed
+it.** At `0.15.0` those pins are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`,
+package `=0.7.17`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.8.0` (`7873aa63`)
+and tools tag `0.2.0` (`60d4d0e3`), all in `Cargo.toml` except substrate's. Substrate and mcp are
+pinned by revision, each the commit a release tag points at; llm and tools by tag, which
+`Cargo.lock` resolves to that commit. The arrow points inward — something else embeds this, never
+the reverse.
 
 ## Where it sits
 
@@ -81,7 +85,7 @@ Source publication uses this repository's checks and standalone `b10x-gates bot`
 Atlas checkout or organization-wide admission. Organization privacy rules remain applicable;
 Atlas documentation delivery and optional organization audits run separately.
 
-Rust 1.97, edition 2024. The binary is `b10x-harness`.
+Rust 1.98, edition 2024. The binary is `b10x-harness`.
 
 ```text
 cargo run -p b10x-harness-cli -- run \

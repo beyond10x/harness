@@ -2,10 +2,10 @@
 //!
 //! # Why the catalogue does not perform anything
 //!
-//! `harness-tools` depends on `harness-wire`, `serde` and nothing else — no substrate, no tokio, no
-//! sibling repository. That is deliberate: metaharness embeds this crate to serve the same tools to
-//! Claude Code over MCP, and a workspace that links no async runtime cannot afford a catalogue that
-//! drags one in.
+//! `harness-catalogue` depends on `harness-wire`, the `tools` crates, `serde`, `globset` and
+//! `regex` — no substrate, no tokio, no async runtime. That is deliberate: metaharness embeds this
+//! crate to serve the same tools to Claude Code over MCP, and a workspace that links no async
+//! runtime cannot afford a catalogue that drags one in.
 //!
 //! So the catalogue holds *what a tool is* and this trait holds *who does it*. There are two
 //! implementations today and they differ in exactly one property:

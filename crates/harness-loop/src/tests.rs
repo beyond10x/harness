@@ -17,7 +17,7 @@ const WIRE: &str = "scripted";
 /// The verb a call names when the entry it wants is an argument.
 ///
 /// `harness_catalogue::verbs::INVOKE_VERB` spelled again rather than depended on: `harness-loop` does
-/// not know `harness-tools` exists, and a test that imported it would be asserting over the very
+/// not know `harness-catalogue` exists, and a test that imported it would be asserting over the very
 /// coupling this crate refuses.
 const INVOKE_VERB: &str = "tool_invoke";
 

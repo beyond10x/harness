@@ -79,6 +79,11 @@ pub use embedded::Embedded;
 pub use predicate::{Predicate, PredicateOp, Unmet, When};
 pub use substrate_wire::WorkspaceAccess as ProcessWorkspaceAccess;
 pub use toolchain::Toolchain;
+// Re-exported because `Toolchain::from_providers` takes, and `Toolchain::providers` answers,
+// `tool_toolchain::ResolvedProvider`. A consumer that resolves its own providers and passes them in
+// must name the same types; re-exporting the crate lets it do so from here without pinning
+// `b10x-tool-toolchain` itself and risking a second, incompatible version (tests/toolchain_reexport.rs).
+pub use tool_toolchain;
 pub use tools::ConfinedOperations;
 pub use withheld::Withheld;
 

@@ -23,6 +23,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   operation names are unchanged. A `tools` read now carries a whole-file `sha256` and a write carries
   `sha256` and a unified `diff`; the adapter strips them, because they are `tool-contract/1` properties
   harness does not publish yet, so the model-facing replies stay byte-for-byte what they were.
+- The only model-facing reply change from the move is `dir_list`: a non-regular entry (socket, FIFO,
+  device) is now reported as `kind: "other"` with `bytes: null`, where it was `kind: "file"` with the
+  length of the directory entry — `b10x-tool-fs` names an entry by its own type, which is more
+  correct. Regular files, directories and symlinks are unchanged.
 
 ### Fixed
 

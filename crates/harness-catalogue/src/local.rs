@@ -28,11 +28,12 @@
 //!
 //! # The name mapping, tested both ways
 //!
-//! Each harness operation name is mapped onto one `tools` operation id by [`MAPPING`]: the recorded
-//! operation name stays what it was (`file.read`, `shell`), model-facing names do not change, and
-//! this table is the one place a harness name meets a `tools` id. [`tools_operation`] and
-//! [`harness_operation`] read it in each direction, and the suite below checks the round trip and
-//! that every id is an operation the tools crates actually expose.
+//! Each harness operation is routed to its `tools` operation directly, in code, by the method that
+//! performs it. [`MAPPING`] is the **declared** correspondence beside that — the recorded operation
+//! name stays what it was (`file.read`, `shell`) and model-facing names do not change.
+//! [`tools_operation`] and [`harness_operation`] read it in each direction, and the suite below
+//! checks the round trip and that every id is an operation the tools crates actually expose, so the
+//! declaration cannot drift from what the adapter calls.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -103,7 +104,13 @@ const INHERITED_ENV: &[&str] = &[
 /// concludes the file is not there.
 pub(crate) const SKIPPED: &[&str] = &[".git", "target", "node_modules", ".venv", "__pycache__"];
 
-/// The one place a harness operation name meets a `tools` operation id: `(harness, tools)`.
+/// The **declared** harness-name↔tools-id correspondence: `(harness, tools)`.
+///
+/// Not the router — each `Operations` method below calls its tools operation directly, by name, in
+/// code. This table is what a consumer and the two-way test read instead: [`tools_operation`] and
+/// [`harness_operation`] answer it in each direction, and `every_mapped_id_is_an_operation_the_tools_crates_expose`
+/// is what keeps it honest against the tools crates, so the declaration cannot drift from what the
+/// adapter actually calls.
 ///
 /// `search` and `run` are **not** here — `tools` `0.1.0` has no search or process toolset, so they
 /// stay local. The recorded operation name (`file.read`, `shell`) is a third thing and is not this

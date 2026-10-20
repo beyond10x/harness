@@ -44,9 +44,9 @@
 //!
 //! # The toolchain types come from `tool-toolchain`
 //!
-//! [`ResolvedProvider`] and the declarative toolchain registry are the `tools` crate's, moved there
-//! with `harness-toolchain` (ADR 0097 decision 3). This crate re-exports the one type the catalogue
-//! names and keeps no copy of its own.
+//! [`ResolvedProvider`] and the declarative toolchain registry are `b10x-tool-toolchain`'s, moved
+//! there from the former `harness-toolchain` crate (ADR 0097 decision 3). This crate re-exports the
+//! one type the catalogue names and keeps no copy of its own.
 
 mod catalogue;
 mod flat;

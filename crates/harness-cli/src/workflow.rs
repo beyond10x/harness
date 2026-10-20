@@ -1542,7 +1542,7 @@ enum Exit {
 
 /// The exit, read from **either shape the `run` tool answers in**.
 ///
-/// The local port writes `exit: <code>` (`harness-tools/local.rs`, `null` for a killed process);
+/// The local port writes `exit: <code>` (`harness-catalogue/src/local.rs`, `null` for a killed process);
 /// the confined port writes `exit: <the execution record>` with `exit.exit: {code, signal}`
 /// (`harness-substrate/embedded.rs` and `client.rs`, substrate's own resource, serialised). The
 /// sixth paid native walk ran its validator inside the sandbox, saw it exit `0`, and read the

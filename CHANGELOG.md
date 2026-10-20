@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-20
+
 ### Added
 
 - Retrofit the shipped loop and workflow boundary into an ESS specification with 42 native

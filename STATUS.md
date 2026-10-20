@@ -1,6 +1,6 @@
 # Status
 
-Observed on 2026-09-25 after the Substrate refresh released as `0.13.3`. Current evidence is the repository-owned
+Observed on 2026-09-25 after the Substrate refresh released as `0.13.3`, re-read after `0.14.0` (2026-10-20). Current evidence is the repository-owned
 `cargo xtask gate`; historical live-provider observations remain dated in the rows that carry them.
 
 The refresh pins Substrate `05695970` (package `0.7.8`, development wire `0.16.0`) and MCP

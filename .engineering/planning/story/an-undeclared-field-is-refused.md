@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:an-undeclared-field-is-refused
 kind: story
-status: active
+status: implemented
 title: A tool call with a field its schema does not declare is refused
 summary: Catalogue entries with additionalProperties false refuse an undeclared field, naming it (file_write ignored a stale expected_sha256 at 0.15.1). Release after 0.16.0.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T22:55:45Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-20T22:55:45Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-20T23:46:10Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

@@ -201,11 +201,15 @@ impl Catalogue {
     /// Why this operation may not touch this path under **either** layer, or [`None`] if it may.
     ///
     /// The run's answer first, so the refusal a person reads names the boundary they set when both
-    /// of them refuse.
+    /// of them refuse. A path that is a directory in the tree this catalogue writes is judged by
+    /// what it can hold and by every link beneath it ([`crate::written::refusal`]).
     fn refusal(&self, operation: &str, path: &str) -> Option<String> {
-        self.scope
-            .refusal(operation, path)
-            .or_else(|| self.step.refusal(operation, path))
+        crate::written::refusal(
+            [&self.scope, &self.step],
+            self.operations.host_root(),
+            operation,
+            path,
+        )
     }
 
     /// Whether anything at all was declared, by the run or by the step now running.
@@ -528,13 +532,14 @@ impl Catalogue {
     /// The checks of the `build-test` contract are the executor's, made before any argv is handed
     /// over: the arguments the registry accepts, where the path arguments the call names land
     /// under the provider's directory ([`Operations::host_root`]), this run's write scope on the
-    /// written paths the plan declares, as spelled and where they land, the declared programs,
-    /// and one deadline for the call. The scope asked is both layers, the run's and the step's,
-    /// exactly as a `file_write` asks them. Each argv that passes reaches the provider through
-    /// [`Operations::run_within`] — `b10x-tool-process` locally, substrate with the providers'
-    /// sandbox applied when confined — and each run in the answer is that provider's own reply,
-    /// every planned provider named in a role's answer, and a plan the deadline cut short marked
-    /// as cut ([`ProviderRunner::answered`]).
+    /// written paths the plan declares, as spelled and where they land, and on every module file
+    /// a written path an argv hands to `rustfmt` declares ([`crate::modules`]), the declared
+    /// programs, and one deadline for the call. The scope asked is both layers, the run's and the
+    /// step's, exactly as a `file_write` asks them. Each argv that passes reaches the provider
+    /// through [`Operations::run_within`] — `b10x-tool-process` locally, substrate with the
+    /// providers' sandbox applied when confined — and each run in the answer is that provider's
+    /// own reply, every planned provider named in a role's answer, and a plan the deadline cut
+    /// short marked as cut ([`ProviderRunner::answered`]).
     fn invoke_toolchain(
         &self,
         name: &str,
@@ -557,12 +562,21 @@ impl Catalogue {
             .into()));
         };
         let runner = ProviderRunner::new(&*self.operations, root);
-        let (scope, step) = (self.scope.clone(), self.step.clone());
+        let (scope, step, tree) = (self.scope.clone(), self.step.clone(), root.to_path_buf());
+        // A written path a `rustfmt` argv names is judged with every module it declares, which
+        // rustfmt rewrites with it ([`crate::modules`]).
+        let formatted = crate::modules::formatted(&plan);
         let executor = match Executor::with_runner(&runner, self.toolchains.clone()) {
             Ok(executor) => executor.refusing_writes(move |path| {
-                scope
-                    .refusal("file.write", path)
-                    .or_else(|| step.refusal("file.write", path))
+                crate::written::refusal([&scope, &step], Some(&tree), "file.write", path).or_else(
+                    || {
+                        formatted
+                            .iter()
+                            .any(|named| named == path)
+                            .then(|| crate::modules::refusal([&scope, &step], &tree, path))
+                            .flatten()
+                    },
+                )
             }),
             Err(error) => return Some(Err(error.to_string().into())),
         };

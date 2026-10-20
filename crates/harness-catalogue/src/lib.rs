@@ -58,10 +58,12 @@
 mod catalogue;
 mod flat;
 mod local;
+mod modules;
 mod operations;
 mod scope;
 mod toolchain;
 mod verbs;
+mod written;
 
 pub use catalogue::{Catalogue, Entry, entry_names, operation_of, subjects_of};
 pub use flat::Flat;

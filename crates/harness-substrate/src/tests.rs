@@ -1610,7 +1610,6 @@ fn a_confined_toolchain_write_through_a_link_into_a_refused_directory_sends_no_e
 }
 
 #[test]
-#[ignore = "pre-existing; fixed by story:a-written-directory-is-judged-by-what-it-holds (next unit)"]
 fn a_confined_toolchain_write_naming_the_directory_that_holds_refused_files_sends_no_exec() {
     // `--substrate-embedded` is the only composition `harness-cli` runs a toolchain under. A
     // written path that names `protected` or the workspace itself hands the program every file
@@ -1634,4 +1633,48 @@ fn a_confined_toolchain_write_naming_the_directory_that_holds_refused_files_send
             .map(|body| body["input"]["argv"].clone())
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn a_confined_toolchain_write_naming_a_directory_by_any_route_to_a_refused_file_sends_no_exec() {
+    // Adversary: the confined composition for the routes the unit's confined case leaves out — the
+    // refused directory named directly, through a link, and a directory holding a link to a
+    // refused file — and a directory holding nothing refused, which still reaches substrate.
+    let tree = tempfile::tempdir().expect("a tree");
+    std::fs::create_dir(tree.path().join("protected")).expect("the refused directory");
+    std::fs::write(tree.path().join("protected/kept"), "").expect("a refused file");
+    std::fs::create_dir(tree.path().join("src")).expect("src");
+    std::fs::write(tree.path().join("src/ok"), "").expect("an admitted file");
+    std::os::unix::fs::symlink("../protected/kept", tree.path().join("src/alias"))
+        .expect("a link to a refused file");
+    std::fs::create_dir(tree.path().join("links")).expect("links");
+    std::os::unix::fs::symlink("../protected", tree.path().join("links/protected"))
+        .expect("a link to the refused directory");
+    std::fs::create_dir(tree.path().join("clean")).expect("clean");
+    std::fs::write(tree.path().join("clean/ok"), "").expect("an admitted file");
+    let script = one_exec();
+    let catalogue = writing_probe(tree.path(), script.clone());
+
+    let mut admitted = Vec::new();
+    for path in [
+        "protected",
+        "protected/",
+        "links/protected",
+        "links/protected/.",
+        "src",
+        "src/.",
+    ] {
+        if let Ok(answer) = catalogue.invoke("probe_write", &json!({"paths": [path]})) {
+            admitted.push(format!("`{path}` -> {answer}"));
+        }
+    }
+    assert!(admitted.is_empty(), "admitted: {admitted:?}");
+    assert!(execs_sent(&script).is_empty(), "an exec reached substrate");
+
+    catalogue
+        .invoke("probe_write", &json!({"paths": ["clean"]}))
+        .expect("a directory holding nothing refused runs confined");
+    let sent = execs_sent(&script);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["input"]["argv"], json!(["true", "clean"]));
 }

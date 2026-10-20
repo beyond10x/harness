@@ -51,6 +51,7 @@ jsonschema = { version = "0.52.1", default-features = false }
 # Hook and command timeouts stop the whole process group, not only the direct child. Unix process
 # groups and signals are OS primitives; this narrow feature set avoids hand-written unsafe FFI.
 nix = { version = "0.31.3", features = ["process", "signal"] }
+proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The workflow notation reads its own documents (`Flow::from_yaml`), so the CLI never parses one

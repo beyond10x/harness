@@ -169,6 +169,7 @@ dependencies = [
  "b10x-tool-search",
  "b10x-tool-toolchain",
  "nix",
+ "proc-macro2",
  "serde",
  "serde_json",
  "tempfile",

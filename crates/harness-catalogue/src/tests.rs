@@ -945,6 +945,47 @@ fn a_path_that_leaves_the_workspace_and_comes_back_is_judged_where_it_lands() {
 }
 
 #[test]
+fn a_write_naming_a_directory_is_judged_by_what_it_holds_under_either_layer() {
+    // `protected/**=denied` matches nothing of the name `protected`, and a provider that wrote
+    // through the directory would reach every file beneath it. The provider here records every
+    // write it is handed, so an admitted call shows as one that reached it.
+    let dir = tree();
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::write(dir.path().join("protected/kept"), "kept").expect("a refused file");
+    let deny = || {
+        Scope::of(vec![
+            ScopeRule::parse("protected/**=denied").expect("a rule"),
+        ])
+    };
+    let run_layer = Catalogue::of(Everything::at(dir.path(), &[])).scoped(deny());
+    let mut step_layer = Catalogue::of(Everything::at(dir.path(), &[]));
+    step_layer.narrow(deny());
+
+    for catalogue in [&run_layer, &step_layer] {
+        for (name, arguments) in [
+            ("file_write", json!({"path": "protected", "text": "whole"})),
+            (
+                "file_edit",
+                json!({"path": "protected", "old": "a", "new": "b"}),
+            ),
+        ] {
+            let refused = catalogue.invoke(name, &arguments).expect_err("refused");
+            assert!(
+                refused.message().contains("`protected` is a directory"),
+                "{name}: {refused}"
+            );
+            assert!(
+                refused.message().contains("`protected/**=denied`"),
+                "{name}: {refused}"
+            );
+        }
+        catalogue
+            .invoke("file_write", &json!({"path": "src", "text": "whole"}))
+            .expect("a directory nothing beneath is refused is admitted as before");
+    }
+}
+
+#[test]
 fn reading_a_denied_path_is_still_reading_because_a_write_scope_bounds_writes() {
     let dir = tree();
     let mut verbs = Verbs::new(

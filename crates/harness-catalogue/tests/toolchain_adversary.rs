@@ -328,7 +328,6 @@ toolchains:
 "#;
 
 #[test]
-#[ignore = "pre-existing; fixed by story:a-written-directory-is-judged-by-what-it-holds (next unit)"]
 fn a_written_path_naming_a_directory_that_holds_refused_files_starts_nothing() {
     // `gofmt -w <dir>` rewrites every Go file beneath it. The scope refuses each file under
     // `protected/**` by name, and admits the directories that hold them.
@@ -359,10 +358,291 @@ fn a_written_path_naming_a_directory_that_holds_refused_files_starts_nothing() {
     );
 }
 
+#[test]
+fn a_written_link_that_resolves_to_a_directory_holding_refused_files_starts_nothing() {
+    // The link's own spelling holds nothing a rule names; where it lands is `protected`, and that
+    // directory is judged by what it holds. A directory nothing beneath is refused still runs.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::write(dir.path().join("protected/kept.go"), "package protected\n").expect("a source");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::fs::write(dir.path().join("src/ok.go"), "package src\n").expect("a source");
+    std::fs::create_dir(dir.path().join("links")).expect("links");
+    std::os::unix::fs::symlink("../protected", dir.path().join("links/protected"))
+        .expect("a link to the refused directory");
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let operations = Recorder {
+        tree: LocalOperations::new(dir.path()).expect("a workspace"),
+        programs: vec!["gofmt".to_owned()],
+        started: Arc::clone(&started),
+    };
+    let catalogue =
+        Catalogue::of_with_toolchains(operations, resolve(dir.path(), GO_FMT_SHAPED, &["fmtlike"]))
+            .scoped(denied("protected/**"));
+
+    let refused = catalogue
+        .invoke("fmtlike_fmt", &json!({"paths": ["links/protected"]}))
+        .expect_err("the link lands on the refused directory");
+    assert!(
+        refused.message().contains("leads to `protected`"),
+        "{refused}"
+    );
+    assert!(
+        refused.message().contains("`protected/**=denied`"),
+        "{refused}"
+    );
+    assert!(
+        started.lock().expect("not poisoned").is_empty(),
+        "an argv reached the provider"
+    );
+
+    catalogue
+        .invoke("fmtlike_fmt", &json!({"paths": ["src"]}))
+        .expect("a directory nothing beneath is refused runs");
+    assert_eq!(
+        *started.lock().expect("not poisoned"),
+        vec![vec!["gofmt".to_owned(), "-w".to_owned(), "src".to_owned()]]
+    );
+}
+
+/// The `gofmt -w`-shaped catalogue over a [`Recorder`] in `root`, and every argv it was asked to
+/// start.
+fn recording(root: &Path) -> (Catalogue, Arc<Mutex<Vec<Vec<String>>>>) {
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let operations = Recorder {
+        tree: LocalOperations::new(root).expect("a workspace"),
+        programs: vec!["gofmt".to_owned()],
+        started: Arc::clone(&started),
+    };
+    let catalogue =
+        Catalogue::of_with_toolchains(operations, resolve(root, GO_FMT_SHAPED, &["fmtlike"]));
+    (catalogue, started)
+}
+
+fn formatting(catalogue: &Catalogue, path: &str) -> Result<Value, Refused> {
+    catalogue.invoke("fmtlike_fmt", &json!({"paths": [path]}))
+}
+
+/// What every refusal of a written directory tells the caller to do instead.
+const INSTEAD: &str = "Name the subdirectories or files to format or write instead";
+
+#[test]
+fn a_written_directory_holding_a_link_to_a_refused_file_starts_nothing() {
+    // `gofmt -w src` follows `src/alias.go` and rewrites `protected/kept.go`, which the scope
+    // refuses by name; `go_fmt_on_a_directory_rewrites_no_refused_file_through_a_link_beneath_it`
+    // runs the real `gofmt`. The name `src` holds nothing a rule names.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::write(dir.path().join("protected/kept.go"), "package protected\n").expect("a source");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::fs::write(dir.path().join("src/ok.go"), "package src\n").expect("a source");
+    std::os::unix::fs::symlink("../protected/kept.go", dir.path().join("src/alias.go"))
+        .expect("a link to a refused file");
+    let (catalogue, started) = recording(dir.path());
+    let catalogue = catalogue.scoped(denied("protected/**"));
+
+    let refused = formatting(&catalogue, "src").expect_err("the link reaches a refused file");
+    assert_eq!(
+        refused.message(),
+        format!(
+            "`src` is a directory, and the link `src/alias.go` beneath it leads to \
+             `protected/kept.go`, where `protected/**=denied` refuses this write; a write through \
+             the directory reaches that file through the link. {INSTEAD}, none of which holds \
+             that link."
+        )
+    );
+    assert!(
+        started.lock().expect("not poisoned").is_empty(),
+        "an argv reached the provider"
+    );
+
+    formatting(&catalogue, "src/ok.go").expect("a file beside the link runs");
+    assert_eq!(
+        *started.lock().expect("not poisoned"),
+        vec![vec![
+            "gofmt".to_owned(),
+            "-w".to_owned(),
+            "src/ok.go".to_owned()
+        ]]
+    );
+}
+
+#[test]
+fn a_link_beneath_a_written_directory_to_another_directory_is_judged_as_the_rest_of_the_walk() {
+    // A program follows a link to a directory, so the walk does too: what it leads to is judged
+    // by name as a written directory is, and walked for its own links. A cycle ends where it
+    // returns to a directory already walked.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::write(dir.path().join("protected/kept.go"), "package protected\n").expect("a source");
+    std::fs::create_dir(dir.path().join("shared")).expect("shared");
+    std::fs::write(dir.path().join("shared/x.go"), "package shared\n").expect("a source");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::os::unix::fs::symlink("../shared", dir.path().join("src/shared"))
+        .expect("a link to an admitted directory");
+    std::os::unix::fs::symlink("../src", dir.path().join("shared/back"))
+        .expect("a link back, closing a cycle");
+    std::fs::create_dir(dir.path().join("lib")).expect("lib");
+    std::os::unix::fs::symlink("../protected/kept.go", dir.path().join("lib/alias.go"))
+        .expect("a link to a refused file");
+    std::fs::create_dir(dir.path().join("app")).expect("app");
+    std::os::unix::fs::symlink("../lib", dir.path().join("app/lib"))
+        .expect("a link to a directory holding a link to a refused file");
+    std::fs::create_dir(dir.path().join("web")).expect("web");
+    std::os::unix::fs::symlink("../protected", dir.path().join("web/protected"))
+        .expect("a link to the refused directory");
+    let (catalogue, started) = recording(dir.path());
+    let catalogue = catalogue.scoped(denied("protected/**"));
+
+    formatting(&catalogue, "src").expect("`shared` holds nothing refused, and the cycle ends");
+    assert_eq!(started.lock().expect("not poisoned").len(), 1);
+
+    let refused = formatting(&catalogue, "app").expect_err("`lib` holds a link to a refused file");
+    assert_eq!(
+        refused.message(),
+        format!(
+            "`app` is a directory, and the link `app/lib/alias.go` beneath it leads to \
+             `protected/kept.go`, where `protected/**=denied` refuses this write; a write through \
+             the directory reaches that file through the link. {INSTEAD}, none of which holds \
+             that link."
+        )
+    );
+    let refused = formatting(&catalogue, "web").expect_err("the link leads to a refused directory");
+    assert_eq!(
+        refused.message(),
+        format!(
+            "`web` is a directory, and the link `web/protected` beneath it leads to the directory \
+             `protected`, where `protected/**=denied` refuses this write; a write through the \
+             directory reaches what that directory holds through the link. {INSTEAD}, none of \
+             which holds that link."
+        )
+    );
+    assert_eq!(
+        started.lock().expect("not poisoned").len(),
+        1,
+        "an argv reached the provider"
+    );
+}
+
+#[test]
+fn a_link_beneath_a_written_directory_that_stays_inside_it_is_admitted() {
+    // Both links land inside `src`, which the walk covers, one of them on `src` itself.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::create_dir_all(dir.path().join("src/inner")).expect("src/inner");
+    std::fs::write(dir.path().join("src/inner/a.go"), "package inner\n").expect("a source");
+    std::os::unix::fs::symlink("inner/a.go", dir.path().join("src/alias.go"))
+        .expect("a link within");
+    std::os::unix::fs::symlink("..", dir.path().join("src/inner/up")).expect("a link up to src");
+    let (catalogue, started) = recording(dir.path());
+    let catalogue = catalogue.scoped(denied("protected/**"));
+
+    formatting(&catalogue, "src").expect("every link beneath stays inside");
+    assert_eq!(
+        *started.lock().expect("not poisoned"),
+        vec![vec!["gofmt".to_owned(), "-w".to_owned(), "src".to_owned()]]
+    );
+}
+
+#[test]
+fn a_link_beneath_a_written_directory_that_leads_nowhere_is_judged_where_its_target_would_be() {
+    // A program that writes through a link that leads nowhere creates its target.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::os::unix::fs::symlink("../protected/new.go", dir.path().join("src/new.go"))
+        .expect("a link to a refused path not yet written");
+    std::fs::create_dir(dir.path().join("other")).expect("other");
+    std::os::unix::fs::symlink("../elsewhere/new.go", dir.path().join("other/new.go"))
+        .expect("a link to an admitted path not yet written");
+    let (catalogue, started) = recording(dir.path());
+    let catalogue = catalogue.scoped(denied("protected/**"));
+
+    let refused = formatting(&catalogue, "src").expect_err("its target is refused");
+    assert_eq!(
+        refused.message(),
+        format!(
+            "`src` is a directory, and the link `src/new.go` beneath it leads to \
+             `protected/new.go`, where `protected/**=denied` refuses this write; a write through \
+             the directory reaches that file through the link. {INSTEAD}, none of which holds \
+             that link."
+        )
+    );
+    assert!(started.lock().expect("not poisoned").is_empty());
+
+    formatting(&catalogue, "other").expect("its target is admitted");
+    assert_eq!(started.lock().expect("not poisoned").len(), 1);
+}
+
+#[test]
+fn a_written_directory_is_walked_only_when_a_rule_refuses_something() {
+    // `src` is one directory deeper than the walk's bound, 32 directories, so a walk of it is
+    // refused by the bound; a scope that refuses nothing never walks it.
+    let dir = tempfile::tempdir().expect("a workspace");
+    let deep: Vec<String> = (1..=33).map(|level| format!("d{level}")).collect();
+    std::fs::create_dir_all(dir.path().join("src").join(deep.join("/"))).expect("a deep tree");
+
+    let (catalogue, started) = recording(dir.path());
+    let admitting = catalogue.scoped(Scope::of(vec![
+        ScopeRule::parse("**=allowed").expect("a rule"),
+    ]));
+    formatting(&admitting, "src").expect("nothing is refused, so nothing is walked");
+    assert_eq!(started.lock().expect("not poisoned").len(), 1);
+
+    let (catalogue, started) = recording(dir.path());
+    let refusing = catalogue.scoped(denied("protected/**"));
+    let refused = formatting(&refusing, "src").expect_err("the walk meets its bound");
+    assert_eq!(
+        refused.message(),
+        format!(
+            "`src` is a directory nested more than 32 directories deep, deeper than a write \
+             through a directory is judged while `protected/**=denied` refuses writes, so it is \
+             refused rather than judged in part. {INSTEAD}."
+        )
+    );
+    assert!(started.lock().expect("not poisoned").is_empty());
+
+    // The step's layer is asked as well, and a directory within the bound is walked and runs.
+    let (mut catalogue, started) = recording(dir.path());
+    catalogue.narrow(denied("protected/**"));
+    let refused = formatting(&catalogue, "src").expect_err("the step refuses something");
+    assert!(
+        refused.message().contains("more than 32 directories deep"),
+        "{refused}"
+    );
+    formatting(&catalogue, "src/d1/d2").expect("31 levels deep is within the bound");
+    assert_eq!(started.lock().expect("not poisoned").len(), 1);
+}
+
 const UNFORMATTED_GO: &str = "package protected\n\nfunc   F( ) {}\n";
 
 #[test]
-#[ignore = "pre-existing; fixed by story:a-written-directory-is-judged-by-what-it-holds (next unit)"]
+fn go_fmt_on_a_directory_rewrites_no_refused_file_through_a_link_beneath_it() {
+    // The measurement this case repeats: `gofmt -w src`, with `src/alias.go` a link to
+    // `protected/kept.go`, rewrote `protected/kept.go`. Needs `go` on `PATH`.
+    let dir = tempfile::tempdir().expect("a workspace");
+    std::fs::write(dir.path().join("go.mod"), "module probe\n\ngo 1.21\n").expect("a module");
+    std::fs::create_dir(dir.path().join("protected")).expect("the refused directory");
+    std::fs::write(dir.path().join("protected/kept.go"), UNFORMATTED_GO).expect("a source");
+    std::fs::create_dir(dir.path().join("src")).expect("src");
+    std::os::unix::fs::symlink("../protected/kept.go", dir.path().join("src/alias.go"))
+        .expect("a link to a refused file");
+    let providers = tool_toolchain::Registry::builtins()
+        .expect("the built-ins")
+        .resolve(dir.path(), Some(&["go".to_owned()]))
+        .expect("the built-in Go provider resolves where `go` is on `PATH`");
+    let catalogue = local(dir.path(), providers).scoped(denied("protected/**"));
+
+    let answer = catalogue.invoke("go_fmt", &json!({"paths": ["src"]}));
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("protected/kept.go")).expect("read"),
+        UNFORMATTED_GO,
+        "`go_fmt` rewrote a file under `protected/**=denied` through a link: {answer:?}"
+    );
+    assert!(answer.is_err(), "{answer:?}");
+}
+
+#[test]
 fn go_fmt_on_a_directory_rewrites_no_file_the_scope_refuses() {
     // The built-in `go_fmt`, "Format only the explicitly named Go source files". Needs `go` on
     // `PATH`, which the built-in provider resolves its root from.

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T08:43:46Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-consumes-tools-crates",
+  "kind": "story",
+  "revision": 41,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "gate-steps.sh on wave/2026-10-20-tools-1 at 58b29933: 17 steps all exit 0 (test-workspace 108s, substrate-conformance 74s, clippy 45s, ...)",
+    "reference": "~/.cache/harness-tools-1-gate/summary.txt"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-consumes-tools-crates
 kind: story
-status: active
+status: implemented
 title: Harness consumes the tools repository's crates instead of harness-tools and harness-toolchain
 summary: 'ADR 0095 phase T2 for harness: the tool contracts and default implementations come from tools crates pinned by tag; waits for tools'' first release.'
 relations:
@@ -60,10 +60,11 @@ scope:
   path: crates/harness-xtask/src/main.rs
 - confidence: inferred
   path: spec/COVERAGE.md
-revision: 41
+revision: 42
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T07:26:34Z", actor: "human:timo", revision: 40, decided_on: {"recorded":{"review_outcome":7}}}
 - {from: "proposed", to: "active", at: "2026-10-20T07:26:34Z", actor: "human:timo", revision: 41, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "active", to: "implemented", at: "2026-10-20T08:43:46Z", actor: "human:timo", revision: 42, decided_on: {"recorded":{"test_result":1,"review_outcome":8}}}
 ---
 ## Context
 

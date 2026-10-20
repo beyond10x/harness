@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-consumes-tools-crates
 kind: story
-status: draft
+status: active
 title: Harness consumes the tools repository's crates instead of harness-tools and harness-toolchain
 summary: 'ADR 0095 phase T2 for harness: the tool contracts and default implementations come from tools crates pinned by tag; waits for tools'' first release.'
 relations:
@@ -24,8 +24,6 @@ scope:
   path: ROADMAP.md
 - confidence: inferred
   path: STATUS.md
-- confidence: inferred
-  path: contracts/cli/b10x-harness
 - confidence: cited
   path: crates/harness-cli/Cargo.toml
 - confidence: inferred
@@ -36,8 +34,6 @@ scope:
   path: crates/harness-cli/src/metaharness.rs
 - confidence: inferred
   path: crates/harness-cli/src/workflow.rs
-- confidence: inferred
-  path: crates/harness-loop/src/tests.rs
 - confidence: cited
   path: crates/harness-substrate/Cargo.toml
 - confidence: inferred
@@ -49,18 +45,25 @@ scope:
 - confidence: inferred
   path: crates/harness-substrate/src/tools.rs
 - confidence: inferred
-  path: crates/harness-substrate/tests
+  path: crates/harness-substrate/tests/conformance.rs
+- confidence: inferred
+  path: crates/harness-substrate/tests/embedded_live.rs
+- confidence: inferred
+  path: crates/harness-substrate/tests/live.rs
 - confidence: cited
   path: crates/harness-toolchain
 - confidence: cited
   path: crates/harness-tools
-- confidence: cited
+- confidence: inferred
   path: crates/harness-xtask/Cargo.toml
 - confidence: inferred
   path: crates/harness-xtask/src/main.rs
 - confidence: inferred
   path: spec/COVERAGE.md
-revision: 31
+revision: 41
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T07:26:34Z", actor: "human:timo", revision: 40, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "proposed", to: "active", at: "2026-10-20T07:26:34Z", actor: "human:timo", revision: 41, decided_on: {"recorded":{"review_outcome":7}}}
 ---
 ## Context
 
@@ -215,3 +218,47 @@ do not exist yet.
   `README.md`, `ROADMAP.md`, `STATUS.md`, `CHANGELOG.md`, `spec/COVERAGE.md`. This story carries
   `depends_on: story:harness-builds-on-llm-0-7` (recorded 2026-10-20) for that reason: it runs after
   that story has merged, never beside it — cited
+
+## Scope refined by story-scoper (2026-10-20, medium confidence)
+
+Settled, cited from the tree at harness `c50f4fd5` and tools tag `0.1.0` (`046dfb14`):
+
+- **Adapter is a crate of its own, below `harness-substrate` and `harness-cli`.** `ConfinedOperations`
+  implements `harness_tools::Operations` (`crates/harness-substrate/src/tools.rs:28,152`) and
+  `harness-substrate` depends on nothing above it, so the `Operations` trait and the publication
+  layer (`Catalogue`, `Flat`, `Verbs`, `Scope`) that move out of `crates/harness-tools` land in a
+  new crate both depend on. Invariant 6 forbids `common`/`shared`/`utils`/`misc`/`helpers`; the
+  name is the implementor's.
+- **`crates/harness-toolchain` deletes outright**: `b10x-tool-toolchain` 0.1.0 is the same code plus
+  a doc paragraph, `pub mod contract;` and a `plan` fallback; the five builtin YAMLs are
+  byte-identical.
+- **`crates/harness-tools` does not delete outright.** `b10x-tool-fs` and `b10x-tool-code-editor`
+  replace the reader and writer halves of `local.rs`; `catalogue.rs`, `flat.rs`, `verbs.rs`,
+  `scope.rs`, `toolchain.rs`, `operations.rs`, `tests.rs` and `local.rs`'s `grep`/`exec`/`drain`
+  stay (tools has no `process` or `search` toolset in 0.1.0; `tool_fs` does not export `walk`).
+- **Name mapping (the recorded operation, `Entry.operation`, is a third column and stays):**
+  `file_read → fs.read`, `dir_list → fs.list` (the harness name is `dir_list`, not `directory_list`),
+  `find → fs.glob`, `file_write → code.write`, `file_edit → code.edit`; `search` and `run` have no
+  tools operation in 0.1.0 and stay local (`run` at `Risk::High`).
+- **The CLI contract names no tool.** `contracts/cli/b10x-harness/2026-09-18/argv.json` matches none
+  of the tool names (grep → 0); `manifest.json:26` `run` is the `run` subcommand. The acceptance's
+  "contract lists every tool name" is met by argv staying byte-identical; the tool-name list lives
+  in `catalogue.rs:931-940` and `README.md:238-246`. No new CLI contract version is cut.
+
+Callers to re-point (`git grep`, cited): `crates/harness-cli/src/{lib,approve,metaharness,workflow}.rs`,
+`crates/harness-xtask/src/main.rs:194-219` (`harness_toolchain::`),
+`crates/harness-substrate/src/{embedded,tools,toolchain,tests}.rs`,
+`crates/harness-substrate/tests/{conformance,embedded_live,live}.rs`.
+`crates/harness-loop/src/tests.rs` is doc comments only, not a caller.
+
+Not established by the scoper (the implementor decides and reports):
+
+- The new crate's name and whether `verbs.rs`/`flat.rs` move verbatim or are rewritten.
+- `tool_fs` adds `sha256` to every `fs.read` reply; `ConfinedOperations::file_read` answers none, so
+  the substrate conformance suite's `agreed`/`all_agree` equality check breaks unless the adapter
+  strips the field or the confined reply gains one. **Default: strip in the adapter** (the digest is
+  a tools contract property harness does not publish yet); the implementor confirms against
+  `crates/harness-substrate/tests/conformance.rs`.
+- Behavioural drift between `local.rs` and the tools crates (overlapping-match counting, trailing
+  `/`, `limit: 0`, bound in bytes): which of `harness-tools/src/tests.rs` (1,240 lines) and the 34
+  conformance cases those changes break was not checked.

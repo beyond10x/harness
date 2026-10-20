@@ -977,6 +977,68 @@ fn a_changed_run_configuration_cannot_resume_a_checkpoint() {
     );
 }
 
+/// A checkpoint written before `LoopConfig::cwd` existed resumes under a caller that now names one.
+///
+/// Such a checkpoint was taken by a loop that recorded no directory, so there is nothing in it for
+/// the resuming run's directory to disagree with. Everything else must still match exactly.
+#[test]
+fn a_checkpoint_that_names_no_directory_resumes_under_a_run_that_names_one() {
+    let suspend = || {
+        let mut model = ScriptedModel::new(vec![Ok(asks_for(&[(
+            "call-1",
+            "fs.write",
+            json!({"path": "a"}),
+        )]))]);
+        let mut tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+        let mut defer = DeferApproval("approval-older");
+        let mut sink = VecLoopSink::new();
+        AgentLoop::new(
+            &mut model,
+            &mut tools,
+            &mut defer,
+            LoopConfig::new("scripted-model", "be useful"),
+        )
+        .run("do the thing", &mut sink)
+        .expect("suspends")
+        .checkpoint
+        .expect("a suspended outcome carries its continuation")
+    };
+    let resume = |checkpoint: ApprovalCheckpoint, config: LoopConfig| {
+        let mut model = ScriptedModel::new(vec![Ok(answer("written"))]);
+        let mut tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+        let mut approvals = DenyAll;
+        let mut sink = VecLoopSink::new();
+        AgentLoop::new(&mut model, &mut tools, &mut approvals, config).resume_approval(
+            checkpoint,
+            ApprovalDecision::Approved,
+            &mut sink,
+        )
+    };
+
+    // The bytes an older loop wrote: no `cwd` anywhere in them.
+    let older = serde_json::to_string(&suspend()).expect("encodes");
+    assert!(!older.contains("\"cwd\""), "{older}");
+    let named =
+        LoopConfig::new("scripted-model", "be useful").with_cwd(Some("/srv/work/tree".to_owned()));
+    let completed = resume(
+        serde_json::from_str(&older).expect("decodes"),
+        named.clone(),
+    )
+    .expect("an older checkpoint resumes under a run that names its directory");
+    assert_eq!(completed.stop, LoopStop::Completed);
+
+    // The allowance is the directory and nothing else.
+    let error = resume(
+        serde_json::from_str(&older).expect("decodes"),
+        LoopConfig {
+            model: "different-model".to_owned(),
+            ..named
+        },
+    )
+    .expect_err("a different model is still a different run");
+    assert!(matches!(error, LoopError::Config(reason) if reason.contains("configuration changed")));
+}
+
 #[test]
 fn approval_is_never_asked_for_a_tool_that_does_not_need_it() {
     let mut harness = Harness::new(
@@ -1776,6 +1838,36 @@ fn a_run_refused_nothing_announces_nothing() {
         panic!("the run starts by saying what it can do");
     };
     assert!(withheld.is_empty(), "absence stays absence: {withheld:?}");
+}
+
+#[test]
+fn the_run_names_the_directory_its_caller_says_it_works_in() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("ok"))]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    );
+    harness.config = harness
+        .config
+        .clone()
+        .with_cwd(Some("/srv/work/tree".to_owned()));
+    let (_, sink) = harness.run();
+    let Some(LoopEvent::Started { cwd, .. }) = sink.events().first() else {
+        panic!("the run starts by saying what it can do");
+    };
+    assert_eq!(cwd.as_deref(), Some("/srv/work/tree"));
+}
+
+#[test]
+fn a_run_whose_caller_named_no_directory_names_none() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("ok"))]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    );
+    let (_, sink) = harness.run();
+    let Some(LoopEvent::Started { cwd, .. }) = sink.events().first() else {
+        panic!("the run starts by saying what it can do");
+    };
+    assert_eq!(cwd, &None, "the loop does not guess where it is");
 }
 
 #[test]
@@ -7317,5 +7409,81 @@ fn a_run_whose_port_already_answers_to_recall_is_refused_before_a_byte_goes_out(
     assert!(
         harness.model.seen.is_empty(),
         "and nothing was sent: the refusal is before the first request"
+    );
+}
+
+// --- adversary pass: story:started-record-carries-the-loops-cwd ---------------------------------
+//
+// `LoopConfig` crosses an `ApprovalCheckpoint`, which refuses unknown fields and compares the whole
+// configuration on resume. The unit claims a checkpoint written before the field still resumes;
+// nothing in the suite serialised one.
+
+/// A run under `cwd` that suspends on its one approval-gated call, and the checkpoint it hands back.
+fn suspended_in(cwd: Option<&str>, id: &'static str) -> ApprovalCheckpoint {
+    let mut model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval(id);
+    let mut sink = VecLoopSink::new();
+    AgentLoop::new(
+        &mut model,
+        &mut tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful").with_cwd(cwd.map(ToOwned::to_owned)),
+    )
+    .run("do the thing", &mut sink)
+    .expect("suspends")
+    .checkpoint
+    .expect("a suspended outcome carries its continuation")
+}
+
+fn resume_in(checkpoint: ApprovalCheckpoint, cwd: Option<&str>) -> Result<LoopOutcome, LoopError> {
+    let mut model = ScriptedModel::new(vec![Ok(answer("written"))]);
+    let mut tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut approvals = DenyAll;
+    let mut sink = VecLoopSink::new();
+    AgentLoop::new(
+        &mut model,
+        &mut tools,
+        &mut approvals,
+        LoopConfig::new("scripted-model", "be useful").with_cwd(cwd.map(ToOwned::to_owned)),
+    )
+    .resume_approval(checkpoint, ApprovalDecision::Approved, &mut sink)
+}
+
+#[test]
+fn a_checkpoint_whose_run_named_no_directory_has_the_bytes_an_older_loop_wrote_and_resumes() {
+    let encoded = serde_json::to_string(&suspended_in(None, "approval-cwd-1")).expect("encodes");
+    assert!(
+        !encoded.contains("\"cwd\""),
+        "an older loop refuses an unknown field, so nothing is written when nothing was named: \
+         {encoded}"
+    );
+    let decoded: ApprovalCheckpoint =
+        serde_json::from_str(&encoded).expect("a checkpoint without the field deserialises");
+    let completed = resume_in(decoded, None).expect("resumes");
+    assert_eq!(completed.stop, LoopStop::Completed);
+}
+
+#[test]
+fn a_checkpoint_carries_its_directory_across_a_process_and_resumes_only_in_it() {
+    let checkpoint = suspended_in(Some("/srv/work/tree"), "approval-cwd-2");
+    let encoded = serde_json::to_value(&checkpoint).expect("encodes");
+    assert_eq!(encoded["config"]["cwd"], json!("/srv/work/tree"));
+    let decoded: ApprovalCheckpoint = serde_json::from_value(encoded.clone()).expect("round-trips");
+    assert_eq!(decoded, checkpoint);
+
+    let completed = resume_in(decoded, Some("/srv/work/tree")).expect("the same directory resumes");
+    assert_eq!(completed.stop, LoopStop::Completed);
+
+    let elsewhere: ApprovalCheckpoint = serde_json::from_value(encoded).expect("round-trips");
+    let error = resume_in(elsewhere, Some("/srv/other/tree"))
+        .expect_err("an approval given for one directory is not spent in another");
+    assert!(
+        matches!(&error, LoopError::Config(reason) if reason.contains("configuration changed")),
+        "{error:?}"
     );
 }

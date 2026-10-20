@@ -199,6 +199,33 @@ pub enum LoopEvent {
         /// stops being written, the default is no longer accountable and should go with it.
         #[serde(default = "named_credential")]
         credential_source: String,
+        /// The directory this run works in, absolute, as its caller resolved it — see
+        /// [`crate::LoopConfig::cwd`].
+        ///
+        /// So a reader that attests *where the agent worked* decides it from the loop's own record
+        /// rather than from whatever launched it, which can only say where it meant the run to be.
+        ///
+        /// **Skipped when absent, unlike the lists above, and for the reason they are not.** Those
+        /// are always written because an empty list is an answer an older build could not give.
+        /// Here there is no such answer: a loop nobody told where it was has nothing to say, and
+        /// neither has a build older than the field, so a reader concludes *not stated* from
+        /// either and is right both times. Skipping keeps an embedder that names no directory
+        /// writing the record it wrote before the field existed.
+        ///
+        /// A string rather than a path for the reason every other path in this record is one:
+        /// the caller decides once how a path becomes text, and a path that would not serialise
+        /// cannot take the whole `started` line with it.
+        ///
+        /// **What `b10x-harness` writes here**: the canonical root its file tools act in, exactly,
+        /// and nothing otherwise. Nothing for a root whose name is not UTF-8, because a lossy
+        /// rendering would name a directory that does not exist. Nothing under
+        /// `--substrate <socket>`, because writes and executions there land in the daemon's
+        /// `--workspace-id` workspace and no host path names it — the reading root alone is not
+        /// where that run works. Under `--substrate-embedded` the adopted workspace *is* that
+        /// root, so it is written; a confined `run` child sees the same directory mounted at
+        /// `/workspace`, so `pwd` inside one differs from this by the mount path only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
     },
     /// A credential was renewed and written back, before the first turn.
     ///
@@ -467,6 +494,7 @@ mod tests {
             toolchains: Vec::new(),
             mcp: Vec::new(),
             credential_source: "named".to_owned(),
+            cwd: None,
         };
         let encoded = serde_json::to_value(&event).expect("serializes");
         assert_eq!(encoded["withheld"][0]["tool"], serde_json::json!("run"));
@@ -502,6 +530,7 @@ mod tests {
             toolchains: Vec::new(),
             mcp: Vec::new(),
             credential_source: "named".to_owned(),
+            cwd: None,
         };
         let encoded = serde_json::to_string(&started).expect("serializes");
         assert_eq!(
@@ -517,6 +546,49 @@ mod tests {
             serde_json::from_str(r#"{"kind":"started","model":"m","published_tools":[]}"#)
                 .expect("an older record deserializes");
         assert_eq!(old, started);
+    }
+
+    #[test]
+    fn a_started_record_names_the_directory_the_loop_works_in_and_an_older_one_still_reads() {
+        let started = |cwd: Option<&str>| LoopEvent::Started {
+            model: "m".to_owned(),
+            published_tools: Vec::new(),
+            operations: Vec::new(),
+            withheld: Vec::new(),
+            skills: Vec::new(),
+            agents: Vec::new(),
+            memories: Vec::new(),
+            profiles: Vec::new(),
+            context: Vec::new(),
+            toolchains: Vec::new(),
+            mcp: Vec::new(),
+            credential_source: "named".to_owned(),
+            cwd: cwd.map(ToOwned::to_owned),
+        };
+
+        let named = started(Some("/srv/work/tree"));
+        let encoded = serde_json::to_string(&named).expect("serializes");
+        assert_eq!(
+            encoded,
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"memories":[],"profiles":[],"context":[],"toolchains":[],"mcp":[],"credential_source":"named","cwd":"/srv/work/tree"}"#,
+            "added after every field that was already there, each of which keeps its bytes"
+        );
+        assert_eq!(
+            serde_json::from_str::<LoopEvent>(&encoded).expect("deserializes"),
+            named
+        );
+
+        // An embedder that told the loop nothing writes nothing: the record is the one it wrote
+        // before the field existed.
+        let unnamed = serde_json::to_string(&started(None)).expect("serializes");
+        assert!(!unnamed.contains("cwd"), "{unnamed}");
+
+        // And a record from a loop older than the field reads, as one that named no directory.
+        let old: LoopEvent = serde_json::from_str(
+            r#"{"kind":"started","model":"m","published_tools":[],"withheld":[],"skills":[],"agents":[],"memories":[],"profiles":[],"context":[],"toolchains":[],"mcp":[],"credential_source":"named"}"#,
+        )
+        .expect("an older record deserializes");
+        assert_eq!(old, started(None));
     }
 
     #[test]

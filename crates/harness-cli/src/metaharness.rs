@@ -355,7 +355,11 @@ fn started(value: &Value, version: &str) -> Value {
             .cloned()
             .unwrap_or_else(|| json!("named")),
         "output_style": Value::Null,
-        "cwd": Value::Null,
+        // **From the record, and `null` when it names none.** Not `withheld`'s argument: that
+        // answer follows from the rest of the record, and a directory follows from nothing in it.
+        // A loop older than the field, or one whose embedder named no directory, did not say,
+        // and inventing one here would attest a place nobody saw the run work in.
+        "cwd": value.get("cwd").cloned().unwrap_or(Value::Null),
         "offered_tools": value["published_tools"],
         // **What the run could do**, beside what the model was offered. Under the flat surface the
         // two lists name the same entries; behind three verbs the first is the same on every run,
@@ -801,6 +805,26 @@ mod tests {
             events[0]["harness_version"], "0.1.0",
             "the claim `[]` rests on"
         );
+    }
+
+    #[test]
+    fn the_directory_the_loop_names_is_the_one_the_session_states() {
+        let events = convert_all(
+            r#"{"kind":"started","model":"m","published_tools":[],"cwd":"/srv/work/tree"}"#,
+        );
+        assert_eq!(
+            events[0]["cwd"], "/srv/work/tree",
+            "read from the loop's own record, so a reader attesting where the run worked need not \
+             take the launcher's word for it"
+        );
+    }
+
+    #[test]
+    fn a_record_that_names_no_directory_states_none_rather_than_guessing_one() {
+        // An older loop, or an embedder that told the loop nothing: unlike `withheld`, no build
+        // can answer this from the rest of the record, so the answer stays *not stated*.
+        let events = convert_all(RUN);
+        assert_eq!(events[0]["cwd"], Value::Null);
     }
 
     const PRICED: &str = r#"{"kind":"started","model":"m","published_tools":["tool_search"]}

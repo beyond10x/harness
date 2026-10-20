@@ -155,6 +155,9 @@ impl<O: Write, E: Write> Renderer<O, E> {
             credential_source: _,
             toolchains: _,
             mcp,
+            // Not rendered: the person watching chose the directory and is looking at it. It is
+            // for a reader in another process, which is who the record is for.
+            cwd: _,
         } = event
         else {
             return;
@@ -664,6 +667,7 @@ mod tests {
                     toolchains: Vec::new(),
                     mcp: Vec::new(),
                     credential_source: "named".to_owned(),
+                    cwd: None,
                 },
                 LoopEvent::TextDelta {
                     text: "the ".to_owned(),
@@ -1014,6 +1018,7 @@ mod tests {
             toolchains: Vec::new(),
             mcp: Vec::new(),
             credential_source: "named".to_owned(),
+            cwd: None,
         };
 
         let (out, err) = render(vec![started()], false);
@@ -1235,6 +1240,7 @@ mod tests {
                 toolchains: Vec::new(),
                 mcp: Vec::new(),
                 credential_source: "named".to_owned(),
+                cwd: None,
             }],
             false,
         );

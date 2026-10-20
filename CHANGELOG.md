@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- The `--json` `started` record carries `cwd`: the canonical root the file tools act in, exactly as
+  they resolved `--workspace` (the session's `workspace` now names that same root), so a consumer
+  attesting where a run worked reads it from the loop's own record. It is absent when that root's
+  name is not UTF-8, rather than a lossy rendering naming a directory that does not exist, and
+  absent under `--substrate <socket>`, where writes and executions land in the daemon's
+  `--workspace-id` workspace that no host path names. Under `--substrate-embedded` it is the
+  adopted host tree; a confined `run` child sees that directory at `/workspace`. The metaharness
+  converter writes it to `session.started.cwd`, and `null` when the record has none. Additive:
+  every existing field is unchanged, a record without `cwd` still deserialises, and an embedder
+  that names no directory writes no `cwd`. In the library it is `LoopEvent::Started::cwd` and
+  `LoopConfig::cwd` / `LoopConfig::with_cwd`, both `Option<String>`, defaulted and skipped when
+  absent. An approval checkpoint whose configuration names no directory (one written before the
+  field, or by a caller that named none) resumes whatever directory the resuming run names; one
+  that names a directory resumes only under that directory. The CLI contract
+  (`contracts/cli/b10x-harness/2026-09-18`) is unchanged.
+
 ## [0.15.0] - 2026-10-20
 
 ### Added

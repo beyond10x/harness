@@ -3078,8 +3078,7 @@ fn a_messages_api_error_after_a_text_delta_is_final_through_the_shipped_binary()
 }
 
 #[test]
-fn a_responses_server_error_after_lifecycle_payloads_only_is_retried_through_the_shipped_binary()
-{
+fn a_responses_server_error_after_lifecycle_payloads_only_is_retried_through_the_shipped_binary() {
     // `response.created` and `response.in_progress` have not answered the turn (llm-responses
     // `LIFECYCLE_EVENTS`), so the failure after them is still "before output".
     retried_once_then_completed(
@@ -3204,12 +3203,18 @@ fn a_denied_call_reaches_the_responses_wire_as_a_failed_result_carrying_the_refu
         .iter()
         .find(|entry| entry["type"] == "function_call_output")
         .unwrap_or_else(|| panic!("the refused call's result is replayed: {second}"));
-    let envelope: Value =
-        serde_json::from_str(result["output"].as_str().expect("llm's envelope is a string"))
-            .expect("llm's envelope is JSON");
+    let envelope: Value = serde_json::from_str(
+        result["output"]
+            .as_str()
+            .expect("llm's envelope is a string"),
+    )
+    .expect("llm's envelope is JSON");
     assert_eq!(envelope["ok"], false, "{envelope}");
     let text = envelope["output"].as_str().expect("the refusal as text");
-    assert!(text.contains(DENIED), "the refusal, in the loop's words: {text}");
+    assert!(
+        text.contains(DENIED),
+        "the refusal, in the loop's words: {text}"
+    );
 }
 
 #[test]
@@ -3243,5 +3248,8 @@ fn a_denied_call_reaches_the_messages_wire_as_a_failed_result_carrying_the_refus
         .unwrap_or_else(|| panic!("the refused call's result is replayed: {second}"));
     assert_eq!(result["is_error"], true, "{result}");
     let text = result["content"].as_str().expect("the refusal as text");
-    assert!(text.contains(DENIED), "the refusal, in the loop's words: {text}");
+    assert!(
+        text.contains(DENIED),
+        "the refusal, in the loop's words: {text}"
+    );
 }

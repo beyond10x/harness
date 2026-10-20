@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-app-server"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-cli"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-flow",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-conformance"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-flow",
  "b10x-harness-loop",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-flow"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-wire",
  "serde",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-wire",
  "jsonschema",
@@ -230,7 +230,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-mcp"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-wire",
  "b10x-mcp-client",
@@ -248,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-substrate"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-toolchain",
  "b10x-harness-tools",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-toolchain"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "regex",
  "serde",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-tools"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-toolchain",
  "b10x-harness-wire",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "httpdate",
  "serde",
@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-xtask"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "b10x-harness-cli",
  "b10x-harness-toolchain",
@@ -492,8 +492,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-host"
-version = "0.7.8"
-source = "git+https://github.com/beyond10x/substrate?rev=05695970b069f79e6678f2f02cbd78bbe5fa2a56#05695970b069f79e6678f2f02cbd78bbe5fa2a56"
+version = "0.7.17"
+source = "git+https://github.com/beyond10x/substrate?rev=00fa634cb24eb307946bfe3bbe40142f4b7a469a#00fa634cb24eb307946bfe3bbe40142f4b7a469a"
 dependencies = [
  "async-trait",
  "b10x-substrate-wire",
@@ -520,8 +520,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-wire"
-version = "0.7.8"
-source = "git+https://github.com/beyond10x/substrate?rev=05695970b069f79e6678f2f02cbd78bbe5fa2a56#05695970b069f79e6678f2f02cbd78bbe5fa2a56"
+version = "0.7.17"
+source = "git+https://github.com/beyond10x/substrate?rev=00fa634cb24eb307946bfe3bbe40142f4b7a469a#00fa634cb24eb307946bfe3bbe40142f4b7a469a"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -1056,7 +1056,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3180,7 +3180,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3483,7 +3483,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3541,7 +3541,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3967,10 +3967,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4518,7 +4518,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

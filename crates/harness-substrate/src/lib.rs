@@ -237,6 +237,9 @@ pub(crate) fn confined_exec_input(
         // substrate mounts these read-only and reports them in the observation (its ADR 0010).
         // Empty unless the caller declared a toolchain, which is every existing consumer.
         read_only_roots,
+        // substrate 0.7.17 (ADR 0033) admits single host files read-only. Harness declares none:
+        // a toolchain is a directory root above, and nothing here binds a lone host file.
+        read_only_files: Vec::new(),
         sandbox: ConfinementRequest {
             // The field the wire path never found: substrate refuses an exec whose admitted
             // snapshot is stale, so the run has to name the one it probed.

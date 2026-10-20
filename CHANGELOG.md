@@ -7,6 +7,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-20
+
+### Security
+
+- harness 0.14.0 and earlier, on Substrate below 0.7.13: a child run confined through
+  `harness-substrate` could write the read-only workspace and outside it through inherited
+  descriptors; fixed by Substrate 0.7.13. The embedded and socket backends pin
+  `b10x-substrate-host` and `b10x-substrate-wire` to Substrate 0.7.17 (`00fa634c`), which carries
+  the fix. `confined_exec_input` sets the `read_only_files` field Substrate 0.7.17 added (ADR 0033,
+  single host file admitted read-only); harness declares none.
+
 ## [0.14.0] - 2026-10-20
 
 ### Added

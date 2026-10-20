@@ -16,14 +16,15 @@ workspace = true
 
 [dependencies]
 harness-wire = { workspace = true }
-nix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tool-code-editor = { workspace = true }
 tool-fs = { workspace = true }
+tool-process = { workspace = true }
 tool-search = { workspace = true }
 tool-toolchain = { workspace = true }
 
 [dev-dependencies]
 harness-loop = { workspace = true }
+nix = { workspace = true }
 tempfile = { workspace = true }

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-20T08:29:28Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-consumes-tools-crates",
+  "kind": "story",
+  "revision": 41,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-tools-1-pass-1",
+    "review": "review-result:adversary-tools-1-pass-1",
+    "outcome": "fixed"
+  }
+}

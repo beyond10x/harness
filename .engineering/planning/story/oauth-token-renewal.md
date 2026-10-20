@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:oauth-token-renewal
 kind: story
-status: proposed
+status: rejected
 title: A run outlives the token it started with
 relations:
 - derived_from: epic:subscription-auth-finished
@@ -14,9 +14,10 @@ scope:
   path: crates/harness-cli/src/providers.rs
 - confidence: inferred
   path: crates/harness-credential
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:31Z", actor: "human:timo", revision: 4, imported: true}
+- {from: "proposed", to: "rejected", at: "2026-10-20T05:54:32Z", actor: "human:timo", revision: 7}
 ---
 ## Evidence
 
@@ -76,3 +77,15 @@ owner or by the run — or stops with a message that names the credential and th
 expired, before the turn is paid for. `ROADMAP.md`'s Phase 4 renewal bullet states which was chosen
 and why, and is corrected where it now says nothing here calls an authorization server: as of
 2026-08-30 something does.
+
+## Rejected 2026-10-20
+
+Surface gone and subject covered by llm. `crates/harness-credential` was deleted when harness
+moved onto llm 0.8.0 (`story:harness-builds-on-llm-0-7`, merged as `8e5c17a9`). llm owns the
+subscription token's lifetime: it re-reads the source on every request (parity row C3,
+`llm-credentials/src/codex.rs:83`, test `a_codex_login_resolves_its_access_token`), renews a due
+Codex login (C9, `CodexAuthFile::renew`, `llm-credentials/src/codex/renewal.rs:392`) inside the
+15-minute margin (C19, `is_due`, `renewal.rs:721`), and the bridge reports the renewal as
+`credential-renewed` (`crates/harness-cli/src/llm_port.rs`, `renew_codex_login`). Decided by
+session `adr-changes` under the owner's exception 5: "move each of the 4 stories to rejected only
+where llm covers its subject (cite the llm parity row or test)".

@@ -8,7 +8,14 @@ summary: 'Filed from adversary pass 1 of wave llm-1: 1 miss in 8 suite runs on a
 relations:
 - serves: vision:b10x-owns-its-loop
 - derived_from: story:bridge-interrupt-race-pinned
-revision: 2
+scope:
+- confidence: cited
+  path: STATUS.md
+- confidence: cited
+  path: crates/harness-app-server/src/lib.rs
+- confidence: cited
+  path: crates/harness-cli/tests/bridge_mode.rs
+revision: 5
 ---
 ## Context
 

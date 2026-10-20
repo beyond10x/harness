@@ -21,7 +21,7 @@ foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrat
 [llm](https://github.com/beyond10x/llm) for every model call and
 [tools](https://github.com/beyond10x/tools) for the tool contracts and default implementations —
 each pinned by git tag or exact revision, never by a sibling path, and on nothing that could embed
-it.** At `0.15.0` those pins are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`,
+it.** At `0.15.1` those pins are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`,
 package `=0.7.17`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.8.1` (`3eb94989`)
 and tools tag `0.2.0` (`60d4d0e3`), all in `Cargo.toml` except substrate's. Substrate and mcp are
 pinned by revision, each the commit a release tag points at; llm and tools by tag, which
@@ -39,7 +39,7 @@ the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.15.0` (2026-10-20).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.15.1` (2026-10-20).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |

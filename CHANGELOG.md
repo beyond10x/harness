@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-20
+
 ### Added
 
 - The `--json` `started` record carries `cwd`: the canonical root the file tools act in, exactly as

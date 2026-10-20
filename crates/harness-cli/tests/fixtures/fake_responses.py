@@ -425,8 +425,9 @@ class Handler(BaseHTTPRequestHandler):
             # run breaks on the wire with spend already on the meter, which is the case a session
             # has to keep the figures of.
             #
-            # 400 rather than a 5xx or a 429: `harness_http::status_error` maps it to `Refused` and
-            # not retriable, so the wire gives up on the first request and this costs no wall clock.
+            # 400 rather than a 5xx or a 429: the client (`llm-http` since llm 0.7.0,
+            # `harness_http::status_error` before it) maps it to `Refused` and not retriable, so
+            # the wire gives up on the first request and this costs no wall clock.
             # A retriable status reaches the same failure after sleeping 1 + 2 + 4 s of back-off.
             if has_function_output(body):
                 self._send_json(
@@ -623,8 +624,9 @@ class Handler(BaseHTTPRequestHandler):
             # the flow aborts rather than recording a network blip as a failure.
             #
             # 400 rather than a closed socket or a 5xx, for the reason `fails-after-turn` gives:
-            # `harness_http::status_error` maps it to `Refused` and not retriable, so the failure
-            # lands on the first request and costs no wall clock, while a stream cut mid-event is
+            # the client (`llm-http` since llm 0.7.0, `harness_http::status_error` before it)
+            # maps it to `Refused` and not retriable, so the failure lands on the first request
+            # and costs no wall clock, while a stream cut mid-event is
             # a truncation the loop retries.
             if Handler.turn_count >= 2:
                 self._send_json(

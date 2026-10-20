@@ -40,8 +40,10 @@ const ORIGINATOR: &str = "b10x-harness";
 /// The output bound a Messages turn is sent when the run named none, as `harness-messages` did.
 const DEFAULT_MESSAGES_MAX_OUTPUT_TOKENS: u64 = 8192;
 /// The reasoning efforts a binding declares. `llm` refuses an effort its binding does not
-/// declare; Harness passed any string through.
-const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
+/// declare; Harness passed any string through, and `--reasoning-effort` still takes any string.
+/// `max` is sent as it is on Messages and as the highest Responses effort, `xhigh`
+/// (`llm_core::controls::wire_effort`).
+const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 /// How often the calling thread looks at Harness's cancellation flag while a turn runs.
 const CANCEL_POLL: Duration = Duration::from_millis(10);
 /// Connect bound, as Harness's `Settings::streaming`.
@@ -263,13 +265,11 @@ fn binding(target: &Target<'_>, source: Option<&Source>) -> Result<Binding, Stri
             AuthKind::ApiKey,
             Some(ApiKeyHeader::new("x-api-key").map_err(|error| error.message)?),
         ),
+        // `llm` adds the Messages route's own subscription presentation to this kind — the OAuth
+        // beta header and the client preamble — and serves it over Messages only; on Responses a
+        // subscription token is the plain bearer that route was measured with.
         (Protocol::Messages, Some(Presentation::Subscription)) => {
-            return Err(
-                "a subscription token on the Messages wire needs the OAuth presentation llm does \
-                 not offer yet (llm parity gaps C8, M5, M6; story:anthropic-access); use an API \
-                 key on this wire"
-                    .to_owned(),
-            );
+            (AuthKind::SubscriptionOauth, None)
         }
         (_, Some(_)) => (AuthKind::Bearer, None),
     };
@@ -292,8 +292,10 @@ fn binding(target: &Target<'_>, source: Option<&Source>) -> Result<Binding, Stri
             .iter()
             .map(|&effort| effort.to_owned())
             .collect(),
-        context_window: target.context_window,
-        max_output_tokens: max_output_tokens.min(target.context_window),
+        ..Capabilities::text(
+            target.context_window,
+            max_output_tokens.min(target.context_window),
+        )
     };
     let model = id(target.model)?;
     BindingDocument::new(
@@ -521,6 +523,9 @@ fn to_llm_request(
                 llm_core::ToolChoice::Named(tool_name(name.as_str())?)
             }
         },
+        // Harness's turn carries no thinking, parallel-tool-call or hint control to map; the
+        // empty value is the pre-0.7.0 turn exactly.
+        controls: llm_core::Controls::default(),
     })
 }
 
@@ -683,10 +688,37 @@ mod tests {
     }
 
     #[test]
-    fn a_subscription_token_on_the_messages_wire_is_refused_naming_the_parity_gap() {
+    fn a_subscription_token_on_the_messages_wire_is_llms_subscription_oauth_account() {
+        // llm 0.7.0 presents `AuthKind::SubscriptionOauth` on Messages — a bearer plus the OAuth
+        // beta header and the client preamble, billed as a subscription — where the spike bridge
+        // refused the token (story:harness-builds-on-llm-0-7).
         let source = Source::file(Path::new("/named/by/the/caller"), None).expect("a source");
-        let error = binding(&target(Protocol::Messages), Some(&source)).expect_err("refused");
-        assert!(error.contains("M5"), "{error}");
+        let binding = binding(&target(Protocol::Messages), Some(&source)).expect("binds");
+        let account = &binding.declaration().account;
+        assert_eq!(account.auth_kind, AuthKind::SubscriptionOauth);
+        assert_eq!(account.billing_kind, BillingKind::Subscription);
+        assert!(account.api_key_header.is_none());
+    }
+
+    #[test]
+    fn a_subscription_token_on_the_responses_wire_stays_a_plain_bearer() {
+        // llm 0.7.0 serves `SubscriptionOauth` over Messages only (`llm-providers` `bind()`), so
+        // the Codex route keeps what was measured on it: a plain bearer, billed as a subscription.
+        let source = Source::environment("TOKEN", None).expect("a source");
+        let binding = binding(&target(Protocol::Responses), Some(&source)).expect("binds");
+        let account = &binding.declaration().account;
+        assert_eq!(account.auth_kind, AuthKind::Bearer);
+        assert_eq!(account.billing_kind, BillingKind::Subscription);
+    }
+
+    #[test]
+    fn the_binding_declares_the_max_effort_the_command_line_accepts() {
+        // `--reasoning-effort` is a free string, so `max` reaches this port, and llm refuses an
+        // effort the binding does not declare. 0.7.0 sends `max` as it is on Messages and as the
+        // highest Responses effort, `xhigh` (`llm_core::controls::wire_effort`).
+        let binding = binding(&target(Protocol::Messages), None).expect("binds");
+        let efforts = &binding.declaration().serving.capabilities.reasoning_efforts;
+        assert!(efforts.iter().any(|effort| effort == "max"), "{efforts:?}");
     }
 
     #[test]

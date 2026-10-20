@@ -334,7 +334,7 @@ fn demanded_by(
     let mut supplied: BTreeSet<String> = BTreeSet::new();
     loop {
         let output = invoke(&with(document, command, values, &supplied), machine);
-        if matches!(output.status, Some(0 | 2)) {
+        if reached_its_work(&output) {
             break;
         }
         let named: BTreeSet<String> = flags_named_in(document, command, &output.stderr)
@@ -357,13 +357,31 @@ fn demanded_by(
         let mut without = demanded.clone();
         without.remove(candidate);
         let output = invoke(&with(document, command, values, &without), machine);
-        if matches!(output.status, Some(0 | 2)) {
+        if reached_its_work(&output) {
             demanded = without;
         } else if !flags_named_in(document, command, &output.stderr).contains(candidate) {
             unnamed.insert(candidate.clone());
         }
     }
     Demand::Ran { demanded, unnamed }
+}
+
+/// llm's refusal of a turn held to a tool that ended in prose, as the binary prints it.
+const HELD_TURN_REFUSED: &str = "model terminal reason contradicts its tool obligations";
+
+/// Whether an invocation got past its command line and into its work.
+///
+/// Exit `0` and exit `2` are the documented outcomes of a run that reached the model; exit `1` is
+/// a refusal, before the run — which is what this file measures — or on the wire. One wire
+/// refusal is reached by the walk every case here drives: the flow's step is held to `answer`
+/// after its one nudge, the `text` scenario answers that turn in prose too, and llm refuses a
+/// turn held to a tool that ends in prose as `Protocol` [`HELD_TURN_REFUSED`] (llm parity row
+/// R45; story:harness-builds-on-llm-0-7), where Harness's own wire let the walk stop
+/// `unstructured` with exit 2. That refusal names the model's answer and no flag, so it counts as
+/// the run having reached its work — which is what it did.
+fn reached_its_work(output: &Output) -> bool {
+    matches!(output.status, Some(0 | 2))
+        || (output.status == Some(1) && output.stderr.contains(HELD_TURN_REFUSED))
 }
 
 struct Fixture {
@@ -565,11 +583,11 @@ fn measure_demands(
 ///
 /// Exit `2` counts as having run: it is the documented outcome for a walk that reached the model
 /// but did not produce every promised answer. The distinction this measurement needs is between a
-/// pre-run refusal (`1`) and a command which reached its work (`0` or `2`). In particular,
+/// pre-run refusal (`1`) and a command which reached its work (`0` or `2`, or the one exit `1`
+/// that is the model's and not the command line's — see [`reached_its_work`]). In particular,
 /// `workflow run` now applies profiles and reaches the endpoint instead of panicking before the
 /// walk, so its post-clap requirements are measured exactly like `run`'s.
 #[test]
-#[ignore = "llm parity gap (unlisted): llm-core refuses a turn that ends in prose under a forced tool choice as Protocol; this walk's step answers in prose"]
 fn the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not() {
     let document = pinned_document();
     let demanded = section(&pinned_readme(), DEMANDED);

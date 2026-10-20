@@ -74,13 +74,13 @@ b10x-mcp-client = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd
 b10x-mcp-config = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 b10x-mcp-types = { git = "https://github.com/beyond10x/mcp", rev = "bf7f9415fbd8a28abff789d7d39d2584a8f6d2b2" }
 
-llm-blocking = { package = "b10x-llm-blocking", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-credentials = { package = "b10x-llm-credentials", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-http = { package = "b10x-llm-http", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-messages = { package = "b10x-llm-messages", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-providers = { package = "b10x-llm-providers", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
-llm-responses = { package = "b10x-llm-responses", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-blocking = { package = "b10x-llm-blocking", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-credentials = { package = "b10x-llm-credentials", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-http = { package = "b10x-llm-http", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-messages = { package = "b10x-llm-messages", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-providers = { package = "b10x-llm-providers", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
+llm-responses = { package = "b10x-llm-responses", git = "https://github.com/beyond10x/llm", tag = "0.7.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

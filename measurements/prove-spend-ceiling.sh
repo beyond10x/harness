@@ -36,7 +36,7 @@ scratch="$(mktemp -d)"
 announce="$(mktemp)"
 trap 'kill "${emulator:-}" 2>/dev/null || true; rm -rf "$scratch" "$announce"' EXIT
 
-python3 "$root/crates/harness-messages/tests/fixtures/fake_messages.py" \
+python3 "$root/crates/harness-cli/tests/fixtures/fake_messages.py" \
   --scenario text >"$announce" 2>/dev/null &
 emulator=$!
 for _ in $(seq 1 100); do [ -s "$announce" ] && break; sleep 0.1; done

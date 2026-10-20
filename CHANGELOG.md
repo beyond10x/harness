@@ -16,6 +16,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **Every model call goes through `llm`'s client crates**, pinned by tag `0.7.0`
+  (`b10x-llm-core`, `-blocking`, `-credentials`, `-http`, `-messages`, `-providers`,
+  `-responses`; atlas ADR 0097). `crates/harness-cli/src/llm_port.rs` is the one module where
+  Harness's values meet `llm`'s; compaction, mid-stream retry, the run ledger and approvals stay
+  here. What a run sees: a subscription token (`--oauth-token-file`, `--oauth-token-env`) on
+  `anthropic-messages` is presented as `llm`'s `AuthKind::SubscriptionOauth` — `authorization:
+  Bearer` plus `anthropic-beta: oauth-2025-04-20`, `llm`'s client preamble as the first `system`
+  block with the instruction after it, billed as a subscription — where the spike bridge refused
+  it; on `openai-responses` `llm` 0.7.0 sends a subscription token as a plain bearer, because it
+  admits `SubscriptionOauth` over Messages only. `--reasoning-effort max` is declared to `llm`,
+  which the Messages wire sends as `max` and the Responses wire as its highest, `xhigh`. Two
+  places `llm` is stricter than the former wires: a turn held to `answer` — the one a prose-ending
+  run is given after its nudge — that ends in prose again is refused on the wire (`Protocol: model
+  terminal reason contradicts its tool obligations`, llm parity row R45), so such a run exits 1
+  with the refusal on stderr where it used to stop `unstructured` and exit 2, and still never
+  exits 0 over prose; and on `anthropic-messages` the inclusive input total is stated only when
+  `input_tokens`, `cache_read_input_tokens` and `cache_creation_input_tokens` are all reported,
+  so a stream that omits one leaves the turn's usage and cost unknown rather than summing the
+  rest (llm parity row M25).
+- `rust-version` 1.97 to 1.98, which `llm` requires; the MSRV job in `.github/workflows/gate.yml`
+  builds on `1.98.0`.
+- The gate no longer runs the in-process HTTP boundary guard: the crate it fenced is gone.
 - Rebuild public documentation as an independent Rust workspace with static HTML/CSS, explicit
   navigation, checked local links and anchors, and exact-source artifact provenance. Refresh the
   landing page and getting-started guidance; keep live delivery on its existing route pending
@@ -25,6 +47,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   twice, and record unresolved policy choices as explicit blockers.
 - Run the home-path privacy check from Rust, retaining index and working-tree coverage and
   a content-pinned exception for the historical evidence extracted from the former journal.
+
+### Removed
+
+- `crates/harness-http`, `crates/harness-responses`, `crates/harness-messages` and
+  `crates/harness-credential`, with their `contract.rs`, `provider_emulated.rs`, `transport.rs` and
+  `summary_request.rs` suites. `contracts/provider-wires/` stays byte for byte and
+  `cargo xtask provider-contracts` still checks every released version against its fixtures; the
+  Rust half of each provider-wire contract is `llm`'s. The two emulators moved to
+  `crates/harness-cli/tests/fixtures/`.
 
 ### Fixed
 

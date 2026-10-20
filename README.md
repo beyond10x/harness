@@ -73,7 +73,6 @@ added there and not here is a documentation defect, not a second gate.
 | website contract | `cargo xtask website-contract` |
 | toolchain specs | `cargo xtask toolchain-specs --self-test`, then `cargo xtask toolchain-specs` |
 | generated toolchain docs | `cargo xtask toolchain-docs --check` |
-| HTTP boundary guard | in-process check that `harness-http` carries no vendor name |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
 | absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
 | strict rustdoc | `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked` |
@@ -313,7 +312,7 @@ unless a run asks for it.
 
 | what | how it is spelled | what it is |
 |---|---|---|
-| structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it **and the turn that ask opens is held to that tool at the provider** — one turn per run, never any other; if it still does not, the run stops `unstructured` and exits 2 — never a success status over prose |
+| structured output | `--output-schema <FILE>` | the schema is published as a tool named `answer` that the model calls to finish; its arguments are the answer. **Stdout is that JSON and nothing else**, written once when the run completes, so the command composes — except under `--json`, where stdout is the event record and carries no bare answer line: the answer is then the **last** `answered` event before a `finished` whose `stop.kind` is `completed`, because a `stop` hook can withdraw an earlier one and the run answers again. A model that ends in prose is told once to call it **and the turn that ask opens is held to that tool at the provider** — one turn per run, never any other; if it still does not, `llm` refuses that held turn on the wire (`model terminal reason contradicts its tool obligations`, llm parity row R45) and the run exits 1 with the refusal on stderr — never a success status over prose |
 | sub-agents | `--delegate` (`--delegate-turns N`, default 20; `--delegate-parallel N`, default 4) | a tool named `delegate`: a second loop runs to completion inside the tool call over a **fresh** conversation, with the same tools, the same approver, the same hooks, the same cancel and a share of the parent's remaining budget. The parent reads one result — `{stop, turns, text}` — never the child's transcript. Depth one: a delegate cannot delegate. **Neighbouring `delegate` calls of one turn run side by side** — each child gets a fork of the model and tool ports, while the approver, the hooks and the record stay single and are asked from the run's own thread. `--delegate-parallel 1` runs them one at a time |
 | skills | `--skills-dir <DIR>` or `--plugin-dir <DIR>` | a tool named `skill` returns one operator-supplied instruction document by name. Descriptions are present in the standing instruction; bounded bodies are loaded before the run and returned only on demand. The loop performs no filesystem discovery and a delegate receives the same immutable set. |
 | memories | `--memory-dir <DIR>`, repeatable | a **read-only** tool named `recall` returns one caller-supplied memory record by id; the ids are a schema `enum` over the active records. Summaries are present in the standing instruction; bodies are returned only on demand. `Memories` is the exact sibling of `Skills` — the loop walks no directory and reads no file, and a delegate observes its parent's vault entry for entry. **This flag is the whole of how a memory reaches a run**: no default vault, no `$XDG` location, no environment variable, no walk beside the workspace, no `--plugin-dir` arm, no profile key. Absent, no `recall` tool is published. A record's `trust` admits exactly one value, `unreviewed`; `status` is `active`/`rejected`/`superseded` and nothing is deleted. A malformed or partly-invalid vault refuses the **whole** vault by name rather than yielding a smaller one. **There is no memory-writing tool and no writing flag** — the shipped toolset is read-only, and a writer would be its own change with its own gate. |
@@ -430,14 +429,14 @@ are refused by name rather than answered with a silent success.
 one function; below it the loop holds a `ModelPort` and cannot tell which projection it got, which
 is the whole reason a second wire cost a second projection instead of a second loop.
 
-A wire crate is now **only** the projection — the request body, the stream decoder, the endpoint's
-path and its header names. Everything under that is
-[`crates/harness-http`](crates/harness-http/src/lib.rs): bounded SSE framing, the retry rule, the
-back-off, the witnessed sink that stops a turn being resent once a person has read part of it, and
-the HTTP status mapping. That half was written for the first wire and copied unchanged by the
-second, which is what proved it was transport-shaped rather than vendor-shaped. The two wires
-configure it identically but for one thing, and that one thing is checked: the first route ends its
-stream with `data: [DONE]` and the second has no sentinel at all.
+Both wires are `llm`'s client crates since llm `0.7.0` — `b10x-llm-responses` and
+`b10x-llm-messages` over `b10x-llm-http`, with the credential presentation in
+`b10x-llm-providers` — and [`crates/harness-cli/src/llm_port.rs`](crates/harness-cli/src/llm_port.rs)
+is the one module where Harness's neutral values meet theirs: it translates a turn, a stream event,
+an outcome and an error, and bridges a blocking loop whose sink is not `Send` onto an async client.
+The request body, the stream decoder, the SSE framing, the retry rule, the status mapping and every
+header name are `llm`'s (atlas ADR 0097). Compaction, the mid-stream retry, the run ledger and the
+approvals stay here, because they are loop features and `llm` is not an agent loop.
 
 Turns are **stateless**: nothing is retained on the far side and the whole conversation is replayed
 each time. Reasoning — `reasoning` items on one wire, `thinking` and `redacted_thinking` blocks on
@@ -451,23 +450,18 @@ deltas on one wire, `thinking_delta` blocks on the other — reaches a reader on
 arrives, so a long think is not a silent minute. It is shown and let go: what crosses a tool round
 trip, and what a session stores, is the opaque item, never the streamed text.
 
-Both wires are exercised by the **same** loop suite over a real socket: the same case names against
-the same scenario names, with a test that fails if either side grows a case the other lacks. A
-second comparison covers the half beneath them —
-[`crates/harness-messages/tests/transport.rs`](crates/harness-messages/tests/transport.rs) reads
-what each wire asks of `harness-http` and fails on any difference but the framing, so a wire that
-quietly doubled its attempts or halved a timeout is caught by a test rather than by a person
-reading two files side by side.
+Both wires are exercised by the **same** end-to-end suite over a real socket
+([`crates/harness-cli/tests/end_to_end.rs`](crates/harness-cli/tests/end_to_end.rs)), against two
+deterministic emulators in [`crates/harness-cli/tests/fixtures/`](crates/harness-cli/tests/fixtures/)
+whose scenario names are the same on both sides. What each wire asks of its transport is compared
+in `llm`'s own tests and recorded in `llm`'s parity table (`llm/docs/harness-parity.md`), not in a
+comparison kept here.
 
 ## Layout
 
 | crate | owns |
 |---|---|
 | `crates/harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`. No I/O, no clock, no vendor field name. It defines the credential types; it reads and sends none |
-| `crates/harness-credential` | credential sources that read exactly what a caller pointed them at. Nothing vendor-shaped: how a fetched credential is *presented* belongs to the wire |
-| `crates/harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST`. No vendor name, field name or header name |
-| `crates/harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers |
-| `crates/harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
 | `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
@@ -475,7 +469,7 @@ reading two files side by side.
 | `crates/harness-toolchain` | versioned declarative toolchain providers — Rust, Go, Taskfile, npm, Yarn and explicitly loaded operator documents — with read-only discovery and a typed argv compiler |
 | `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
 | `crates/harness-app-server` | the Codex-format JSON-RPC server, and the wire-backed `ToolPort` |
-| `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block |
+| `crates/harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts, the environment block, and `llm_port.rs`: the model port over `llm`'s client crates and the credential sources that feed them |
 
 | path | holds |
 |---|---|
@@ -490,15 +484,14 @@ reading two files side by side.
 
 Every contract pin is checked **from both directions** — an independent checker verifies the
 manifest against its fixtures, and a Rust test in the owning crate verifies the code produces those
-bytes or holds those constants. The provider and CLI checkers run through `cargo xtask`; the
-app-server profile checker remains the existing Python program. Neither half is sufficient alone.
+bytes or holds those constants — for the provider wires that crate is `llm`'s since llm `0.7.0`.
+The provider and CLI checkers run through `cargo xtask`; the app-server profile checker remains the
+existing Python program. Neither half is sufficient alone.
 
 These suites drive real processes over real sockets and pipes:
 
 | suite | drives |
 |---|---|
-| `crates/harness-responses/tests/provider_emulated.rs` | the first wire's client and the loop against a local HTTP endpoint |
-| `crates/harness-messages/tests/provider_emulated.rs` | the same suite, pointed at the second wire |
 | `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace: both surfaces, both wires, sessions, resume, `chat`, the approver and a refused command line |
 | `crates/harness-cli/tests/bridge_mode.rs` | the shipped binary driven as a bridge would drive it |
 | `crates/harness-cli/tests/workflow.rs` | the shipped binary walking a flow document: one session per section, a retreat to its bound, and a hook refusing a transition |

@@ -635,12 +635,13 @@ fn the_binary_drives_the_second_wire_and_calls_a_real_tool_through_it() {
 }
 
 #[test]
-#[ignore = "llm parity gap (unlisted, beside M30): llm-messages refuses a `signature_delta` into a thinking block whose start carried no `signature` field; Harness folded it"]
 fn a_thinking_round_trip_completes_through_the_shipped_binary() {
     // The second wire's opaque item, all the way out and back through the real binary: the
     // `reasoning` scenario answers turn one with a `thinking` block and a tool call, and only
     // completes turn two if the block was replayed byte for byte at the head of the assistant
-    // message. A wire that dropped it or reordered it ends here instead.
+    // message. A wire that dropped it or reordered it ends here instead. The block opens with no
+    // `signature` field and is signed by its `signature_delta`: llm 0.7.0 accepts that shape
+    // (llm parity row M47) where 0.1.7 refused it (story:harness-builds-on-llm-0-7).
     let fixture = Fixture::messages("reasoning");
     let workspace = workspace();
     let output = run_against(
@@ -657,26 +658,26 @@ fn a_thinking_round_trip_completes_through_the_shipped_binary() {
     );
     assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
 
-    let usage: Vec<Value> = output
-        .stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|event| event["kind"] == "usage")
-        .collect();
-    assert!(
-        !usage.is_empty(),
-        "no usage reached the record: {}",
-        output.stdout
-    );
-    // 42 fresh plus 7 read from cache. This wire reports the two disjointly and the projection
-    // sums them, because the neutral `input_tokens` is the whole and cached is a part of it — a
-    // run that reported 42 here would price every cached turn low.
-    assert_eq!(usage[0]["input_tokens"], 49, "{}", usage[0]);
+    let events = events(&output);
+    let kinds = kinds(&events);
     assert_eq!(
-        usage[0]["cached_input_tokens"],
-        Value::from(7),
-        "{}",
-        usage[0]
+        kinds.iter().filter(|kind| **kind == "turn-started").count(),
+        2,
+        "the turn that thought and called, and the one that replayed the block: {kinds:?}"
+    );
+    assert_eq!(
+        events.last().expect("a terminal event")["stop"],
+        serde_json::json!({"kind": "completed"}),
+        "{kinds:?}"
+    );
+    // This wire reports its input figures disjointly — 42 fresh, 7 read from cache — and the
+    // emulator names no cache write. llm parity row M25: llm states the inclusive input total only
+    // when all three parts are reported, where Harness summed the two it had. The total is
+    // unknown, so no usage reaches the record: absent, never zero
+    // (story:harness-builds-on-llm-0-7).
+    assert!(
+        !kinds.contains(&"usage"),
+        "a total nobody reported must not be filed: {kinds:?}"
     );
 }
 
@@ -1842,11 +1843,15 @@ fn an_output_schema_that_is_not_an_object_schema_refuses_the_run_before_anything
 }
 
 #[test]
-#[ignore = "llm parity gap (unlisted): llm-core refuses a turn that ends in prose under a forced tool choice as Protocol; Harness read it as a prose turn"]
 fn a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer() {
     // The failure that must not be silent: a consumer that piped stdout to a JSON reader and got
-    // prose with exit 0 would read the prose as the answer. One nudge is spent, and then the run
-    // stops `unstructured` and exits 2 — the same status every other stop-without-an-answer has.
+    // prose with exit 0 would read the prose as the answer. One nudge is spent, and the turn it
+    // opens is held to `answer` at the provider. llm parity row R45: llm refuses a turn held to a
+    // tool that ends in prose — `Protocol`, "model terminal reason contradicts its tool
+    // obligations", never retried — where Harness's own wire returned the prose turn and the loop
+    // stopped `unstructured` with exit 2. The run now ends on the wire, with the status
+    // `README.md` documents for a run the harness could not finish, and still never a success
+    // status over prose (story:harness-builds-on-llm-0-7).
     let fixture = Fixture::start("answer-prose");
     let workspace = workspace();
     let dir = tempfile::tempdir().expect("a temporary directory");
@@ -1865,12 +1870,20 @@ fn a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer() {
         workspace.path(),
     );
 
-    assert_eq!(output.status, Some(2), "stderr: {}", output.stderr);
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
     assert_eq!(
         output.stdout, "",
         "nothing at all on stdout: a run with no structured answer has nothing to compose with"
     );
-    assert!(output.stderr.contains("Unstructured"), "{}", output.stderr);
+    // The nudge was spent first, and then llm's refusal of the held turn names itself.
+    assert!(output.stderr.contains("answer-nudged"), "{}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("model terminal reason contradicts its tool obligations"),
+        "llm parity row R45, by name: {}",
+        output.stderr
+    );
     // The prose is still shown — as progress, on stderr, where it cannot be read as the answer.
     assert!(
         output.stderr.contains("The readme says hello harness."),
@@ -1887,10 +1900,40 @@ fn a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer() {
         ],
         workspace.path(),
     );
+    assert_eq!(recorded.status, Some(1), "stdout: {}", recorded.stdout);
     let events = events(&recorded);
+    let kinds = kinds(&events);
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "warning" && event["code"] == "answer-nudged"),
+        "the one nudge is in the record: {kinds:?}"
+    );
     assert_eq!(
-        events.last().expect("a terminal event")["stop"],
-        serde_json::json!({"kind": "unstructured", "asked_again": 1})
+        kinds.iter().filter(|kind| **kind == "turn-started").count(),
+        2,
+        "the turn that answered in prose and the held one llm refused: {kinds:?}"
+    );
+    let held_turn = kinds
+        .iter()
+        .rposition(|kind| *kind == "turn-started")
+        .expect("a held turn");
+    assert!(
+        kinds[held_turn..].contains(&"text-delta"),
+        "the held turn's prose still reached the record as it arrived (llm parity row R30): \
+         {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"finished"),
+        "a run that broke must not read as one that ended: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"answered"),
+        "no answer was given, so none is recorded: {kinds:?}"
+    );
+    assert!(
+        !kinds.contains(&"refused"),
+        "`refused` is for a run that never started, and this one did: {kinds:?}"
     );
 }
 

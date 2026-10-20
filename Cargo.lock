@@ -186,7 +186,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -243,7 +243,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -314,8 +314,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-blocking"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "tokio",
@@ -323,8 +323,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-core"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "serde",
  "serde_json",
@@ -334,8 +334,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-credentials"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -352,8 +352,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-http"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "bytes",
@@ -366,8 +366,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-messages"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -381,8 +381,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-providers"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -391,14 +391,15 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
  "url",
  "zeroize",
 ]
 
 [[package]]
 name = "b10x-llm-responses"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.7.0#75455f32a2a2ad728f307daf943b12a42a29e114"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -450,7 +451,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
- "toml",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -3966,7 +3967,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -4109,10 +4110,23 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.6+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
+dependencies = [
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -4120,6 +4134,15 @@ name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
 dependencies = [
  "serde_core",
 ]

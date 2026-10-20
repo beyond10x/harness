@@ -40,7 +40,7 @@ python3 "$root/measurements/fixtures/make-compaction-workspace.py" "$workspace" 
 # detached with its announcement in a file, because a pipe held open by a still-running server
 # keeps every reader of this script's stdout waiting for it.
 announce="$(mktemp)"
-python3 "$root/crates/harness-messages/tests/fixtures/fake_messages.py" \
+python3 "$root/crates/harness-cli/tests/fixtures/fake_messages.py" \
   --scenario "$scenario" >"$announce" 2>/dev/null &
 emulator=$!
 trap 'kill "$emulator" 2>/dev/null || true; rm -f "$announce"' EXIT

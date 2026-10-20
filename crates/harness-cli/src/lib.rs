@@ -11,7 +11,6 @@ pub mod approve;
 pub mod contract;
 pub mod environment;
 pub mod hooks;
-mod llm_port;
 pub mod memories;
 mod metaharness;
 pub mod profile;
@@ -29,6 +28,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use harness_app_server::ServerConfig;
+use harness_llm as llm_port;
 use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, ContextCacheClass, ContextKind, ContextLayer,
     ContextPackage, ContextTrust, DenyAll, LoopCancel, LoopConfig, LoopStop, RunLedger,
@@ -254,10 +254,10 @@ impl Wire {
     }
 
     /// The `llm` protocol this wire is.
-    fn protocol(self) -> llm_core::Protocol {
+    fn protocol(self) -> llm_port::Protocol {
         match self {
-            Self::OpenaiResponses => llm_core::Protocol::Responses,
-            Self::AnthropicMessages => llm_core::Protocol::Messages,
+            Self::OpenaiResponses => llm_port::Protocol::Responses,
+            Self::AnthropicMessages => llm_port::Protocol::Messages,
         }
     }
 }
@@ -1687,7 +1687,9 @@ fn model_client(
         // too; one that did not gets the binding's declared number rather than a silent absence.
         max_output_tokens: max_output_tokens_per_turn,
     };
-    llm_port::client(&target, credential.source()?, cancel)
+    // The port is `Send` for a consumer that holds it across threads; the loop here does not.
+    let port: Box<dyn ModelPort> = llm_port::client(&target, credential.source()?, cancel)?;
+    Ok(port)
 }
 
 fn app_server_command(options: &AppServerOptions) -> Result<(), String> {

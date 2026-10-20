@@ -39,7 +39,7 @@ fn validate(kind: &'static str, value: &str) -> Result<(), InvalidId> {
 // That pattern is **the OpenAI Responses wire's**, verified there and nowhere else. Encoding it in
 // this crate would make the neutral layer vendor-shaped on the strength of one provider, and would
 // forbid a name a future wire may well accept. So the rule lives in the Responses wire — the
-// former `harness-responses`, and `llm-responses` behind `crates/harness-cli/src/llm_port.rs`
+// former `harness-responses`, and `llm-responses` behind `crates/harness-llm`
 // since llm 0.7.0 — which refuses an unpublishable name **by name and before the request goes
 // out**: a local refusal naming the tool and the pattern, rather than a 400 from the far side of
 // a network call.

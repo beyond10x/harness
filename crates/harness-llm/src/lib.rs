@@ -1,10 +1,16 @@
+#![forbid(unsafe_code)]
+
 //! The model port over `llm`'s client crates, and the credential sources that feed them.
 //!
 //! The one place Harness's neutral values (`harness_wire`) meet `llm_core`'s. Everything vendor
 //! shaped — request bodies, stream decoding, status classes, credential presentation, Codex login
-//! renewal — is `llm`'s; this module only translates values and bridges two differences of
+//! renewal — is `llm`'s; this crate only translates values and bridges two differences of
 //! execution model: Harness's loop is blocking and its sink is not `Send`, and its cancellation
 //! token is a flag rather than a waker.
+//!
+//! `llm_credentials`, `Protocol` and `BoxFuture` are re-exported so a consumer names the
+//! `SecretResolver` it hands [`Source::resolver`], the protocol [`Target`] carries and the future
+//! a resolver returns from the same `llm` this crate links, without pinning `llm` itself.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,9 +23,7 @@ use harness_wire::{
     TurnOutcome, TurnRequest, Usage, WireError, WireErrorCode, WireId,
 };
 use llm_blocking::BlockingModel;
-use llm_core::{
-    AuthKind, BillingKind, BoxFuture, Capabilities, ErrorCode, Id, Model, Protocol, Provenance,
-};
+use llm_core::{AuthKind, BillingKind, Capabilities, ErrorCode, Id, Model, Provenance};
 use llm_credentials::{
     ResolvedSecret, Secret, SecretError, SecretRef, SecretResolver, SecretVersion,
 };
@@ -28,6 +32,9 @@ use llm_providers::{
     Account, ApiKeyHeader, BaseUrl, Binding, BindingDocument, Endpoint, Provider, ServedModel,
     ServingModel,
 };
+
+pub use llm_core::{BoxFuture, Protocol};
+pub use llm_credentials;
 
 /// The identifier the Responses wire tags its opaque items with. Unchanged from the retired
 /// `harness-responses` crate, because sessions on disk carry it.
@@ -128,6 +135,24 @@ impl Source {
         Self::subscription(reference, Arc::new(resolver), pointer)
     }
 
+    /// A credential the caller's own `resolver` answers for the reference `name`, presented as
+    /// `presentation`. `llm` asks it once per model request, at call time, and never caches the
+    /// answer; a resolver that leases a credential per request gets one lease per request.
+    ///
+    /// # Errors
+    /// Names the refusal for a reference name `llm` will not accept.
+    pub fn resolver(
+        name: &str,
+        resolver: Arc<dyn SecretResolver>,
+        presentation: Presentation,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            reference: reference(name)?,
+            resolver,
+            presentation,
+        })
+    }
+
     fn subscription(
         reference: SecretRef,
         source: Arc<dyn SecretResolver>,
@@ -196,6 +221,9 @@ pub struct Target<'a> {
 
 /// A blocking [`ModelPort`] over an `llm` client for `target`, authenticated by `source` or not.
 ///
+/// The port is `Send`, so a caller may hold it across a thread boundary; one that does not
+/// coerces it to `Box<dyn ModelPort>`.
+///
 /// # Errors
 /// Names what refused: the endpoint, the model, the bound, or a credential this build cannot
 /// present on that wire.
@@ -203,7 +231,7 @@ pub fn client(
     target: &Target<'_>,
     source: Option<Source>,
     cancel: &Cancel,
-) -> Result<Box<dyn ModelPort>, String> {
+) -> Result<Box<dyn ModelPort + Send>, String> {
     let binding = binding(target, source.as_ref())?;
     let http = HttpClient::with_connect_timeout(LIMITS, CONNECT).map_err(|error| error.message)?;
     let resolver: Arc<dyn SecretResolver> = source.map_or_else(
@@ -339,8 +367,12 @@ fn binding(target: &Target<'_>, source: Option<&Source>) -> Result<Binding, Stri
 /// Returns the new token's expiry and whether the refresh token rotated, or [`None`] when nothing
 /// was due (or the expiry could not be read, which `llm` leaves alone as Harness did).
 ///
+/// Blocking. A caller whose thread drives a tokio runtime gets the same answer: the renewal then
+/// runs on a thread of its own, because tokio refuses to block a thread that drives a runtime.
+///
 /// # Errors
-/// `llm`'s refusal, which names the file and never a token.
+/// `llm`'s refusal, which names the file and never a token; or the runtime that could not be
+/// built, or the renewal thread that panicked, named as such.
 pub fn renew_codex_login(
     path: &Path,
     token_endpoint: &str,
@@ -354,13 +386,25 @@ pub fn renew_codex_login(
         .map_err(|error| error.message)?
         .with_endpoint(token_endpoint, client_id)
         .with_margin(margin);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| error.to_string())?;
-    let outcome = runtime
-        .block_on(login.renew(&renewal, &llm_core::Cancel::new()))
-        .map_err(|error| error.to_string())?;
+    let renew = || -> Result<Renewal, String> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?;
+        runtime
+            .block_on(login.renew(&renewal, &llm_core::Cancel::new()))
+            .map_err(|error| error.to_string())
+    };
+    let outcome = if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|scope| {
+            scope
+                .spawn(renew)
+                .join()
+                .unwrap_or_else(|_| Err("the Codex login renewal thread panicked".to_owned()))
+        })
+    } else {
+        renew()
+    }?;
     Ok(match outcome {
         Renewal::NotDue | Renewal::Undated => None,
         Renewal::Renewed(renewed) => Some((
@@ -373,13 +417,20 @@ pub fn renew_codex_login(
 }
 
 /// A blocking turn over one `llm` client.
-struct LlmPort {
+pub struct LlmPort {
     blocking: BlockingModel,
     wire: WireId,
     /// The model the run named, which `Usage::model` falls back to when the provider names none.
     model: String,
     cancel: Cancel,
 }
+
+/// `LlmPort` is `Send`, which is what lets [`client`] return `Box<dyn ModelPort + Send>`; this
+/// stops the build if a field ever takes that away.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<LlmPort>();
+};
 
 impl ModelPort for LlmPort {
     fn wire(&self) -> &WireId {
@@ -698,6 +749,15 @@ fn from_llm_error(error: llm_core::Error) -> WireError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::process::Command;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use harness_wire::VecSink;
+    use llm_credentials::environment::EnvironmentResolver;
+
     use super::*;
 
     fn target(protocol: Protocol) -> Target<'static> {
@@ -903,5 +963,296 @@ mod tests {
             );
             assert_eq!(wire.code, expected, "{what}: {wire:?}");
         }
+    }
+
+    // The public surface's own cases (story:llm-port-is-a-public-crate): a caller's resolver is
+    // asked once per request, an environment variable behind it is read on each request, and the
+    // client a consumer holds across threads is `Send`.
+
+    /// One short Messages turn, framed as the emulator in `harness-cli`'s fixtures frames it.
+    const TURN_EVENTS: [(&str, &str); 6] = [
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"msg_b10x_001","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":3,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        ),
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":0}"#,
+        ),
+        (
+            "message_delta",
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ];
+
+    /// A loopback Messages endpoint that answers every request with [`TURN_EVENTS`] and keeps the
+    /// `x-api-key` each request carried, in memory only (`AGENTS.md` invariant 17).
+    struct Endpoint {
+        base_url: String,
+        keys: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Endpoint {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+            let base_url = format!("http://{}/v1", listener.local_addr().expect("bound"));
+            let keys = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&keys);
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { return };
+                    answer(stream, &seen);
+                }
+            });
+            Self { base_url, keys }
+        }
+
+        fn target(&self) -> Target<'_> {
+            Target {
+                protocol: Protocol::Messages,
+                base_url: &self.base_url,
+                model: "m",
+                context_window: 1000,
+                max_output_tokens: None,
+            }
+        }
+
+        fn keys(&self) -> Vec<String> {
+            self.keys.lock().expect("unpoisoned").clone()
+        }
+    }
+
+    fn answer(stream: TcpStream, seen: &Mutex<Vec<String>>) {
+        let mut reader = BufReader::new(stream);
+        let (mut length, mut key) = (0, String::new());
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).expect("a header line") == 0 {
+                return;
+            }
+            let line = line.trim_end();
+            if line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                match name.trim().to_ascii_lowercase().as_str() {
+                    "content-length" => length = value.trim().parse().expect("a length"),
+                    "x-api-key" => value.trim().clone_into(&mut key),
+                    _ => {}
+                }
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).expect("the request body");
+        seen.lock().expect("unpoisoned").push(key);
+        let mut stream = reader.into_inner();
+        stream
+            .write_all(b"HTTP/1.0 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+            .expect("the response head");
+        for (name, data) in TURN_EVENTS {
+            write!(stream, "event: {name}\ndata: {data}\n\n").expect("an event");
+        }
+    }
+
+    fn request() -> TurnRequest {
+        TurnRequest {
+            model: "m".to_owned(),
+            instructions: "Answer.".to_owned(),
+            items: vec![Item::UserText {
+                text: "hello".to_owned(),
+            }],
+            tools: Vec::new(),
+            max_output_tokens: None,
+            sampling: harness_wire::Sampling::default(),
+            tool_choice: harness_wire::ToolChoice::Auto,
+        }
+    }
+
+    /// A caller's per-request lease: every resolve is counted and answers a fresh synthetic key,
+    /// `lease-1`, `lease-2`, … (`AGENTS.md` invariant 17).
+    #[derive(Default)]
+    struct Lease {
+        calls: AtomicUsize,
+    }
+
+    impl SecretResolver for Lease {
+        fn resolve<'a>(
+            &'a self,
+            _reference: &'a SecretRef,
+        ) -> BoxFuture<'a, Result<ResolvedSecret, SecretError>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            Box::pin(async move {
+                Ok(ResolvedSecret {
+                    secret: Secret::new(format!("lease-{call}").into_bytes())?,
+                    version: SecretVersion::new(format!("lease-{call}"))?,
+                })
+            })
+        }
+    }
+
+    #[test]
+    fn a_resolver_passed_to_source_resolver_is_asked_exactly_once_per_model_request() {
+        // agent-platform redeems a per-attempt lease once per request: the resolver it passes is
+        // asked by `llm` at call time, never at construction, and never cached between turns.
+        let endpoint = Endpoint::start();
+        let lease = Arc::new(Lease::default());
+        let source = Source::resolver("tenant-lease", lease.clone(), Presentation::ApiKey)
+            .expect("a source");
+        let mut port = client(&endpoint.target(), Some(source), &Cancel::new()).expect("a client");
+        assert_eq!(
+            lease.calls.load(Ordering::SeqCst),
+            0,
+            "asked before a request"
+        );
+        for turn in 1..=3 {
+            let outcome = port
+                .turn(&request(), &mut VecSink::new())
+                .expect("the turn completes");
+            assert_eq!(
+                lease.calls.load(Ordering::SeqCst),
+                turn,
+                "asked once per request, through request {turn}"
+            );
+            assert_eq!(
+                outcome.items,
+                vec![Item::AssistantText {
+                    text: "done".to_owned()
+                }]
+            );
+        }
+        assert_eq!(
+            endpoint.keys(),
+            ["lease-1", "lease-2", "lease-3"],
+            "each request carried the value its own resolve answered"
+        );
+    }
+
+    /// The variable the environment case binds and a synthetic value for it (invariant 17), and
+    /// the marker of a child run of this test binary.
+    const VARIABLE: &str = "B10X_HARNESS_LLM_FIXTURE_KEY";
+    const VALUE: &str = "synthetic-environment-key";
+    const CHILD: &str = "B10X_HARNESS_LLM_TEST_CHILD";
+
+    /// `std::env::set_var` is unsafe and `unsafe_code` is forbidden, so a case that needs
+    /// [`VARIABLE`] set or unset re-runs itself in a child whose environment the parent chooses,
+    /// as `llm-credentials`' own environment cases do. In the parent: runs `name` once with the
+    /// variable set to [`VALUE`] and once without it, requires that exactly that one case ran and
+    /// passed in each child, and returns false. In a child: returns true.
+    fn in_children(name: &str) -> bool {
+        if std::env::var_os(CHILD).is_some() {
+            return true;
+        }
+        let module = module_path!();
+        let path = format!(
+            "{}::{name}",
+            module.split_once("::").map_or(module, |(_, within)| within)
+        );
+        for value in [Some(VALUE), None] {
+            let mut command = Command::new(std::env::current_exe().expect("this test binary"));
+            command
+                .args([path.as_str(), "--exact", "--test-threads=1"])
+                .env(CHILD, "1")
+                .env_remove(VARIABLE);
+            if let Some(value) = value {
+                command.env(VARIABLE, value);
+            }
+            let output = command.output().expect("the child runs");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "{value:?}: {stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            // The runner's own summary line: a filter that selected nothing exits 0 too.
+            let summary = stdout
+                .lines()
+                .rfind(|line| line.starts_with("test result:"))
+                .expect("a summary line");
+            assert!(summary.contains(" 1 passed;"), "{value:?}: {summary}");
+        }
+        false
+    }
+
+    /// Counts the resolves `inner` answers.
+    struct Counted<R> {
+        inner: R,
+        calls: AtomicUsize,
+    }
+
+    impl<R: SecretResolver> SecretResolver for Counted<R> {
+        fn resolve<'a>(
+            &'a self,
+            reference: &'a SecretRef,
+        ) -> BoxFuture<'a, Result<ResolvedSecret, SecretError>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.resolve(reference)
+        }
+    }
+
+    #[test]
+    fn source_resolver_over_an_environment_resolver_reads_the_variable_on_each_request() {
+        // agentide's per-request API key from the environment: an `EnvironmentResolver` (which
+        // reads the variable on every resolve, never caching) behind `Source::resolver` with
+        // `Presentation::ApiKey` is asked on each request. Set, each request carries the value;
+        // unset, construction still succeeds and each request is refused by the reference's name.
+        if !in_children(
+            "source_resolver_over_an_environment_resolver_reads_the_variable_on_each_request",
+        ) {
+            return;
+        }
+        let set = std::env::var_os(VARIABLE).is_some();
+        let endpoint = Endpoint::start();
+        let environment = Arc::new(Counted {
+            inner: EnvironmentResolver::new(BTreeMap::from([(
+                SecretRef::new("agent-key").expect("a reference"),
+                VARIABLE.to_owned(),
+            )]))
+            .expect("a resolver"),
+            calls: AtomicUsize::new(0),
+        });
+        let source = Source::resolver("agent-key", environment.clone(), Presentation::ApiKey)
+            .expect("a source");
+        let mut port = client(&endpoint.target(), Some(source), &Cancel::new())
+            .expect("construction reads nothing");
+        assert_eq!(environment.calls.load(Ordering::SeqCst), 0);
+        for turn in 1..=3 {
+            let result = port.turn(&request(), &mut VecSink::new());
+            assert_eq!(
+                environment.calls.load(Ordering::SeqCst),
+                turn,
+                "the variable is read once per request, through request {turn}"
+            );
+            if set {
+                result.expect("the turn completes");
+            } else {
+                let error = result.expect_err("an unset variable refuses the request");
+                assert_eq!(error.code, WireErrorCode::Unauthorized, "{error:?}");
+                assert!(error.message.contains("agent-key"), "{error:?}");
+                assert!(!error.message.contains(VARIABLE), "{error:?}");
+            }
+        }
+        let expected: Vec<&str> = if set { vec![VALUE; 3] } else { Vec::new() };
+        assert_eq!(endpoint.keys(), expected);
+    }
+
+    #[test]
+    fn the_client_a_consumer_holds_across_threads_is_send() {
+        // uilab holds the client across `spawn_blocking`; `ModelPort` carries no `Send` bound, so
+        // the return type has to.
+        let port: Box<dyn ModelPort + Send> =
+            client(&target(Protocol::Messages), None, &Cancel::new()).expect("a client");
+        let wire = std::thread::spawn(move || port.wire().clone())
+            .join()
+            .expect("the thread ends");
+        assert_eq!(wire.as_str(), MESSAGES_WIRE);
     }
 }

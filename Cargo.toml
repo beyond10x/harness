@@ -9,6 +9,7 @@ members = [
     "crates/harness-substrate",
     "crates/harness-mcp",
     "crates/harness-app-server",
+    "crates/harness-llm",
     "crates/harness-cli",
     "crates/harness-xtask",
 ]
@@ -29,6 +30,7 @@ harness-catalogue = { package = "b10x-harness-catalogue", path = "crates/harness
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
 harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
+harness-llm = { package = "b10x-harness-llm", path = "crates/harness-llm" }
 
 # The tool contracts and default implementations harness consumes, pinned by git tag like substrate
 # and MCP, never a sibling path (atlas ADR 0097 decision 3, ADR 0095 phase T2). `tool-fs` and

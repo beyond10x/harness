@@ -1,0 +1,26 @@
+[package]
+name = "b10x-harness-llm"
+description = "The b10x harness's model port over llm's client crates, and the credential sources that feed them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "harness_llm"
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-wire = { workspace = true }
+llm-blocking = { workspace = true }
+llm-core = { workspace = true }
+llm-credentials = { workspace = true, features = ["codex-renewal", "environment", "file", "json-pointer"] }
+llm-http = { workspace = true }
+llm-messages = { workspace = true }
+llm-providers = { workspace = true }
+llm-responses = { workspace = true }
+tokio = { workspace = true }

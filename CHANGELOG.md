@@ -7,6 +7,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-harness-llm` (`crates/harness-llm`, lib `harness_llm`): the model port over `llm`'s client
+  crates and the credential sources that feed them, moved unchanged out of `harness-cli`'s private
+  `llm_port` module with its tests, so a consumer builds its `ModelPort` from this crate rather than
+  copying the module. Its public surface is `Source` (`key`, `file`, `environment`, `resolver`),
+  `Presentation`, `Target`, `client`, `LlmPort`, `RESPONSES_WIRE`, `MESSAGES_WIRE`,
+  `renew_codex_login`, and the re-exports `llm_credentials`, `Protocol` and `BoxFuture`, so a
+  consumer names the `SecretResolver` trait, its value types, the protocol and the future a resolver
+  returns from the same `llm` this crate links, without pinning `llm` itself. `harness-cli` depends
+  on it; the seven `b10x-llm-*` crates and `tokio` moved from `harness-cli`'s dependencies to its own.
+- `Source::resolver(name, resolver, presentation)`: a credential a caller's own `SecretResolver`
+  answers, asked once per model request, at call time — one lease per request for a caller that
+  leases one, and a fresh read of the variable per request behind an `EnvironmentResolver`.
+- `client` returns `Box<dyn ModelPort + Send>` and `LlmPort: Send` is asserted at compile time, so a
+  consumer may hold the port across a thread boundary; `harness-cli`'s callers coerce it to
+  `Box<dyn ModelPort>` as before. Behaviour and the CLI contract
+  (`contracts/cli/b10x-harness/2026-09-18`) are unchanged.
+
 ### Changed
 
 - Harness consumes the `tools` repository's crates at tag `0.1.0` instead of its own

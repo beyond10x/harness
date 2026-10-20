@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-builds-on-llm-0-7
 kind: story
-status: active
+status: implemented
 title: Harness builds on llm 0.7.0 and its four wire and credential crates are gone
 summary: The spike bridge (8989d138) is carried from llm 0.1.7 to 0.7.0; harness-messages, harness-responses, harness-http and harness-credential are deleted; compaction, retry, the ledger and approvals stay.
 relations:
@@ -42,6 +42,8 @@ scope:
 - confidence: cited
   path: crates/harness-cli/tests
 - confidence: cited
+  path: crates/harness-cli/tests/workflow.rs
+- confidence: cited
   path: crates/harness-credential
 - confidence: cited
   path: crates/harness-http
@@ -54,13 +56,16 @@ scope:
 - confidence: cited
   path: crates/harness-xtask/src/main.rs
 - confidence: cited
+  path: measurements
+- confidence: cited
   path: spec/COVERAGE.md
 - confidence: inferred
   path: website
-revision: 28
+revision: 37
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T01:57:56Z", actor: "human:timo", revision: 27, decided_on: {"recorded":{"review_outcome":5}}}
 - {from: "proposed", to: "active", at: "2026-10-20T01:57:56Z", actor: "human:timo", revision: 28, decided_on: {"recorded":{"review_outcome":5}}}
+- {from: "active", to: "implemented", at: "2026-10-20T05:39:37Z", actor: "human:timo", revision: 37, decided_on: {"recorded":{"test_result":1,"review_outcome":12,"verification":1}}}
 ---
 ## Context
 
@@ -121,11 +126,28 @@ base `3169042f` has none there; the spike added three).
 
 ## Pin
 
-`tag = "0.7.0"`, for all seven llm crates. This section is what the acceptance reads. If llm tags
-`0.8.0` before the unit's gate run, the coordinator rewrites this line to `0.8.0` through
-`aep plan artifact body` and tells the implementor (adr-changes, 2026-10-20: "move the pin to 0.8.0
-in the same wave once it is [tagged]"); the unit then gates on the tag written here. A tag that
-lands after the gate run is a later story.
+`tag = "0.8.0"` (llm tag on `7873aa63`, "release: LLM 0.8.0 (#40)", 2026-10-20 05:15 UTC). The
+build and the two adversary passes were made on `0.7.0`; the merge to `main` is on `0.8.0`. This
+section is what the acceptance reads. adr-changes, 2026-10-20 (second decision, after llm's wave
+w09 adversary): llm 0.7.0 makes Responses `server_error` and `rate_limit_exceeded` and Messages
+`overloaded_error` and `api_error` final where harness retried them (llm
+`story:retry-classes-harness-retried`, parity rows R28/M27); through the bridge's `may_retry`
+(`llm_port.rs:622`) those retries stop. llm 0.8.0 marks all four retriable before output. So:
+"build and review on 0.7.0 as planned, but merge to main only on llm 0.8.0 with a test that each
+of the four classes before output is retried by Harness's loop. Until 0.8.0 is tagged, the unit
+waits on the wave branch after its gate." When llm tags `0.8.0`, the coordinator rewrites this
+line, the unit moves the pin and adds that test in one correction round, and the gate runs again.
+
+Third decision (adr-changes, 2026-10-20, after the adversary's pass 1): the merge condition is
+"0.8.0, retry cases green, absent-counter case green". Settled after two corrections the same
+night: llm keeps "an absent usage counter is unknown, not 0" and takes no Messages usage change
+into 0.8.0 (its story archived; llm puts `cache_control` on nearly every request, `codec.rs:163`,
+`:88-104`). One case with `cache_creation_input_tokens` absent from the Messages usage object
+expects usage unknown and the run saying so (llm parity M25); green on 0.7.0 and after. The
+emulator's default matches the real API (the counter present, 0) and the three usage assertions
+the spike had rewritten are restored: that is the M25 fix.
+Unit commits allowed on `impl/harness-builds-on-llm-0-7`: up to six (spike, unit, corrections,
+the 0.8.0 move).
 
 ## What the unit decides, and how
 
@@ -158,6 +180,12 @@ lands after the gate run is a later story.
    consumer's pin and stay.
 8. **Gate.** `cargo xtask gate` on the unit's tree; the spike's commit message reports the
    per-step results and this unit reports them again at the pinned tag.
+9. **Retry classes (on 0.8.0).** One test per class, through the shipped binary or
+   `llm_port::client` against the fake servers in `crates/harness-cli/tests/fixtures/`: a
+   Responses `server_error` and a `rate_limit_exceeded`, and a Messages `overloaded_error` and an
+   `api_error`, each arriving before any output, are retried by the loop and the turn completes on
+   the retry. Red on 0.7.0 (the class is final there), green on 0.8.0. The test names llm's story
+   `retry-classes-harness-retried` and parity rows R28/M27.
 
 ## Stories whose surface this removes
 
@@ -205,7 +233,17 @@ The last row is not a pin: the merge of this story to `main` breaks that crate's
 
 Derived 2026-10-20 by the coordinator from `git show --stat 8989d138` and `git grep` at `origin/main`
 `3169042f`; no scoper agent was dispatched because the spike commit lists every file. Every line is
-**cited** (read from a command) or **inferred**.
+**cited** (read from a command) or **inferred**. **Confirmed after implementation** (wave llm-1,
+six unit commits, `git diff --stat 22ddc1df..abbfc96c`): every cited line held; the two inferred
+lines resolved as: `crates/harness-wire/src/id.rs` — changed (two comments reworded to name
+`llm-responses`); `website/` — untouched (`git grep` for the four crate names finds nothing there).
+Touched beyond the derived list, now cited: `measurements/dry-run-compaction.sh`,
+`measurements/dry-run-surfaces.sh`, `measurements/prove-spend-ceiling.sh`,
+`measurements/rehearse-paid-command.sh` (the moved fixture path; the token file mode),
+`crates/harness-cli/tests/workflow.rs` (a usage assertion restored), and the two emulators
+`crates/harness-cli/tests/fixtures/fake_messages.py` and `fake_responses.py` (scenarios added for
+the adversary's cases). Not touched, as listed: `contracts/provider-wires/`, `crates/harness-loop`,
+`harness-wire`'s types.
 
 - **Primary surface:** `crates/harness-cli`: `Cargo.toml`, `src/lib.rs` (158 lines changed),
   `src/llm_port.rs` (new, 701 lines), `src/provider.rs` (doc comment), and six test files under

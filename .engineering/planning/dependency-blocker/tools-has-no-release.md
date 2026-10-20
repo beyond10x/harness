@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: dependency-blocker:tools-has-no-release
 kind: dependency-blocker
-status: open
+status: cleared
 title: The tools repository has no released crate to pin
 relations:
 - blocks: story:harness-consumes-tools-crates
-revision: 3
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-20T05:14:44Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## What is missing
 

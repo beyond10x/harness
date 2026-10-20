@@ -60,7 +60,7 @@ scope:
   path: crates/harness-xtask/src/main.rs
 - confidence: inferred
   path: spec/COVERAGE.md
-revision: 28
+revision: 31
 ---
 ## Context
 
@@ -122,27 +122,58 @@ implementations from `tools` crates pinned by tag, through an adapter owned here
 
 `cargo xtask gate` exits 0, its `cargo xtask cli-contract` step included, on a tree whose
 workspace members no longer include `crates/harness-tools` or `crates/harness-toolchain`, whose
-`[workspace.dependencies]` pin the `tools` crates by the released tag § Open names, whose CLI
-contract version in force (`contracts/cli/b10x-harness/<version>/manifest.json`, today
-`2026-09-18`) still lists every tool name the binary publishes, and which carries one new test,
+`[workspace.dependencies]` pin `b10x-tool-fs`, `b10x-tool-code-editor`, `b10x-tool-toolchain` and
+`b10x-tool-contract` at `tools` tag `0.1.0` (or a later tag § Open names), whose CLI
+contract version in force (`contracts/cli/b10x-harness/2026-09-18/manifest.json`) still lists
+every tool name the binary publishes, unchanged, with the adapter's name-to-operation mapping
+table tested in both directions, and which carries one new test,
 beside the adapter, that builds the adapter's `ToolSpec` for `run` and asserts that `AgentLoop`
 under `DenyAll` returns a failed `ToolOutcome` for it (the gate `AGENTS.md` § Safety envelope
 describes, exercised through the new adapter rather than through `harness-tools`).
 
-## Open until `tools` releases
+## Open until `tools` releases — answered 2026-10-20
 
-Each line is rewritten with its answer, through `aep plan artifact body`, before this story moves
-out of `draft`; the acceptance reads the answers.
+`tools` released `0.1.0` on 2026-10-20 05:13 UTC: annotated tag on `046dfb14c36773b557d76de0de92e04ce23a388d`
+(`git rev-parse '0.1.0^{}'` in a fetched checkout; GitHub release page
+`https://github.com/beyond10x/tools/releases/tag/0.1.0`, no assets). Its `CHANGELOG.md` `[0.1.0]`:
+"The first release: ADR 0095 phase T1, seeded from harness 0.13.3 under ADR 0097. harness and
+metaharness pin this tag." Workspace `rust-version = "1.98"`. Four crates (`crates/*/Cargo.toml` at
+the tag):
 
-- **The tag and the crates.** Which `tools` tag, and which of its crates replace
-  `crates/harness-tools` and `crates/harness-toolchain`: unknown until `tools` releases. Both move
-  (§ The seam); what is open is their names.
+| crate | what | licence |
+|---|---|---|
+| `b10x-tool-contract` | the `tool-contract/1` profile: parser, validator, `tool-conformance/1` runner, schema shape check, `tool-contract validate` binary | Apache-2.0 |
+| `b10x-tool-fs` | `fs` v1alpha1: `fs.read`, `fs.list`, `fs.glob`, `fs.stat` over one workspace root; "harness 0.13.3's local reader moved here with a whole-file digest on reads" | LicenseRef-B10x-Proprietary |
+| `b10x-tool-code-editor` | `code-editor` v1alpha1: `code.write`, `code.edit`, `code.patch`, `code.move`, `code.delete`; "harness 0.13.3's local writer moved here with `expected_sha256` preconditions" | LicenseRef-B10x-Proprietary |
+| `b10x-tool-toolchain` | "harness 0.13.3's declarative toolchain registry moved here, deriving `build-test` operations under the profile" | LicenseRef-B10x-Proprietary |
+
+- **The tag and the crates.** `tag = "0.1.0"`. `crates/harness-tools` is replaced by
+  `b10x-tool-fs` and `b10x-tool-code-editor` (plus `b10x-tool-contract` for the profile types);
+  `crates/harness-toolchain` by `b10x-tool-toolchain`. Both move, as § The seam requires.
 - **The toolchain gate steps.** `cargo xtask toolchain-specs` and `cargo xtask toolchain-docs`
-  check `crates/harness-toolchain`'s specs today (`crates/harness-xtask/src/main.rs:195-220`).
-  After the move they check the `tools` crate's specs through its API, or they leave with the crate
-  and `AGENTS.md` § The gate drops them: `tools`' first release decides which.
-- **Tool names.** Whether the names the CLI contract pins change. If they do, this story cuts a
-  new `contracts/cli/b10x-harness/<date>/` version (invariant 13) and never edits `2026-09-18`.
+  (`crates/harness-xtask/src/main.rs:195-220`) check `crates/harness-toolchain`'s specs today; after
+  the move they check `b10x-tool-toolchain`'s through its API or leave the gate with the crate.
+  Decided at implementation by what `b10x-tool-toolchain` 0.1.0 exposes; `AGENTS.md` § The gate
+  says which.
+- **Tool names.** They change: `tools` names its operations `fs.read`, `fs.list`, `fs.glob`,
+  `fs.stat`, `code.write`, `code.edit`, `code.patch`, `code.move`, `code.delete`; the CLI contract
+  in force (`contracts/cli/b10x-harness/2026-09-18/manifest.json`) pins harness's own names
+  (`run` among them, `manifest.json:26`). **Decided** (adr-changes, 2026-10-20): this story keeps
+  harness's CLI contract names toward the model and toward metaharness, with a mapping table from
+  each harness name to its `tools` contract operation id (`file_read` → `fs.read`, `file_edit` →
+  `code.edit`, …) in the adapter, tested in both directions. A rename changes what the model sees
+  and metaharness's surface, so it is a later wave with its own CLI contract version (invariant
+  13), measured by a takt trial first (Atlas ADR 0101). The CLI contract `2026-09-18` therefore
+  stays in force for this story. The `tools` `fs` and `code-editor` toolsets carry no `run`: the
+  shell tool (`run`, `Risk::High`) stays harness's until `tools` publishes a process toolset, and
+  the story says so in `STATUS.md`.
+- **Read-only toolset.** `b10x-tool-code-editor` writes. `AGENTS.md` § Safety envelope: "the
+  shipped toolset is read-only. Adding a tool that writes or executes is its own change, with its
+  own gate and its own entry in `STATUS.md`". Linking the crate is not publishing its tools: this
+  story links `b10x-tool-fs` (and `b10x-tool-contract`) for the shipped read-only surface and
+  `b10x-tool-toolchain`; `b10x-tool-code-editor` is linked only where `harness-tools`'s writer was
+  already published behind the approval gate (`file_edit`, `file_write` at `Risk::Medium`), under
+  the same gate, and nothing new is published.
 - **Adapter location.** `crates/harness-cli` or a crate of its own: decided by whether
   `harness-substrate` needs the mapping (`crates/harness-substrate/Cargo.toml:16,42` consumes
   `harness-tools` today).

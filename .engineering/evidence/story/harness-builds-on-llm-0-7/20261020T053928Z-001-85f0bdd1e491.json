@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T05:39:28Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-builds-on-llm-0-7",
+  "kind": "story",
+  "revision": 36,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "verify-cheap-conditions: members naming the four crates 8 -> 0, crate dirs 4 -> 0, llm pins 0 -> 7 (0.8.0 after the move), rust-version 1.97 -> 1.98, ignore attributes under harness-cli/tests 0 -> 0; full gate exit per step as recorded",
+    "reference": "~/.cache/harness-wave-2026-10-20-w01/u1/scratch/verify-cheap-conditions.txt vs ~/.cache/harness-wave-2026-10-20-w01/gate/summary.txt: VERIFIED"
+  }
+}

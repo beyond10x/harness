@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: story:run-moves-onto-tool-process
 kind: story
-status: draft
+status: active
 title: Harness's run moves onto the tools repository's tool-process toolset
 summary: 'After 0.15.0 and tools'' tool-process release: run is served by b10x-tool-process, which bounds a descendant holding stdout and kills a setsid descendant; fixes a pre-existing unbounded output-thread join.'
 relations:
 - decomposes: epic:harness-on-llm-and-tools
 - serves: vision:b10x-owns-its-loop
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-20T16:10:54Z", actor: "human:timo", revision: 4}
 ---
 ## Context
 
@@ -40,10 +43,25 @@ adapter over it), and a test shows `sh -c "sleep 3 &"` (a descendant holding std
 300 ms bound answers `timed_out: true` within a small multiple of the bound, and a `setsid`
 descendant is killed with the group.
 
+## Scope
+
+- `crates/harness-catalogue/src/local.rs`: `LocalOperations::run`/`run_within` call
+  `tool_process::Process::run` (the declared program set is today's `programs`); harness's `exec`,
+  `terminate`, `Drained`, `drain`, `read_ends`, `keep_both_ends`, `whole_prefix`, `whole_suffix` go
+  where nothing else uses them; `run → process.run` joins the adapter's mapping table.
+- `Cargo.toml` (`tool-process` beside the other tools crates at the wave's tools tag),
+  `crates/harness-catalogue/Cargo.toml`, `Cargo.lock`.
+- Tests pinning `run` replies (`crates/harness-catalogue/src/tests.rs`, `local.rs` tests,
+  `crates/harness-cli/tests/end_to_end.rs`), `CHANGELOG.md`, `AGENTS.md` (the default
+  implementations sentence), `STATUS.md`.
+- Not touched: the Substrate-confined `run` (`crates/harness-substrate/src/tools.rs`), which stays
+  Substrate's; the toolchain path (`story:build-test-runs-through-the-tools-executor`).
+
 ## Sequencing
 
-After 0.15.0 (tools-1 + `story:llm-port-is-a-public-crate`), and after `tools` releases a
-`tool-process` toolset (tools 0.2.0 or later). Blocked until then.
+Unblocked: `b10x-tool-process` has shipped since tools `0.2.0`; wave tools-3 pins tools `0.3.0`
+(`e89380d8`) after `story:search-moves-onto-tool-search`, and this is the wave's second unit
+(`b10x-chef-orchestrator`, 2026-10-20, under the owner's exception 5).
 
 ## Out of scope
 

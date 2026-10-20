@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: dependency-blocker:tools-executor-is-not-generic
 kind: dependency-blocker
-status: open
+status: cleared
 title: tools' toolchain Executor runs only through the local process runner
 relations:
 - blocks: story:build-test-runs-through-the-tools-executor
-revision: 1
+revision: 2
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-20T15:47:23Z", actor: "human:timo", revision: 2}
 ---
 ## What is missing
 

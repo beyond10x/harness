@@ -457,7 +457,7 @@ impl Operations for ConfinedOperations {
     ///
     /// The trait's default answers the path as written, which is right for substrate's guarded
     /// filesystem — it follows no link — but this provider hands substrate the spelling
-    /// [`without_dot_components`] makes, so that is the name the scope is shown. Nothing is
+    /// `without_dot_components` makes, so that is the name the scope is shown. Nothing is
     /// resolved and nothing is refused here; where the path is stays substrate's to say.
     fn lands(&self, path: &str) -> Result<String, String> {
         Ok(without_dot_components(path).into_owned())

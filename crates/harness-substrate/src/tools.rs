@@ -22,6 +22,7 @@
 //! Substrate reaches the same place from the other side: `exec.start`'s first capability predicate
 //! is `exec.argv-only`. Neither component will run a shell, and neither had to be told by the other.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::time::Duration;
 
@@ -185,6 +186,10 @@ impl Operations for ConfinedOperations {
     /// turn. A live run on 2026-08-24 read three files in one turn and the next turn's replay grew
     /// by 24,630 tokens, which pushed the conversation past its bound and bought a prefix rewrite.
     fn file_read(&self, path: &str, window: ReadWindow) -> Result<Value, String> {
+        // Every path below — what reaches substrate, what the reply and its refusals name — is the
+        // one spelling ([`without_dot_components`]), as the reading provider names it.
+        let spelled = without_dot_components(path);
+        let path: &str = &spelled;
         let ceiling = window
             .max_bytes
             .unwrap_or(MAX_READ_BYTES)
@@ -344,7 +349,7 @@ impl Operations for ConfinedOperations {
             return Err(Self::unavailable("file_write"));
         }
         self.backend
-            .file_write(&self.workspace, path, text)
+            .file_write(&self.workspace, &without_dot_components(path), text)
             .map_err(|error| error.to_string())
     }
 
@@ -361,6 +366,9 @@ impl Operations for ConfinedOperations {
         if !self.writes {
             return Err(Self::unavailable("file_edit"));
         }
+        // One spelling for the read, the write back and every sentence between them.
+        let spelled = without_dot_components(path);
+        let path: &str = &spelled;
         let current = self
             .backend
             .file_read(&self.workspace, path)
@@ -445,12 +453,52 @@ impl Operations for ConfinedOperations {
             .map_err(|error| Refused::from(error.to_string()))
     }
 
+    /// The name a write reaches: the path as written, less its `.` components.
+    ///
+    /// The trait's default answers the path as written, which is right for substrate's guarded
+    /// filesystem — it follows no link — but this provider hands substrate the spelling
+    /// [`without_dot_components`] makes, so that is the name the scope is shown. Nothing is
+    /// resolved and nothing is refused here; where the path is stays substrate's to say.
+    fn lands(&self, path: &str) -> Result<String, String> {
+        Ok(without_dot_components(path).into_owned())
+    }
+
     fn programs(&self) -> &[String] {
         &self.programs
     }
 
     fn writes(&self) -> bool {
         self.writes
+    }
+}
+
+/// `path` with its `.` components dropped, and nothing else about it changed.
+///
+/// A `.` names the directory it stands in: it is a spelling, not a location, so dropping one
+/// decides nothing about where a path is. The reading provider beside this one resolves it, and
+/// substrate refuses every `.` component as an escape, so before this `./notes.txt` was a file
+/// through `LocalOperations` and `workspace.path-escape` here
+/// (`story:one-spelling-of-a-path-in-every-workspace`).
+///
+/// **Only `.`.** A `..` stays where it was written: collapsing `a/../b` would be deciding
+/// containment in this crate, which is substrate's alone (`backend.rs`). No link is resolved and
+/// no check is added. A path with an empty component — a leading or trailing `/`, a `//` — is
+/// handed over untouched, because substrate refuses it whatever its `.`s say, and dropping one
+/// beside an empty component could turn `.//x` into `/x`. A path made of nothing but `.`
+/// components is the root, spelled `.` as the reading provider spells it.
+fn without_dot_components(path: &str) -> Cow<'_, str> {
+    let mut components = path.split('/');
+    if !components.clone().any(|component| component == ".") || components.any(str::is_empty) {
+        return Cow::Borrowed(path);
+    }
+    let kept: Vec<&str> = path
+        .split('/')
+        .filter(|component| *component != ".")
+        .collect();
+    if kept.is_empty() {
+        Cow::Borrowed(".")
+    } else {
+        Cow::Owned(kept.join("/"))
     }
 }
 

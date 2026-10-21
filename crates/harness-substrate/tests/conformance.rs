@@ -1063,80 +1063,124 @@ fn a_write_under_a_directory_that_does_not_exist_yet_is_one_answer_in_every_work
     );
 }
 
-/// `./notes.txt` and `notes.txt` do **not** name one file in every workspace today.
+/// `./notes.txt` and `notes.txt` name one file in every workspace, and so do `a/./b.txt` and
+/// `a/b.txt`.
 ///
-/// # A second difference pinned rather than closed, and why the pin is where it is
+/// # A `.` component is a spelling, not a location
 ///
-/// A leading `./` names the same file by every reading of the trait — it is not what `# Errors`
-/// means by "outside the workspace". `LocalOperations` reads it, because `Path::join` and
-/// `canonicalize` resolve it; the confined route hands the path to substrate, which answers
-/// `workspace.path-escape`. `Split` reads through its local half, so the same spelling is a file
-/// through two of the three and a boundary violation through one.
+/// A `.` names the directory it stands in, so no reading of the trait's "outside the workspace"
+/// covers `./notes.txt`. `LocalOperations` reads it because `Path::join` and `canonicalize` resolve
+/// it. Substrate's guarded IO refuses every `.` component as `workspace.path-escape`, so
+/// `ConfinedOperations` drops `.` components before a path reaches substrate — only `.`: never a
+/// `..`, never a link, and no containment check of its own, so substrate is still the one judge of
+/// where a path is (`../x` and `a/../../x` are refused exactly as before, which
+/// `tests/confined_spelling.rs` pins). `Split` reads through its local half and writes through its
+/// confined half over one tree, so it is the workspace that would show the two halves disagreeing.
 ///
-/// **The fix does not belong in this crate.** `harness-substrate/src/backend.rs` says it in its own
-/// words: "A path that leaves the workspace is refused by substrate and never by this crate:
-/// re-implementing containment here would make two answers to one question, and the wrong one would
-/// be the one nobody was looking at." Normalising `./` here is the first half of exactly that. The
-/// two places it could live are substrate's own path handling and
-/// `harness_catalogue::Catalogue`, which is the one gate every provider is reached through — and that
-/// second one changes what every entry receives, for every embedder, which is a design change with
-/// its own blast radius. Smaller than the parent-directory split above: nothing published tells a
-/// model that `./` is legal for `file_read`, so this is habit rather than a documented workflow.
-/// **Story: `story:one-spelling-of-a-path-in-every-workspace`.**
+/// # What is asked, and of whom
 ///
-/// **When this case goes red**, whichever side moved, delete it and fold `./notes.txt` into
-/// `every_workspace_answers_the_same_whole_small_file` — the contract is assertable at that point
-/// and this pin only hides it.
+/// Each workspace against **itself**: the dotted spelling answers exactly what the plain one
+/// answers on the same workspace, for a read, a write, an edit and a listing, and the write and the
+/// edit land in the file the plain name names. Comparing one workspace's answer with another's is
+/// the other cases' business; a write's reply is each provider's own shape.
 ///
-/// # It quotes nothing of substrate's, and says how it knows the spelling is the reason
-///
-/// The refusing side is checked as *a refusal* plus one fact this repository owns: the **same
-/// provider, the same tree, the same call** reads `notes.txt` under its plain name. That is what
-/// makes the refusal about the spelling rather than about the file, and it holds whatever words
-/// substrate refuses in. Matching a substring of substrate's error — `path-escape`, or the prose
-/// beside it — would put a string this repository does not control inside its own gate, and a
-/// rename over there, or a `Debug` rendering becoming a written sentence, would turn this red for
-/// no change in behaviour.
-fn a_path_spelled_with_a_leading_dot(workspace: &Workspace) -> Result<(), String> {
-    workspace.seed("notes.txt", FIVE_LINES);
-    let dotted = workspace
-        .operations
-        .file_read("./notes.txt", ReadWindow::whole());
-    let plain = workspace
-        .operations
-        .file_read("notes.txt", ReadWindow::whole());
-    // The control. Whatever happens to `./notes.txt`, the file itself is readable here — so a
-    // refusal below is about how the path was spelled and not about the tree.
-    if plain.as_ref().map(|answer| &answer["lines"]["total"]) != Ok(&json!(5)) {
-        return Err(format!(
-            "could not read `notes.txt` under its plain name, so this case cannot say anything \
-             about the spelling: {plain:?}"
-        ));
+/// The read under the plain name is the control: it shows the file is there, so a difference below
+/// is about the spelling and not about the tree. The listing is asked as well, and on
+/// `ConfinedOperations` it is refused under every spelling because that provider lists nothing;
+/// what is asserted there is that the spelling changes nothing about the answer — `./.` included,
+/// which names the root `.` names. **Story: `story:one-spelling-of-a-path-in-every-workspace`.**
+fn a_path_spelled_with_dot_components(workspace: &Workspace) -> Result<(), String> {
+    /// One file under two spellings each.
+    const SPELLINGS: &[(&str, &str)] = &[
+        ("./notes.txt", "notes.txt"),
+        ("a/./b.txt", "a/b.txt"),
+        ("././a/./b.txt", "a/b.txt"),
+    ];
+    /// One directory under two spellings each.
+    const DIRECTORIES: &[(&str, &str)] = &[("./a", "a"), ("a/.", "a"), ("./.", ".")];
+    let operations = &workspace.operations;
+    let mut differences = Vec::new();
+    for &(dotted, plain) in SPELLINGS {
+        workspace.seed(plain, FIVE_LINES);
+        let by_name = answered(operations.file_read(plain, ReadWindow::whole()));
+        if by_name["lines"]["total"] != json!(5) {
+            return Err(format!(
+                "could not read `{plain}` under its plain name, so this case cannot say anything \
+                 about the spelling: {by_name}"
+            ));
+        }
+        let by_dot = answered(operations.file_read(dotted, ReadWindow::whole()));
+        if by_dot != by_name {
+            differences.push(format!(
+                "file_read `{dotted}` answered {by_dot}, and `{plain}` answered {by_name}"
+            ));
+        }
+
+        let written = settled(operations.file_write(dotted, "written\n"));
+        let landed = workspace.on_disk(plain);
+        let rewritten = settled(operations.file_write(plain, "written\n"));
+        if written.get("refused").is_some()
+            || written != rewritten
+            || landed.as_deref() != Some("written\n")
+        {
+            differences.push(format!(
+                "file_write `{dotted}` answered {written} and left {landed:?} at `{plain}`, and \
+                 `{plain}` answered {rewritten}"
+            ));
+        }
+
+        // The same edit of the same bytes both ways, so the two replies can be compared whole —
+        // size and digest included.
+        workspace.seed(plain, "written\n");
+        let edited = settled(operations.file_edit(dotted, "written", "edited!"));
+        let landed = workspace.on_disk(plain);
+        workspace.seed(plain, "written\n");
+        let reedited = settled(operations.file_edit(plain, "written", "edited!"));
+        if edited.get("refused").is_some()
+            || edited != reedited
+            || landed.as_deref() != Some("edited!\n")
+        {
+            differences.push(format!(
+                "file_edit `{dotted}` answered {edited} and left {landed:?} at `{plain}`, and \
+                 `{plain}` answered {reedited}"
+            ));
+        }
     }
-    // What each does **today**: only the provider that hands the path to substrate refuses it.
-    let refuses_the_spelling = workspace.name == "ConfinedOperations";
-    match (&dotted, refuses_the_spelling) {
-        (Ok(answer), false) if answer == plain.as_ref().expect("read above") => Ok(()),
-        (Err(_), true) => Ok(()),
-        _ => Err(format!(
-            "this workspace {} read `./notes.txt` today, and now the answer is {dotted:?} — see \
-             `story:one-spelling-of-a-path-in-every-workspace` and this case's own note before \
-             changing anything here",
-            if refuses_the_spelling {
-                "refused to"
-            } else {
-                "did"
-            },
-        )),
+    for &(dotted, plain) in DIRECTORIES {
+        let by_dot = answered(operations.dir_list(dotted));
+        let by_name = answered(operations.dir_list(plain));
+        if by_dot != by_name {
+            differences.push(format!(
+                "dir_list `{dotted}` answered {by_dot}, and `{plain}` answered {by_name}"
+            ));
+        }
     }
+    if differences.is_empty() {
+        Ok(())
+    } else {
+        Err(differences.join("\n    "))
+    }
+}
+
+/// A write's or an edit's reply, without the one field two identical writes cannot share.
+///
+/// Substrate's reply says when it observed the write (`observed_at`); two writes of the same bytes
+/// to the same file a moment apart differ there and nowhere else. Everything else — the path it
+/// names, the size, the digest — is kept, because that is what says which file was written.
+fn settled(result: Result<Value, String>) -> Value {
+    let mut reply = answered(result);
+    if let Some(object) = reply.as_object_mut() {
+        object.remove("observed_at");
+    }
+    reply
 }
 
 #[test]
 fn a_path_spelled_with_a_leading_dot_names_the_same_file_in_every_workspace() {
     every_workspace(
-        "`./notes.txt` is inside the workspace by every reading of the trait, and today one \
-         workspace answers it as an escape — this case holds that split still and exactly:",
-        a_path_spelled_with_a_leading_dot,
+        "a `.` component is a spelling and not a location, so a path spelled with one names the \
+         file the plain path names, in every workspace:",
+        a_path_spelled_with_dot_components,
     );
 }
 

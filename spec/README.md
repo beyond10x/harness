@@ -4,7 +4,7 @@ This first retrofit holds the native agent loop and workflow scheduler to an exp
 It is a library-boundary specification, **not a claim that all of Harness is modeled or tested by
 ESS**. [COVERAGE.md](COVERAGE.md) identifies the executed slice and remaining boundaries.
 
-The maintained toolchain is ESS **0.66.0**, pinned in `ess-inputs.yaml` and by exact release commit
+The maintained toolchain is ESS **0.67.0**, pinned in `ess-inputs.yaml` and by exact release commit
 in `crates/harness-conformance/Cargo.toml`. `cargo xtask specification` compiles, synthesizes,
 compares projections, runs the native target, and audits an inert target using those Rust libraries;
 it needs no installed `ess` executable. The repository gate includes this command.

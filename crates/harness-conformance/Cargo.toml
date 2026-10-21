@@ -14,12 +14,11 @@ harness-loop.workspace = true
 harness-flow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
-# Exact ESS 0.66.0 release. No sibling checkout participates in this gate.
-ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "145a1b9d5567a7601b95ee86e3a88f44dbdc0dd5" }
-ess-primitives = { git = "https://github.com/beyond10x/ess", rev = "145a1b9d5567a7601b95ee86e3a88f44dbdc0dd5" }
+ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "4579d8049bb5b83749b46059dfc0982de7633485" }
+ess-primitives = { git = "https://github.com/beyond10x/ess", rev = "4579d8049bb5b83749b46059dfc0982de7633485" }
 
-ess-domain = { git = "https://github.com/beyond10x/ess", rev = "145a1b9d5567a7601b95ee86e3a88f44dbdc0dd5" }
-ess-compiler = { git = "https://github.com/beyond10x/ess", rev = "145a1b9d5567a7601b95ee86e3a88f44dbdc0dd5" }
+ess-domain = { git = "https://github.com/beyond10x/ess", rev = "4579d8049bb5b83749b46059dfc0982de7633485" }
+ess-compiler = { git = "https://github.com/beyond10x/ess", rev = "4579d8049bb5b83749b46059dfc0982de7633485" }
 serde_yaml_ng.workspace = true
 
 [lints]

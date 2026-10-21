@@ -268,7 +268,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Executable specification
 
-`spec/ess-inputs.yaml` pins ESS 0.52.0. The authored specification describes the native loop and
+`spec/ess-inputs.yaml` pins ESS 0.67.0. The authored specification describes the native loop and
 workflow boundaries; `conformance/` records the compiled model, selected suite, required scenario
 inventory and coverage limits. This is a retrofit of shipped behavior, not permission to invent
 new runtime semantics. Preserve source citations and report every unresolved mapping.

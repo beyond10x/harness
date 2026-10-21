@@ -348,7 +348,7 @@ else.
 | leg | mechanism | owner |
 |---|---|---|
 | workflow in | the flow document, `aep govern workflow flow --map <steps> --max-attempts N` | AEP, exists |
-| step → turn | `FlowRunner`, the `StepRunner` in `crates/harness-cli/src/workflow.rs`: one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives`, and a `kind: command` step is one gated `run` call instead | here, **shipped** |
+| step → turn | `harness_workflow::Walk`, the `StepRunner` in `crates/harness-workflow` (`FlowRunner` in `crates/harness-cli` until 2026-10-22): one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives`, and a `kind: command` step is one gated `run` call instead | here, **shipped** |
 | transition out | the fourth hook point on `--hooks`, `transition` (`crates/harness-cli/src/hooks.rs:216`, `:352`): fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is, and a hook that cannot answer is read closed at both moments | here, **shipped** |
 | the governor | any program behind that hook — `metaharness aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |
 | the record | `flow.*` events on `--json`; metaharness maps each to an IR family or lists it as control plane, when an eval wants the run | metaharness, absent, optional |

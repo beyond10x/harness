@@ -7,6 +7,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-harness-workflow` (`harness_workflow`), a library that walks a workflow document with one agent loop: `Walk` is the step runner, one step a turn and one section a conversation. The caller lends it a `Governor` that answers each transition and a `StepRecord` that receives each section; it spawns no process and reads context files only inside a workspace the caller names.
+
+### Changed
+
+- `b10x-harness workflow run` walks through `harness_workflow`; its argv, events, session files and exit statuses are unchanged.
+- ESS 0.67.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance`); the generated model and suite are byte-identical.
+
+### Fixed
+
+- A path spelled with `.` components (`./notes.txt`, `a/./b.txt`) names the same file through a confined workspace (`ConfinedOperations`, `Split`) as through a local one, for read, write and edit, and the write scope is shown the same name. `..` is never collapsed: `../x` and `a/../../x` are still substrate's to refuse.
+
 ## [0.16.1] - 2026-10-21
 
 ### Added

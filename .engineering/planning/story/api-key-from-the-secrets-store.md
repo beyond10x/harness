@@ -7,7 +7,7 @@ title: An API key is read from the local secrets store by reference
 summary: '`--api-key-secret <namespace>/<name>` resolves a provider key through llm-credentials'' secrets resolver, so no key is stored in a file'
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+revision: 2
 ---
 ## Context
 
@@ -42,3 +42,11 @@ The first caller is a trial arm that reads the key `llm/opencode-go-api-key`.
 
 - Writing a secret: `secretsctl put` stays the only writer.
 - Reading Secret Service attributes directly.
+
+## Release target
+
+On 2026-10-22 the orchestrator asked for this story to be pulled into 0.17.0, as the first link of the
+trial arm chain (harness release, then a metaharness story, then a trial story), and allowed at most
+one extra gate round. It needs more than one gate round: a new git dependency (`beyond10x/secrets`
+v0.5.0 through `llm-credentials`' `secrets` feature, `llm` 0.8.1), a new `contracts/cli` version and
+an adversary pass over a credential path. It ships as 0.17.1, the release after 0.17.0.

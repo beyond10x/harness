@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-21T23:53:00Z",
+  "actor": "human:timo",
+  "artifact": "story:workflow-run-through-the-library",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate at 6a1c727d (release 0.17.0): gate: green, EXIT=0, 1152 passed 0 failed (~/.cache/harness-wave/gate-release.log); PR #37 5/5 checks pass"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:one-spelling-of-a-path-in-every-workspace
 kind: story
-status: active
+status: implemented
 title: One spelling of a path names one file in every workspace
 summary: ./notes.txt reads locally and is refused as a path escape when confined; the model is never told which spelling is required.
 relations:
@@ -14,11 +14,16 @@ scope:
 - confidence: cited
   path: crates/harness-substrate/src/tools.rs
 - confidence: cited
+  path: crates/harness-substrate/tests/adversary_trailing_dot.rs
+- confidence: cited
+  path: crates/harness-substrate/tests/confined_spelling.rs
+- confidence: cited
   path: crates/harness-substrate/tests/conformance.rs
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:31Z", actor: "human:timo", revision: 2, imported: true}
 - {from: "proposed", to: "active", at: "2026-10-21T21:01:57Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-21T23:53:06Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Evidence
 

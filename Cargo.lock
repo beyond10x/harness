@@ -187,6 +187,7 @@ dependencies = [
  "b10x-harness-mcp",
  "b10x-harness-substrate",
  "b10x-harness-wire",
+ "b10x-harness-workflow",
  "b10x-mcp-config",
  "b10x-mcp-testkit",
  "b10x-mcp-types",
@@ -298,6 +299,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "zeroize",
+]
+
+[[package]]
+name = "b10x-harness-workflow"
+version = "0.16.1"
+dependencies = [
+ "b10x-harness-catalogue",
+ "b10x-harness-flow",
+ "b10x-harness-loop",
+ "b10x-harness-wire",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

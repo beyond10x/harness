@@ -63,9 +63,12 @@ CLI never parses a document itself.
 
 ## 2. A step is a turn — the `StepRunner` binding
 
-`FlowRunner` in `crates/harness-cli/src/workflow.rs` implements `harness_flow::StepRunner` over one
-`Prepared` (client, tools, approver, config, hooks) — the same objects `run` builds once in
-`prepare` — and drives one `AgentLoop::run_in` per step, exactly as `chat` drives one per line.
+`harness_workflow::Walk` (`crates/harness-workflow`) implements `harness_flow::StepRunner` over a
+model, a toolset, an approver, a config and optional hooks, and drives one `AgentLoop::run_in` per
+step, exactly as `chat` drives one per line. It takes the transition governor and the per-section
+record as the traits `Governor` and `StepRecord`. `harness-cli`'s `workflow run` lends it the
+objects `run` builds once in `prepare`, its `transition` hook as the governor, and session files as
+the record.
 
 **What a step reads from its `run` payload.** All optional; the projection today carries only the
 first two (§ 7 E1 is what fills the rest):

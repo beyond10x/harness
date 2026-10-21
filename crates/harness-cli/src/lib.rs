@@ -187,34 +187,13 @@ fn standing_instruction(
     // it true; this is what stops the model spending a turn discovering it by being refused.
     if announce && !catalogue.scope().is_empty() {
         text.push_str("\n\nWhere this run may write. A path no rule names is unrestricted:\n");
-        text.push_str(&scope_lines(catalogue.scope()));
+        text.push_str(&harness_workflow::scope_lines(catalogue.scope()));
     }
     if !context.is_empty() {
         text.push_str(
             "\n\nFiles you have been given. They are already read; do not read them again:\n",
         );
         text.push_str(context);
-    }
-    text
-}
-
-/// One line per rule, in the order the scope was declared in.
-///
-/// One wording, in one place, because two of them say the same boundary: the standing instruction
-/// states the **run's** scope before the first turn, and a step of a walk is told its **node's**
-/// beside its prompt. A second table of words here is a second boundary as far as a model reading
-/// them is concerned.
-fn scope_lines(scope: &harness_catalogue::Scope) -> String {
-    let mut text = String::new();
-    for rule in scope.rules() {
-        let word = match rule.write {
-            harness_catalogue::WriteScope::Allowed => "may be written or edited",
-            harness_catalogue::WriteScope::PartialOnly => {
-                "may be edited in part, never replaced whole — use `file_edit`"
-            }
-            harness_catalogue::WriteScope::Denied => "must not be changed at all",
-        };
-        let _ = writeln!(text, "- `{}` {word}", rule.paths);
     }
     text
 }

@@ -1,0 +1,25 @@
+[package]
+name = "b10x-harness-workflow"
+description = "One b10x loop walks a whole workflow document, as a library: a step is a turn, a section is a conversation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "harness_workflow"
+
+[lints]
+workspace = true
+
+[dependencies]
+harness-catalogue = { workspace = true }
+harness-flow = { workspace = true }
+harness-loop = { workspace = true }
+harness-wire = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

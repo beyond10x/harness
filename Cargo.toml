@@ -5,6 +5,7 @@ members = [
     "crates/harness-loop",
     "crates/harness-conformance",
     "crates/harness-flow",
+    "crates/harness-workflow",
     "crates/harness-catalogue",
     "crates/harness-substrate",
     "crates/harness-mcp",
@@ -26,6 +27,7 @@ publish = false
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
 harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
+harness-workflow = { package = "b10x-harness-workflow", path = "crates/harness-workflow" }
 harness-catalogue = { package = "b10x-harness-catalogue", path = "crates/harness-catalogue" }
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
 harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }

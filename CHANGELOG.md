@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-22
+
 ### Added
 
 - `b10x-harness-workflow` (`harness_workflow`), a library that walks a workflow document with one agent loop: `Walk` is the step runner, one step a turn and one section a conversation. The caller lends it a `Governor` that answers each transition and a `StepRecord` that receives each section; it spawns no process and reads context files only inside a workspace the caller names.

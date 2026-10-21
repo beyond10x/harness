@@ -18,7 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- A path spelled with `.` components (`./notes.txt`, `a/./b.txt`) names the same file through a confined workspace (`ConfinedOperations`, `Split`) as through a local one, for read, write and edit, and the write scope is shown the same name. `..` is never collapsed: `../x` and `a/../../x` are still substrate's to refuse.
+- A path spelled with `.` components (`./notes.txt`, `a/./b.txt`) names the same file through a confined workspace (`ConfinedOperations`, `Split`) as through a local one, for read, write and edit, and the write scope is shown the same name. `..` is never collapsed: `../x` and `a/../../x` are still substrate's to refuse, and a trailing `.` after a name (`notes.txt/.`) is refused in every workspace.
 
 ## [0.16.1] - 2026-10-21
 

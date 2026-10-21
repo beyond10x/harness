@@ -96,6 +96,12 @@ pub use document::{
 /// declares lives on the catalogue and is laid over the run's for the length of that step. Both
 /// surfaces [`harness_catalogue`] ships implement it here, and a caller that wraps one of them in
 /// its own port implements it by handing back the catalogue inside.
+///
+/// **It must be the same catalogue.** Nothing here can check that [`catalogue_mut`] reaches the
+/// catalogue the port's calls are judged by; a wrapper that hands back another one makes every
+/// node's write scope decorative while the walk reports it applied.
+///
+/// [`catalogue_mut`]: StepTools::catalogue_mut
 pub trait StepTools: ToolPort {
     /// The catalogue every published tool reaches.
     fn catalogue(&self) -> &Catalogue;
@@ -216,6 +222,12 @@ impl std::error::Error for WalkError {}
 /// that published its own toolset would be a second answer to *what may this run do* (design
 /// 0003 § 6). The catalogue's **write scope** is the exception: each step narrows it to what its
 /// own node declares and gives it back when it ends (crate header).
+///
+/// **The walk owns the catalogue's step layer** ([`Catalogue::narrow`]): every step replaces it,
+/// and every step's end resets it to [`Scope::default`](harness_catalogue::Scope::default), so a
+/// layer the caller narrowed before the walk does not survive the first step. A caller that wants
+/// the whole walk narrower sets the run's own layer with [`Catalogue::scoped`] before lending the
+/// toolset, as `b10x-harness workflow run` does.
 pub struct Walk<'a> {
     model: &'a mut dyn ModelPort,
     tools: &'a mut dyn StepTools,

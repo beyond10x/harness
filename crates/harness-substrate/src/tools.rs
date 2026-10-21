@@ -486,6 +486,11 @@ impl Operations for ConfinedOperations {
 /// handed over untouched, because substrate refuses it whatever its `.`s say, and dropping one
 /// beside an empty component could turn `.//x` into `/x`. A path made of nothing but `.`
 /// components is the root, spelled `.` as the reading provider spells it.
+///
+/// **A trailing `.` after a name is handed over untouched.** `notes.txt/.` says *the directory
+/// `notes.txt`*, which the reading provider refuses for a file and for a name that does not
+/// exist; dropping the `.` would read or create `notes.txt` here and nowhere else. Substrate
+/// refuses it as it refuses every `.` component, so all three workspaces refuse it.
 fn without_dot_components(path: &str) -> Cow<'_, str> {
     let mut components = path.split('/');
     if !components.clone().any(|component| component == ".") || components.any(str::is_empty) {
@@ -497,6 +502,8 @@ fn without_dot_components(path: &str) -> Cow<'_, str> {
         .collect();
     if kept.is_empty() {
         Cow::Borrowed(".")
+    } else if path.ends_with("/.") {
+        Cow::Borrowed(path)
     } else {
         Cow::Owned(kept.join("/"))
     }

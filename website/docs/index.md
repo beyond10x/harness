@@ -84,7 +84,7 @@ Start with [Getting started](./getting-started.md) for a read-only first run. Th
 
 > **Pre-v1**
 >
-> Harness is tagged `0.17.1` and changing quickly. The provider wires and command-line surface are
+> Harness is tagged `0.18.0` and changing quickly. The provider wires and command-line surface are
 > pinned by repository contracts, but live-provider and external-bridge characterization is still
 > limited. See [Status and limitations](./status.md) before adopting it.
 >

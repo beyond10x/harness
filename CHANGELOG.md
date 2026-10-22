@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-22
+
 ### Removed
 
 - `b10x-harness events`: metaharness reads the `--json` record itself with `metaharness project --from harness-json` (metaharness 0.13.0).

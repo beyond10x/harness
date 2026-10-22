@@ -49,8 +49,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; serializable approval checkpoints resume on fresh workers before the exact effect; service access and durable storage remain in the embedder |
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), memories (`recall`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md). `recall` is read-only and has no writing counterpart |
-| command line (`run`, `chat`, `workflow`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`, `events`) | implemented. Eleven top-level verbs, 23 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-09-18/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract |
-| workflows (`workflow plan`, `workflow run`) | implemented, `provider_emulated` only — a step is a turn, a group is a scope, a boundary is a hook; see [design 0003](docs/design/0003-workflow-runner.md) |
+| command line (`run`, `chat`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`) | implemented. Nine top-level verbs, 19 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-10-22.1/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract. `events` and `workflow` were removed for `0.18.0`: metaharness reads the `--json` record itself, and multi-step governed work is Loom's |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories. That exit has been open since 2026-08-21 (`88bbf61`, the commit that wrote Phase 2); kept, not retired — see [ROADMAP Phase 2](ROADMAP.md#phase-2-bridge-mode) |
 | substrate confinement, embedded | working, including execution, and `run` has been *exercised* against a confined process: on 2026-08-31 an embedded delegated scope built, formatted, tested and vetted a Go server through the admitted toolchain; see `STATUS.md` |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |
@@ -348,74 +347,6 @@ run in order and reach the same results in the same order.
 Provider-native structured output (constrained decoding on the wire) and delegate *trees* remain
 later milestones. The loop now validates every `answer` locally against its declared JSON Schema.
 
-## Workflows
-
-A workflow is a document this loop walks itself — [`harness-flow`](crates/harness-flow/src/lib.rs)'s
-notation, a DAG of sub-trees whose edges join siblings only, bound to the loop by
-[design 0003](docs/design/0003-workflow-runner.md). No `metaharness` and no `protocol` process is
-involved: the loop sees the whole graph, so a section stays warm across its steps and a retreat
-re-enters a scope instead of paying for its context again.
-
-```console
-b10x-harness workflow plan --flow flow.yaml                 # validate, print the plan; contacts nothing
-b10x-harness workflow run  --flow flow.yaml --input "…"     # walk it, with the run flags chat takes
-```
-
-`plan` takes only `--flow` and `--max-attempts` — no endpoint, no credential — so *does this
-document validate, and what runs in what order* is free, exactly as `tools` is. `run` flattens the
-same options `run` and `chat` do, plus `--flow <FILE>` (`.yaml`/`.yml` or `.json`, decided by
-extension), `--input <TEXT>` (the task, given to every step beside its own prompt) and
-`--max-attempts <N>`, which overrides every `repeat.max` — the root's included — for a document
-that carries none.
-
-**A step is one turn, one call, or a handoff.** Every model step runs under an output schema the runner
-derives — the model never sees a schema file — and finishes by calling `answer` with
-`outcome: passed` or `outcome: failed`,
-an optional `note`, and `gives` when its enclosing group promised names. `gives` is the only thing
-that crosses a group boundary, so a group that promised `specification_id` and never answered with
-one fails by the notation's own rule rather than by a new one — once, and without a retreat, since
-a section that came out clean and still did not produce it buys the same answer again. A budget stop, or prose after the
-nudge, is a failed step. A wire failure is nobody's failed step: it aborts the flow, because a walk
-that recorded a network blip as `failed` would misreport the plan. A step whose `run` says
-`kind: command` is not a turn at all: its argv is one `run` call through the same gate a model's
-call meets — published, approver, `before-call`, tool, `after-call` — filed into the section's
-conversation, exit `0` passed and everything else failed by name.
-
-A step whose `run.kind` is `operator` is the boundary a model must not cross: its non-empty
-`prompt` becomes the reason on one terminal `flow-paused` event, the step is counted as reached
-rather than failed, and the process exits `0`. Nothing after it is called skipped, no open group
-is left or retreated, no session is invented, and that step reaches neither budget, scope, tool,
-approval, call hook nor provider. An unknown kind and an operator step without a prompt are refused
-by `workflow plan`, so neither can silently become a model turn.
-
-**A group is a conversation.** Steps sharing a scope continue the same items; a step in another
-group starts from the handoffs of the siblings that came out **clean** — rendered as *"Earlier
-sections established:"* — and nothing else, so a sibling's transcript never crosses and a result
-nobody accepted is not what the rest of the walk is built on. **A retreat is `Repeat`**: a group that
-did not come out clean is re-entered from nothing but those handoffs, up to the bound the document
-wrote down.
-
-**A section boundary can be refused.** `--hooks` learns a fourth point, `transition`, asked before a
-group is entered and again after it leaves, under the same rules as the other three — declared,
-never discovered, narrowing only. Exit 2 at `enter` skips the section as failed, exit 2 at `leave`
-on a clean attempt forces a retreat, and a hook that cannot answer fails closed; the protocol is in
-the [workflows guide](website/docs/guides/workflows.md).
-
-**One session per `(scope, attempt)`**, id `<flow-run-id>` then every open section on the way down
-with the attempt it is on — `….root.2.implement-to-review.3.verify.1` — filed with what it cost as
-the scope closes. `--no-session` writes nothing; `--resume` is refused, because a flow names its
-own sessions and resuming a *flow* is a later milestone. Exit status reads as it does everywhere
-else: `0` the flow came out clean or is awaiting an operator, `2` it finished and did not — a failed step, a skipped or
-exhausted section, a cancelled run — `1` refused before it started, or aborted mid-step.
-
-**What stays outside: the governor.** Guards, evidence and transition budgets are
-AEP' engine and stay there — this harness embeds nothing above it (invariant 2),
-and a runner that evaluated a gate would be a second protocol implementation with none of the
-conformance suites behind it. `aep govern workflow flow` projects `adp/default/2` into this notation
-and says what the projection is: an ordering, not a government. Nor is this an eval arm — a run here
-moves the sequencer, so it is a different experiment, and where it is measured against the driven
-arm it is measured as cost, tokens and wall-time under the **same** governor program.
-
 ## Three shells, one loop
 
 | shell | what it is |
@@ -479,8 +410,6 @@ comparison kept here.
 |---|---|
 | `crates/harness-wire` | neutral values plus `ModelPort` and `ToolPort`. No I/O, no clock, no vendor field name. It keeps the credential types (`BearerSource`, `Bearer`, `StaticBearer`) for an embedder with its own model port; the shipped binary's credential path is `llm`'s (`harness_llm::Source`), and the crate reads and sends none |
 | `crates/harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port |
-| `crates/harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse |
-| `crates/harness-workflow` | `b10x-harness-workflow`, a public library: `Walk` walks a workflow document with one agent loop, a step a turn and a section a conversation. The caller lends the transition governor and the per-section record as traits; it spawns no process. `workflow run` uses it |
 | `crates/harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer |
 | `crates/harness-catalogue` | one catalogue, published flat or under three verbs, over the `tools` crates: the adapter that maps each operation onto `b10x-tool-fs` (reads), `b10x-tool-search` (search), `b10x-tool-code-editor` (writes) and `b10x-tool-process` (the local `run`), re-exports `b10x-tool-toolchain`'s resolved providers, and runs every toolchain call through its executor over the active provider's `run_within` |
 | `crates/harness-mcp` | a reviewed `b10x-mcp` tool snapshot as a `ToolPort`: the local profile pins registry and snapshot digests and supplies every published name, description, envelope and subject |
@@ -511,7 +440,6 @@ These suites drive real processes over real sockets and pipes:
 |---|---|
 | `crates/harness-cli/tests/end_to_end.rs` | the shipped binary over a real workspace: both surfaces, both wires, sessions, resume, `chat`, the approver and a refused command line |
 | `crates/harness-cli/tests/bridge_mode.rs` | the shipped binary driven as a bridge would drive it |
-| `crates/harness-cli/tests/workflow.rs` | the shipped binary walking a flow document: one session per section, a retreat to its bound, and a hook refusing a transition |
 
 ## Not owned here
 

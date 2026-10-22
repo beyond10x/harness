@@ -323,13 +323,11 @@ version = "0.17.1"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-catalogue",
- "b10x-harness-flow",
  "b10x-harness-llm",
  "b10x-harness-loop",
  "b10x-harness-mcp",
  "b10x-harness-substrate",
  "b10x-harness-wire",
- "b10x-harness-workflow",
  "b10x-mcp-config",
  "b10x-mcp-testkit",
  "b10x-mcp-types",
@@ -347,7 +345,6 @@ dependencies = [
 name = "b10x-harness-conformance"
 version = "0.17.1"
 dependencies = [
- "b10x-harness-flow",
  "b10x-harness-loop",
  "b10x-harness-wire",
  "clap",
@@ -357,17 +354,6 @@ dependencies = [
  "ess-primitives",
  "serde_json",
  "serde_yaml_ng",
-]
-
-[[package]]
-name = "b10x-harness-flow"
-version = "0.17.1"
-dependencies = [
- "b10x-harness-wire",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -442,18 +428,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "zeroize",
-]
-
-[[package]]
-name = "b10x-harness-workflow"
-version = "0.17.1"
-dependencies = [
- "b10x-harness-catalogue",
- "b10x-harness-flow",
- "b10x-harness-loop",
- "b10x-harness-wire",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

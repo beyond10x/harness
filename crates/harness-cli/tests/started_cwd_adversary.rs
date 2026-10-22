@@ -2,8 +2,7 @@
 //!
 //! The unit's own end-to-end cases launch `run` in a directory and spell one relative
 //! `--workspace`. These drive the record from the other places a directory can come from or go
-//! to: a name that is not UTF-8, a symlink, `chat`, `workflow run`, a delegate, a fork, and the
-//! `events` converter reading the record the binary itself wrote.
+//! to: a name that is not UTF-8, a symlink, `chat`, a delegate and a fork.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -294,86 +293,6 @@ fn every_chat_line_names_the_directory_it_works_in() {
     }
 }
 
-/// `workflow run` builds every step from `prepare` and clones its configuration per step.
-#[test]
-fn every_workflow_step_names_the_directory_it_works_in() {
-    const FLOW: &str = "\
-id: two-sections
-root:
-  id: root
-  nodes:
-    - id: shape
-      gives: [specification_id]
-      nodes:
-        - id: specify
-          run:
-            state: specify
-            summary: \"State the required behaviour.\"
-        - id: decompose
-          needs: [specify]
-          run:
-            state: decompose
-            prompt: \"Break it into units that can be verified on their own.\"
-    - id: build
-      needs: [shape]
-      nodes:
-        - id: implement
-          run:
-            state: implement
-            summary: \"Make the smallest change that satisfies the units.\"
-";
-    let fixture = Fixture::start("flow-passes");
-    let workspace = tempfile::tempdir().expect("a temporary directory");
-    readme_in(workspace.path());
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let flow = dir.path().join("flow.yaml");
-    fs::write(&flow, FLOW).expect("write the flow");
-    let sessions = tempfile::tempdir().expect("a temporary directory");
-
-    let output = Command::new(BINARY)
-        .args([
-            "workflow",
-            "run",
-            "--base-url",
-            &fixture.base_url,
-            "--model",
-            "b10x-emulated",
-            "--api-key-env",
-            "B10X_HARNESS_TEST_KEY",
-            "--json",
-            "--input",
-            "add a CSV export",
-        ])
-        .arg("--session-dir")
-        .arg(sessions.path())
-        .arg("--flow")
-        .arg(&flow)
-        .current_dir(workspace.path())
-        .env("B10X_HARNESS_TEST_KEY", "test-key")
-        .output()
-        .expect("the binary runs");
-    let output = Output {
-        status: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    };
-    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
-    let events = events(&output);
-    let records = started(&events);
-    assert!(
-        !records.is_empty(),
-        "a step's loop starts: {}",
-        output.stdout
-    );
-    for record in records {
-        assert_eq!(
-            record["cwd"],
-            Value::String(canonical(workspace.path())),
-            "{record}"
-        );
-    }
-}
-
 /// A delegate runs over the parent's port, in the parent's directory, and its own `started`
 /// (nested in `delegated`) says so — in order, and side by side over forked ports.
 #[test]
@@ -401,38 +320,4 @@ fn a_delegate_and_a_forked_pair_name_their_parents_directory() {
             );
         }
     }
-}
-
-/// The acceptance's second line, end to end: the record the binary wrote, through the binary's
-/// own `events` converter, lands in `session.started.cwd`.
-#[test]
-fn the_converter_states_the_directory_the_record_the_binary_wrote_names() {
-    let fixture = Fixture::start("text");
-    let workspace = tempfile::tempdir().expect("a temporary directory");
-    readme_in(workspace.path());
-    let output = run_in(&fixture, workspace.path(), &[], None);
-    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
-
-    let scratch = tempfile::tempdir().expect("a temporary directory");
-    let record = scratch.path().join("record.jsonl");
-    fs::write(&record, &output.stdout).expect("write the record");
-    let converted = Command::new(BINARY)
-        .arg("events")
-        .arg("--in")
-        .arg(&record)
-        .output()
-        .expect("the binary runs");
-    assert_eq!(
-        converted.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&converted.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&converted.stdout);
-    let session = stdout
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("a JSON line"))
-        .find(|event| event["event"] == "session.started")
-        .unwrap_or_else(|| panic!("a session.started: {stdout}"));
-    assert_eq!(session["cwd"], Value::String(canonical(workspace.path())));
 }

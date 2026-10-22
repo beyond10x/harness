@@ -17,14 +17,12 @@ workspace = true
 
 [dependencies]
 harness-app-server = { workspace = true }
-harness-flow = { workspace = true }
 harness-loop = { workspace = true }
 harness-mcp = { workspace = true }
 harness-substrate = { workspace = true }
 harness-catalogue = { workspace = true }
 harness-llm = { workspace = true }
 harness-wire = { workspace = true }
-harness-workflow = { workspace = true }
 tool-toolchain = { workspace = true }
 clap = { workspace = true }
 ctrlc = { workspace = true }

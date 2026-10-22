@@ -366,22 +366,15 @@ fn demanded_by(
     Demand::Ran { demanded, unnamed }
 }
 
-/// llm's refusal of a turn held to a tool that ended in prose, as the binary prints it.
-const HELD_TURN_REFUSED: &str = "model terminal reason contradicts its tool obligations";
-
 /// Whether an invocation got past its command line and into its work.
 ///
 /// Exit `0` and exit `2` are the documented outcomes of a run that reached the model; exit `1` is
-/// a refusal, before the run — which is what this file measures — or on the wire. One wire
-/// refusal is reached by the walk every case here drives: the flow's step is held to `answer`
-/// after its one nudge, the `text` scenario answers that turn in prose too, and llm refuses a
-/// turn held to a tool that ends in prose as `Protocol` [`HELD_TURN_REFUSED`] (llm parity row
-/// R45; story:harness-builds-on-llm-0-7), where Harness's own wire let the walk stop
-/// `unstructured` with exit 2. That refusal names the model's answer and no flag, so it counts as
-/// the run having reached its work — which is what it did.
+/// a refusal, before the run — which is what this file measures — or on the wire. Until 0.18.0 one
+/// wire refusal also counted: the `workflow run` walk held its step to `answer`, and llm refused
+/// the prose turn that followed. That verb is gone, no command here holds a turn to a tool, and
+/// exit `1` is a refusal again without exception.
 fn reached_its_work(output: &Output) -> bool {
     matches!(output.status, Some(0 | 2))
-        || (output.status == Some(1) && output.stderr.contains(HELD_TURN_REFUSED))
 }
 
 struct Fixture {
@@ -428,19 +421,12 @@ impl Drop for Fixture {
     }
 }
 
-/// A workspace with one readable file, and a one-step flow document beside it.
+/// A workspace with one readable file.
 fn workspace() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("a temporary directory");
     std::fs::File::create(dir.path().join("README.md"))
         .and_then(|mut file| file.write_all(b"hello harness\n"))
         .expect("a readable file in the workspace");
-    std::fs::write(
-        dir.path().join("one-step.yaml"),
-        "id: one-step\nroot:\n  id: root\n  nodes:\n    - id: shape\n      nodes:\n        - id: \
-         specify\n          run:\n            state: specify\n            summary: \"State the \
-         required behaviour.\"\n",
-    )
-    .expect("a flow document");
     dir
 }
 
@@ -450,10 +436,6 @@ fn values(fixture: &Fixture, workspace: &Path, sessions: &Path) -> BTreeMap<Stri
         ("--input", "read the readme and tell me what it says"),
         ("--base-url", fixture.base_url.as_str()),
         ("--model", "b10x-emulated"),
-        (
-            "--flow",
-            &workspace.join("one-step.yaml").display().to_string(),
-        ),
         ("--session-dir", &sessions.display().to_string()),
         ("--workspace", &workspace.display().to_string()),
     ]
@@ -581,12 +563,9 @@ fn measure_demands(
 /// with neither `XDG_STATE_HOME` nor `HOME` — because `--session-dir` is only demanded on the
 /// second, and a driver in a container is exactly the reader this document is written for.
 ///
-/// Exit `2` counts as having run: it is the documented outcome for a walk that reached the model
-/// but did not produce every promised answer. The distinction this measurement needs is between a
-/// pre-run refusal (`1`) and a command which reached its work (`0` or `2`, or the one exit `1`
-/// that is the model's and not the command line's — see [`reached_its_work`]). In particular,
-/// `workflow run` now applies profiles and reaches the endpoint instead of panicking before the
-/// walk, so its post-clap requirements are measured exactly like `run`'s.
+/// Exit `2` counts as having run: it is the documented outcome for a run that reached the model
+/// and stopped for a named reason. The distinction this measurement needs is between a pre-run
+/// refusal (`1`) and a command which reached its work (`0` or `2`, see [`reached_its_work`]).
 #[test]
 fn the_escape_table_names_the_flags_this_binary_demands_and_clap_does_not() {
     let document = pinned_document();
@@ -813,8 +792,7 @@ fn defaults_run_uses(
 /// The measurement is on `run` and the rows are required on every command whose row for that flag
 /// is **byte-identical** to `run`'s. That is the document's own statement that the flag behaves the
 /// same there, and it is the only generalisation available: `chat` reads a conversation from
-/// standard input and `workflow run` aborts before it reaches either resolver, so neither can be
-/// measured this way today.
+/// standard input, so it cannot be measured this way today.
 #[test]
 fn every_default_this_binary_applies_after_clap_is_a_row_carrying_its_value() {
     let document = pinned_document();

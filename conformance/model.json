@@ -3,21 +3,6 @@
   "version": 1,
   "naming": {},
   "domains": {
-    "harness.flow": {
-      "name": "harness.flow",
-      "naming": {
-        "summary": "Native DAG validation and execution, bounded retreat, refusal and operator pause."
-      },
-      "types": [],
-      "entities": [],
-      "commands": [
-        "harness.flow.Run"
-      ],
-      "events": [],
-      "errors": [],
-      "views": [],
-      "actors": []
-    },
     "harness.loop": {
       "name": "harness.loop",
       "naming": {
@@ -258,126 +243,6 @@
   "conversions": [],
   "entities": {},
   "commands": {
-    "harness.flow.Run": {
-      "name": "harness.flow.Run",
-      "domain": "harness.flow",
-      "input": [
-        {
-          "name": "document",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "json"
-          },
-          "naming": {}
-        },
-        {
-          "name": "script",
-          "type_ref": {
-            "kind": "list",
-            "of": {
-              "kind": "primitive",
-              "name": "string"
-            }
-          },
-          "naming": {}
-        },
-        {
-          "name": "refuse_entry",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "boolean"
-          },
-          "naming": {}
-        }
-      ],
-      "response": [
-        {
-          "name": "status",
-          "type_ref": {
-            "kind": "optional",
-            "of": {
-              "kind": "primitive",
-              "name": "string"
-            }
-          },
-          "naming": {}
-        },
-        {
-          "name": "reached",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "integer"
-          },
-          "naming": {}
-        },
-        {
-          "name": "ran",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "integer"
-          },
-          "naming": {}
-        },
-        {
-          "name": "failed",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "integer"
-          },
-          "naming": {}
-        },
-        {
-          "name": "skipped",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "integer"
-          },
-          "naming": {}
-        },
-        {
-          "name": "retreats",
-          "type_ref": {
-            "kind": "primitive",
-            "name": "integer"
-          },
-          "naming": {}
-        },
-        {
-          "name": "paths",
-          "type_ref": {
-            "kind": "list",
-            "of": {
-              "kind": "primitive",
-              "name": "string"
-            }
-          },
-          "naming": {}
-        },
-        {
-          "name": "diagnostic",
-          "type_ref": {
-            "kind": "optional",
-            "of": {
-              "kind": "primitive",
-              "name": "string"
-            }
-          },
-          "naming": {}
-        }
-      ],
-      "outcomes": [
-        {
-          "name": "returned",
-          "condition": {
-            "kind": "otherwise"
-          },
-          "test_strategy": "default_branch",
-          "emits": [],
-          "returns": true
-        }
-      ],
-      "naming": {}
-    },
     "harness.loop.Call": {
       "name": "harness.loop.Call",
       "domain": "harness.loop",
@@ -648,18 +513,16 @@
     "harness-native": {
       "name": "harness-native",
       "owns": [
-        "harness.flow",
         "harness.loop"
       ],
       "accepts": [
-        "harness.flow.Run",
         "harness.loop.Call",
         "harness.loop.Run",
         "harness.loop.ValidateBudget"
       ],
       "publishes": [],
       "naming": {
-        "summary": "Native AgentLoop and Flow library boundaries with explicit deterministic upstream ports."
+        "summary": "Native AgentLoop library boundary with explicit deterministic upstream ports."
       }
     }
   },

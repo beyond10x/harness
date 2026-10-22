@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-10-22`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-10-22.1`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -22,11 +22,8 @@ than copying every help paragraph.
 
 | Command | Purpose |
 |---|---|
-| `run` | Run one request to completion |
+| `run` | Run one request, given as `--input TEXT`, to completion |
 | `chat` | Read one line at a time over the same local session |
-| `workflow` | Workflow command group |
-| `workflow plan` | Validate a workflow document and print what runs in what order, without an endpoint |
-| `workflow run` | Walk a workflow document: one turn per step, one session per section |
 | `sessions` | List local sessions newest first |
 | `tools` | Print the catalogue, skills and agents this machine would publish, without a model call |
 | `context show` | Assemble context and print its body-free manifest, or the explicit model-facing body |
@@ -43,7 +40,6 @@ than copying every help paragraph.
 | `toolchains show` | Print one validated provider definition and body-free provenance |
 | `toolchains validate` | Validate custom YAML specifications against built-ins and each other |
 | `app-server` | Serve one Codex app-server-compatible JSON-RPC connection over stdio |
-| `events` | Convert a Harness JSONL record into `metaharness.event/1` |
 
 ## Global options
 
@@ -109,7 +105,7 @@ path, variable name, secrets-store reference or secret. Naming none records `"no
 
 ## Outbound MCP
 
-`run`, `chat`, `workflow run`, and `tools` accept the same reviewed outbound surface.
+`run`, `chat`, and `tools` accept the same reviewed outbound surface.
 
 | Option | Meaning |
 |---|---|
@@ -218,7 +214,7 @@ source path where knowing the document's identity can improve the answer.
 | `--output-schema FILE` | Make `run` finish with one structured object |
 
 `--output-schema` belongs only to `run`: an open-ended `chat` conversation has no single final
-object, and `workflow run` derives one schema per step for itself.
+object.
 
 ## Advanced loop features
 
@@ -228,25 +224,6 @@ object, and `workflow run` derives one schema per step for itself.
 | `--delegate-turns N` | Cap one delegate; default `20`, minimum `1` |
 | `--delegate-parallel N` | Cap neighbouring delegates that may run together; default `4`, minimum `1` |
 | `--hooks FILE` | Load explicitly named operator hook programs |
-
-Under `workflow run`, `--hooks` also accepts `on: "transition"`, asked before a section is entered
-and after it leaves. See [Workflow reference](./workflows.md).
-
-## Workflows
-
-| Option | Meaning |
-|---|---|
-| `--flow FILE` | The workflow document; YAML or JSON, decided by extension |
-| `--input TEXT` | The task, given to every step beside its own prompt — the same word `run` uses |
-| `--max-attempts N` | Override every `repeat.max` in the document, the root's included; absent means the document's own bounds |
-
-`workflow plan` accepts `--flow` and `--max-attempts` only, and contacts no endpoint. `workflow run`
-takes the option groups above — endpoint, credentials, workspace, confinement, approvals, budgets,
-sessions — and refuses `--resume` by name, because a flow names its own sessions. `--output-schema`
-is not a flag of `workflow run` at all: the runner derives the schema each step answers under, so
-typing it is an unrecognised argument rather than a refusal. Step budgets
-(`--max-turns`, `--max-output-tokens`, `--max-output-tokens-per-turn`) bound one step;
-`--max-cost-microunits` and `--max-duration-ms` bound the whole flow.
 
 ## Standard streams
 
@@ -259,18 +236,13 @@ typing it is an unrecognised argument rather than a refusal. Step budgets
 Under `--json`, a refusal before the loop starts is one `{"kind":"refused","reason":"..."}` line
 and exit status 1.
 
-The `events` converter reads its Harness JSONL record from `--in FILE` and writes the projected
-record to `--out FILE`.
-
 ## Exit status
 
-| Status | Caller action | Under `workflow run` |
-|---|---|---|
-| `0` | Consume the completed answer, or inspect a typed handoff | The flow came out clean, or stopped at an `operator` step with terminal `flow-paused` |
-| `2` | Inspect the named stop: a budget, cancellation, or unstructured result bound the run | The flow finished and did not come out clean: a failed step, a skipped or exhausted section, or a cancelled run. Inspect `flow-finished` |
-| `1` | Treat it as a configuration, credential, confinement, transport, or protocol failure | Refused before the flow started, or aborted mid-step on a loop error |
-
-`workflow plan` exits `0` when the document validates and `1` when it does not.
+| Status | Caller action |
+|---|---|
+| `0` | Consume the completed answer, or inspect a typed handoff |
+| `2` | Inspect the named stop: a budget, cancellation, or unstructured result bound the run |
+| `1` | Treat it as a configuration, credential, confinement, transport, or protocol failure |
 
 Clap parse errors are normalized to status 1 by this command because status 2 already means a run
 that started and stopped.

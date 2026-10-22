@@ -4,7 +4,6 @@ specification:
   - system.yaml
   - components.yaml
   - domains/loop.yaml
-  - domains/flow.yaml
 scenarios:
   - scenarios/run-completed.yaml
   - scenarios/run-usage-absent.yaml
@@ -29,18 +28,6 @@ scenarios:
   - scenarios/budget-zero-max-cost-microunits.yaml
   - scenarios/budget-unpriced-cost.yaml
   - scenarios/budget-priced-cost.yaml
-  - scenarios/flow-completed.yaml
-  - scenarios/flow-failure-skips-dependent.yaml
-  - scenarios/flow-operator-pause.yaml
-  - scenarios/flow-entry-refused.yaml
-  - scenarios/flow-retreat-then-success.yaml
-  - scenarios/flow-retreat-exhausted.yaml
   - scenarios/run-cancelled-before-provider.yaml
   - scenarios/run-input-budget-unobservable.yaml
   - scenarios/run-output-budget-unobservable.yaml
-  - scenarios/flow-empty-group.yaml
-  - scenarios/flow-duplicate-id.yaml
-  - scenarios/flow-self-dependency.yaml
-  - scenarios/flow-cross-scope-dependency.yaml
-  - scenarios/flow-zero-repeats.yaml
-  - scenarios/flow-missing-handoff-does-not-retreat.yaml

@@ -147,15 +147,6 @@ A stop hook can withdraw one answer and send the loop back to work, so consumers
 
 ## Evaluation record
 
-The `events` command converts a saved Harness JSONL record into the `metaharness.event/1` stream used
-to compare evaluation arms:
-
-```bash
-b10x-harness events --in run.jsonl --out evaluation.jsonl
-```
-
-It converts observations only. It does not add the per-call control seam used to drive vendor
-harnesses. An `approval-resolved` denial therefore crosses as a `warning` with code
-`approval-denied` rather than as a seam decision: the approver is the run's own gate, inside the
-harness, and nothing on the metaharness side decided the call. An approval that was granted emits
-nothing — the request and its result already say the call proceeded.
+An evaluator reads the `--json` record itself. Keep the stream a run wrote and hand that file to
+the consumer; Harness has no converter of its own. metaharness, for example, projects it into its
+evaluation stream with `metaharness project --from harness-json`.

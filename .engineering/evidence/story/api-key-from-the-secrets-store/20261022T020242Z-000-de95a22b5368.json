@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-22T02:02:42Z",
+  "actor": "human:timo",
+  "artifact": "story:api-key-from-the-secrets-store",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate at c5cf4de5 (tag 0.17.1): gate green, 1181 passed, 0 failed, 6 ignored; PR #39 5/5 checks"
+  }
+}

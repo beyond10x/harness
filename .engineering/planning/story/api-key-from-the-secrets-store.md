@@ -2,28 +2,41 @@
 format: aep.planning-md/3
 id: story:api-key-from-the-secrets-store
 kind: story
-status: active
+status: implemented
 title: An API key is read from the local secrets store by reference
 summary: '`--api-key-secret <namespace>/<name>` resolves a provider key through llm-credentials'' secrets resolver, so no key is stored in a file'
 relations:
 - serves: vision:b10x-owns-its-loop
 scope:
-- confidence: inferred
+- confidence: cited
   path: Cargo.lock
-- confidence: inferred
-  path: contracts/cli/b10x-harness
-- confidence: inferred
+- confidence: cited
+  path: contracts/cli/b10x-harness/2026-10-22
+- confidence: cited
+  path: crates/harness-cli/src/contract.rs
+- confidence: cited
   path: crates/harness-cli/src/lib.rs
-- confidence: inferred
-  path: crates/harness-cli/tests
-- confidence: inferred
+- confidence: cited
+  path: crates/harness-cli/tests/secrets_adversary_cli.rs
+- confidence: cited
+  path: crates/harness-cli/tests/secrets_security_cli.rs
+- confidence: cited
   path: crates/harness-llm/Cargo.toml
-- confidence: inferred
+- confidence: cited
   path: crates/harness-llm/src/lib.rs
-revision: 5
+- confidence: cited
+  path: crates/harness-llm/tests/secrets_adversary.rs
+- confidence: cited
+  path: crates/harness-llm/tests/secrets_security.rs
+- confidence: cited
+  path: website/docs/concepts/security-boundary.md
+- confidence: cited
+  path: website/docs/reference/cli.md
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T00:02:57Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T00:02:57Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-22T02:02:59Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Context
 
@@ -66,3 +79,19 @@ trial arm chain (harness release, then a metaharness story, then a trial story),
 one extra gate round. It needs more than one gate round: a new git dependency (`beyond10x/secrets`
 v0.5.0 through `llm-credentials`' `secrets` feature, `llm` 0.8.1), a new `contracts/cli` version and
 an adversary pass over a credential path. It ships as 0.17.1, the release after 0.17.0.
+
+## Delivery
+
+Shipped in 0.17.1 (tag object 243dae18 on c5cf4de5, 2026-10-22): unit 9389c693, merge da4dbd58,
+release commit 6e10881e, clippy fix c5cf4de5.
+
+- The first 0.17.1 gate (on 6e10881e) failed clippy `too_many_lines` (103/100) in
+  `crates/harness-cli/tests/secrets_security_cli.rs`; c5cf4de5 moved the case's sandbox into a
+  struct, and the second gate passed (1181 passed, 0 failed, 6 ignored).
+- Disk: during the gate the orchestrator held all cargo at 14G free on `/`, then sent a go at 46G
+  free for the 0.17.1 gate in harness-w0171-secret, one cargo run at a time (2026-10-22, ~04:0x).
+- The unit's first bot commit was refused by the common checks: gitleaks `generic-api-key` matched
+  a synthetic environment-variable name in `secrets_adversary_cli.rs`; it moved into a named
+  constant before 9389c693.
+- Not covered and not run: a read of a real keychain entry, a namespace `secretsctl` mounted on
+  another backend (refused as not found), a locked collection (may prompt per request).

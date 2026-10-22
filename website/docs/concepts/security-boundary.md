@@ -1,6 +1,9 @@
 ---
 title: Security boundary
+sidebar_position: 3
 description: Credentials, transcripts, tools, hooks, and the boundary Harness does and does not provide.
+lede: Harness controls the agent loop; it is not by itself a sandbox, a credential broker or a multi-tenant service.
+source: crates/harness-cli/src/provider.rs; crates/harness-cli/src/transcript.rs; crates/harness-cli/src/hooks.rs; crates/harness-cli/src/memories.rs; crates/harness-mcp/src/lib.rs; crates/harness-substrate/src/embedded.rs
 ---
 
 # Security boundary

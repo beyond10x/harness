@@ -1,5 +1,6 @@
 ---
 title: Configuration reference
+sidebar_position: 2
 description: Provider and profile fields, precedence, model aliases, credential defaults, and renewal behavior.
 ---
 

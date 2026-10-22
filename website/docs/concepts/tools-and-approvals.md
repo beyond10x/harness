@@ -1,6 +1,9 @@
 ---
 title: Tools and approvals
+sidebar_position: 2
 description: How Harness publishes capabilities, derives risk, and asks before an effect.
+lede: The published toolset is the policy, and approval is a second gate, per call, for the capabilities that exist.
+source: crates/harness-catalogue/src/catalogue.rs; crates/harness-catalogue/src/scope.rs; crates/harness-catalogue/src/written.rs; crates/harness-cli/src/approve.rs; b10x-harness tools --help
 ---
 
 # Tools and approvals
@@ -20,6 +23,9 @@ do exist.
 | `file_write` | `file.write` | medium | Confined workspace |
 | `file_edit` | `file.edit` | medium | Confined workspace |
 | `run` | `shell` | high | Confined execution and an allowed program |
+
+With `--toolchain`, the typed toolchain tools and `toolchain_<role>` entries join the catalogue at
+high risk; [Toolchains](../reference/toolchains.md) lists them.
 
 Reads are bounded to the workspace root. Paths are re-checked after canonicalization, including the
 paths traversed by a search, so a symlink inside the tree cannot be used to read outside it.
@@ -67,11 +73,13 @@ approver defaults to `auto`:
 
 The library default remains deny-all. A shell that wants another policy has to provide it.
 
-> **Unattended effects**
->
-> `--yes` is not a convenience alias for “safe.” It declares that no person is watching and approves
-> every call that asks. Prefer a narrow tool catalogue, write scope, program list, budget, and
-> confinement boundary even when approval is automatic.
+:::caution[Unattended effects]
+
+`--yes` is not a convenience alias for “safe.” It declares that no person is watching and approves
+every call that asks. Prefer a narrow tool catalogue, write scope, program list, budget, and
+confinement boundary even when approval is automatic.
+
+:::
 
 ## Restrict writes by path
 
@@ -92,15 +100,24 @@ The values mean:
 - `partial-only`: an exact edit is admitted, but whole-file replacement is refused;
 - `denied`: no write tool may change the matching path.
 
-A path no rule mentions is unrestricted. These flags declare restrictions, not an allowlist. The
+A path no rule mentions is unrestricted. These flags declare restrictions, not an allowlist.
+
+The scope judges a written path as spelled and then where it lands, so `./notes.txt` and
+`a/./b.txt` are judged as the files they name. A directory a tool writes is judged by everything it
+can hold, including through a link inside it that leads out of the workspace, and a Rust formatting
+call by every module file its named files reach. Build, test and lint calls write the workspace
+without naming paths; the scope does not cover them. They are high-risk process calls held by
+approval and confinement.
+
+The
 default `--scope-announce stated` also tells the model the rules so it does not spend a turn
 discovering them through a refusal. `silent` keeps the gate but withholds the instruction, primarily
 for experiments.
 
 ## Calls that never happen
 
-An unpublished tool, rejected approval, blocked hook, invalid argument, oversized result, or denied
-path becomes an explicit failed tool outcome. It is never reported to the model as success, and the
+An unpublished tool, rejected approval, blocked hook, invalid argument, a field the tool's schema
+does not declare, an oversized result, or a denied path becomes an explicit failed tool outcome. It is never reported to the model as success, and the
 run record carries enough information to distinguish the refusal from an executed call.
 
 ## Narrowing for a named agent

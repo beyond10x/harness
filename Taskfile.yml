@@ -13,7 +13,16 @@ tasks:
     desc: Compile, check synthesis drift and run the native ESS scenarios
     cmds:
       - cargo xtask specification
-  website:
-    desc: Validate, test and lint the independent documentation workspace
+  docs-generate:
+    desc: Regenerate the derived documentation pages (website/docs/reference/cli.md, toolchains.md, crates.md, website/docs/status.md, website/data/status.json)
     cmds:
-      - cargo xtask website
+      - cargo run --locked -p harness-docs -- generate
+  docs-check:
+    desc: Fail when a derived documentation page is missing, stale or edited, or a page under website/docs breaks the page rules
+    cmds:
+      - cargo run --locked -p harness-docs -- generate --check
+  docs-site:
+    desc: Build the Docusaurus site into website/build
+    cmds:
+      - npm --prefix website ci --allow-git=root
+      - npm --prefix website run build

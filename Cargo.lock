@@ -2576,6 +2576,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-docs"
+version = "0.18.0"
+dependencies = [
+ "b10x-harness-cli",
+ "b10x-tool-toolchain",
+ "clap",
+ "serde_json",
+]
+
+[[package]]
 name = "hash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,154 @@
+{
+  "format": "b10x-product-landing/1",
+  "product": {
+    "name": "Harness",
+    "mark": "Hs",
+    "eyebrow": "The beyond10x agent loop · pre-v1",
+    "promise": [
+      "One loop.",
+      "Explicit effects."
+    ],
+    "lede": "Give a model a task, decide what it can touch, and keep a record of every turn. Harness talks to model APIs directly, asks before a tool call above the run's risk ceiling, and holds the run to the bounds you set.",
+    "actions": [
+      {
+        "label": "Make your first run",
+        "href": "/docs/getting-started",
+        "kind": "primary"
+      },
+      {
+        "label": "Understand the loop",
+        "href": "/docs/concepts/agent-loop"
+      },
+      {
+        "label": "CLI reference",
+        "href": "/docs/reference/cli"
+      },
+      {
+        "label": "What exists today",
+        "href": "/docs/status"
+      }
+    ],
+    "meta": "Rust · OpenAI Responses and Anthropic Messages · Linux · LicenseRef-B10x-Proprietary",
+    "kpis": [
+      "shipped",
+      "planned"
+    ]
+  },
+  "sections": [
+    {
+      "kind": "features",
+      "eyebrow": "Start small, add authority deliberately",
+      "title": "A capability is a boundary, not a promise in a prompt.",
+      "lede": "Begin with a read-only workspace. File changes and process execution appear only when a confinement boundary can provide them, and a missing capability is reported as withheld.",
+      "items": [
+        {
+          "title": "Read the workspace",
+          "description": "file_read, dir_list, search and find, bounded to the workspace root. The default needs no substrate and publishes no write tool; b10x-harness tools prints the catalogue without contacting a model.",
+          "status": "shipped",
+          "href": "/docs/getting-started"
+        },
+        {
+          "title": "Admit a change",
+          "description": "A confined workspace adds file_write and file_edit. Each call still meets the run's approval ceiling and its ordered write scope.",
+          "status": "shipped",
+          "href": "/docs/tutorials/confined-change"
+        },
+        {
+          "title": "Allow execution",
+          "description": "run starts an argv, never a shell string, and only for a program declared with --allow-program, inside confined execution. A host that cannot confine it withholds the tool.",
+          "status": "shipped",
+          "href": "/docs/guides/confinement"
+        },
+        {
+          "title": "Budgets that bind",
+          "description": "Turn, token, duration and context-window ceilings, and a spend ceiling when a dated rate card prices the model. Unreported usage stays unknown and is never counted as zero.",
+          "status": "shipped",
+          "href": "/docs/concepts/agent-loop"
+        },
+        {
+          "title": "A readable record",
+          "description": "Sessions are written outside the workspace and resume locally; --json streams vendor-neutral JSON Lines events for another program.",
+          "status": "shipped",
+          "href": "/docs/guides/sessions-and-events"
+        },
+        {
+          "title": "Driven by a real external client",
+          "description": "Bridge mode serves the loop over JSON-RPC on stdio and is contract-tested, but no real external client has driven it yet.",
+          "status": "planned",
+          "href": "/docs/limitations"
+        }
+      ]
+    },
+    {
+      "kind": "flow",
+      "eyebrow": "One turn",
+      "title": "The model proposes. The loop decides.",
+      "lede": "Every turn is assembled from the local conversation and sent as a complete request. A refusal comes back to the model as a failed tool outcome, so it learns the effect did not happen.",
+      "steps": [
+        {
+          "label": "Harness",
+          "title": "Assemble",
+          "description": "Instruction, conversation, published tools and the budget left."
+        },
+        {
+          "label": "Model API",
+          "title": "Propose",
+          "description": "A stateless request over OpenAI Responses or Anthropic Messages."
+        },
+        {
+          "label": "Harness",
+          "title": "Gate",
+          "description": "Catalogue, risk ceiling, approver and write scope, per call."
+        },
+        {
+          "label": "Workspace",
+          "title": "Execute",
+          "description": "Admitted tools run; each result is bounded and returns to the next turn."
+        },
+        {
+          "label": "Harness",
+          "title": "Record",
+          "description": "The answer, the session and a typed stop when a bound ends the run."
+        }
+      ]
+    },
+    {
+      "kind": "status",
+      "eyebrow": "Status",
+      "title": "Pre-v1. Here is exactly what exists.",
+      "lede": "Shipped means code on main today, held by the named test. Planned means not built yet. Provider fixtures come from deterministic emulators; dated live observations are listed under Limitations. Generated by harness-docs.",
+      "items": "data/status.json"
+    },
+    {
+      "kind": "related",
+      "eyebrow": "Related tools",
+      "title": "Where Harness sits.",
+      "tools": [
+        {
+          "id": "ess",
+          "relation": "specifies"
+        },
+        {
+          "name": "Metaharness",
+          "description": "Drives and compares vendor coding harnesses. Harness is the native loop it observes and compares against.",
+          "href": "https://beyond10x.github.io/metaharness/"
+        },
+        {
+          "name": "Substrate",
+          "description": "Confines files and processes. Harness publishes writes and execution only when a substrate boundary admits them.",
+          "href": "https://github.com/beyond10x/substrate"
+        },
+        {
+          "name": "llm",
+          "description": "The model-client crates that send every model call and decode its stream; Harness pins them by tag.",
+          "href": "https://github.com/beyond10x/llm"
+        },
+        {
+          "name": "Tools",
+          "description": "The tool contracts and default implementations Harness adapts: reading, searching, editing, processes and toolchains.",
+          "href": "https://github.com/beyond10x/tools"
+        }
+      ]
+    }
+  ]
+}

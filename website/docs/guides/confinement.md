@@ -1,6 +1,9 @@
 ---
 title: Confined workspaces
+sidebar_position: 3
 description: Admit writes and process execution through a named substrate boundary.
+lede: Harness publishes read tools by default; writes and process execution appear only when a named substrate boundary says this machine can confine them.
+source: crates/harness-substrate/src/embedded.rs; crates/harness-substrate/src/toolchain.rs; crates/harness-catalogue/src/toolchain.rs; b10x-harness tools --help
 ---
 
 # Confined workspaces
@@ -103,6 +106,11 @@ scripts become enum-validated calls through `taskfile_run`, `npm_run` or `yarn_r
 are published only when every active provider implements the role. `--toolchain-spec FILE` loads a
 custom provider only when the operator names it. The catalogue is frozen before turn one, and raw
 `run` cannot invoke internally admitted programs.
+
+Every toolchain call is checked before a process starts. A path argument that lands outside the
+workspace is refused, a written path goes through the write scope, and an argument that begins
+with `-` is refused unless it follows a declared `--`. [Toolchains](../reference/toolchains.md)
+lists each provider's tools.
 
 ## Approval still applies
 

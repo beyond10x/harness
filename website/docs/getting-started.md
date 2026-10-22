@@ -1,5 +1,6 @@
 ---
 title: First read-only run
+sidebar_position: 2
 description: Build Harness, inspect what it can do, and make one bounded read-only run.
 ---
 
@@ -18,9 +19,9 @@ The [release page](https://github.com/beyond10x/harness/releases) is the place t
 binaries and checksums. The repository's release workflow targets Linux x86_64 and aarch64; macOS
 is not a build target because the embedded confinement host uses Linux namespaces.
 
-To build from source, install Rust 1.98 or newer and arrange Git access to the pinned foundation
-dependencies before building. Public source visibility alone does not grant access to every
-dependency. From the repository root:
+To build from source, install Rust 1.98 or newer and Git. The foundation crates Harness depends on
+are public Git repositories pinned by tag or revision, and Cargo fetches them with the system `git`.
+From the repository root:
 
 ```bash
 cargo build --release --locked -p b10x-harness-cli
@@ -73,11 +74,13 @@ name with a flag is read only and never renewed by Harness.
 
 See [Configure providers and profiles](./guides/profiles.md) before using a built-in provider.
 
-> **Credential handling**
->
-> Environment variables can be visible to processes allowed to inspect your environment. Credential
-> files and provider stores have their own permissions and rotation rules. Use the source appropriate
-> to your machine, and never paste a real token into a command, fixture, issue, or transcript.
+:::caution[Credential handling]
+
+Environment variables can be visible to processes allowed to inspect your environment. Credential
+files and provider stores have their own permissions and rotation rules. Use the source appropriate
+to your machine, and never paste a real token into a command, fixture, issue, or transcript.
+
+:::
 
 ## 3. Make the run
 
@@ -125,4 +128,6 @@ rate card; Harness refuses an unmeasurable spend limit rather than pretending it
 - [First confined change](./tutorials/confined-change.md) adds write capability through substrate.
 - [Tools and approvals](./concepts/tools-and-approvals.md) explains the two gates on an effect.
 - [Resume and consume events](./guides/sessions-and-events.md) covers sessions and JSONL.
-- [Command-line reference](./reference/cli.md) lists the complete public surface.
+- [Command-line reference](./reference/cli.md) lists the complete public surface, and
+  [the command-line guide](./guides/command-line.md) covers credentials, standard streams and exit
+  status.

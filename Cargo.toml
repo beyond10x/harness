@@ -11,6 +11,7 @@ members = [
     "crates/harness-llm",
     "crates/harness-cli",
     "crates/harness-xtask",
+    "crates/harness-docs",
 ]
 
 [workspace.package]

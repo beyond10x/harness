@@ -8,7 +8,6 @@ use clap::{Parser, Subcommand};
 mod cli_contract;
 mod home_paths;
 mod provider_contract;
-mod website_contract;
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo xtask")]
@@ -29,10 +28,6 @@ enum Task {
         #[arg(long)]
         self_test: bool,
     },
-    /// Verify the public website against shipped versions and the generated CLI surface.
-    WebsiteContract,
-    /// Validate, test and lint the independent documentation workspace.
-    Website,
     /// Compile the ESS specification and execute its native conformance suite.
     Specification,
     /// Refuse literal absolute POSIX home paths in the index and tracked working files.
@@ -45,11 +40,6 @@ enum Task {
     ToolchainSpecs {
         #[arg(long)]
         self_test: bool,
-    },
-    /// Generate the built-in toolchain reference, or check its committed bytes.
-    ToolchainDocs {
-        #[arg(long)]
-        check: bool,
     },
     /// Generate a new immutable command-line contract from clap.
     PinCli {
@@ -69,13 +59,10 @@ fn main() -> ExitCode {
         Task::ProviderContracts => provider_contract::check(&root),
         Task::CliContract { self_test: true } => cli_contract::self_test(),
         Task::CliContract { self_test: false } => cli_contract::check(&root),
-        Task::WebsiteContract => website_contract::check(&root),
-        Task::Website => website(&root),
         Task::Specification => specification(&root),
         Task::HomePaths { self_test: true } => home_paths::self_test(),
         Task::HomePaths { self_test: false } => home_paths::check(&root),
         Task::ToolchainSpecs { self_test } => toolchain_specs(self_test),
-        Task::ToolchainDocs { check } => toolchain_docs(&root, check),
         Task::PinCli { version } => cli_contract::pin(&root, &version),
     };
     match result {
@@ -119,11 +106,21 @@ fn gate(root: &Path) -> Result<(), String> {
     provider_contract::check(root)?;
     cli_contract::self_test()?;
     cli_contract::check(root)?;
-    website_contract::check(root)?;
-    website(root)?;
     toolchain_specs(true)?;
     toolchain_specs(false)?;
-    toolchain_docs(root, true)?;
+    run(
+        root,
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "harness-docs",
+            "--",
+            "generate",
+            "--check",
+        ],
+    )?;
     specification(root)?;
 
     // The untouched app-server profile checker remains until its next material change.
@@ -138,25 +135,6 @@ fn gate(root: &Path) -> Result<(), String> {
     run_command("strict rustdoc", &mut docs)?;
     println!("gate: green");
     Ok(())
-}
-
-fn website(root: &Path) -> Result<(), String> {
-    let site = root.join("website");
-    run(&site, "cargo", &["fmt", "--check"])?;
-    run(&site, "cargo", &["test", "--locked"])?;
-    run(
-        &site,
-        "cargo",
-        &[
-            "clippy",
-            "--all-targets",
-            "--locked",
-            "--",
-            "-D",
-            "warnings",
-        ],
-    )?;
-    run(&site, "cargo", &["run", "--locked", "--", "check"])
 }
 
 fn specification(root: &Path) -> Result<(), String> {
@@ -211,27 +189,6 @@ fn toolchain_specs(self_test: bool) -> Result<(), String> {
         return Err("toolchain spec self-test accepted a provider collision".to_owned());
     }
     println!("toolchain spec checker self-test: rejected planted defects");
-    Ok(())
-}
-
-fn toolchain_docs(root: &Path, check: bool) -> Result<(), String> {
-    let path = root.join("website/docs/reference/toolchains.md");
-    let expected = tool_toolchain::builtin_reference()?;
-    if check {
-        let actual = std::fs::read_to_string(&path)
-            .map_err(|error| format!("reading generated `{}`: {error}", path.display()))?;
-        if actual != expected {
-            return Err(format!(
-                "`{}` is stale; run `cargo xtask toolchain-docs`",
-                path.display()
-            ));
-        }
-        println!("toolchain docs: current");
-        return Ok(());
-    }
-    std::fs::write(&path, expected)
-        .map_err(|error| format!("writing generated `{}`: {error}", path.display()))?;
-    println!("wrote {}", path.display());
     Ok(())
 }
 

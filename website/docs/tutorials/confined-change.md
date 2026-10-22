@@ -1,5 +1,6 @@
 ---
 title: Make a confined change
+sidebar_position: 1
 description: Move from read-only inspection to a writing run whose paths and commands are bounded.
 ---
 
@@ -19,6 +20,10 @@ b10x-harness providers show claude
 
 The built-in provider may select a default credential source. `providers show` tells you which one
 before any model request.
+
+The run below selects the `confined-change` profile from
+[Configure a provider and profile](../guides/profiles.md#add-a-confined-change-profile). Its
+`write = true` is what selects the embedded substrate boundary.
 
 ## Inspect the effect boundary
 

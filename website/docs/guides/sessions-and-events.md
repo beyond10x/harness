@@ -1,6 +1,9 @@
 ---
 title: Sessions and events
+sidebar_position: 4
 description: Resume conversations, use chat, and consume the JSONL run record correctly.
+lede: Sessions keep a conversation between invocations, and the JSON Lines record shows a run while it happens; each works without the other.
+source: crates/harness-cli/src/transcript.rs; crates/harness-loop/src/event.rs; crates/harness-cli/src/render.rs; b10x-harness sessions --help; b10x-harness run --help
 ---
 
 # Sessions and events
@@ -43,10 +46,12 @@ A session records:
 It records neither credentials nor the standing instruction. The instruction is rebuilt from the
 current invocation, catalogue, environment, write scope, and project files.
 
-> **Resume must stay on one wire**
->
-> Opaque provider items are replayed verbatim. A session produced by `openai-responses` is refused by
-> `anthropic-messages`, and vice versa. Start a new session to change wires.
+:::note[Resume must stay on one wire]
+
+Opaque provider items are replayed verbatim. A session produced by `openai-responses` is refused by
+`anthropic-messages`, and vice versa. Start a new session to change wires.
+
+:::
 
 ## Chat
 
@@ -90,7 +95,11 @@ Each line is one object with a kebab-case `kind`. The main event groups are:
 
 The `started` event names the model, tools published to it, neutral operations, any requested tool
 withheld by the machine, and the `skills` and `agents` offered — the last three written even when
-empty, so *this run had none* and *this build does not say* are different records. The `finished` event carries the typed stop and total model turns.
+empty, so *this run had none* and *this build does not say* are different records. It also lists
+the `memories`, `profiles`, `context` files, `toolchains` and `mcp` servers, the
+`credential_source`, and `cwd`: the canonical root the file tools act in. `cwd` is absent when that
+root's name is not UTF-8 and under `--substrate <socket>`, where no host path names the daemon's
+workspace. The `finished` event carries the typed stop and total model turns.
 
 `credential-renewed` arrives **before** `started`, and only on a run that renewed something: the
 token had gone stale, it was renewed, and the file its owner keeps it in was rewritten — all before

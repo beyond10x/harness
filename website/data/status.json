@@ -1,0 +1,293 @@
+{
+  "asOf": "2026-10-22",
+  "format": "b10x-status/1",
+  "items": [
+    {
+      "area": "Provider wires",
+      "detail": "The binary reads a real file through a real tool call over the Responses wire.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::the_binary_reads_a_real_file_through_a_real_tool_call",
+      "href": "/docs/reference/wires",
+      "label": "OpenAI Responses",
+      "status": "shipped"
+    },
+    {
+      "area": "Provider wires",
+      "detail": "The binary drives the Messages wire and calls a real tool through it.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::the_binary_drives_the_second_wire_and_calls_a_real_tool_through_it",
+      "href": "/docs/reference/wires",
+      "label": "Anthropic Messages",
+      "status": "shipped"
+    },
+    {
+      "area": "Provider wires",
+      "detail": "A short model name resolves to the exact identifier this build pins.",
+      "evidence": "crates/harness-cli/src/provider.rs::a_short_name_resolves_to_the_exact_identifier_this_build_pins",
+      "href": "/docs/reference/cli#b10x-harness-providers-show",
+      "label": "Provider presets",
+      "status": "shipped"
+    },
+    {
+      "area": "Provider wires",
+      "detail": "Naming your own credential turns the preset's token renewal off, so no file is rewritten that the operator did not offer.",
+      "evidence": "crates/harness-cli/src/provider.rs::naming_your_own_credential_turns_the_renewal_off",
+      "href": "/docs/guides/command-line#credentials",
+      "label": "Credentials the operator names",
+      "status": "shipped"
+    },
+    {
+      "area": "Provider wires",
+      "detail": "A run or server without the secrets flag never dials the session bus.",
+      "evidence": "crates/harness-cli/tests/secrets_security_cli.rs::a_run_or_server_without_the_flag_never_dials_the_session_bus",
+      "href": "/docs/guides/command-line#credentials",
+      "label": "Secrets store only on request",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "A turn ceiling stops the loop, and the stop names the ceiling.",
+      "evidence": "crates/harness-loop/src/tests.rs::a_turn_ceiling_stops_the_loop_and_names_itself",
+      "href": "/docs/concepts/agent-loop",
+      "label": "Turn ceiling",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "A spend ceiling on a run that cannot price its model is refused before the first request.",
+      "evidence": "crates/harness-loop/src/tests.rs::a_spend_ceiling_on_a_run_that_cannot_price_itself_is_refused_before_the_first_request",
+      "href": "/docs/concepts/agent-loop",
+      "label": "Spend ceiling",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "A model the rate card does not price has no cost rather than a zero one.",
+      "evidence": "crates/harness-loop/src/price.rs::a_model_the_card_does_not_price_is_absent_rather_than_free",
+      "label": "Unpriced is not free",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "Usage a provider did not report stays unknown rather than becoming zero.",
+      "evidence": "crates/harness-loop/src/tests.rs::unreported_usage_stays_unknown_rather_than_zero",
+      "label": "Unreported usage",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "A declared context window compacts on the token count the provider reported.",
+      "evidence": "crates/harness-loop/src/tests.rs::a_declared_window_compacts_on_the_count_the_provider_reported",
+      "href": "/docs/concepts/agent-loop",
+      "label": "Compaction",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "Cancellation between tool calls stops the run before the next effect.",
+      "evidence": "crates/harness-loop/src/tests.rs::cancellation_between_tool_calls_stops_before_the_next_effect",
+      "href": "/docs/concepts/agent-loop",
+      "label": "Cancellation",
+      "status": "shipped"
+    },
+    {
+      "area": "Agent loop",
+      "detail": "A run asked for a schema that answers in prose stops without an answer.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer",
+      "href": "/docs/guides/structured-runs",
+      "label": "Structured output",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "A run entry built from the process adapter is refused under the default approver.",
+      "evidence": "crates/harness-catalogue/tests/run_under_deny_all.rs::run_built_from_the_adapter_is_refused_under_deny_all",
+      "href": "/docs/concepts/tools-and-approvals",
+      "label": "Deny by default",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "A write is refused when the run has nobody it may ask.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::a_write_is_refused_when_the_run_may_not_ask_anybody",
+      "href": "/docs/concepts/tools-and-approvals",
+      "label": "No silent approval",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "Raising the unattended ceiling lets a write through, on either wire.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::raising_the_ceiling_lets_a_write_through_on_the_second_wire_too",
+      "href": "/docs/reference/cli#b10x-harness-run",
+      "label": "Approval ceiling",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "A path the write scope denies is refused for both writers, and the refusal says the scope is what is wrong.",
+      "evidence": "crates/harness-catalogue/src/scope.rs::a_denied_path_refuses_both_and_says_it_is_the_scope_that_is_wrong",
+      "href": "/docs/guides/profiles",
+      "label": "Write scope",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "A declared program with no confinement is reported as withheld rather than dropped.",
+      "evidence": "crates/harness-cli/tests/withheld.rs::a_declared_program_with_no_confinement_at_all_is_reported_rather_than_dropped",
+      "href": "/docs/guides/confinement",
+      "label": "Withheld tools are reported",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "The verbs surface publishes three tools over the same catalogue.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::the_verbs_surface_publishes_three_tools_over_the_same_catalogue",
+      "href": "/docs/concepts/tools-and-approvals",
+      "label": "Verb surface",
+      "status": "shipped"
+    },
+    {
+      "area": "Tools and approvals",
+      "detail": "An MCP server named in a reviewed profile runs end to end over stdio.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::outbound_mcp_runs_end_to_end_over_stdio",
+      "href": "/docs/guides/command-line#mcp-servers",
+      "label": "Outbound MCP",
+      "status": "shipped"
+    },
+    {
+      "area": "Command line",
+      "detail": "The tools command describes the toolset without an endpoint.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::the_tools_subcommand_describes_the_toolset_without_an_endpoint",
+      "href": "/docs/reference/cli#b10x-harness-tools",
+      "label": "Toolset description",
+      "status": "shipped"
+    },
+    {
+      "area": "Command line",
+      "detail": "Every profile that contributed to a run is in its record with its own digest.",
+      "evidence": "crates/harness-cli/src/profile.rs::every_profile_that_contributed_is_in_the_record_with_its_own_digest",
+      "href": "/docs/guides/profiles",
+      "label": "Profiles",
+      "status": "shipped"
+    },
+    {
+      "area": "Command line",
+      "detail": "The default write scope denies the repository's own Git directory.",
+      "evidence": "crates/harness-cli/src/profile.rs::the_default_write_scope_denies_git",
+      "href": "/docs/guides/profiles",
+      "label": "Default write scope",
+      "status": "shipped"
+    },
+    {
+      "area": "Command line",
+      "detail": "A declared context file that is absent refuses the run before any session is filed.",
+      "evidence": "crates/harness-cli/tests/context.rs::a_declared_context_file_that_is_absent_refuses_the_run_before_any_session",
+      "href": "/docs/reference/cli#b10x-harness-context-show",
+      "label": "Declared context files",
+      "status": "shipped"
+    },
+    {
+      "area": "Sessions and output",
+      "detail": "A run files its conversation, and a later run resumes it.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::a_run_files_its_conversation_and_a_later_one_resumes_it",
+      "href": "/docs/guides/sessions-and-events",
+      "label": "Resume",
+      "status": "shipped"
+    },
+    {
+      "area": "Sessions and output",
+      "detail": "A session directory inside the workspace is refused before it is created.",
+      "evidence": "crates/harness-cli/src/transcript.rs::a_session_directory_inside_the_workspace_is_refused_before_creation",
+      "href": "/docs/guides/sessions-and-events",
+      "label": "Sessions stay outside the workspace",
+      "status": "shipped"
+    },
+    {
+      "area": "Sessions and output",
+      "detail": "JSON mode emits one event per line.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::json_mode_emits_one_event_per_line",
+      "href": "/docs/guides/sessions-and-events",
+      "label": "JSON events",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "A delegate runs a whole second loop, and the parent reads only its report.",
+      "evidence": "crates/harness-loop/src/tests.rs::a_delegate_runs_a_whole_second_loop_and_the_parent_reads_only_its_report",
+      "label": "Delegation",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "Two delegates of one turn run at the same time.",
+      "evidence": "crates/harness-loop/src/tests.rs::two_delegates_of_one_turn_run_at_the_same_time",
+      "label": "Concurrent delegates",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "A named agent cannot widen what the parent run was admitted.",
+      "evidence": "crates/harness-loop/src/agent.rs::an_agent_cannot_widen_what_the_parent_was_admitted",
+      "href": "/docs/guides/command-line#skills-agents-and-memories",
+      "label": "Named agents",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "Skill descriptions are in the instruction, and their bodies are not until the model asks.",
+      "evidence": "crates/harness-loop/src/skill.rs::the_descriptions_are_in_the_instruction_and_the_bodies_are_not",
+      "href": "/docs/guides/command-line#skills-agents-and-memories",
+      "label": "Skills",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "recall answers a memory's body, and the record names every memory whatever its status.",
+      "evidence": "crates/harness-loop/src/tests.rs::a_recall_answers_the_body_and_the_record_names_every_memory_whatever_its_status",
+      "href": "/docs/guides/command-line#skills-agents-and-memories",
+      "label": "Read-only memories",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "A stop hook blocks one ending, and the run turns again before it finishes.",
+      "evidence": "crates/harness-cli/tests/end_to_end.rs::a_stop_hook_blocks_one_ending_and_the_run_turns_again_before_it_finishes",
+      "href": "/docs/reference/cli#b10x-harness-run",
+      "label": "Stop hooks",
+      "status": "shipped"
+    },
+    {
+      "area": "Delegation, skills, memories and hooks",
+      "detail": "A hook file naming a point that does not exist is refused by name.",
+      "evidence": "crates/harness-cli/src/hooks.rs::transition_is_no_longer_a_hook_point",
+      "label": "Hook points",
+      "status": "shipped"
+    },
+    {
+      "area": "Bridge mode",
+      "detail": "A tool call round trips back to the client that registered the tool.",
+      "evidence": "crates/harness-cli/tests/bridge_mode.rs::a_tool_call_round_trips_back_to_the_client",
+      "href": "/docs/reference/cli#b10x-harness-app-server",
+      "label": "Tool calls round trip",
+      "status": "shipped"
+    },
+    {
+      "area": "Bridge mode",
+      "detail": "The client methods served and refused match the pinned profile manifest.",
+      "evidence": "crates/harness-app-server/tests/contract.rs::the_served_and_refused_client_methods_match_the_manifest",
+      "label": "Pinned method inventory",
+      "status": "shipped"
+    },
+    {
+      "area": "Bridge mode",
+      "detail": "A real external client drives bridge mode end to end, beyond the contract tests.",
+      "label": "Driven by a real external client",
+      "status": "planned"
+    },
+    {
+      "area": "Specification",
+      "detail": "The agent loop's turn, tool and budget behaviour is modelled in the executable specification and run by its conformance suite.",
+      "label": "The loop in the executable specification",
+      "status": "planned"
+    }
+  ],
+  "source": "harness-docs, from its capability list; every shipped item names the test that holds it"
+}

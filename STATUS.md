@@ -65,7 +65,7 @@ versions and environments in which they were recorded.
 `cargo xtask gate` is the evidence source, and `gate()` in `crates/harness-xtask/src/main.rs` is
 what decides its contents: workspace tests, explicit cross-workspace conformance, formatting, clippy
 with warnings denied, independent provider and CLI contract validation (including planted bad CLI
-fixtures), the website contract, the built-in toolchain specs (also against planted defects) and the
-committed bytes of their generated reference, the generic HTTP boundary guard, the app-server
+fixtures), the built-in toolchain specs (also against planted defects), the generated documentation pages
+and the rules every page is held to (`harness-docs generate --check`), the generic HTTP boundary guard, the app-server
 profile and home-path checks, and strict rustdoc. This page deliberately carries no hand-maintained
 test counts; the gate's own output is the current count and exit evidence.

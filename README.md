@@ -3,8 +3,9 @@
 The b10x agent loop — ours, not a vendor's. It makes its own model calls, through `llm`'s client
 crates, and owns the cycle: one turn out, tool calls back, results in, next turn out.
 
-**[Read the public documentation](https://beyond10x.github.io/harness/)** for the quickstart,
-execution model, safety boundary, operational guides and reference.
+**[Read the documentation](https://beyond10x.github.io/harness/)**: [getting started](https://beyond10x.github.io/harness/docs/getting-started),
+the [CLI reference](https://beyond10x.github.io/harness/docs/reference/cli) and
+[status](https://beyond10x.github.io/harness/docs/status). The site's source is [`website/`](website/README.md).
 
 The source is publicly readable under the proprietary `LicenseRef-B10x-Proprietary` declaration.
 Public visibility is not an open-source licence or a stability promise. Report a suspected security
@@ -73,11 +74,11 @@ added there and not here is a documentation defect, not a second gate.
 | lint | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | provider-wire pins | `cargo xtask provider-contracts` |
 | command-line argv pin | `cargo xtask cli-contract --self-test`, then `cargo xtask cli-contract` |
-| website contract | `cargo xtask website-contract` |
 | toolchain specs | `cargo xtask toolchain-specs --self-test`, then `cargo xtask toolchain-specs` |
-| generated toolchain docs | `cargo xtask toolchain-docs --check` |
+| documentation pages | `cargo run --locked -p harness-docs -- generate --check` |
+| ESS specification and conformance | `cargo xtask specification` |
 | app-server profile pin | `python3 scripts/check-app-server-profile.py` |
-| absolute home paths | `python3 scripts/check-no-home-paths.py --self-test`, then `python3 scripts/check-no-home-paths.py` |
+| absolute home paths | `cargo xtask home-paths --self-test`, then `cargo xtask home-paths` |
 | strict rustdoc | `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked` |
 
 Source publication uses this repository's checks and standalone `b10x-gates bot`. It requires no

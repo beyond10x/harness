@@ -1,5 +1,6 @@
 [package]
 name = "b10x-harness-xtask"
+description = "The repository's own gate and contract checkers, run as cargo xtask"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

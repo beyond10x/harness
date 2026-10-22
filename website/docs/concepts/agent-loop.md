@@ -1,6 +1,9 @@
 ---
 title: The agent loop
+sidebar_position: 1
 description: How Harness assembles turns, performs tool round trips, and decides when a run stops.
+lede: Harness owns the cycle between one caller, one model endpoint and one tool port, and sends every turn as a complete request because the endpoint keeps no thread.
+source: crates/harness-loop/src/lib.rs; crates/harness-loop/src/budget.rs; crates/harness-loop/src/context.rs; crates/harness-loop/src/event.rs; crates/harness-wire/src/port.rs
 ---
 
 # The agent loop

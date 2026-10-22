@@ -289,8 +289,8 @@ cargo xtask gate
 transcribes it and nothing else decides. In order: `cargo test --workspace --locked`,
 `cargo test -p b10x-harness-substrate --locked --test conformance`, `cargo fmt --all --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo xtask provider-contracts`,
-`cargo xtask cli-contract`, `cargo xtask website-contract`, `cargo xtask website`, `cargo xtask toolchain-specs`,
-`cargo xtask toolchain-docs --check`, `cargo xtask specification`,
+`cargo xtask cli-contract`, `cargo xtask toolchain-specs`,
+`cargo run --locked -p harness-docs -- generate --check`, `cargo xtask specification`,
 `python3 scripts/check-app-server-profile.py`, `cargo xtask home-paths` and strict
 rustdoc. Three of them — the CLI contract checker, the toolchain specs checker and
 `home-paths` — run **twice**: `--self-test` first, on planted fixtures, then the tree.
@@ -399,19 +399,25 @@ rules still apply; historical brand exemptions do not authorize new public assoc
 
 ## Independent documentation source
 
-`website/` is an independent Rust workspace with its own lockfile and public crates.io dependencies.
-It owns the public HTML/CSS presentation and the explicit Markdown navigation. `cargo xtask website`
-runs its formatting, tests, strict Clippy and rendered link/anchor checks. The source gate also
-checks the documentation against the product's generated CLI and toolchain contracts.
+`website/` is the Docusaurus site served at `https://beyond10x.github.io/harness/`, on the shared
+Docs System pinned by commit in `website/package.json`. The site build is the only Node here.
+`crates/harness-docs` (`harness-docs`) generates `website/docs/reference/cli.md`, `toolchains.md`,
+`crates.md`, `website/docs/status.md` and `website/data/status.json`; never edit those by hand.
+`task docs-generate` rewrites them, and `task docs-check` (`harness-docs generate --check`, a gate
+step) fails on a stale or edited generated file, on a page without its front matter, on a page
+that is not passive Markdown or names internal material, and on a landing page that does not name
+the workspace version. A release therefore updates `website/docs/index.md`. `website/README.md`
+lists what is generated, the page rules, and the preview and build commands.
 
-Follow `website/README.md` to preview or produce the deterministic artifact for `/harness/`.
-Production builds verify all website and build-workflow input bytes against checkout HEAD;
-previews deliberately omit publication provenance. The read-only `pages.yml` produces the
-`b10x-project-site` artifact without deploying it.
+`.github/workflows/pages.yml` builds the site with `contents: read` and no credential, runs the
+`harness-docs` tests, binds the build to its commit with `harness-docs provenance`, and on a push to `main`
+uploads `b10x-project-site`. `.github/workflows/b10x-docs-site.yml` hands that exact artifact to
+the shared `project-site.yml` publisher, pinned by commit, which deploys it to Pages. Do not add
+a deploy step to `pages.yml` or a credential to either workflow.
 
-The generated delivery integration below remains the active legacy route. It is not a dependency
-of the independent builder. Switching live delivery requires a separate coordinated publisher
-change; do not claim this source change has deployed the new site.
+The generated delivery integration below still exists and shares the `b10x-docs-pages`
+concurrency group with the project-site workflow. Removing it is a later, coordinated step; do not
+claim a source change has deployed the site until the live site serves its commit's provenance.
 
 <!-- b10x-docs-operations:start -->
 ## Public documentation operations

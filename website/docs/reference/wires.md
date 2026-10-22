@@ -1,5 +1,6 @@
 ---
 title: Provider wires
+sidebar_position: 4
 description: The two model API projections, their shared transport, and continuation rules.
 ---
 
@@ -57,12 +58,14 @@ attempt. See [Sessions and events](../guides/sessions-and-events.md).
 Provider-wire contracts pin exact request bytes, non-secret header values, terminal policy, and the
 full accepted event inventory under `contracts/provider-wires/<wire>/<version>/`. The independent
 `cargo xtask provider-contracts` validator checks each manifest, fixture, digest, inventory and
-released-version immutability, while tests in the wire crates exercise the production encoder,
-header builder and decoder against those same bytes.
+released-version immutability. The wire crates themselves live in the
+[llm](https://github.com/beyond10x/llm) repository, pinned by tag, and their tests exercise the
+production encoder, header builder and decoder. A change to what is sent or accepted is an `llm`
+change that this repository re-pins.
 
 Most current evidence comes from deterministic local provider emulators. It proves the projection,
 transport, and loop scenarios against a real socket; it is not a claim that every live service
-implementing a similarly named API behaves identically. See [Status and limitations](../status.md).
+implementing a similarly named API behaves identically. See [Limitations](../limitations.md).
 
 ## App-server bridge
 

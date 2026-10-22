@@ -1,6 +1,9 @@
 ---
 title: Structured runs, delegates and hooks
+sidebar_position: 5
 description: Opt into machine-readable answers, skills loaded on demand, fresh-context and named delegation, and operator hooks.
+lede: Each of these features changes how a run can finish or what the model can call, so each is opt-in, and none widens the tool catalogue or passes the approval gate.
+source: crates/harness-loop/src/answer.rs; crates/harness-loop/src/skill.rs; crates/harness-loop/src/memory.rs; crates/harness-loop/src/delegate.rs; crates/harness-cli/src/agents.rs; crates/harness-cli/src/hooks.rs; b10x-harness run --help
 ---
 
 # Structured runs, delegates and hooks
@@ -45,8 +48,9 @@ b10x-harness run \
 Without `--json`, stdout contains exactly one compact JSON value when the run completes. Model prose
 and progress go to stderr. If the model ends in prose, Harness nudges it once to call `answer` —
 **and holds the turn that nudge opens to that tool at the provider**, so the model cannot answer
-in prose twice by choice. A second prose ending still stops as `unstructured` with status 2, which
-is now a route that ignored a constraint it documents rather than a model that preferred prose.
+in prose twice by choice. A held turn that still ends in prose is refused on the wire with
+`Protocol: model terminal reason contradicts its tool obligations` on stderr, and the run exits 1
+with nothing on stdout. A run never exits 0 over prose.
 
 The constraint is sent on that one turn and no other. Holding every turn to `answer` would be a run
 that answers before it does any work, and on one route the field sits outside the prompt cache — so
@@ -83,7 +87,7 @@ a `recall` call the model makes by id. `recall`'s `id` argument is a schema `enu
 records, so an id this run does not have is refused by the provider before it is sent.
 
 ```bash
-b10x-harness run --memory-dir ./vault "what did we decide about retries?"
+b10x-harness run --memory-dir ./vault --input "what did we decide about retries?" ...
 ```
 
 `Memories` is a value the **caller** constructs and hands in. The loop walks no directory and reads
@@ -207,7 +211,9 @@ answer.
 
 A hooks file naming any other point is refused by name before the run starts.
 
-> **Hooks are not confined**
->
-> Hook programs run on the operator's host, outside substrate confinement. They are named explicitly
-> and never discovered from the workspace. See [Security boundary](../concepts/security-boundary.md).
+:::caution[Hooks are not confined]
+
+Hook programs run on the operator's host, outside substrate confinement. They are named explicitly
+and never discovered from the workspace. See [Security boundary](../concepts/security-boundary.md).
+
+:::

@@ -1,6 +1,7 @@
 ---
 slug: /
 title: What is Harness?
+sidebar_position: 1
 description: Harness owns the agent loop between a model API and an explicitly bounded set of tools.
 ---
 
@@ -82,13 +83,15 @@ Start with [Getting started](./getting-started.md) for a read-only first run. Th
 [The agent loop](./concepts/agent-loop.md) to understand the execution model or
 [Tools and approvals](./concepts/tools-and-approvals.md) before enabling effects.
 
-> **Pre-v1**
->
-> Harness is tagged `0.17.1` and changing quickly. The provider wires and command-line surface are
-> pinned by repository contracts, but live-provider and external-bridge characterization is still
-> limited. See [Status and limitations](./status.md) before adopting it.
->
-> The source is publicly readable under `LicenseRef-B10x-Proprietary`. Public visibility is not an
-> open-source licence or a stability promise. See the repository
-> [security policy](https://github.com/beyond10x/harness/security/policy) for private vulnerability
-> reporting.
+:::caution[Pre-v1]
+
+Harness is tagged `0.17.1` and changing quickly. The provider wires and command-line surface are
+pinned by repository contracts, but live-provider and external-bridge characterization is still
+limited. See [Status](./status.md) and [Limitations](./limitations.md) before adopting it.
+
+The source is publicly readable under `LicenseRef-B10x-Proprietary`. Public visibility is not an
+open-source licence or a stability promise. See the repository
+[security policy](https://github.com/beyond10x/harness/security/policy) for private vulnerability
+reporting.
+
+:::

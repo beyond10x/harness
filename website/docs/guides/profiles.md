@@ -1,6 +1,9 @@
 ---
 title: Configure a provider and profile
+sidebar_position: 2
 description: Save connection facts and run permissions without hiding what will happen.
+lede: A provider holds connection facts and a profile holds run permissions; Harness ships providers and never ships a permission profile.
+source: crates/harness-cli/src/provider.rs; crates/harness-cli/src/profile.rs; b10x-harness providers --help; b10x-harness profiles --help
 ---
 
 # Configure a provider and profile
@@ -24,11 +27,13 @@ Built-in providers may name default credential sources. `claude` reads
 `OPENAI_API_KEY`. This is visible in `providers show` and in the run record as
 `credential_source: "provider:<name>"`.
 
-> **The `codex` provider may update its credential file**
->
-> When its default token is near expiry, `codex` renews it before the model call and atomically
-> rewrites `~/.codex/auth.json`. Harness reports that write even under `--quiet`. Naming your own
-> OAuth source disables renewal: explicitly named credential files are read-only.
+:::caution[The codex provider may update its credential file]
+
+When its default token is near expiry, `codex` renews it before the model call and atomically
+rewrites `~/.codex/auth.json`. Harness reports that write even under `--quiet`. Naming your own
+OAuth source disables renewal: explicitly named credential files are read-only.
+
+:::
 
 ## Create a configuration
 

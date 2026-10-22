@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `b10x-harness events`: metaharness reads the `--json` record itself with `metaharness project --from harness-json` (metaharness 0.13.0).
 - `b10x-harness workflow plan|run` and the `b10x-harness-workflow` / `b10x-harness-flow` crates: multi-step governed work is Loom's. The `transition` hook point went with them (`HookPoint::Transition` is gone from `b10x-harness-loop`); a hooks file naming it is refused by name. This breaks `metaharness-aep-eval native`, which runs `b10x-harness workflow`; it must move off before using 0.18.0. Both commands are refused by clap as unknown subcommands (exit 1, and the `refused` line under `--json`); the CLI contract is cut as `contracts/cli/b10x-harness/2026-10-22.1`, and design 0003 is deleted.
 
+### Changed
+
+- The documentation site at `https://beyond10x.github.io/harness/` is Docusaurus on the shared Docs System, built by `pages.yml` and deployed by `b10x-docs-site.yml`; the new `harness-docs` crate generates the CLI, toolchain, crate and status pages and checks every page (`cargo xtask gate` runs `harness-docs generate --check`), replacing the Rust site builder and the `cargo xtask website`, `website-contract` and `toolchain-docs` tasks.
+
 ## [0.17.1] - 2026-10-22
 
 ### Added

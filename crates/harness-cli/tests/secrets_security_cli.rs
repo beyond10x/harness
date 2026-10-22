@@ -22,29 +22,40 @@ fn connections(listener: &UnixListener) -> usize {
     count
 }
 
-#[test]
-fn a_run_or_server_without_the_flag_never_dials_the_session_bus() {
-    let runtime = tempfile::tempdir().expect("a runtime directory");
-    let state = tempfile::tempdir().expect("a state directory");
-    let config = tempfile::tempdir().expect("a config directory");
-    let workspace = tempfile::tempdir().expect("a workspace");
-    let bus = runtime.path().join("bus");
-    let listener = UnixListener::bind(&bus).expect("a fixture bus socket");
-    listener.set_nonblocking(true).expect("non-blocking");
+/// The binary's environment: cleared, with every directory it may read or write a fresh temporary
+/// one and both of zbus's ways to the session bus pointed at `bus`.
+struct Sandbox {
+    runtime: tempfile::TempDir,
+    state: tempfile::TempDir,
+    config: tempfile::TempDir,
+    bus: std::path::PathBuf,
+}
 
-    let run = |arguments: &[&str], variables: &[(&str, &str)]| {
+impl Sandbox {
+    fn new() -> Self {
+        let runtime = tempfile::tempdir().expect("a runtime directory");
+        let bus = runtime.path().join("bus");
+        Self {
+            runtime,
+            state: tempfile::tempdir().expect("a state directory"),
+            config: tempfile::tempdir().expect("a config directory"),
+            bus,
+        }
+    }
+
+    fn run(&self, arguments: &[&str], variables: &[(&str, &str)]) -> String {
         let mut command = Command::new(BINARY);
         command
             .args(arguments)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
-            .env("HOME", config.path())
-            .env("XDG_CONFIG_HOME", config.path())
-            .env("XDG_STATE_HOME", state.path())
-            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", self.config.path())
+            .env("XDG_CONFIG_HOME", self.config.path())
+            .env("XDG_STATE_HOME", self.state.path())
+            .env("XDG_RUNTIME_DIR", self.runtime.path())
             .env(
                 "DBUS_SESSION_BUS_ADDRESS",
-                format!("unix:path={}", bus.display()),
+                format!("unix:path={}", self.bus.display()),
             )
             .stdin(Stdio::null());
         for (name, value) in variables {
@@ -57,7 +68,16 @@ fn a_run_or_server_without_the_flag_never_dials_the_session_bus() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         )
-    };
+    }
+}
+
+#[test]
+fn a_run_or_server_without_the_flag_never_dials_the_session_bus() {
+    let sandbox = Sandbox::new();
+    let workspace = tempfile::tempdir().expect("a workspace");
+    let listener = UnixListener::bind(&sandbox.bus).expect("a fixture bus socket");
+    listener.set_nonblocking(true).expect("non-blocking");
+    let run = |arguments: &[&str], variables: &[(&str, &str)]| sandbox.run(arguments, variables);
     let workspace = workspace.path().display().to_string();
     let base = [
         "run",

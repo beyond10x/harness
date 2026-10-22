@@ -99,6 +99,11 @@ cargo run -p b10x-harness-cli -- run \
 `--api-key-env <NAME>` is the alternative. **There is no ambient fallback** — the harness reads no
 credential it was not pointed at, so a run can always be explained afterwards.
 
+`--api-key-secret <namespace>/<name>` reads the key from the local secrets store instead, where
+`secretsctl put <name> --namespace <namespace>` wrote it, on every request. The platform keychain
+is opened only when the flag is given. A namespace `secretsctl` mounted on another backend is not
+followed and is refused as not found, and a locked keychain may ask to be unlocked on each request.
+
 `--oauth-token-file <path>` or `--oauth-token-env <NAME>` names a subscription token instead,
 re-read by `llm-credentials` on every request so a renewed token is followed without a restart. A
 token file is refused — on every request, naming `oauth-token-file` and never the path or the

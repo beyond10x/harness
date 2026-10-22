@@ -24,6 +24,8 @@ use harness_wire::{
 };
 use llm_blocking::BlockingModel;
 use llm_core::{AuthKind, BillingKind, Capabilities, ErrorCode, Id, Model, Provenance};
+use llm_credentials::secrets::SecretsResolver;
+use llm_credentials::secrets::storage::{Scope, ScopeName, SecretName, SecretStorage};
 use llm_credentials::{
     ResolvedSecret, Secret, SecretError, SecretRef, SecretResolver, SecretVersion,
 };
@@ -135,6 +137,70 @@ impl Source {
         Self::subscription(reference, Arc::new(resolver), pointer)
     }
 
+    /// An API key read from the local secrets store at `<namespace>/<name>` on every request.
+    ///
+    /// The layout is the one `secretsctl put <name> --namespace <namespace>` writes: the
+    /// `secrets` library's keychain backend over the platform's keychain, tenant and user
+    /// `default`. The reference is checked before the platform's store is opened, and the store
+    /// is opened here and nowhere else: a run that names no reference never reaches it.
+    ///
+    /// # Errors
+    /// Names the reference for one that is not `<namespace>/<name>`, and for a store that will
+    /// not open. A secret the store does not hold is refused per request, by the same reference.
+    pub fn secret(reference: &str) -> Result<Self, String> {
+        Self::secret_with(reference, |scope| {
+            llm_credentials::keychain::native_store()
+                .map(|store| SecretsResolver::keychain(store, scope))
+        })
+    }
+
+    /// [`Source::secret`] over a storage the caller built, for an embedder that holds its own
+    /// store and for a test that holds an in-memory one.
+    ///
+    /// # Errors
+    /// Names the reference for one that is not `<namespace>/<name>`.
+    pub fn secret_in(reference: &str, storage: Arc<dyn SecretStorage>) -> Result<Self, String> {
+        Self::secret_with(reference, |scope| Ok(SecretsResolver::new(storage, scope)))
+    }
+
+    /// Checks `reference` and only then calls `open` for the scope its namespace selects.
+    fn secret_with(
+        reference: &str,
+        open: impl FnOnce(Scope) -> Result<SecretsResolver, SecretError>,
+    ) -> Result<Self, String> {
+        // Escaped, because the refusal reaches a terminal: a control character or a bidi override
+        // typed into the reference must not rewrite the line that says what was refused.
+        let refused = |why: &str| {
+            format!(
+                "the secrets store reference `{}` is not `<namespace>/<name>`: {why}",
+                reference.escape_debug()
+            )
+        };
+        let (namespace, name) = reference
+            .split_once('/')
+            .ok_or_else(|| refused("it holds no `/`"))?;
+        let namespace = ScopeName::parse(namespace)
+            .map_err(|error| refused(&format!("the namespace is {error}")))?;
+        SecretName::parse(name).map_err(|error| refused(&format!("the name is {error}")))?;
+        let typed = SecretRef::new(reference).map_err(|error| refused(&error.to_string()))?;
+        let name = SecretRef::new(name).map_err(|error| refused(&error.to_string()))?;
+        let store = open(Scope {
+            namespace,
+            ..Scope::local()
+        })
+        .map_err(|error| {
+            format!(
+                "the secrets store reference `{reference}`: the local secrets store could not be \
+                 opened: {error}"
+            )
+        })?;
+        Ok(Self {
+            reference: typed,
+            resolver: Arc::new(Stored { name, store }),
+            presentation: Presentation::ApiKey,
+        })
+    }
+
     /// A credential the caller's own `resolver` answers for the reference `name`, presented as
     /// `presentation`. `llm` asks it once per model request, at call time, and never caches the
     /// answer; a resolver that leases a credential per request gets one lease per request.
@@ -194,6 +260,33 @@ impl SecretResolver for HeldKey {
                 version: SecretVersion::new("held".to_owned())?,
             })
         })
+    }
+}
+
+/// A secrets-store resolver asked for one name, whatever reference `llm` passes it.
+///
+/// `llm` names its source's reference in a per-request refusal, and that reference is the whole
+/// `<namespace>/<name>` the operator typed; the store is asked for the name alone, in the scope
+/// the namespace selected. Nothing is held between requests: every resolve is a read.
+struct Stored {
+    name: SecretRef,
+    store: SecretsResolver,
+}
+
+impl SecretResolver for Stored {
+    fn resolve<'a>(
+        &'a self,
+        _reference: &'a SecretRef,
+    ) -> BoxFuture<'a, Result<ResolvedSecret, SecretError>> {
+        self.store.resolve(&self.name)
+    }
+
+    fn refresh<'a>(
+        &'a self,
+        _reference: &'a SecretRef,
+        rejected: &'a SecretVersion,
+    ) -> BoxFuture<'a, Result<(), SecretError>> {
+        self.store.refresh(&self.name, rejected)
     }
 }
 
@@ -1296,6 +1389,168 @@ mod tests {
         }
         let expected: Vec<&str> = if set { vec![VALUE; 3] } else { Vec::new() };
         assert_eq!(endpoint.keys(), expected);
+    }
+
+    // story:api-key-from-the-secrets-store. Every store below is `keyring_core`'s in-memory mock,
+    // laid out as `secretsctl put <name> --namespace <namespace>` lays one out — the library's
+    // keychain backend, tenant and user `default` — and never the platform's keychain, Secret
+    // Service or D-Bus. Every value is synthetic (`AGENTS.md` invariant 17).
+
+    /// A synthetic key, long enough that a refusal or a `Debug` quoting any of it is caught.
+    const STORED: &str = "synthetic-stored-key-5c1e9a7d";
+    /// What the same entry holds after it is rewritten between two requests.
+    const ROTATED: &str = "synthetic-rotated-key-0b4f2e68";
+
+    /// A fresh in-memory keychain no other case sees.
+    struct Keychain {
+        store: Arc<keyring_core::mock::Store>,
+    }
+
+    impl Keychain {
+        fn new() -> Self {
+            Self {
+                store: keyring_core::mock::Store::new().expect("an in-memory store"),
+            }
+        }
+
+        fn backend(&self) -> llm_credentials::secrets::keychain::KeychainBackend {
+            llm_credentials::secrets::keychain::KeychainBackend::new(
+                self.store.clone() as Arc<keyring_core::CredentialStore>
+            )
+        }
+
+        /// Writes `value` at `namespace`/`name` as `secretsctl put` does.
+        fn put(&self, namespace: &str, name: &str, value: &str) {
+            use llm_credentials::secrets::storage::{
+                Address, ScopeName, SecretStorage as _, SecretValue, Target as At,
+            };
+            let address = Address::parse(ScopeName::DEFAULT, namespace, ScopeName::DEFAULT, name)
+                .expect("a secrets address");
+            let backend = self.backend();
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("a runtime")
+                .block_on(backend.write(
+                    &At::unbound(address),
+                    SecretValue::new(value.as_bytes().to_vec()).expect("a value"),
+                ))
+                .expect("the fixture store takes the write");
+        }
+
+        /// The storage a [`Source::secret_in`] reads: the backend behind the local authorizer,
+        /// exactly what `SecretsResolver::keychain` builds over the native store.
+        fn storage(&self) -> Arc<dyn llm_credentials::secrets::storage::SecretStorage> {
+            Arc::new(llm_credentials::secrets::authorize::Authorized::local(
+                self.backend(),
+            ))
+        }
+    }
+
+    #[test]
+    fn an_api_key_in_the_secrets_store_reaches_the_request_header_read_again_on_each_request() {
+        let keychain = Keychain::new();
+        keychain.put("llm", "fixture-api-key", STORED);
+        let endpoint = Endpoint::start();
+        let source = Source::secret_in("llm/fixture-api-key", keychain.storage())
+            .expect("a well-formed reference");
+        let debug = format!("{source:?}");
+        assert!(debug.contains("llm/fixture-api-key"), "{debug}");
+        assert!(!debug.contains(STORED), "never the value: {debug}");
+        let mut port = client(&endpoint.target(), Some(source), &Cancel::new()).expect("a client");
+        assert_eq!(endpoint.keys(), Vec::<String>::new(), "nothing sent yet");
+
+        port.turn(&request(), &mut VecSink::new())
+            .expect("the first turn completes");
+        keychain.put("llm", "fixture-api-key", ROTATED);
+        port.turn(&request(), &mut VecSink::new())
+            .expect("the second turn completes");
+        assert_eq!(
+            endpoint.keys(),
+            [STORED, ROTATED],
+            "each request carries what the store held when that request was made: fetched at \
+             call time, never held"
+        );
+    }
+
+    #[test]
+    fn a_secret_the_store_does_not_hold_is_refused_by_its_reference_and_never_by_a_value() {
+        let keychain = Keychain::new();
+        // Held under the same name in another namespace, and under another name in this one:
+        // neither is the secret the reference names, and neither may answer for it.
+        keychain.put("other", "fixture-api-key", STORED);
+        keychain.put("llm", "another-key", STORED);
+        let endpoint = Endpoint::start();
+        let source = Source::secret_in("llm/fixture-api-key", keychain.storage())
+            .expect("a well-formed reference");
+        let mut port = client(&endpoint.target(), Some(source), &Cancel::new())
+            .expect("construction reads nothing");
+        let error = port
+            .turn(&request(), &mut VecSink::new())
+            .expect_err("a secret the store does not hold refuses the request");
+        assert_eq!(error.code, WireErrorCode::Unauthorized, "{error:?}");
+        assert!(
+            error.message.contains("llm/fixture-api-key"),
+            "the refusal names the reference: {error:?}"
+        );
+        let rendered = format!("{error} {error:?}");
+        assert!(!rendered.contains(STORED), "never a value: {rendered}");
+        assert_eq!(
+            endpoint.keys(),
+            Vec::<String>::new(),
+            "nothing was sent without a credential"
+        );
+    }
+
+    #[test]
+    fn a_reference_that_is_not_namespace_slash_name_is_refused_by_name_before_a_store_is_opened() {
+        let opened = AtomicUsize::new(0);
+        let keychain = Keychain::new();
+        let open = |scope| {
+            opened.fetch_add(1, Ordering::SeqCst);
+            Ok(llm_credentials::secrets::SecretsResolver::new(
+                keychain.storage(),
+                scope,
+            ))
+        };
+        for malformed in [
+            "",
+            "fixture-api-key",
+            "/fixture-api-key",
+            "llm/",
+            "llm//fixture-api-key",
+            "LLM/fixture-api-key",
+            "llm/Fixture-Api-Key",
+            "llm/fixture api key",
+            "-llm/fixture-api-key",
+        ] {
+            let error = Source::secret_with(malformed, open)
+                .expect_err("not `<namespace>/<name>` is refused");
+            assert!(
+                error.contains(&format!("`{malformed}`")),
+                "the refusal names the reference as typed: {error}"
+            );
+        }
+        assert_eq!(
+            opened.load(Ordering::SeqCst),
+            0,
+            "a malformed reference opens no store"
+        );
+        // The name may itself hold `/`, as a secrets name does: the namespace is the first segment.
+        Source::secret_with("llm/team/fixture-api-key", open).expect("a nested name");
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_opened_is_refused_by_the_reference_and_its_code() {
+        let error = Source::secret_with("llm/fixture-api-key", |_| {
+            Err(SecretError::UnsupportedPlatform)
+        })
+        .expect_err("a store that will not open refuses the source");
+        assert!(error.contains("`llm/fixture-api-key`"), "{error}");
+        assert!(
+            error.contains(&SecretError::UnsupportedPlatform.to_string()),
+            "{error}"
+        );
     }
 
     #[test]

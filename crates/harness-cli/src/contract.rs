@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-09-18";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-10-22";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -584,7 +584,8 @@ mod tests {
                 "2026-08-31.1",
                 "2026-09-01",
                 "2026-09-02",
-                "2026-09-18"
+                "2026-09-18",
+                "2026-10-22"
             ],
             "a released version may be superseded and never removed"
         );
@@ -1601,7 +1602,12 @@ mod tests {
         );
         assert_eq!(
             flag("run", "--oauth-token-env")["conflicts_with"],
-            json!(["--api-key-env", "--api-key-file", "--oauth-token-file"]),
+            json!([
+                "--api-key-env",
+                "--api-key-file",
+                "--api-key-secret",
+                "--oauth-token-file"
+            ]),
             "and the members exclude one another, so the pair reads as one of them, not both"
         );
         // Emitted for every flag, empty or not, exactly as `conflicts_with` is: a key that

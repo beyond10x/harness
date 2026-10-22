@@ -14,7 +14,7 @@ b10x-harness run --help
 ```
 
 The repository pins that generated command-line surface as a versioned contract; the current pin is
-`contracts/cli/b10x-harness/2026-09-18`. A released version — one reachable on `origin/main` —
+`contracts/cli/b10x-harness/2026-10-22`. A released version — one reachable on `origin/main` —
 never changes, and a changed surface cuts the next one. This page groups the options by task rather
 than copying every help paragraph.
 
@@ -82,6 +82,7 @@ API-key and OAuth sources are mutually exclusive.
 |---|---|
 | `--api-key-file PATH` | Read a bearer API key from the named file |
 | `--api-key-env NAME` | Read it from the named environment variable |
+| `--api-key-secret NAMESPACE/NAME` | Read it from the local secrets store on each model call |
 | `--oauth-token-file PATH` | Re-read a subscription token file per model call |
 | `--oauth-token-env NAME` | Read the subscription token from the named variable |
 | `--oauth-token-pointer POINTER` | Select a token inside a JSON OAuth source |
@@ -90,8 +91,8 @@ Harness searches no ambient default. A **provider** may default a credential pat
 makes `provider = "claude"` enough on its own — and a run that took one reports
 `credential_source: "provider:<name>"`, so the default is visible in the record rather than
 silent. A credential you name yourself always wins and records its class and source kind — for
-example `"api-key:file"` or `"oauth:environment"` — without recording the path, variable name or
-secret. Naming none records `"none"`.
+example `"api-key:file"`, `"api-key:secrets"` or `"oauth:environment"` — without recording the
+path, variable name, secrets-store reference or secret. Naming none records `"none"`.
 
 ## Workspace and tools
 

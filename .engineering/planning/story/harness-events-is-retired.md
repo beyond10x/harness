@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:harness-events-is-retired
 kind: story
-status: active
+status: implemented
 title: harness events is retired; metaharness reads the --json record
 summary: The events subcommand that rewrites a --json record as metaharness.event/1 is removed (Atlas ADR 0096 decision 7); metaharness project --from harness-json replaces it.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T02:18:25Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-22T02:18:25Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-22T07:41:29Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":2}}}
 ---
 ## Context
 

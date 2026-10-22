@@ -8,7 +8,7 @@ tags:
 - b10x-chef-orchestrator
 relations:
 - decides: story:docs-on-the-repository-site
-revision: 1
+revision: 2
 ---
 ## The stop
 
@@ -29,3 +29,11 @@ The repository's own site and its workflows, the organization-side steps of the 
 Stage C (Website, root caller, Atlas catalog) for harness only, the deletion of harness's
 unified-site files, and the GitHub website field. On 2026-10-22 conductor serves its own site;
 `https://beyond10x.github.io/mandate/` still answers "Documentation moved".
+
+## Follow-up approval: docs-system #31
+
+2026-10-22, session `b10x-chef-orchestrator` under its grant: "once those are green, merge #31
+through the bot route and then finish Stage C". docs-system PR #31
+(`https://github.com/beyond10x/docs-system/pull/31`) drops `harness/docs` from the surfaces of
+`changes/docs-system-0.3.3.yaml`, because `atlas docs snapshot` refused it with
+`docs-system/passive-docusaurus-markers-0.3.3 affects non-public surface harness/docs`.

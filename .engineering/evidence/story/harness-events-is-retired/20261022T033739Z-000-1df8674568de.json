@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-22T03:37:39Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-events-is-retired",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Release workflow at tag 0.18.0 (330e2cd), GitHub Release with 3 assets",
+    "reference": "https://github.com/beyond10x/harness/actions/runs/39717239220"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-22T10:00:24Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-on-the-repository-site",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "publish-docs green with Website 7034dec; /harness/ 200 titled Harness, /docs/harness/ refreshes to /harness/docs/ (200), homepage field https://beyond10x.github.io/harness/, unified-site files deleted",
+    "reference": "https://github.com/beyond10x/atlas/actions/runs/39756439799"
+  }
+}

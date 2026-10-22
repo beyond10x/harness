@@ -2,12 +2,28 @@
 format: aep.planning-md/3
 id: story:api-key-from-the-secrets-store
 kind: story
-status: draft
+status: active
 title: An API key is read from the local secrets store by reference
 summary: '`--api-key-secret <namespace>/<name>` resolves a provider key through llm-credentials'' secrets resolver, so no key is stored in a file'
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 2
+scope:
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: contracts/cli/b10x-harness
+- confidence: inferred
+  path: crates/harness-cli/src/lib.rs
+- confidence: inferred
+  path: crates/harness-cli/tests
+- confidence: inferred
+  path: crates/harness-llm/Cargo.toml
+- confidence: inferred
+  path: crates/harness-llm/src/lib.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-22T00:02:57Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-22T00:02:57Z", actor: "human:timo", revision: 4}
 ---
 ## Context
 

@@ -38,7 +38,6 @@ const PAGES: &[(&str, &str, &str)] = &[
         "Delegates, skills & hooks",
         "Guides",
     ),
-    ("guides/workflows", "Run a workflow", "Guides"),
     ("concepts/agent-loop", "The agent loop", "Concepts"),
     (
         "concepts/tools-and-approvals",
@@ -54,7 +53,6 @@ const PAGES: &[(&str, &str, &str)] = &[
     ("reference/configuration", "Configuration", "Reference"),
     ("reference/toolchains", "Toolchains", "Reference"),
     ("reference/wires", "Provider wires", "Reference"),
-    ("reference/workflows", "Workflow format", "Reference"),
     ("status", "Status & limitations", "Reference"),
 ];
 

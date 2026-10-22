@@ -118,23 +118,22 @@ fn the_help_pages_say_which_alphanumerics_the_binary_means() {
 
 /// The two other pages the same sentence is rendered on are not held to it.
 ///
-/// `RunOptions` (`crates/harness-cli/src/lib.rs:473`) is flattened by `run`, `chat` **and
-/// `workflow run`**; `ToolsOptions` (`:907`) carries a second copy of the same paragraph for
-/// `tools`. Four pages, two sources. The unit's own case
+/// `RunOptions` (`crates/harness-cli/src/lib.rs:473`) is flattened by `run` and `chat`;
+/// `ToolsOptions` (`:907`) carries a second copy of the same paragraph for `tools`. Three pages,
+/// two sources (a fourth, `workflow run`, went with that verb in 0.18.0). The unit's own case
 /// (`crates/harness-cli/tests/end_to_end.rs:487`) asserts on `run` and `chat`, which are the same
 /// source — so the whole `ToolsOptions` copy is unpinned, and reverting it alone puts `ws_something`
 /// back on `tools --help` with the suite still green.
 ///
 /// This case is the one that would catch that mutant. It is green at `1acad51`: both copies were
-/// corrected. It is here so that the *next* edit to either one is caught on all four pages rather
+/// corrected. It is here so that the *next* edit to either one is caught on all three pages rather
 /// than on the two that happen to share a struct.
 #[test]
 fn every_page_the_workspace_rule_is_rendered_on_states_the_same_rule() {
-    let pages: [&[&str]; 4] = [
+    let pages: [&[&str]; 3] = [
         &["run", "--help"],
         &["chat", "--help"],
         &["tools", "--help"],
-        &["workflow", "run", "--help"],
     ];
     for page in pages {
         let help = invoke(page);
@@ -161,11 +160,10 @@ fn every_page_the_workspace_rule_is_rendered_on_states_the_same_rule() {
 
 #[test]
 fn every_allow_program_help_page_names_the_root_process_boundary() {
-    let pages: [&[&str]; 4] = [
+    let pages: [&[&str]; 3] = [
         &["run", "--help"],
         &["chat", "--help"],
         &["tools", "--help"],
-        &["workflow", "run", "--help"],
     ];
     for page in pages {
         let help = invoke(page);

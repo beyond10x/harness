@@ -4,11 +4,11 @@
 //! requirement is decided after clap, not on the three the unit chose to look at. These cases take
 //! the acceptance at its word and measure one more: `--session-dir`.
 //!
-//! It records `"default": null` on `run`, `chat` and `workflow run`, and the binary settles it after
+//! It records `"default": null` on `run` and `chat`, and the binary settles it after
 //! clap in `session_dir()` (`crates/harness-cli/src/lib.rs:1961`) — `$XDG_STATE_HOME/b10x-harness/
 //! sessions`, or `$HOME/.local/state/b10x-harness/sessions`, or a refusal by name when the machine
 //! has neither. That is both halves of the story at once: a default the row does not carry, and a
-//! requirement clap does not hold, on the same three commands the unit disclaimed `--wire` and
+//! requirement clap does not hold, on the same commands the unit disclaimed `--wire` and
 //! `--base-url`/`--model` for.
 //!
 //! `contracts/cli/b10x-harness/2026-08-30.2/README.md` says "`--wire` is the only flag of the three
@@ -395,156 +395,19 @@ fn a_bare_environment_makes_session_dir_a_flag_the_run_demands_and_the_document_
     );
 }
 
-/// The smallest workflow document that reaches a turn, written by the case rather than found.
-const ONE_STEP: &str = "\
-id: one-step
-root:
-  id: root
-  nodes:
-    - id: shape
-      nodes:
-        - id: specify
-          run:
-            state: specify
-            summary: \"State the required behaviour.\"
-";
-
-/// The sentence the unit added says `workflow run` is refused by name. It is not; it panics.
-///
-/// `contracts/cli/b10x-harness/2026-08-30.2/README.md:243-250` is the escape story 1 was closed
-/// with, and it is scoped to three commands by name:
-///
-/// > `run`, `chat` and `workflow run` record `--base-url` and `--model` as `"required": false`.
-/// > That is true of clap … and it is not true of the run. … a run that has neither the two flags
-/// > nor a configured provider is **refused by name before the first request**.
-///
-/// This case is the third command in that list. The invocation is built from the document alone —
-/// `workflow run`'s two `"required": true` rows, `--flow` and `--input`, and nothing else — and
-/// with no provider configured it does not reach a refusal. `workflow::dispatch` never calls
-/// `apply_profiles`, so `RunOptions::base_url`'s `expect` fires and the process aborts with **exit
-/// `101`**, which the same document's *What is not pinned* section
-/// (`README.md:230-232`) says is not one of this binary's statuses: "`0` answered, `2` stopped for
-/// a named reason, `1` could not run".
-///
-/// So the acceptance was unmet on the command the escape named third, and unmet in the worst
-/// available way: a consumer that followed the document got a status the document says cannot
-/// happen, out of a panic handler, with a stack trace on stderr instead of a sentence naming the
-/// flag to type. The unit knew — its own case said so in a doc comment — and asserted the document
-/// instead of running the command.
-///
-/// # What this case decides now, and what it gave up
-///
-/// It was written asserting that the run **is** refused by name, which is one of the two ways to
-/// remove the defect: make the sentence true. The other is to stop making the claim, and that is
-/// the one taken — the binary's half is `story:workflow-run-panics-and-drops-its-profile` and is
-/// not this unit's to fix, so a case that only accepted the first was over-specified against the
-/// defect it names in its own title.
-///
-/// So it is now decided **both ways round**: the command is run, and the escape section names it
-/// if and only if it really is refused by name. Removing the sentence passes; putting it back
-/// while the binary still panics fails; and when the binary is fixed, a document that then says
-/// nothing about `workflow run` fails too, so the correction cannot be landed and forgotten. The
-/// exit status the document forbids is still measured and still printed — it moved from an
-/// assertion this unit may not satisfy into the evidence of one it can.
-///
-/// **No endpoint is contacted.** The panic precedes the first request, so this case needs no
-/// fixture and is deterministic.
-#[test]
-fn workflow_run_built_from_the_document_alone_is_refused_by_name_as_the_document_says() {
-    let document = pinned_document();
-    let readme = pinned_readme();
-    let config = tempfile::tempdir().expect("a temporary config directory");
-    let state = tempfile::tempdir().expect("a temporary state directory");
-    let workspace = tempfile::tempdir().expect("a temporary workspace");
-    let flow = workspace.path().join("one-step.yaml");
-    std::fs::write(&flow, ONE_STEP).expect("a flow document");
-
-    let mut values = BTreeMap::new();
-    values.insert("--input", "do the thing".to_owned());
-    values.insert("--flow", flow.display().to_string());
-
-    // The document's `"required": true` rows for `workflow run`, and nothing beyond them: the
-    // consumer this models has not yet read the escape, which is the state the escape is written
-    // for.
-    let mut argv: Vec<String> = vec!["workflow".to_owned(), "run".to_owned()];
-    for listed in document["arguments"]["workflow run"]
-        .as_array()
-        .expect("`workflow run` has a flag list")
-    {
-        if listed["required"] != true {
-            continue;
-        }
-        let long = listed["long"].as_str().expect("a long flag");
-        argv.push(long.to_owned());
-        argv.push(values[long].clone());
-    }
-    argv.push("--workspace".to_owned());
-    argv.push(workspace.path().display().to_string());
-
-    let output = Command::new(BINARY)
-        .args(&argv)
-        .env("XDG_CONFIG_HOME", config.path())
-        .env("XDG_STATE_HOME", state.path())
-        .stdin(Stdio::null())
-        .output()
-        .expect("the binary runs");
-    let output = Output {
-        status: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    };
-
-    // Measured before the document is opened: exit `1`, naming the flags to type, is a refusal by
-    // name. Anything else is not, whatever it is — and what it is today is exit `101` out of a
-    // panic handler, which `## What is not pinned` says this binary does not produce.
-    let refused_by_name = output.status == Some(1)
-        && ["--base-url", "--model"]
-            .iter()
-            .all(|long| output.stderr.contains(long));
-
-    let demanded = section(&readme, DEMANDED);
-    let named = demanded.contains("`workflow run`");
-    assert_eq!(
-        named,
-        refused_by_name,
-        "`### {DEMANDED}` names `workflow run`: {named}. A command line built from \
-         `{ARGV_CONTRACT_VERSION}` alone is refused by name on it: {refused_by_name}. Those have to \
-         agree — a pinned document may not promise a refusal the binary does not give, and may not \
-         stay silent about one it does.\n`b10x-harness {}` exited `{:?}`.\nstdout: {}\nstderr: {}",
-        argv.join(" "),
-        output.status,
-        output.stdout,
-        output.stderr
-    );
-}
-
 /// Every command line this document says is enough exits with one of the three statuses it names.
 ///
-/// **This is the assertion that was in this file at `1acad51` and is not in it now.** The case it
-/// stood in — `workflow_run_built_from_the_document_alone_is_refused_by_name_as_the_document_says`
-/// — carried two independent claims: that the escape section and the binary agree about
-/// `workflow run`, and that the exit status is one of `0`, `1`, `2`. `2a045c3` rewrote the first
-/// into a biconditional, which is a fair answer to a scope decision that had moved under it, and
-/// dropped the second, which had not moved: `README.md:232` still says *"the exit statuses … are
-/// `0` answered, `2` stopped for a named reason, `1` could not run"*, and it says it in the same
-/// section that now also says `workflow run` exits `101`.
-///
-/// A document that states three statuses and then discloses a fourth is not thereby correct about
-/// the three; it is contradicting itself in two subsections of *What is not pinned*. A driver that
-/// wrote `if code not in (0, 1, 2): raise` — which is exactly what a pinned status list is for —
-/// breaks on the first `workflow run` it launches.
-///
-/// **This case does not require the binary to be fixed**, and so does not reopen the scope
-/// decision. It is satisfied the moment the statuses sentence stops claiming three, or the moment
-/// `workflow run` stops panicking; either is in this unit's reach, and one of them has to happen
-/// before a consumer can trust either sentence.
+/// A document that states three statuses and then lets a command it describes exit with a fourth
+/// is contradicting itself. A driver that wrote `if code not in (0, 1, 2): raise` — which is exactly
+/// what a pinned status list is for — breaks on the first such command it launches. Until 0.18.0
+/// that command was `workflow run`, which exited `101` out of a panic handler; the verb is gone,
+/// and this case holds `run` and `chat` to the same list.
 ///
 /// # The list is read out of the document, not written here
 ///
 /// It was written with `matches!(status, Some(0..=2))`, which is the sentence's claim copied into
-/// this file — so the only thing that could satisfy it was fixing the binary, which is the one
-/// resolution its own paragraph above rules out, and amending the sentence would have left it red
-/// with nothing to do. So the statuses are parsed from the section that states them: every
+/// this file — so the only thing that could satisfy it was fixing the binary, and amending the
+/// sentence would have left it red with nothing to do. So the statuses are parsed from the section that states them: every
 /// backticked integer in `## What is not pinned` before its first subsection. Amending the sentence
 /// satisfies this; producing a status the sentence does not name still fails it, and so does
 /// deleting the sentence, because then the list is empty and every status is unnamed.
@@ -556,12 +419,9 @@ fn the_exit_status_of_a_command_line_the_document_describes_is_one_the_document_
     let config = tempfile::tempdir().expect("a temporary config directory");
     let state = tempfile::tempdir().expect("a temporary state directory");
     let workspace = tempfile::tempdir().expect("a temporary workspace");
-    let flow = workspace.path().join("one-step.yaml");
-    std::fs::write(&flow, ONE_STEP).expect("a flow document");
 
     let mut values = BTreeMap::new();
     values.insert("--input", "do the thing".to_owned());
-    values.insert("--flow", flow.display().to_string());
 
     let named = statuses_the_document_names(&pinned_readme());
     assert!(
@@ -571,7 +431,7 @@ fn the_exit_status_of_a_command_line_the_document_describes_is_one_the_document_
     );
 
     let mut undocumented: Vec<String> = Vec::new();
-    for command in ["run", "chat", "workflow run"] {
+    for command in ["run", "chat"] {
         let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
         for listed in document["arguments"][command]
             .as_array()
@@ -646,7 +506,7 @@ fn statuses_the_document_names(readme: &str) -> std::collections::BTreeSet<i32> 
 /// `2a045c3` changed a production message to make M1 measurable: `transcript.rs:342` now ends
 /// *"name one with `--session-dir`, or run with `--no-session` and file nothing"*. That function
 /// has **two** production callers — `session_dir()` at `crates/harness-cli/src/lib.rs:1971`, for
-/// `run`, `chat` and `workflow run`, where `--no-session` exists; and `sessions_command()` at
+/// `run` and `chat`, where `--no-session` exists; and `sessions_command()` at
 /// `:2245`, where it does not. The pinned document records exactly two flags on `sessions`,
 /// `--help` and `--session-dir`.
 ///

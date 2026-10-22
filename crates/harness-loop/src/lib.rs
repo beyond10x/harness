@@ -2104,14 +2104,14 @@ impl<'a> AgentLoop<'a> {
     ///
     /// # What this is for
     ///
-    /// A workflow's `command` step is a program the document names — a verifier, a validator — and
-    /// not a question for a model (`harness-cli` design 0003 § 6, M2). Nothing is sent to the
-    /// provider. The call is the caller's, and it runs through `AgentLoop::invoke`'s stages in
-    /// their order — published or routed, the argument bound, the approver, the operator's
-    /// `before-call` hook, the tool, the result bound, the `after-call` hook — and leaves the
-    /// record a model's call leaves: `ToolRequested`, then `ToolCompleted`, with a `Warning` naming
-    /// any refusal between them. A caller that reached the port directly would be a second answer
-    /// to *what may this run do*, and the approver and the hooks would never hear of it.
+    /// A program the caller names — a verifier, a validator — that is not a question for a model.
+    /// Nothing is sent to the provider. The call is the caller's, and it runs through
+    /// `AgentLoop::invoke`'s stages in their order — published or routed, the argument bound, the
+    /// approver, the operator's `before-call` hook, the tool, the result bound, the `after-call`
+    /// hook — and leaves the record a model's call leaves: `ToolRequested`, then `ToolCompleted`,
+    /// with a `Warning` naming any refusal between them. A caller that reached the port directly
+    /// would be a second answer to *what may this run do*, and the approver and the hooks would
+    /// never hear of it.
     ///
     /// The clock is the budget's `max_duration_ms`, measured from now: this is one call and not a
     /// run, so there is no earlier start to measure from. The conversation is the caller's to keep

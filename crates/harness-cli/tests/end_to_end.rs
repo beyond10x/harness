@@ -875,8 +875,8 @@ fn an_embedded_workspace_with_the_wrong_name_refuses_the_run_by_name() {
 ///
 /// # And on every page, not on the two that share a struct
 ///
-/// `RunOptions` is flattened by `run`, `chat` and `workflow run`; `ToolsOptions` carries a second
-/// copy of the same paragraph for `tools`. Four pages, two sources — so a case that asserted on
+/// `RunOptions` is flattened by `run` and `chat`; `ToolsOptions` carries a second
+/// copy of the same paragraph for `tools`. Three pages, two sources — so a case that asserted on
 /// `run` and `chat` left the whole `ToolsOptions` copy unpinned, and reverting it alone put
 /// `ws_something` back on `tools --help` with everything green. The pages are enumerated from the
 /// pinned argv document instead: every command that records a `--substrate-embedded` row.

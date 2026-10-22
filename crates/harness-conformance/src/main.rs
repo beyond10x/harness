@@ -81,7 +81,7 @@ impl ConformanceTarget for Target {
     ) -> std::result::Result<SemanticViewResult, TargetError> {
         Err(TargetError::unsupported(
             "view",
-            "loop/flow values have no persistent view boundary",
+            "loop values have no persistent view boundary",
         ))
     }
     fn observe_events(

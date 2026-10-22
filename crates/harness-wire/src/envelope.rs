@@ -71,9 +71,9 @@ pub enum Risk {
 
 /// Whether repeating the call is safe.
 ///
-/// This is the field a retry reads. A workflow that retreats re-runs a whole scope
-/// (`b10x-harness-flow`'s `Repeat`), so every tool in that scope runs again — and one that is
-/// [`Idempotency::NonIdempotent`] does something twice.
+/// This is the field a retry reads. A scheduler that retreats re-runs a whole scope, so every
+/// tool in that scope runs again — and one that is [`Idempotency::NonIdempotent`] does
+/// something twice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Idempotency {

@@ -22,21 +22,8 @@ const UNPARSED: &str = "LLM/fixture-api-key";
 /// A variable no case sets, named by the environment-reading credential flags.
 const UNSET_VARIABLE: &str = "B10X_ADVERSARY_UNSET";
 
-const ONE_STEP: &str = "\
-id: one-step
-root:
-  id: root
-  nodes:
-    - id: shape
-      nodes:
-        - id: specify
-          run:
-            state: specify
-            summary: \"State the required behaviour.\"
-";
-
-/// The four commands the in-force document gives `--api-key-secret`.
-const COMMANDS: [&str; 4] = ["app-server", "chat", "run", "workflow run"];
+/// The three commands the in-force document gives `--api-key-secret`.
+const COMMANDS: [&str; 3] = ["app-server", "chat", "run"];
 
 fn document() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -65,8 +52,7 @@ fn conflicts(row: &Value) -> Vec<String> {
         .collect()
 }
 
-/// A sandbox: a home, every XDG directory, a workspace with a flow, and a bus address nobody
-/// serves.
+/// A sandbox: a home, every XDG directory, a workspace, and a bus address nobody serves.
 struct Sandbox {
     root: tempfile::TempDir,
 }
@@ -77,7 +63,6 @@ impl Sandbox {
         for directory in ["home", "config", "state", "runtime", "workspace"] {
             std::fs::create_dir(root.path().join(directory)).expect("a sandbox directory");
         }
-        std::fs::write(root.path().join("workspace/one-step.yaml"), ONE_STEP).expect("a flow");
         Self { root }
     }
 
@@ -94,14 +79,8 @@ impl Sandbox {
         let mut argv: Vec<String> = command.split_whitespace().map(str::to_owned).collect();
         argv.extend(["--base-url".to_owned(), base_url.to_owned()]);
         argv.extend(["--model".to_owned(), "m".to_owned()]);
-        if matches!(command, "run" | "workflow run") {
+        if command == "run" {
             argv.extend(["--input".to_owned(), "say hello".to_owned()]);
-        }
-        if command == "workflow run" {
-            argv.extend([
-                "--flow".to_owned(),
-                self.path("workspace/one-step.yaml").display().to_string(),
-            ]);
         }
         if command != "app-server" {
             argv.extend([
@@ -210,7 +189,7 @@ fn every_conflict_the_document_pins_for_the_secret_flag_is_one_clap_refuses_both
 }
 
 #[test]
-fn a_pointer_beside_the_secret_flag_alone_is_refused_by_clap_on_all_four_commands() {
+fn a_pointer_beside_the_secret_flag_alone_is_refused_by_clap_on_every_command() {
     let sandbox = Sandbox::new();
     let base_url = closed_port();
     for command in COMMANDS {
@@ -258,8 +237,8 @@ fn every_command_the_document_does_not_give_the_flag_refuses_it() {
 
 #[test]
 fn a_malformed_reference_is_refused_by_name_on_every_command_before_any_request() {
-    // `app-server` resolves its credential in its own function, apart from `run`, `chat` and
-    // `workflow run`; nothing else drives that branch through the binary, so dropping it would
+    // `app-server` resolves its credential in its own function, apart from `run` and `chat`;
+    // nothing else drives that branch through the binary, so dropping it would
     // leave app-server serving unauthenticated turns with the flag silently ignored.
     let sandbox = Sandbox::new();
     let mut wrong: Vec<String> = Vec::new();

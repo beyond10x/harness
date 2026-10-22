@@ -9,8 +9,6 @@ mean the repository's entire implementation has an ESS domain.
 | Budget admission | All six zero bounds, valid empty budget, cost ceiling requires a priced run | `crates/harness-loop/src/budget.rs:11,67` |
 | Native loop outcomes | Completed, provider incomplete/output limit, input/output/turn ceilings, cancellation before dispatch, missing usage with and without token ceilings | `crates/harness-loop/src/lib.rs:123,2102,2812,2835` |
 | Approval and tool reach | Cheap read dispatches; medium-risk write is denied by DenyAll and admitted by ApproveAll; unpublished tool refuses; failed tool results remain visible and the model continues | `crates/harness-loop/src/approval.rs:49`; `crates/harness-loop/src/lib.rs:2073,3161`; `crates/harness-wire/src/envelope.rs:218` |
-| Workflow execution | Dependency order, failed dependency skip, operator pause, entry refusal, repeat success/exhaustion, missing handoff ends without retreat | `crates/harness-flow/src/run.rs:214,296,376` |
-| Workflow admission | Empty groups, duplicate ids, self/cross-scope dependencies and zero repeats refuse before any step | `crates/harness-flow/src/lib.rs:244,318`; `crates/harness-flow/src/plan.rs:45` |
 
 The known `StopKind` vocabulary includes `max-cost`, `deadline`, `awaiting-approval` and
 `unstructured`, but declaring their shape is not executing those paths. The initial suite does not
@@ -48,9 +46,10 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
 - **UNMAPPED: MCP discovery, transport and local admission.** Sources:
   `crates/harness-mcp/src/lib.rs:34,48,84`. Add real MCP fixtures exercising digest-pinned profile
   intersection; an unpublished flat tool refusal does not prove MCP policy admission.
-- **UNMAPPED: CLI profiles, workflow binding and contracts.** Sources:
-  `crates/harness-cli/src/profile.rs`, `workflow.rs`, `contract.rs`; `contracts/cli/`.
-  Native Flow scenarios prove scheduling, not CLI argument parsing, profile merge or command effects.
+- **UNMAPPED: CLI profiles and contracts.** Sources:
+  `crates/harness-cli/src/profile.rs`, `contract.rs`; `contracts/cli/`.
+  Native loop scenarios prove the library boundary, not CLI argument parsing, profile merge or
+  command effects.
 
 No conflicting source semantics were resolved by guessing. One pre-existing prose disagreement is
 visible: `AGENTS.md` invariant 10 described cost ceilings as always unenforceable, while

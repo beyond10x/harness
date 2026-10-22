@@ -8,7 +8,7 @@ relations:
 - specifies: vision:b10x-owns-its-loop
 - informed_by: specification:published-interfaces
 model_digest: 4061ac1f6ba3f6b443dc0acb5873b593c3805870927041901582c377e0d9ab96
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "validated", at: "2026-10-03T20:11:35Z", actor: "human:timo", revision: 4}
 - {from: "validated", to: "conforming", at: "2026-10-03T20:11:35Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"ess_conformance_coverage_v1":1}}}
@@ -34,3 +34,14 @@ The session integration branch owns this retrofit. Parent controls planning-stor
 The first slice covers budget admission, loop terminal results and usage, tool admission/refusal and workflow scheduling/admission. It does not cover all Harness behavior. spec/COVERAGE.md records eight UNMAPPED boundaries: remaining loop control/accounting; dynamic context/narrowing; provider transport/protocols; credentials; session persistence/app-server; confinement/effectful tools; MCP; CLI profiles/workflow binding/contracts. Source-derived declarations and real boundary scenarios, not owner guesses, are needed to close them. Existing tests for these boundaries continue to run.
 
 `cargo xtask specification` runs both the real target and inert-target calibration without requiring an ambient ESS CLI. `task check` delegates to the full source gate. The existing AGENTS cost-ceiling prose was corrected to match Budget::validate(priced); priced ceilings were already shipped.
+
+## Workflow boundary removed — 0.18.0
+
+The workflow verb and the `harness-flow` / `harness-workflow` crates were removed in 0.18.0
+(story:workflow-verb-is-removed). The specification lost the `flow` domain
+(`spec/domains/flow.yaml`) and its 12 authored scenarios (`spec/scenarios/flow-*.yaml`). The
+selected suite went from 42 to 29 scenarios, all of them against the real `AgentLoop` boundary;
+`cargo xtask specification` passes 29 and the inert target fails 29. The "workflow boundary"
+named in the retrofit scope and the "workflow scheduling/admission" slice above no longer exist.
+`conformance/mutation-evidence.json` keeps the 2026-10-03 record as history, including the
+failed-workflow-status mutation, whose source is gone.

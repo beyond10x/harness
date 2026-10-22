@@ -15,11 +15,10 @@ release.
 | Provider turns | Streaming OpenAI Responses and Anthropic Messages projections |
 | Agent loop | Turn assembly, tool round trips, approvals, cancellation, compaction, and budgets |
 | Workspace tools | Bounded reads everywhere; file writes and argv execution behind substrate capabilities; child processes are workspace-read-only by default and receive only explicitly named writable subtrees |
-| Command line | `run`, `chat`, `workflow plan`, `workflow run`, `sessions`, `tools`, `context show`, `app-server`, and `events` |
+| Command line | `run`, `chat`, `sessions`, `tools`, `context show`, `app-server`, `profiles`, `providers`, and `toolchains` |
 | Persistence | Local, atomic session files with resume and usage/cost retention |
 | Machine output | Vendor-neutral JSONL events and structured object output |
 | Advanced loop | Opt-in depth-one delegation, named agents and skills read from a Claude Code plugin layout, caller-owned memories behind a read-only `recall` tool, and operator hooks |
-| Workflows | A YAML or JSON flow walked one model turn per step, one session per section, with a `transition` hook asked at every section boundary |
 | Contracts | Pinned provider requests/streams, app-server profile, and generated argv surface |
 
 The full Rust workspace gate tests, formats, lints, and checks all three contract families. The two
@@ -81,10 +80,10 @@ fixtures.
 Released contract versions are immutable. A changed provider request, accepted stream, app-server
 profile, or argv surface cuts a new versioned contract rather than rewriting the old one. Released
 means reachable on `origin/main` — not tagged, and not out of the changelog's `[Unreleased]` — and
-a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-09-18`, which
-added `--memory-dir` to `run`, `chat`, `workflow run` and `tools`. It is **strictly additive**:
-four arrivals and no field of any surviving flag moved, so a consumer pinned to `2026-09-02` is
-still correct against this binary. `2026-09-02` is released and was superseded rather than edited.
+a second cut on one day takes a `.N` suffix. The current CLI contract is `2026-10-22.1`. It is
+**not additive**: two commands left the binary and no flag of any remaining command moved, so a
+consumer pinned to `2026-10-22` that invokes only the remaining commands is still correct against
+this binary. `2026-10-22` is released and was superseded rather than edited.
 
 The Rust library APIs are not yet promised stable. Before upgrading, read the repository
 [changelog](https://github.com/beyond10x/harness/blob/main/CHANGELOG.md) and regenerate any

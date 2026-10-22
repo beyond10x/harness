@@ -28,7 +28,6 @@ surfaces:
   capabilities:
   - agent-loop
   - tool-approvals
-  - workflows
   - session-evidence
   discoverability: public
   id: docs

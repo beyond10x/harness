@@ -269,7 +269,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 ## Executable specification
 
 `spec/ess-inputs.yaml` pins ESS 0.67.0. The authored specification describes the native loop and
-workflow boundaries; `conformance/` records the compiled model, selected suite, required scenario
+its library boundary; `conformance/` records the compiled model, selected suite, required scenario
 inventory and coverage limits. This is a retrofit of shipped behavior, not permission to invent
 new runtime semantics. Preserve source citations and report every unresolved mapping.
 
@@ -331,8 +331,8 @@ CI installs whatever `stable` is that day, and a newer clippy can fail a commit 
 Run `rustup update` before pushing, and read the gate's own exit status, never a pipeline's
 **Two worktrees must not share a `CARGO_TARGET_DIR`, and a worktree's build must not land in
 `main`'s.** Test binaries bake `env!("CARGO_MANIFEST_DIR")` at build time, so a binary built from a
-worktree reads that worktree's fixtures — and when the worktree is gone, `harness-flow`'s fixture
-read fails with `NotFound` in a tree where the file plainly exists (2026-08-29, twice in one day:
+worktree reads that worktree's fixtures — and when the worktree is gone, a fixture
+read fails with `NotFound` in a tree where the file plainly exists (2026-08-29, in the since-removed `harness-flow`, twice in one day:
 first as four `run_in` compile errors served across trees, then as two red tests after a merge).
 Each worktree builds into its own `target/`; when a shared build cannot be avoided, `cargo clean -p`
 every crate the other tree touched before trusting the result.

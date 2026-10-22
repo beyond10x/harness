@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-10-22";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-10-22.1";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -101,9 +101,9 @@ fn definition() -> clap::Command {
 
 /// Every command a caller can type, named by the words that reach it.
 ///
-/// **Depth-first and space-joined** — `workflow`, `workflow plan`, `workflow run` — because a
+/// **Depth-first and space-joined** — `context`, `context show` — because a
 /// nested verb is a command line a consumer types, and a document that recorded only the top level
-/// would say `workflow` accepts no flags at all: true of the word, false of every verb under it,
+/// would say `context` accepts no flags at all: true of the word, false of every verb under it,
 /// and the second is what would break a driver. The word itself is recorded too, with the empty
 /// flag list it really has, so `subcommands` still names everything that exists.
 ///
@@ -585,7 +585,8 @@ mod tests {
                 "2026-09-01",
                 "2026-09-02",
                 "2026-09-18",
-                "2026-10-22"
+                "2026-10-22",
+                "2026-10-22.1"
             ],
             "a released version may be superseded and never removed"
         );
@@ -1308,7 +1309,7 @@ mod tests {
             "run",
             "profiles",
             "profiles list",
-            "workflow run",
+            "context show",
         ] {
             assert_eq!(
                 of(command),
@@ -1529,8 +1530,8 @@ mod tests {
 
     #[test]
     fn a_nested_verb_is_pinned_by_the_words_that_reach_it() {
-        // `workflow` on its own accepts nothing and runs nothing; what a consumer types is
-        // `workflow run`, and that is the command line this document has to describe.
+        // `context` on its own accepts nothing and runs nothing; what a consumer types is
+        // `context show`, and that is the command line this document has to describe.
         let value: Value = serde_json::from_str(&argv()).expect("valid JSON");
         let subcommands: Vec<&str> = value["subcommands"]
             .as_array()
@@ -1538,7 +1539,7 @@ mod tests {
             .iter()
             .filter_map(Value::as_str)
             .collect();
-        for name in ["workflow", "workflow plan", "workflow run"] {
+        for name in ["context", "context show", "profiles", "profiles explain"] {
             assert!(subcommands.contains(&name), "{subcommands:?}");
         }
         let flag = |subcommand: &str, long: &str| -> Option<Value> {
@@ -1550,30 +1551,35 @@ mod tests {
                 .cloned()
         };
         assert_eq!(
-            flag("workflow run", "--flow").expect("the document is named")["required"],
+            flag("context show", "--workspace").expect("the workspace is named")["default"],
+            "."
+        );
+        assert_eq!(
+            flag("context show", "--context").expect("a context file is named")["takes_value"],
             true
         );
         assert_eq!(
-            flag("workflow run", "--input").expect("the task is named")["takes_value"],
-            true
+            flag("profiles explain", "--profile").expect("the profile is named")["short"],
+            "-p"
         );
-        // `plan` contacts nothing, and the pinned document is where a consumer reads that.
-        assert!(flag("workflow plan", "--base-url").is_none());
-        assert!(flag("workflow plan", "--flow").is_some());
+        // `context show` contacts nothing, and the pinned document is where a consumer reads that.
+        assert!(flag("context show", "--base-url").is_none());
         // The word itself takes no flag of its own — only the `--help` clap gives every command,
         // which is a row here because `-h` is a short flag a consumer can type. An empty row set
         // would now be the document forgetting one, not the word having none.
-        let word: Vec<&str> = value["arguments"]["workflow"]
-            .as_array()
-            .expect("a list")
-            .iter()
-            .map(|row| row["long"].as_str().expect("a long flag"))
-            .collect();
-        assert_eq!(
-            word,
-            vec!["--help"],
-            "the word itself takes no flag of its own, and carries the one clap gives every command"
-        );
+        for word in ["context", "profiles"] {
+            let rows: Vec<&str> = value["arguments"][word]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|row| row["long"].as_str().expect("a long flag"))
+                .collect();
+            assert_eq!(
+                rows,
+                vec!["--help"],
+                "`{word}` takes no flag of its own, and carries the one clap gives every command"
+            );
+        }
     }
 
     #[test]

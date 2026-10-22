@@ -11,7 +11,6 @@ publish.workspace = true
 [dependencies]
 harness-wire.workspace = true
 harness-loop.workspace = true
-harness-flow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "4579d8049bb5b83749b46059dfc0982de7633485" }

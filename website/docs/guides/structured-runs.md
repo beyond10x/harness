@@ -205,17 +205,7 @@ A `before-call` failure fails closed. An `after-call` failure is reported as a n
 already ran. A `stop` failure fails open because it cannot retroactively erase an otherwise complete
 answer.
 
-A fourth point exists under `workflow run` only, because it is asked at a section boundary and a
-single run has none. `transition` is asked before a section is entered and again after it leaves:
-exit 2 at the entry skips the section as failed, exit 2 on a clean exit sends the section back for
-another attempt, and a hook that cannot answer is read as a refusal at both moments. It is declared
-in the same file, under the same rules:
-
-```json
-{"on": "transition", "command": ["/opt/policy/protocol-transition"]}
-```
-
-See [Workflows](./workflows.md) for the document it receives and what each refusal does to the walk.
+A hooks file naming any other point is refused by name before the run starts.
 
 > **Hooks are not confined**
 >

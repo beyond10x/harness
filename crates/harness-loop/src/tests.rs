@@ -6199,10 +6199,9 @@ fn a_delegate_run_as_a_named_agent_is_narrowed_to_what_its_author_declared() {
 
 // --- a call outside a turn ------------------------------------------------------------------------
 
-/// A `command` step of a workflow (`harness-cli` design 0003 § 6) is one call the document made and
-/// no turn: the model is never asked, and everything a model's call meets — the approver, the
-/// operator's `before-call` hook, the tool, `after-call` — is met in the same order and recorded
-/// under the same events.
+/// One call the caller made and no turn: the model is never asked, and everything a model's call
+/// meets — the approver, the operator's `before-call` hook, the tool, `after-call` — is met in the
+/// same order and recorded under the same events.
 #[test]
 fn a_call_outside_a_turn_meets_the_gate_a_model_call_meets_and_asks_no_model() {
     let mut harness = Harness::new(

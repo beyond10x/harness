@@ -8,7 +8,8 @@ exist; `approval` is still on the spec and marked for retirement (`crates/harnes
 `crates/harness-substrate/src/embedded.rs`; the socket client exists beside it and is parked
 (`STATUS.md`). § 3 — the three-verb amendment below is what shipped. § 4 — a group is a context
 scope and `gives:` is in the notation (`crates/harness-flow/src/run.rs`, `StepContext`). § 5 — all
-five steps landed. The text below is left as argued.
+five steps landed. 0.18.0 removed `harness-flow` and the workflow runner, so § 4 and step 5
+describe code that no longer exists. The text below is left as argued.
 
 ## The problem, in one line
 

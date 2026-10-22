@@ -295,94 +295,11 @@ measuring this harness has asked for.
 
 ## Phase 8: the workflow runner — the loop walks a workflow itself, with the governor outside
 
-**Status: the binary half shipped; nothing is in progress.** Design 0003. M1 shipped in `0.2.0`;
-of M2, command and operator steps landed — a `kind: command` step is one `run` call through the
-run's gate, no model turn (2026-08-30), and a `kind: operator` step is a typed successful pause with
-terminal `flow-paused`, no provider call and no invented failure or downstream skip (2026-08-31).
-The last commit touching `crates/harness-flow` or `crates/harness-cli/src/workflow.rs` is
-`a4e1218` (2026-08-31); everything since is MCP, documentation and releases. **Two items stay
-open and neither is being worked at this commit**: flow resume (`--resume` is refused by name,
-`crates/harness-cli/src/workflow.rs:426-431`, because a flow names one session per section) and the
-library walk. Both are held as draft artifacts — `epic:embedded-by-a-consumer` and
-`story:workflow-run-through-the-library` — and the store has no active artifact.
-
-`crates/harness-flow` is a DAG of sub-trees, a group as a context scope, `Repeat` as the shape of a
-retreat, `gives` as the only thing that crosses a group boundary, and `Flow::run` walking a
-validated plan against a caller's `StepRunner`. The production `StepRunner` is
-`crates/harness-cli/src/workflow.rs` — `FlowRunner`, which binds a step to one `AgentLoop::run_in`
-over the same `Prepared` the `run` verb builds; the crate's own `tests.rs` holds the rest. On the
-other side of the boundary, AEP already projects into it — `aep govern workflow flow --id adp/default/2
---map …` emits `fixtures/adp-default.projected.yaml`, and that document plans and retreats here.
-The projection says what it is: **an ordering, not a government.** Guards, the `declined` outcome
-and every early exit are dropped, and the retreat bound is a number on the command line because the
-source bounds a retreat with the engine's iteration budget.
-
-**Why the runner has to live here, and not stay a process-per-step driver.** The other way a
-workflow runs this loop is one process per step: `metaharness aep drive` — the CLI atlas ADR 0047
-fixes, with AEP's own model-backed invocations refusing before effects — spawns the binary once per
-`llm` step, through `metaharness run b10x`, with the step's prompt, `--context` files,
-`--write-scope` and `--allow-program`, and nothing else. The loop never sees the graph; every step
-starts cold; a retreat is the engine re-entering a state and paying for the context again.
-metaharness is the right spawner for a *vendor* harness — a scratch home, a copied plugin tree, a
-hook channel, a retained transcript — and for this loop it adds an argv and an attestation, which its
-own adapter says in as many words. Phase 5's embedder holds this loop as a library. A driver that
-is a process tree of `metaharness aep drive` → `metaharness run b10x` → `b10x-harness` per step
-cannot be embedded, and an embedder that wants a workflow wants its ordering, its context scope and
-its retreat *inside* the loop it holds. So the runner is this component's, and it needs neither
-metaharness nor an AEP process to walk a plan — which is what `workflow run` does today.
-
-**What stays outside, by decision.** The governor. The engine (`aep-engine`: guards, evidence,
-transitions, visit and attempt budgets) and the step map (`aep-driver-spec`) are
-AEP', and they stay there: this harness embeds nothing above it (invariant 2), and
-a driver that evaluated a gate would be a second protocol implementation with none of the
-conformance suites behind it — AEP' own guide refuses that by name. The driver is
-not in metaharness and nothing has to be extracted from it. What is worth taking apart is on the
-AEP side: the routing core (`aep-driver`, 90 lines) is a library already; the
-per-harness argv, the per-call `decide_tool`, store integrity and the run directory are the 6,994
-lines behind `metaharness aep drive`. The bridge asks that repository for one new thing — a way to
-put **one transition** to the engine from a run cursor, as a program the loop can call — and nothing
-else.
-
-**The bridge is bytes, in both directions, over ports this loop already has:**
-
-| leg | mechanism | owner |
-|---|---|---|
-| workflow in | the flow document, `aep govern workflow flow --map <steps> --max-attempts N` | AEP, exists |
-| step → turn | `harness_workflow::Walk`, the `StepRunner` in `crates/harness-workflow` (`FlowRunner` in `crates/harness-cli` until 2026-10-22): one step is one turn in the scope's session, the handoff is the step's `answer` against the group's `gives`, and a `kind: command` step is one gated `run` call instead | here, **shipped** |
-| transition out | the fourth hook point on `--hooks`, `transition` (`crates/harness-cli/src/hooks.rs:216`, `:352`): fires before a group is entered and after it leaves, carries flow id, path, attempt and handoff; a block is one more refusal, exactly as `before-call` is, and a hook that cannot answer is read closed at both moments | here, **shipped** |
-| the governor | any program behind that hook — `metaharness aep drive` answering one transition from its cursor, or nothing, in which case the run is ordered and not governed and its record says so | AEP, absent |
-| the record | `flow.*` events on `--json`; metaharness maps each to an IR family or lists it as control plane, when an eval wants the run | metaharness, absent, optional |
-| flow resume | a cursor a stopped walk can be re-entered from. `--resume` is refused by name today, because a flow has one session per section and no name for the walk | here, **open** |
-
-**What this is not: an eval arm.** Under the three-arm program the workflow runs in the engine on
-every arm, and the arms are comparable because only the treatment varies. A run under this phase
-moves the sequencer, so it is a different experiment, not a fifth column of the same one. Where it
-is measured against the driven native arm is cost, tokens and wall-time under the **same** governor
-program — the warm-context claim above is a number to be produced, not a property to be asserted.
-
-Steps, each its own story:
-
-1. **Shipped.** `StepRunner` bound to a turn: a group's steps share one session, a step in a new
-   group starts from `available` and nothing else, `handoff` reads the structured `answer`. Both
-   emulators.
-2. **Shipped.** `workflow run --flow <FILE> [--max-attempts N]`, and the whole `FlowEvent`
-   inventory — `FlowStarted`, `GroupEntered`, `LayerReady`, `StepStarted`, `StepFinished`,
-   `NodeSkipped`, `GroupRepeating`, `HandoffIncomplete`, `TransitionRefused`, `GroupLeft`,
-   `FlowFinished`, `FlowPaused` (`crates/harness-flow/src/event.rs`) — on `--json`, rendered on
-   stderr like everything else.
-3. **Shipped.** The `transition` hook point, with the same *declared, never discovered; narrowing
-   only* rules.
-4. **Open, optional.** The metaharness projection of `flow.*`, only when an eval asks for it.
-5. **Open.** Flow resume: a walk that stopped can be re-entered from where it stopped, rather than
-   `--resume` being refused because a flow has one session per section.
-
-**Exit evidence.** The binary half is reached:
-`crates/harness-cli/tests/workflow.rs:1292` walks the unedited `adp-default.projected.yaml` end to
-end over both emulators, and `:502`, `:634` and `:715` drive a `transition` hook that refuses a
-leave, refuses an enter, and fails closed when it cannot answer — with no `metaharness` and no AEP
-process alive. **Still open:** one embedded run under Phase 5's embedder doing the same through the
-library, which is why the step runner's home (`harness-cli` today, reachable only with the binary)
-is the design question `story:workflow-run-through-the-library` carries; and flow resume.
+**Status: retired; removed for `0.18.0`.** `workflow plan|run`, the `transition` hook point and the
+`b10x-harness-workflow` and `b10x-harness-flow` crates are gone, and so is design 0003. Multi-step
+governed work is Loom's; this loop runs one task. Flow resume and the library walk, the two items
+this phase left open, are closed with it rather than carried. What shipped and when is in
+`CHANGELOG.md` (`0.2.0` to `0.17.1`) and the *Workflow library* row of `STATUS.md`.
 
 ## Phase 9: attributable context and toolchain providers
 

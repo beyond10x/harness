@@ -12,13 +12,11 @@ pub mod contract;
 pub mod environment;
 pub mod hooks;
 pub mod memories;
-mod metaharness;
 pub mod profile;
 pub mod provider;
 mod render;
 pub mod skills;
 pub mod transcript;
-mod workflow;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -187,13 +185,29 @@ fn standing_instruction(
     // it true; this is what stops the model spending a turn discovering it by being refused.
     if announce && !catalogue.scope().is_empty() {
         text.push_str("\n\nWhere this run may write. A path no rule names is unrestricted:\n");
-        text.push_str(&harness_workflow::scope_lines(catalogue.scope()));
+        text.push_str(&scope_lines(catalogue.scope()));
     }
     if !context.is_empty() {
         text.push_str(
             "\n\nFiles you have been given. They are already read; do not read them again:\n",
         );
         text.push_str(context);
+    }
+    text
+}
+
+/// One line per write-scope rule, in the order the scope was declared in.
+fn scope_lines(scope: &harness_catalogue::Scope) -> String {
+    let mut text = String::new();
+    for rule in scope.rules() {
+        let word = match rule.write {
+            harness_catalogue::WriteScope::Allowed => "may be written or edited",
+            harness_catalogue::WriteScope::PartialOnly => {
+                "may be edited in part, never replaced whole — use `file_edit`"
+            }
+            harness_catalogue::WriteScope::Denied => "must not be changed at all",
+        };
+        let _ = writeln!(text, "- `{}` {word}", rule.paths);
     }
     text
 }
@@ -452,24 +466,6 @@ enum Command {
     /// Tools arrive from the client on `thread/start`; the workspace toolset is not published
     /// here. The endpoint and credential stay outside the protocol.
     AppServer(Box<AppServerOptions>),
-    /// Rewrite a `--json` loop record as the `metaharness.event/1` stream every evaluation arm is
-    /// judged from.
-    ///
-    /// A converter and **not** a metaharness adapter, and the difference is the point. Every other
-    /// arm reaches the matrix through an adapter that spawns a vendor binary and decides each tool
-    /// call at a seam — which is what arm `driven` measures. Arm `native` measures the opposite
-    /// claim, that the published toolset *is* the policy, so wrapping this loop in a seam would put
-    /// the driven arm's treatment back on top of it and measure that instead. What crosses is the
-    /// record, not the control.
-    Events(EventsOptions),
-    /// Walk a workflow document: one turn of the loop per step, one conversation per section.
-    ///
-    /// Two verbs over one notation. `plan` validates a document and says what runs in what order,
-    /// contacting nothing; `run` walks it. The scheduler is `harness-flow`'s and knows nothing
-    /// about a model — what a step *is* lives in `workflow.rs`, which is what lets the whole walk
-    /// be tested without a provider.
-    #[command(subcommand)]
-    Workflow(workflow::WorkflowCommand),
 }
 
 #[derive(Debug, Args)]
@@ -477,16 +473,6 @@ struct SessionsOptions {
     /// Where sessions are kept. Defaults to `$XDG_STATE_HOME/b10x-harness/sessions`.
     #[arg(long, value_name = "PATH")]
     session_dir: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct EventsOptions {
-    /// The loop record to read. Standard input when absent.
-    #[arg(long)]
-    r#in: Option<PathBuf>,
-    /// Where to write. Standard output when absent.
-    #[arg(long)]
-    out: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -2087,7 +2073,7 @@ struct Prepared {
 /// Resolves the endpoint, the credential, the toolset, the approver, the session and the hooks.
 ///
 /// `answer` is the schema the run ends under, already read: `run` reads it from the file
-/// `--output-schema` named, `workflow run` derives one, and `chat` passes [`None`] because a
+/// `--output-schema` named, and `chat` passes [`None`] because a
 /// conversation has no single end for a schema to shape. It arrives resolved rather than as a path
 /// because the standing instruction written below **names the tool it publishes** — a caller that
 /// held its own schema and passed [`None`] would get a run publishing `answer` and never told to
@@ -2159,9 +2145,8 @@ fn prepare(
     let approvals = approver(options)?;
     let session_dir = session_dir(options)?;
     let session = open_session(options, &root, session_dir.as_deref())?;
-    // The schema arrives already read — from a file under `--output-schema`, or derived by the
-    // caller, as `workflow run` derives one per section — because the instruction below names the
-    // tool it publishes. A caller that resolved its own schema and left this `None` would get a run
+    // The schema arrives already read — from a file under `--output-schema` — because the
+    // instruction below names the tool it publishes. A caller that resolved its own schema and left this `None` would get a run
     // under a schema that was never told to finish by calling `answer`.
     let delegation = delegation(options);
     let skills = skills_from(&options.skills_dir, &options.plugin_dir)?;
@@ -2967,7 +2952,7 @@ enum Published {
 
 /// Local operations plus explicitly reviewed outbound MCP tools.
 ///
-/// The local catalogue remains the source for workspace instruction and workflow narrowing. MCP
+/// The local catalogue remains the source for workspace instruction and write-scope narrowing. MCP
 /// publication is a separate flat surface because its names and envelopes are already the local
 /// review document; putting it behind the local catalogue's verbs would reinterpret that document.
 struct Augmented {
@@ -3102,20 +3087,6 @@ impl Published {
             Self::Flat(flat) => flat.catalogue(),
             Self::Verbs(verbs) => verbs.catalogue(),
             Self::Augmented(augmented) => augmented.local.catalogue(),
-        }
-    }
-
-    /// The same catalogue, to narrow for one step of a walk.
-    ///
-    /// The only mutation a published toolset admits, and it can only take writing away
-    /// ([`harness_catalogue::Catalogue::narrow`]). Whatever the surface, the scope lives on the one
-    /// catalogue behind it, so a walk narrows the same boundary under `--surface flat` and
-    /// `--surface verbs`.
-    fn catalogue_mut(&mut self) -> &mut harness_catalogue::Catalogue {
-        match self {
-            Self::Flat(flat) => flat.catalogue_mut(),
-            Self::Verbs(verbs) => verbs.catalogue_mut(),
-            Self::Augmented(augmented) => augmented.local.catalogue_mut(),
         }
     }
 
@@ -3916,8 +3887,6 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
         Command::Toolchains(verb) => reported(toolchains_command(verb)),
         Command::Context(verb) => reported(context_command(verb)),
         Command::AppServer(options) => reported(app_server_command(options)),
-        Command::Events(options) => reported(events_command(options)),
-        Command::Workflow(command) => workflow::dispatch(command),
     }
 }
 
@@ -3958,8 +3927,7 @@ fn reported(outcome: Result<(), String>) -> ExitCode {
 /// The one-line record of a run that never started.
 ///
 /// The same shape every other loop event has, so a reader parsing the `--json` stream line by line
-/// does not need a second parser for it. `b10x-harness events` maps it onto the terminal record
-/// the stream already has.
+/// does not need a second parser for it.
 fn refused_line(reason: &str) -> String {
     serde_json::json!({"kind": "refused", "reason": one_line(reason)}).to_string()
 }
@@ -3975,25 +3943,6 @@ fn one_line(message: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// `b10x-harness events`
-fn events_command(options: &EventsOptions) -> Result<(), String> {
-    let mut input: Box<dyn std::io::BufRead> = match &options.r#in {
-        Some(path) => Box::new(std::io::BufReader::new(
-            std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?,
-        )),
-        None => Box::new(std::io::BufReader::new(std::io::stdin())),
-    };
-    let mut output: Box<dyn std::io::Write> = match &options.out {
-        Some(path) => Box::new(
-            std::fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?,
-        ),
-        None => Box::new(std::io::stdout()),
-    };
-    metaharness::convert(&mut input, &mut output, env!("CARGO_PKG_VERSION"))
-        .map(|_| ())
-        .map_err(|error| error.to_string())
 }
 
 /// Parses the command line and runs it.
@@ -4703,6 +4652,22 @@ mod tests {
 
         assert!(text.contains(".engineering/planning/**"), "{text}");
         assert!(text.contains("file_edit"), "and the way in: {text}");
+    }
+
+    #[test]
+    fn every_scope_rule_is_one_line_in_declared_order() {
+        let scope = write_scope(&[
+            "target/**=denied".to_owned(),
+            "docs/**=partial-only".to_owned(),
+            "**=allowed".to_owned(),
+        ])
+        .expect("the rules read");
+        assert_eq!(
+            scope_lines(&scope),
+            "- `target/**` must not be changed at all\n\
+             - `docs/**` may be edited in part, never replaced whole — use `file_edit`\n\
+             - `**` may be written or edited\n"
+        );
     }
 
     #[test]

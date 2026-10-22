@@ -1,7 +1,6 @@
 //! Calls existing production APIs; only upstream ports are scripted.
 use std::collections::VecDeque;
 
-use harness_flow::{Flow, Gate, Step, StepContext, StepOutcome, StepRunner, VecFlowSink};
 use harness_loop::{
     AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopConfig, RunLedger, VecLoopSink,
 };
@@ -80,7 +79,6 @@ pub fn execute(command: &str, input: &Value) -> Result<Value> {
         }
         "harness.loop.Run" => run_loop(input),
         "harness.loop.Call" => call(input),
-        "harness.flow.Run" => run_flow(input),
         _ => Err(format!("no production adapter for {command}").into()),
     }
 }
@@ -163,52 +161,4 @@ fn call(input: &Value) -> Result<Value> {
     let outcome = AgentLoop::new(&mut model, &mut tools, approver, config)
         .call(&call, &mut VecLoopSink::new());
     Ok(json!({"failed":outcome.failed,"tool_calls":tools.calls,"refusal":outcome.refusal}))
-}
-
-struct Steps {
-    script: VecDeque<String>,
-    paths: Vec<String>,
-    refuse_entry: bool,
-}
-impl StepRunner for Steps {
-    fn run(&mut self, path: &str, _: &Step, _: &StepContext) -> StepOutcome {
-        self.paths.push(path.into());
-        match self.script.pop_front().as_deref() {
-            Some("paused") => StepOutcome::Paused {
-                reason: "operator fixture".into(),
-            },
-            Some("passed") => StepOutcome::Passed,
-            _ => StepOutcome::Failed,
-        }
-    }
-    fn entering(&mut self, _: &str, _: u32) -> Gate {
-        if self.refuse_entry {
-            Gate::Refused {
-                reason: "entry fixture".into(),
-            }
-        } else {
-            Gate::Proceed
-        }
-    }
-}
-fn run_flow(input: &Value) -> Result<Value> {
-    let mut steps = Steps {
-        script: serde_json::from_value(input["script"].clone())?,
-        paths: Vec::new(),
-        refuse_entry: boolean(input, "refuse_entry")?,
-    };
-    let outcome = Flow::from_json(&input["document"].to_string())
-        .map_err(|e| e.to_string())
-        .and_then(|flow| {
-            flow.run(&mut steps, &mut VecFlowSink::new())
-                .map_err(|e| e.to_string())
-        });
-    match outcome {
-        Ok(report) => Ok(
-            json!({"status":format!("{:?}",report.status()),"reached":report.reached,"ran":report.ran,"failed":report.failed,"skipped":report.skipped,"retreats":report.retreats,"paths":steps.paths,"diagnostic":null}),
-        ),
-        Err(error) => Ok(
-            json!({"status":null,"reached":0,"ran":0,"failed":0,"skipped":0,"retreats":0,"paths":steps.paths,"diagnostic":error}),
-        ),
-    }
 }

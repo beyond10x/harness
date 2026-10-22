@@ -4,8 +4,6 @@ members = [
     "crates/harness-wire",
     "crates/harness-loop",
     "crates/harness-conformance",
-    "crates/harness-flow",
-    "crates/harness-workflow",
     "crates/harness-catalogue",
     "crates/harness-substrate",
     "crates/harness-mcp",
@@ -26,8 +24,6 @@ publish = false
 [workspace.dependencies]
 harness-wire = { package = "b10x-harness-wire", path = "crates/harness-wire" }
 harness-loop = { package = "b10x-harness-loop", path = "crates/harness-loop" }
-harness-flow = { package = "b10x-harness-flow", path = "crates/harness-flow" }
-harness-workflow = { package = "b10x-harness-workflow", path = "crates/harness-workflow" }
 harness-catalogue = { package = "b10x-harness-catalogue", path = "crates/harness-catalogue" }
 harness-substrate = { package = "b10x-harness-substrate", path = "crates/harness-substrate" }
 harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
@@ -56,8 +52,6 @@ nix = { version = "0.31.3", features = ["process", "signal"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The workflow notation reads its own documents (`Flow::from_yaml`), so the CLI never parses one
-# itself. `_ng` is the maintained fork of `serde_yaml`, which was archived unmaintained in 2024.
 serde_yaml_ng = "0.10"
 sha2 = "0.11.0"
 tempfile = "3.23"

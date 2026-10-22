@@ -13,7 +13,8 @@ the system around it.
 
 An explicit command-line source is always honored as written:
 
-- `--api-key-file` or `--api-key-env` for a bearer API key;
+- `--api-key-file`, `--api-key-env` or `--api-key-secret` for a bearer API key, the last read
+  from the local secrets store by `<namespace>/<name>` reference and opened only when named;
 - `--oauth-token-file` or `--oauth-token-env` for a subscription OAuth token;
 - `--oauth-token-pointer` when that OAuth source is a JSON document.
 

@@ -18,9 +18,12 @@ workspace = true
 harness-wire = { workspace = true }
 llm-blocking = { workspace = true }
 llm-core = { workspace = true }
-llm-credentials = { workspace = true, features = ["codex-renewal", "environment", "file", "json-pointer"] }
+llm-credentials = { workspace = true, features = ["codex-renewal", "environment", "file", "json-pointer", "native-keychain", "secrets"] }
 llm-http = { workspace = true }
 llm-messages = { workspace = true }
 llm-providers = { workspace = true }
 llm-responses = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+keyring-core = "1.0.0"

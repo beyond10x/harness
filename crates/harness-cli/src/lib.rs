@@ -507,6 +507,16 @@ struct AppServerOptions {
     /// Name of an environment variable holding the bearer credential.
     #[arg(long, conflicts_with = "api_key_file")]
     api_key_env: Option<String>,
+    /// The bearer credential's place in the local secrets store, as `<namespace>/<name>`.
+    ///
+    /// The layout `secretsctl put <name> --namespace <namespace>` writes, read again on every
+    /// call. The store is opened only when this is given; nothing else here reads it.
+    #[arg(
+        long,
+        value_name = "NAMESPACE/NAME",
+        conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_file", "oauth_token_env"]
+    )]
+    api_key_secret: Option<String>,
     /// File holding a subscription OAuth token, for a route that takes one instead of an API key.
     ///
     /// Named, like every other credential source here: there is no default path and no vendor
@@ -592,6 +602,18 @@ struct RunOptions {
     /// the harness reads no credential it was not pointed at.
     #[arg(long, conflicts_with = "api_key_file")]
     api_key_env: Option<String>,
+    /// The bearer credential's place in the local secrets store, as `<namespace>/<name>`.
+    ///
+    /// The layout `secretsctl put <name> --namespace <namespace>` writes, read again on every
+    /// call, so a key rewritten in the store is the one the next call sends. The store is opened
+    /// only when this is given: without it this harness never reads the store, and a provider
+    /// default never stands in for it.
+    #[arg(
+        long,
+        value_name = "NAMESPACE/NAME",
+        conflicts_with_all = ["api_key_file", "api_key_env", "oauth_token_file", "oauth_token_env"]
+    )]
+    api_key_secret: Option<String>,
     /// File holding a subscription OAuth token, for a route that takes one instead of an API key.
     ///
     /// A path typed here is re-read on **every** call and is never renewed or written by Harness.
@@ -1215,6 +1237,9 @@ fn credential_source(options: &RunOptions) -> String {
     if options.api_key_env.is_some() {
         return "api-key:environment".to_owned();
     }
+    if options.api_key_secret.is_some() {
+        return "api-key:secrets".to_owned();
+    }
     if options.oauth_token_file.is_some() {
         return "oauth:file".to_owned();
     }
@@ -1291,6 +1316,7 @@ fn apply_provider(
     // refuses outright rather than the accountable one it now allows.
     let named_already = options.api_key_file.is_some()
         || options.api_key_env.is_some()
+        || options.api_key_secret.is_some()
         || options.oauth_token_file.is_some()
         || options.oauth_token_env.is_some();
     if !named_already {
@@ -1551,6 +1577,9 @@ fn resolve_credential(options: &RunOptions) -> Result<Credential, String> {
     )? {
         return Ok(Credential::Subscription(token));
     }
+    if let Some(reference) = &options.api_key_secret {
+        return Ok(Credential::Stored(llm_port::Source::secret(reference)?));
+    }
     Ok(
         match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())? {
             Some(value) => Credential::Key(value),
@@ -1601,6 +1630,11 @@ enum Credential {
     /// Held as the source and not as a value: nothing in this process ever holds the token, which
     /// is what makes an expired one recoverable without restarting the run.
     Subscription(llm_port::Source),
+    /// A key in the local secrets store, read through its source on every call.
+    ///
+    /// Held as the source, as a subscription token is: nothing in this process holds the key
+    /// between calls.
+    Stored(llm_port::Source),
     /// A source the caller already built, for a server that makes one client per turn and must
     /// hand each of them the same source rather than resolving the flags again.
     Shared(llm_port::Source),
@@ -1615,6 +1649,7 @@ impl std::fmt::Debug for Credential {
             Self::Unnamed => "Credential::Unnamed",
             Self::Key(_) => "Credential::Key(<redacted>)",
             Self::Subscription(_) => "Credential::Subscription(<redacted>)",
+            Self::Stored(_) => "Credential::Stored(<redacted>)",
             Self::Shared(_) => "Credential::Shared(<redacted>)",
         })
     }
@@ -1625,7 +1660,9 @@ impl Credential {
         Ok(match self {
             Self::Unnamed => None,
             Self::Key(value) => Some(llm_port::Source::key(&value)?),
-            Self::Subscription(source) | Self::Shared(source) => Some(source),
+            Self::Subscription(source) | Self::Stored(source) | Self::Shared(source) => {
+                Some(source)
+            }
         })
     }
 }
@@ -1678,12 +1715,16 @@ fn app_server_command(options: &AppServerOptions) -> Result<(), String> {
         options.oauth_token_pointer.as_ref(),
     )? {
         Some(token) => Credential::Subscription(token).source()?,
-        None => {
-            match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())? {
-                Some(value) => Credential::Key(value).source()?,
-                None => None,
+        None => match &options.api_key_secret {
+            Some(reference) => Credential::Stored(llm_port::Source::secret(reference)?).source()?,
+            None => {
+                match credential_from(options.api_key_file.as_ref(), options.api_key_env.as_ref())?
+                {
+                    Some(value) => Credential::Key(value).source()?,
+                    None => None,
+                }
             }
-        }
+        },
     };
     let config = ServerConfig {
         model: options.model.clone(),
@@ -4171,6 +4212,86 @@ mod tests {
                 "{pair:?} must not parse: a run has one credential, not two"
             );
         }
+    }
+
+    // story:api-key-from-the-secrets-store. No case here opens a store: a reference that parses
+    // would open the platform's, so these cases stop at the command line, the record and the
+    // refusal of a malformed reference. The read itself is `harness-llm`'s, against an in-memory
+    // store (`a_secret_the_store_does_not_hold_is_refused_by_its_reference_and_never_by_a_value`).
+
+    #[test]
+    fn a_secrets_store_reference_is_one_credential_and_conflicts_with_every_other() {
+        let run = [
+            "b10x-harness",
+            "run",
+            "--base-url",
+            "https://gw.example/v1",
+            "--model",
+            "m",
+            "--input",
+            "hi",
+        ];
+        let app_server = [
+            "b10x-harness",
+            "app-server",
+            "--base-url",
+            "https://gw.example/v1",
+            "--model",
+            "m",
+        ];
+        let secret = ["--api-key-secret", "llm/fixture-api-key"];
+        for base in [&run[..], &app_server[..]] {
+            assert!(
+                parse(&[base, &secret[..]].concat()).is_ok(),
+                "{base:?}: the reference alone parses"
+            );
+            for other in [
+                ["--api-key-file", "/k"],
+                ["--api-key-env", "KEY"],
+                ["--oauth-token-file", "/t"],
+                ["--oauth-token-env", "TOKEN"],
+            ] {
+                assert!(
+                    parse(&[base, &secret[..], &other[..]].concat()).is_err(),
+                    "{base:?} with {other:?} must not parse: a run has one credential, not two"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_secrets_store_reference_is_recorded_as_its_own_credential_kind() {
+        assert_eq!(
+            credential_source(&options(&["--api-key-secret", "llm/fixture-api-key"])),
+            "api-key:secrets"
+        );
+    }
+
+    #[test]
+    fn a_malformed_secrets_store_reference_is_refused_by_name() {
+        for malformed in ["fixture-api-key", "llm/", "LLM/fixture-api-key"] {
+            let error = resolve_credential(&options(&["--api-key-secret", malformed]))
+                .expect_err("not `<namespace>/<name>`");
+            assert!(error.contains(&format!("`{malformed}`")), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_secrets_store_reference_is_a_named_credential_a_provider_default_does_not_replace() {
+        let mut options = options(&["--api-key-secret", "llm/fixture-api-key"]);
+        options.base_url = None;
+        apply_provider(
+            &mut options,
+            Some("openai"),
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("the provider applies");
+        assert_eq!(
+            options.api_key_env, None,
+            "the provider's variable is not added"
+        );
+        assert_eq!(options.credential_from_provider, None);
+        assert_eq!(credential_source(&options), "api-key:secrets");
     }
 
     #[test]

@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-22
+
 ### Added
 
 - `--api-key-secret <NAMESPACE/NAME>` on `run`, `chat`, `workflow run` and `app-server` reads the API key from the local secrets store (the layout `secretsctl put` writes) on every request, through `llm-credentials`' `secrets` resolver (`harness_llm::Source::secret`, and `Source::secret_in` over a caller's own storage). It conflicts with the other four credential flags, records `credential_source: "api-key:secrets"`, and opens the platform keychain only when given. A malformed reference is refused by name, escaped, before any store opens; a secret the store does not hold is refused per request by its reference. The CLI contract is cut as `contracts/cli/b10x-harness/2026-10-22`.

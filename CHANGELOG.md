@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - The documentation site at `https://beyond10x.github.io/harness/` is Docusaurus on the shared Docs System, built by `pages.yml` and deployed by `b10x-docs-site.yml`; the new `harness-docs` crate generates the CLI, toolchain, crate and status pages and checks every page (`cargo xtask gate` runs `harness-docs generate --check`), replacing the Rust site builder and the `cargo xtask website`, `website-contract` and `toolchain-docs` tasks.
 
+### Removed
+
+- The unified-site delivery: `b10x.docs.yaml` and the `b10x-docs-bundle.yml`, `b10x-docs-check.yml` and `b10x-docs-pages.yml` workflows. Website no longer collects harness, and each former `https://beyond10x.github.io/docs/harness/` route redirects to its page under `https://beyond10x.github.io/harness/`.
+
 ## [0.18.0] - 2026-10-22
 
 ### Removed

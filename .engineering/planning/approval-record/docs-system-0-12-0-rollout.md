@@ -5,7 +5,7 @@ kind: approval-record
 status: draft
 title: docs-system 0.12.0 pin rollout approved by session b10x-chef-orchestrator
 summary: Pin batches, getting-started, docs-system migration note, ess-ui-templates and its gates baseline, 2026-10-22
-revision: 1
+revision: 2
 ---
 ## The stop
 
@@ -45,3 +45,19 @@ set scope:
 | gates-policy `d9c0c44` | pushed. `b10x-gates check` from `5527832`: 8 commits on `main`, 9 with the pending commit, 0 findings; `audit` 0 |
 | ess-ui-templates pin and `FONT_RANGE` sed | committed locally, held until the CI policy secret carries the new baseline |
 | ess-ui-templates ESS bump | waits for the item above |
+
+## Closed after the rollout
+
+swarm is closed without a pin bump. The operator decided on 2026-10-23, as relayed by session
+`b10x-chef-orchestrator`, quoted: "swarm: no work. Timo closed it on 2026-10-23 as option B,
+"swarm stays unpinned" (decisions.md 13:39Z, queue row 29)."
+
+- The batch-3 bump commit `7b7b07f` was never pushed. The bot push was refused with "branch
+  authority missing or ambiguous", because swarm has no `b10x-bot-branch-authority` ruleset. The
+  commit is kept only in the managed tree `swarm-docs-system-0-12-0`.
+- No further swarm work follows from this rollout.
+
+docs-system 0.12.1 (tag on `48d96c3`) and 0.12.2 (tag on `b2729c0`, released 2026-10-22T23:56Z)
+carry the cortex template defects s2-01, s2-02, s5-03, s4-01, s2-03, s1-04 and s4-02. The
+orchestrator accepted the s1-04 decision on 2026-10-23: a kind word in prose inline code no longer
+gets a kind chip, while table cells and `<Kind>` keep theirs.

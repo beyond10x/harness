@@ -27,6 +27,16 @@
 //! the tools crate's own arithmetic on paths, and the constructor is named so that a reader of the
 //! call site knows it.
 //!
+//! # The deadline on a read, a list, a search and a find
+//!
+//! `fs` v1alpha2 and `search` v1alpha2 (tools `0.5.0`) take an optional `timeout_ms` and answer
+//! `deadline_reached`. No entry publishes `timeout_ms`, so every call here names none and runs
+//! under the tools crates' default of 10000 ms; a caller cannot reach their `TimeoutAboveMax`
+//! refusal, and if one did it would come back like every other refusal here, as a failed outcome.
+//! `deadline_reached` is passed through on every reply: a call that stopped at its deadline answers
+//! what it had by then, and dropping the field would leave only `note` to tell a partial answer
+//! from a whole one.
+//!
 //! # The name mapping, tested both ways
 //!
 //! Each harness operation is routed to its `tools` operation directly, in code, by the method that
@@ -174,6 +184,7 @@ impl LocalOperations {
             offset: window.offset,
             limit: window.limit,
             max_bytes: window.max_bytes,
+            timeout_ms: None,
         };
         let output = self.fs.read(&input).map_err(|error| error.to_string())?;
         let mut value = serde_json::to_value(output).expect("a read output serialises");
@@ -192,6 +203,7 @@ impl Operations for LocalOperations {
     fn dir_list(&self, path: &str) -> Result<Value, String> {
         let input = ListInput {
             path: Some(path.to_owned()),
+            timeout_ms: None,
         };
         let output = self.fs.list(&input).map_err(|error| error.to_string())?;
         Ok(serde_json::to_value(output).expect("a list output serialises"))
@@ -213,6 +225,7 @@ impl Operations for LocalOperations {
             max_results: options
                 .max_results
                 .map(|count| u64::try_from(count).unwrap_or(u64::MAX)),
+            timeout_ms: None,
         };
         let output = self
             .search
@@ -226,6 +239,7 @@ impl Operations for LocalOperations {
             glob: glob.to_owned(),
             path: Some(path.to_owned()),
             max_results: max_results.map(|count| u64::try_from(count).unwrap_or(u64::MAX)),
+            timeout_ms: None,
         };
         let output = self.fs.glob(&input).map_err(|error| error.to_string())?;
         Ok(serde_json::to_value(output).expect("a glob output serialises"))
@@ -419,6 +433,32 @@ mod tests {
     }
 
     #[test]
+    fn every_read_list_search_and_find_reply_carries_deadline_reached() {
+        // `fs` and `search` v1alpha2 answer `deadline_reached` on every call; the adapter strips
+        // it from none, so a call that stopped at its deadline can be told from a whole one.
+        let dir = workspace();
+        std::fs::write(dir.path().join("notes.txt"), "alpha\n").expect("the seed");
+        let operations = writing(dir.path());
+        let replies = [
+            operations
+                .file_read("notes.txt", crate::ReadWindow::whole())
+                .expect("the read"),
+            operations.dir_list(".").expect("the list"),
+            operations
+                .search("alpha", ".", &SearchOptions::default())
+                .expect("the search"),
+            operations.find("*.txt", ".", None).expect("the find"),
+        ];
+        for reply in replies {
+            assert_eq!(
+                reply["deadline_reached"],
+                serde_json::json!(false),
+                "{reply}"
+            );
+        }
+    }
+
+    #[test]
     fn a_write_and_an_edit_answer_the_path_and_byte_count_alone() {
         let dir = workspace();
         let operations = writing(dir.path());
@@ -474,6 +514,7 @@ mod tests {
                 glob: Some("*.rs".to_owned()),
                 context: Some(9),
                 max_results: Some(1),
+                timeout_ms: None,
             })
             .expect("the grep");
         assert_eq!(

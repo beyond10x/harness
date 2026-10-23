@@ -4,6 +4,9 @@
 //! The adapter's own tests compare its reply with `tool_search`'s, which is the same code on both
 //! sides: a change in the pinned crate moves both and stays green. These cases write the 0.15.1
 //! reply out as literals instead, so a reply change reaches a red test and not only a changelog.
+//!
+//! One field was added since: `deadline_reached`, which `search` v1alpha2 (tools `0.5.0`) answers
+//! on every call, so the literals carry it as `false`.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -86,6 +89,7 @@ fn a_search_answers_0_15_1s_reply_byte_for_byte() {
         "skipped_large_paths": [],
         "regex": true,
         "glob": "*.txt",
+        "deadline_reached": false,
     });
     assert_eq!(answer.to_string(), expected.to_string());
 
@@ -107,6 +111,7 @@ fn a_search_answers_0_15_1s_reply_byte_for_byte() {
         "context": 5,
         "note": "`context` was 6 and this build answers at most 5 lines either side of a match, \
                  so 5 is what these matches carry.",
+        "deadline_reached": false,
     });
     assert_eq!(answer.to_string(), expected.to_string());
 }

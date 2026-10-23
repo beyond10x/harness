@@ -31,12 +31,12 @@ harness-mcp = { package = "b10x-harness-mcp", path = "crates/harness-mcp" }
 harness-app-server = { package = "b10x-harness-app-server", path = "crates/harness-app-server" }
 harness-llm = { package = "b10x-harness-llm", path = "crates/harness-llm" }
 
-tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
-tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
-tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
-tool-process = { package = "b10x-tool-process", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
-tool-search = { package = "b10x-tool-search", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
-tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.4.0", version = "=0.4.0" }
+tool-contract = { package = "b10x-tool-contract", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
+tool-fs = { package = "b10x-tool-fs", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
+tool-code-editor = { package = "b10x-tool-code-editor", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
+tool-process = { package = "b10x-tool-process", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
+tool-search = { package = "b10x-tool-search", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
+tool-toolchain = { package = "b10x-tool-toolchain", git = "https://github.com/beyond10x/tools", tag = "0.5.0", version = "=0.5.0" }
 
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"

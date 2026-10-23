@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - The documentation site at `https://beyond10x.github.io/harness/` is Docusaurus on the shared Docs System, built by `pages.yml` and deployed by `b10x-docs-site.yml`; the new `harness-docs` crate generates the CLI, toolchain, crate and status pages and checks every page (`cargo xtask gate` runs `harness-docs generate --check`), replacing the Rust site builder and the `cargo xtask website`, `website-contract` and `toolchain-docs` tasks.
+- The six `b10x-tool-*` crates move from tools `0.4.0` to `0.5.0`, where `fs` and `search` implement v1alpha2. Every `file_read`, `dir_list`, `search` and `find` reply now carries `deadline_reached`, and each of those calls stops at the tools crates' default 10000 ms deadline, answering what it had by then with `note` saying so; before, they had no wall-clock bound. No entry publishes `timeout_ms`, so tool input schemas are unchanged. A confined (`ConfinedOperations`) `file_read` answers `deadline_reached: false`, so a read answers the same shape in every workspace.
+- The documentation site pins Docs System `0.12.2` (`b2729c0`), up from `9d35e63` (`0.7.0`).
+
+### Fixed
+
+- From tools `0.5.0`: `run` keeps the program's shell unreaped until the process-group kill at its bound, so the kill can never reach a reused group; `file_read` ends a line cut by the 16 MiB counting bound on a whole character and lists it in `truncated_lines`, and answers a CRLF line stopped at its line ending whole and without its `\r`.
 
 ### Removed
 

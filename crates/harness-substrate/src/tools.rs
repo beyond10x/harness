@@ -313,17 +313,15 @@ impl Operations for ConfinedOperations {
                 "total": if ceiling_cut { Value::Null } else { json!(total) },
             },
             "truncated_lines": cut,
+            // `fs` v1alpha2 answers this on every read, so the reading provider beside this one
+            // does. This route sets no wall-clock deadline of its own — the bound on it is the
+            // byte ceiling above — so a read here never stops at one, and `false` is the truth.
+            "deadline_reached": false,
         });
         if ceiling_cut {
             answer["bytes_read"] = json!(bytes);
             answer["route_ceiling_bytes"] = json!(self.read_ceiling_bytes);
-            answer["note"] = json!(format!(
-                "this workspace's read route answers the first {} bytes of a file and no more, and \
-                 `{path}` filled them, so how many lines it has is not knowable from here and the \
-                 lines past that ceiling cannot be reached on this path at any `offset`. A tool \
-                 that walks the tree — `search`, `find` — reads it through the other provider.",
-                self.read_ceiling_bytes
-            ));
+            answer["note"] = json!(ceiling_note(path, self.read_ceiling_bytes));
         }
         Ok(answer)
     }
@@ -470,6 +468,16 @@ impl Operations for ConfinedOperations {
     fn writes(&self) -> bool {
         self.writes
     }
+}
+
+/// The `note` of a read the route's byte ceiling cut, naming the ceiling and the way past it.
+fn ceiling_note(path: &str, ceiling_bytes: u64) -> String {
+    format!(
+        "this workspace's read route answers the first {ceiling_bytes} bytes of a file and no \
+         more, and `{path}` filled them, so how many lines it has is not knowable from here and \
+         the lines past that ceiling cannot be reached on this path at any `offset`. A tool that \
+         walks the tree — `search`, `find` — reads it through the other provider."
+    )
 }
 
 /// `path` with its `.` components dropped, and nothing else about it changed.

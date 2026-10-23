@@ -393,6 +393,7 @@ commits, pushes and releases require no Atlas checkout, current Atlas main or or
 dependency admission. Use standalone `b10x-gates bot --repo . -- <git-command>` with protected local
 credentials and the existing `b10x-bot[bot]` identity. Preserve repository and worktree hooks.
 Delete a pull-request branch only after reading the merge back (`gh pr view <n> --json state` says `MERGED`), never chained to the push: on 2026-10-22 a refused fast-forward was followed by the deletion and GitHub closed the open pull request.
+A scratch clone or checkout that fails a clean-and-pushed check (`git status --porcelain` not empty, or commits not on its remote) is kept and reported to whoever directs the session, never removed on the session's own verification: on 2026-10-23 six such clones were removed after a local check that they were held elsewhere, and the list of their unpushed commits had been cut at three per clone.
 
 Atlas documentation validation belongs to documentation operations; it is not a prerequisite for
 source publication. Documentation failures affect documentation delivery. Organization privacy

@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-26
+
+### Changed
+
+- **Breaking:** `LoopStop` gains the variant `Failed { cause, message, after_compaction }` (kind `failed`); a `match` over `LoopStop` needs an arm for it. A run that had started and then ended in a `LoopError` now emits one `finished` event with that stop before `AgentLoop::run_in` returns the same error. Before, its event stream ended on `turn-started` and `run --json` printed no terminal line, so a supervisor reading the record could not tell a failed run from a lost one. `cause` is `provider-<wire error code>` (`provider-refused`, `provider-transport`, …), `environment`, `budget` or `config`; `message` is the error on one line; `after_compaction` is true when a `conversation-compacted` warning came before the failing request in its turn. The exit status stays 1, human mode prints nothing new, and `app-server` maps the stop to status `failed`.
+- The seven llm crates move from `0.15.0` to `0.16.0` (`33ae9001`). A Messages stream whose `message_delta.usage` carries `cost` now completes instead of being refused (`Messages field is outside the declared subset: message_delta.usage.cost`); the field is surfaced as llm's `usage-extension` warning, a `warning` line under `--json` and `warning [usage-extension] message_delta.usage.cost: <value>` on stderr otherwise. The run's cost is still computed from the rate card, never from the route's figure.
+
 ## [0.20.0] - 2026-10-26
 
 ### Added

@@ -99,7 +99,10 @@ empty, so *this run had none* and *this build does not say* are different record
 the `memories`, `profiles`, `context` files, `toolchains` and `mcp` servers, the
 `credential_source`, and `cwd`: the canonical root the file tools act in. `cwd` is absent when that
 root's name is not UTF-8 and under `--substrate <socket>`, where no host path names the daemon's
-workspace. The `finished` event carries the typed stop and total model turns.
+workspace. The `finished` event carries the typed stop and total model turns. A run that started and
+then failed ends with one `finished` whose stop is `failed`: `cause` (`provider-<wire error code>`,
+`environment`, `budget` or `config`), `message` (the error on one line) and `after_compaction`
+(a `conversation-compacted` warning came before the failing request in its turn).
 
 `credential-renewed` arrives **before** `started`, and only on a run that renewed something: the
 token had gone stale, it was renewed, and the file its owner keeps it in was rewritten — all before
@@ -135,7 +138,8 @@ than on the words, which are written for a person.
 | `stop-hook-exhausted` | A stop hook blocked the end of the run up to its limit; the run ends anyway. |
 
 Provider wires forward their own codes through the same event — `unknown-stream-event` for a stream
-item the wire does not model, `turn-retried` for a stream that broke and is being attempted again.
+item the wire does not model, `turn-retried` for a stream that broke and is being attempted again,
+`usage-extension` for a usage field outside the wire's declared subset that llm admits and reports.
 An unmodelled item is warned about and preserved, never dropped.
 
 `program-refused` is what makes *the surface refused what is outside it* countable. The refusal is

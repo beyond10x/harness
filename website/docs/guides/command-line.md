@@ -118,7 +118,7 @@ line and exit status 1.
 |---|---|
 | `0` | Consume the completed answer |
 | `2` | Inspect the named stop on stderr or in the `finished` event: a budget, deadline, cancellation or a provider that ended a turn early bound the run |
-| `1` | Treat it as a configuration, credential, confinement, transport or protocol failure; a structured run whose held turn ended in prose again is one |
+| `1` | Treat it as a configuration, credential, confinement, transport or protocol failure; a structured run whose held turn ended in prose again is one. Under `--json`, a run that had started ends with a `finished` whose stop is `failed` and names the `cause` |
 
 Clap parse errors are normalised to status 1 by this command, because status 2 already means a run
 that started and stopped.

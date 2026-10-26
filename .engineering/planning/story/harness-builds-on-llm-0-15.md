@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-builds-on-llm-0-15
 kind: story
-status: active
+status: implemented
 title: Harness builds on llm 0.15.0
 summary: Seven llm crates move from 0.8.1 to 0.15.0 without the b10x- package prefix; bedrock-converse is refused by name
 relations:
@@ -17,10 +17,11 @@ scope:
   path: Cargo.toml
 - confidence: cited
   path: crates/harness-llm/src/lib.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T10:45:03Z", actor: "human:timo", revision: 6}
 - {from: "proposed", to: "active", at: "2026-10-26T10:45:03Z", actor: "human:timo", revision: 7}
+- {from: "active", to: "implemented", at: "2026-10-26T11:43:38Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

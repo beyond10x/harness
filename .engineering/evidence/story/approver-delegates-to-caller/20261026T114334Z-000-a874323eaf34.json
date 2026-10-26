@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-26T11:43:34Z",
+  "actor": "human:timo",
+  "artifact": "story:approver-delegates-to-caller",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate at a0a2426 (wave/2026-10-26-llm-ess-approver): green, 60 test binaries 1129 passed 0 failed 6 ignored; Harness ESS 29/29, no-op audit 0/29"
+  }
+}

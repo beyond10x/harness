@@ -2,14 +2,16 @@
 format: aep.planning-md/3
 id: approval-record:wave-llm-ess-approver
 kind: approval-record
-status: draft
+status: approved
 title: Wave llm-ess-approver approved by session b10x-chef-orchestrator
 summary: llm 0.15.0, ESS 0.69.2 and the ADR 0104 caller approver, and the release, 2026-10-26
 relations:
 - decides: story:harness-builds-on-llm-0-15
 - decides: story:ess-pin-0-69-2
 - decides: story:approver-delegates-to-caller
-revision: 1
+revision: 2
+transitions:
+- {from: "draft", to: "approved", at: "2026-10-26T11:43:38Z", actor: "human:timo", revision: 2}
 ---
 ## The stop
 

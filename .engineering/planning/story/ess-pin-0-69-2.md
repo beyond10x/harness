@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-pin-0-69-2
 kind: story
-status: active
+status: implemented
 title: The specification runs on ESS 0.69.2
 summary: spec/ess-inputs.yaml and the ess-* crates move from 0.67.0 to 0.69.2; generated projections regenerated
 relations:
@@ -22,10 +22,11 @@ scope:
   path: spec/README.md
 - confidence: cited
   path: spec/ess-inputs.yaml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T10:45:03Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-10-26T10:45:04Z", actor: "human:timo", revision: 10}
+- {from: "active", to: "implemented", at: "2026-10-26T11:43:38Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

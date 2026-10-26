@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:approver-delegates-to-caller
 kind: story
-status: active
+status: implemented
 title: A run under metaharness hands each approval to its caller
 summary: 'ADR 0104 points 2-3: --approve caller asks the spawning process over stdout/stdin; standalone modes unchanged'
 relations:
@@ -24,10 +24,11 @@ scope:
   path: crates/harness-cli/tests
 - confidence: inferred
   path: website/docs/reference/cli.md
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T10:45:04Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-26T10:45:05Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-26T11:43:38Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

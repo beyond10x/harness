@@ -8,9 +8,9 @@ at `1751a95`. Integration branch: `wave/2026-10-26-llm-ess-approver`.
 
 | # | Stories | Branch | Tree id | Stage |
 |---|---|---|---|---|
-| U1 | `story:harness-builds-on-llm-0-15`, `story:ess-pin-0-69-2` | `unit/pins-llm-0-15-ess-0-69-2` | `harness-unit-pins` | built by the coordinator |
-| U2 | `story:approver-delegates-to-caller` | `unit/caller-approver` | `harness-unit-caller-approver` | implementor |
-| — | integration | `wave/2026-10-26-llm-ess-approver` | `harness-wave-2026-10-26` | open |
+| U1 | `story:harness-builds-on-llm-0-15`, `story:ess-pin-0-69-2` | `unit/pins-llm-0-15-ess-0-69-2` | `harness-unit-pins` | merged `62bd3b8`; adversary pass 1 red 3, corrected `6a26c35` |
+| U2 | `story:approver-delegates-to-caller` | `unit/caller-approver` | `harness-unit-caller-approver` | merged `3d0e896`; adversary pass 1 red 2, corrected in the unit |
+| — | integration | `wave/2026-10-26-llm-ess-approver` | `harness-wave-2026-10-26` | release `a0a2426`, gate green |
 
 Every tree is a managed tree under the worktree state root, with its own `target/`. Scratch is the
 session's scratch directory, one subdirectory per unit. All three serve
@@ -44,3 +44,22 @@ branch, closing store commit; then the release commit and tag per `AGENTS.md` §
 `harness-unit-repo-local-profiles` (`unit/repo-local-profiles`) and `harness-wave-repo-profiles`
 (`wave/2026-10-23-repo-profiles`): both at `f88cc09`, 1 ahead and 0 behind `origin/main`, not on
 `origin/main`; the unit tree holds uncommitted work (10 files). Kept.
+
+## Close
+
+| Item | Result |
+|---|---|
+| Integration commits | `021543d` open, `62bd3b8` U1, `7d4ba40` secrets sandbox under `$TMPDIR`, `50d8ad7` integration docs (its title says merge; it is not one), `3d0e896` U2, `6a26c35` U1 correction, `a0a2426` release 0.20.0 |
+| Gate | `cargo xtask gate` at `a0a2426`: green; 60 test binaries, 1129 passed, 0 failed, 6 ignored; Harness ESS 29/29, no-op audit 0/29 |
+| Reviews | `review-result:u1-pins-adversary-pass-1` (fixed), `review-result:u2-caller-approver-adversary-pass-1` (fixed) |
+| Stories | all three implemented |
+| ESS | 0.70.0 not released at close; 0.69.2 is the newest |
+
+## Cost per agent
+
+| Agent | Model | Tokens |
+|---|---|---|
+| U2 implementor (2 passes) | opus | 260,756 + 70,079 |
+| U2 adversary | opus | 178,349 |
+| U1 adversary | opus | 163,891 |
+| Coordinator | opus | not measured |

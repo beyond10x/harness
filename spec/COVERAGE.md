@@ -30,7 +30,7 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
   `crates/harness-loop/src/context.rs:124`, `environment.rs`, and
   `crates/harness-cli/src/environment.rs`. Add real refresh/narrowing scenarios and boundary views.
 - **UNMAPPED: provider protocols and transport.** Sources: `crates/harness-llm/src/lib.rs`
-  over `llm`'s `llm-responses`, `llm-messages` and `llm-http` (tag `0.15.0`).
+  over `llm`'s `llm-responses`, `llm-messages` and `llm-http` (tag `0.16.0`).
   Scripted native turns do not prove HTTP, streaming, provider item replay or cancellation of
   network I/O. Extend from the existing contract fixtures.
 - **UNMAPPED: credential lifecycle.** Sources: `crates/harness-llm/src/lib.rs` (`Source`,

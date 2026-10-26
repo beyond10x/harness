@@ -40,7 +40,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
    transport and local credential mechanics, and the `b10x-tool-*` crates — `b10x-tool-contract`,
    `b10x-tool-fs`, `b10x-tool-search`, `b10x-tool-code-editor`, `b10x-tool-process`,
    `b10x-tool-toolchain` — for the tool contracts and default implementations the catalogue adapts (atlas ADR 0097 decision 3, ADR 0095 phase T2), and
-   the `b10x-llm-*` client crates for every model call, which only this repository's own
+   the `llm-*` client crates for every model call, which only this repository's own
    `b10x-harness-llm` crate depends on directly (invariant 3).
    All are pinned by git tag or revision, never by a path into the sibling `tools` checkout. A path
    into a sibling checkout builds against whatever is checked out there, and `--locked` cannot lock
@@ -268,7 +268,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Executable specification
 
-`spec/ess-inputs.yaml` pins ESS 0.67.0. The authored specification describes the native loop and
+`spec/ess-inputs.yaml` pins ESS 0.69.2. The authored specification describes the native loop and
 its library boundary; `conformance/` records the compiled model, selected suite, required scenario
 inventory and coverage limits. This is a retrofit of shipped behavior, not permission to invent
 new runtime semantics. Preserve source citations and report every unresolved mapping.

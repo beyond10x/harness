@@ -354,6 +354,9 @@ pub fn client(
         Protocol::ChatCompletions => {
             return Err("this build speaks no chat-completions wire".to_owned());
         }
+        Protocol::BedrockConverse => {
+            return Err("this build speaks no bedrock-converse wire".to_owned());
+        }
     };
     Ok(Box::new(LlmPort {
         blocking: BlockingModel::new(model).map_err(|error| error.message)?,
@@ -1551,6 +1554,16 @@ mod tests {
             error.contains(&SecretError::UnsupportedPlatform.to_string()),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_bedrock_converse_target_is_refused_by_name() {
+        // llm 0.11.0 added the variant; this crate speaks Messages and Responses only, and an
+        // embedder that names Bedrock is told so rather than handed a client for another wire.
+        let error = client(&target(Protocol::BedrockConverse), None, &Cancel::new())
+            .err()
+            .expect("bedrock-converse is refused");
+        assert!(error.contains("bedrock-converse"), "{error}");
     }
 
     #[test]

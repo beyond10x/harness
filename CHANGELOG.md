@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the seven llm crates move from `0.8.1` to `0.15.0` (`84ded0f2`), under their new package names without the `b10x-` prefix. `b10x-harness-llm` re-exports `llm_core::Protocol` and `llm_credentials`, so an embedder now gets the 0.15.0 types: `Protocol` has the variant `BedrockConverse`, and `harness_llm::client` refuses it by name (`this build speaks no bedrock-converse wire`), as it refuses `ChatCompletions`.
+- A Messages run whose `--base-url` is OpenCode Go sends llm 0.15.0's `x-opencode-session` header, one session per client.
+- ESS 0.69.2 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `a3bc2df3`), up from 0.67.0; the generated model and suite are byte-identical.
+
 ## [0.19.0] - 2026-10-23
 
 ### Changed

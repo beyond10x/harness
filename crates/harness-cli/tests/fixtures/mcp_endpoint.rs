@@ -14,7 +14,12 @@ fn main() {
         Some("stdio") => serve_stdio(),
         Some("http") => serve_http(Endpoint::Mcp),
         Some("provider") => serve_http(Endpoint::Provider),
-        _ => panic!("expected one of: stdio, http, provider"),
+        Some("provider-fails-second") => serve_http(Endpoint::ProviderFailsSecond),
+        Some("provider-compacts-then-fails") => serve_http(Endpoint::ProviderCompactsThenFails),
+        _ => panic!(
+            "expected one of: stdio, http, provider, provider-fails-second, \
+             provider-compacts-then-fails"
+        ),
     }
 }
 
@@ -34,6 +39,11 @@ fn serve_stdio() {
 enum Endpoint {
     Mcp,
     Provider,
+    /// One `file_read` call for the first request, then an HTTP 400 for every later one.
+    ProviderFailsSecond,
+    /// Two `file_read` calls and an input count near the declared window for the first request,
+    /// then an HTTP 400 for every later one.
+    ProviderCompactsThenFails,
 }
 
 fn serve_http(endpoint: Endpoint) {
@@ -41,19 +51,26 @@ fn serve_http(endpoint: Endpoint) {
     let address = listener.local_addr().expect("controlled endpoint address");
     let suffix = match endpoint {
         Endpoint::Mcp => "/mcp",
-        Endpoint::Provider => "/v1",
+        Endpoint::Provider
+        | Endpoint::ProviderFailsSecond
+        | Endpoint::ProviderCompactsThenFails => "/v1",
     };
     println!(r#"{{"url":"http://{address}{suffix}"}}"#);
     io::stdout().flush().expect("announce controlled endpoint");
 
     let mut discovery = DiscoveryState::default();
+    let mut served = 0_usize;
     for stream in listener.incoming() {
         let mut stream = stream.expect("accept controlled request");
         let request = read_request(&mut stream);
         match endpoint {
             Endpoint::Mcp => serve_mcp_http(&mut stream, &request, &mut discovery),
             Endpoint::Provider => serve_provider(&mut stream, &request),
+            Endpoint::ProviderFailsSecond | Endpoint::ProviderCompactsThenFails => {
+                serve_failing_provider(&mut stream, endpoint, served);
+            }
         }
+        served += 1;
     }
 }
 
@@ -219,6 +236,69 @@ fn serve_provider(stream: &mut TcpStream, request: &Request) {
         call_events()
     };
     respond(stream, "200 OK", "text/event-stream", &body);
+}
+
+/// A provider that answers the first request and refuses every later one.
+///
+/// The refusal is an HTTP 400 with a JSON error body, the way a provider refuses a conversation
+/// that no longer fits its window: not retriable, so the run fails on the request it was making.
+/// The first answer asks for calls, so the run always comes back for a second request.
+fn serve_failing_provider(stream: &mut TcpStream, endpoint: Endpoint, served: usize) {
+    if served > 0 {
+        respond(
+            stream,
+            "400 Bad Request",
+            "application/json",
+            r#"{"error":{"message":"context length exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}"#,
+        );
+        return;
+    }
+    let body = match endpoint {
+        // Two results, because compaction always leaves the newest one whole and only the older
+        // one can be elided; 120,000 of a declared 128,000 is past the point it starts.
+        Endpoint::ProviderCompactsThenFails => read_calls_events(2, 120_000),
+        _ => read_calls_events(1, 42),
+    };
+    respond(stream, "200 OK", "text/event-stream", &body);
+}
+
+/// `calls` calls of the shipped `file_read` in one response, reporting `input_tokens` as the
+/// input it was charged for.
+///
+/// `file_read` because it is published on every run without further configuration, and a wire
+/// refuses a response that names a tool the request did not publish before the loop sees it.
+fn read_calls_events(calls: u32, input_tokens: u64) -> String {
+    let item = |n: u32, status: &str, arguments: &str| {
+        format!(
+            r#"{{"id":"fc_b10x_00{n}","type":"function_call","status":"{status}","name":"file_read","call_id":"call_b10x_00{n}","arguments":"{arguments}"}}"#
+        )
+    };
+    let arguments = r#"{\"path\":\"README.md\"}"#;
+    let mut events = vec![
+        r#"{"type":"response.created","response":{"id":"resp_b10x_001","object":"response","created_at":1786706400,"status":"in_progress","model":"b10x-emulated","output":[],"incomplete_details":null,"error":null,"usage":null}}"#.to_owned(),
+    ];
+    let mut output = Vec::new();
+    for (index, n) in (1..=calls).enumerate() {
+        let done = item(n, "completed", arguments);
+        events.push(format!(
+            r#"{{"type":"response.output_item.added","output_index":{index},"item":{}}}"#,
+            item(n, "in_progress", "")
+        ));
+        events.push(format!(
+            r#"{{"type":"response.function_call_arguments.delta","item_id":"fc_b10x_00{n}","output_index":{index},"delta":"{arguments}"}}"#
+        ));
+        events.push(format!(
+            r#"{{"type":"response.output_item.done","output_index":{index},"item":{done}}}"#
+        ));
+        output.push(done);
+    }
+    let output = output.join(",");
+    let total = input_tokens + 8;
+    events.push(format!(
+        r#"{{"type":"response.completed","response":{{"id":"resp_b10x_001","object":"response","created_at":1786706400,"status":"completed","model":"b10x-emulated","output":[{output}],"incomplete_details":null,"error":null,"usage":{{"input_tokens":{input_tokens},"input_tokens_details":{{"cached_tokens":0}},"output_tokens":8,"output_tokens_details":{{"reasoning_tokens":0}},"total_tokens":{total}}}}}}}"#
+    ));
+    let events: Vec<&str> = events.iter().map(String::as_str).collect();
+    sse(&events)
 }
 
 fn call_events() -> String {

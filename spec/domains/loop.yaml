@@ -20,7 +20,7 @@ types:
       - {name: max_cost_microunits, type: 'Optional<Integer>'}
   - name: harness.loop.StopKind
     kind: enum
-    variants: [completed, max-turns, max-input-tokens, max-output-tokens, max-cost, budget-unobservable, deadline, cancelled, awaiting-approval, provider-incomplete, unstructured]
+    variants: [completed, max-turns, max-input-tokens, max-output-tokens, max-cost, budget-unobservable, deadline, cancelled, awaiting-approval, provider-incomplete, unstructured, failed]
   - name: harness.loop.Stop
     kind: struct
     fields:
@@ -34,6 +34,9 @@ types:
       - {name: limit_ms, type: 'Optional<Integer>'}
       - {name: checkpoint_id, type: 'Optional<String>'}
       - {name: asked_again, type: 'Optional<Integer>'}
+      - {name: cause, type: 'Optional<String>'}
+      - {name: message, type: 'Optional<String>'}
+      - {name: after_compaction, type: 'Optional<Boolean>'}
 commands:
   - name: harness.loop.ValidateBudget
     # Calls Budget::validate; no state mutation or emitted event is claimed.

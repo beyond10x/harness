@@ -31,7 +31,7 @@ use crate::Cli;
 ///
 /// A dated directory and not a semantic version: what a consumer pins is *the shape on that day*,
 /// and a change cuts a new one beside it.
-pub const ARGV_CONTRACT_VERSION: &str = "2026-10-22.1";
+pub const ARGV_CONTRACT_VERSION: &str = "2026-10-26";
 
 /// This binary's argv surface as canonical JSON: sorted keys, two-space indent, one trailing
 /// newline.
@@ -182,11 +182,34 @@ fn flags(command: &clap::Command) -> Value {
                 "required": argument.is_required_set(),
                 "conflicts_with": conflicts(command, argument),
                 "requires": requires(command, argument),
+                "values": values(argument, takes_value),
             }))
         })
         .collect();
     rows.sort_by(|left, right| left["long"].as_str().cmp(&right["long"].as_str()));
     Value::Array(rows)
+}
+
+/// The words a flag accepts, in name order, or `null` where it takes any word or none.
+///
+/// A closed set is a command line a driver types — `--approve caller` — and until this field
+/// existed nothing in the document said which words a flag like `--approve` would take, so adding
+/// one moved no byte and removing one would have moved none either. `null` and not `[]` for a flag
+/// that takes any word: an empty list would read as *accepts nothing*, which no flag here does.
+fn values(argument: &clap::Arg, takes_value: bool) -> Value {
+    if !takes_value {
+        return Value::Null;
+    }
+    let mut names: Vec<String> = argument
+        .get_possible_values()
+        .iter()
+        .map(|value| value.get_name().to_owned())
+        .collect();
+    if names.is_empty() {
+        return Value::Null;
+    }
+    names.sort();
+    json!(names)
 }
 
 /// Every short flag this binary accepts that the pinned document neither records nor gives up on.
@@ -586,7 +609,8 @@ mod tests {
                 "2026-09-02",
                 "2026-09-18",
                 "2026-10-22",
-                "2026-10-22.1"
+                "2026-10-22.1",
+                "2026-10-26"
             ],
             "a released version may be superseded and never removed"
         );
@@ -813,9 +837,38 @@ mod tests {
                     });
                 }
             }
+            if refuses_a_value(row, now_row) {
+                moved.push(Moved {
+                    subcommand: subcommand.clone(),
+                    long: long.clone(),
+                    field: "values".to_owned(),
+                    before: row["values"].to_string(),
+                    after: now_row["values"].to_string(),
+                });
+            }
         }
         moved.sort();
         moved
+    }
+
+    /// Whether a word this flag accepted before is one it now refuses.
+    ///
+    /// `values` is not in `PINNED_FIELDS` because only one direction of it can break anything: a
+    /// value arriving — `--approve caller` — refuses no invocation that worked, and a value leaving
+    /// does. A row cut before the field existed holds no `values` key at all, and that is absence
+    /// of the field rather than a value, so it moves nothing. `null` is *any word*: going to it
+    /// refuses nothing, and coming from it to a list refuses every word not on the list.
+    fn refuses_a_value(before: &Value, after: &Value) -> bool {
+        let Some(was) = before.get("values") else {
+            return false;
+        };
+        let Some(now) = after["values"].as_array() else {
+            return false;
+        };
+        match was.as_array() {
+            None => true,
+            Some(was) => was.iter().any(|value| !now.contains(value)),
+        }
     }
 
     /// Everything that moved about a command's positional arguments, oldest first.
@@ -1276,6 +1329,108 @@ mod tests {
         assert!(
             moves_between(&before, &document(&[("run", "--model", spelled)])).is_empty(),
             "and an unchanged one is not"
+        );
+    }
+
+    /// The values a flag accepts are pinned, so a value a driver types is a value it can look up.
+    ///
+    /// `--approve caller` is how a launching process takes every approval decision (atlas ADR
+    /// 0104), and until `values` existed no field of this document could say that `--approve`
+    /// accepts it: the row was `takes_value: true`, `value_name: "MODE"` and nothing else, and a
+    /// driver could not tell `caller` from a typo without running the binary.
+    #[test]
+    fn the_values_a_flag_accepts_are_pinned_and_approve_accepts_caller() {
+        let document: Value = serde_json::from_str(&argv()).expect("valid JSON");
+        for command in ["run", "chat"] {
+            let row = document["arguments"][command]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .find(|row| row["long"] == "--approve")
+                .unwrap_or_else(|| panic!("`{command}` has `--approve`"))
+                .clone();
+            assert_eq!(
+                row["values"],
+                json!(["all", "auto", "caller", "deny", "prompt"]),
+                "`{command}`: {row}"
+            );
+        }
+        for (command, rows) in document["arguments"].as_object().expect("an object") {
+            for row in rows.as_array().expect("rows") {
+                assert!(
+                    row.as_object().expect("a row").contains_key("values"),
+                    "`{command}` `{}` carries `values`, null or a list",
+                    row["long"]
+                );
+                if row["takes_value"] == false {
+                    assert!(
+                        row["values"].is_null(),
+                        "a bare flag accepts no value: `{command}` {row}"
+                    );
+                }
+            }
+        }
+        let free = document["arguments"]["run"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["long"] == "--model")
+            .expect("`run --model`");
+        assert!(
+            free["values"].is_null(),
+            "a flag taking any word records null, not an empty list: {free}"
+        );
+    }
+
+    /// A value a flag stops accepting is a move; a value it starts accepting is an arrival.
+    ///
+    /// The same rule the rest of the diff keeps: an invocation that worked can only break by
+    /// something going away. And a document cut before `values` existed holds none, so the field
+    /// arriving is not a move either — every older pair would otherwise owe a row per enum flag.
+    #[test]
+    fn a_value_a_flag_stops_accepting_is_a_move_and_an_arriving_one_is_not() {
+        let mut modes = flag();
+        modes["values"] = json!(["all", "auto", "deny", "prompt"]);
+        let before = document(&[("run", "--approve", modes.clone())]);
+
+        let mut widened = modes.clone();
+        widened["values"] = json!(["all", "auto", "caller", "deny", "prompt"]);
+        assert!(
+            moves_between(&before, &document(&[("run", "--approve", widened)])).is_empty(),
+            "`caller` arriving breaks no invocation that worked"
+        );
+
+        let unrecorded = document(&[("run", "--approve", flag())]);
+        assert!(
+            moves_between(&unrecorded, &before).is_empty(),
+            "the field arriving is not a move"
+        );
+
+        let mut narrowed = modes.clone();
+        narrowed["values"] = json!(["all", "auto", "deny"]);
+        assert_eq!(
+            moves_between(&before, &document(&[("run", "--approve", narrowed)])),
+            vec![Moved {
+                subcommand: "run".to_owned(),
+                long: "--approve".to_owned(),
+                field: "values".to_owned(),
+                before: r#"["all","auto","deny","prompt"]"#.to_owned(),
+                after: r#"["all","auto","deny"]"#.to_owned(),
+            }],
+            "`--approve prompt` stops parsing"
+        );
+
+        let mut open = flag();
+        open["values"] = Value::Null;
+        let free = document(&[("run", "--approve", open)]);
+        assert!(
+            moves_between(&before, &free).is_empty(),
+            "a flag that comes to take any word refuses nothing it took"
+        );
+        assert_eq!(
+            moves_between(&free, &before).len(),
+            1,
+            "a flag that took any word and comes to take a list refuses every other word"
         );
     }
 

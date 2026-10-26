@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 const FIRST_FULL: &str = "2026-08-30.2";
+/// The first cut whose rows carry `values`, the words a flag accepts. Earlier cuts hold none.
+const FIRST_VALUES: &str = "2026-10-26";
 const ARGUMENT_KEYS: &[&str] = &[
     "conflicts_with",
     "default",
@@ -18,6 +20,7 @@ const ARGUMENT_KEYS: &[&str] = &[
     "short",
     "takes_value",
     "value_name",
+    "values",
 ];
 const POSITIONAL_KEYS: &[&str] = &["multiple", "name", "required"];
 
@@ -69,7 +72,7 @@ pub fn self_test() -> Result<(), String> {
         "arguments":{"run":[{
             "conflicts_with":[], "default":Value::Null, "long":"--profile",
             "required":false, "requires":[], "short":"-p", "takes_value":true,
-            "value_name":"PROFILE"
+            "value_name":"PROFILE", "values":["fast","slow"]
         }]},
         "positionals":{"run":[{"multiple":false,"name":"PROMPT","required":false}]}
     });
@@ -96,17 +99,54 @@ pub fn self_test() -> Result<(), String> {
         .expect("document")
         .remove("positionals");
     cases.push(("missing positionals", no_positionals, true));
+    let mut missing_values = clean.clone();
+    missing_values["arguments"]["run"][0]
+        .as_object_mut()
+        .expect("row")
+        .remove("values");
+    cases.push(("missing values", missing_values, true));
+    let mut any_word = clean.clone();
+    any_word["arguments"]["run"][0]["values"] = Value::Null;
+    cases.push(("any word", any_word, false));
+    let mut unsorted_values = clean.clone();
+    unsorted_values["arguments"]["run"][0]["values"] = json!(["slow", "fast"]);
+    cases.push(("unsorted values", unsorted_values, true));
+    let mut no_values = clean.clone();
+    no_values["arguments"]["run"][0]["values"] = json!([]);
+    cases.push(("empty values", no_values, true));
+    let mut repeated_values = clean.clone();
+    repeated_values["arguments"]["run"][0]["values"] = json!(["fast", "fast"]);
+    cases.push(("repeated values", repeated_values, true));
+    let mut bare_values = clean.clone();
+    bare_values["arguments"]["run"][0]["takes_value"] = json!(false);
+    bare_values["arguments"]["run"][0]["value_name"] = Value::Null;
+    cases.push(("bare flag with values", bare_values, true));
+    let mut word_values = clean.clone();
+    word_values["arguments"]["run"][0]["values"] = json!("fast");
+    cases.push(("values not a list", word_values, true));
 
+    let total = cases.len();
     let mut failed = Vec::new();
     for (name, value, should_fail) in cases {
         let mut failures = Vec::new();
-        validate_argv("self-test", &value, FIRST_FULL, &mut failures);
+        validate_argv("self-test", &value, FIRST_VALUES, &mut failures);
         if failures.is_empty() == should_fail {
             failed.push(format!("{name}: {failures:?}"));
         }
     }
+    // A cut before `values` existed is not required to carry it.
+    let mut before_values = clean;
+    before_values["arguments"]["run"][0]
+        .as_object_mut()
+        .expect("row")
+        .remove("values");
+    let mut failures = Vec::new();
+    validate_argv("self-test", &before_values, FIRST_FULL, &mut failures);
+    if !failures.is_empty() {
+        failed.push(format!("a cut before values: {failures:?}"));
+    }
     if failed.is_empty() {
-        println!("command line: self-test green, 6 case(s)");
+        println!("command line: self-test green, {} case(s)", total + 1);
         Ok(())
     } else {
         Err(format!(
@@ -246,6 +286,7 @@ fn validate_argv(label: &str, argv: &Value, version: &str, failures: &mut Vec<St
         }
     }
     let full = cut_order(version) >= cut_order(FIRST_FULL);
+    let valued = cut_order(version) >= cut_order(FIRST_VALUES);
     for (command, rows) in arguments {
         let Some(rows) = rows.as_array() else {
             failures.push(format!("{label}: `{command}` arguments are not an array"));
@@ -264,11 +305,19 @@ fn validate_argv(label: &str, argv: &Value, version: &str, failures: &mut Vec<St
                 continue;
             };
             for key in ARGUMENT_KEYS {
-                if (*key != "short" || full) && !object.contains_key(*key) {
+                let required = match *key {
+                    "short" => full,
+                    "values" => valued,
+                    _ => true,
+                };
+                if required && !object.contains_key(*key) {
                     failures.push(format!("{label}: `{command}` row missing `{key}`"));
                 }
             }
             let long = row["long"].as_str().unwrap_or_default();
+            if valued {
+                check_values(label, command, long, row, failures);
+            }
             if !long.starts_with("--") {
                 failures.push(format!("{label}: `{command}` `{long}` is not a long flag"));
             }
@@ -346,6 +395,36 @@ fn validate_argv(label: &str, argv: &Value, version: &str, failures: &mut Vec<St
                 }
             }
         }
+    }
+}
+
+/// `values` is `null` or a sorted list of distinct, non-empty words, and a bare flag holds none.
+///
+/// An empty list is refused rather than read as *any word*: `null` says that, and a list that
+/// says *no word at all* describes a flag nobody can pass with a value.
+fn check_values(label: &str, command: &str, long: &str, row: &Value, failures: &mut Vec<String>) {
+    match &row["values"] {
+        Value::Null => {}
+        Value::Array(list) => {
+            let words: Vec<&str> = list.iter().filter_map(Value::as_str).collect();
+            let distinct: BTreeSet<&str> = words.iter().copied().collect();
+            if words.is_empty()
+                || words.len() != list.len()
+                || distinct.len() != words.len()
+                || words.iter().any(|word| word.is_empty())
+                || !is_sorted(words.iter().copied())
+            {
+                failures.push(format!("{label}: `{command}` `{long}` `values` is invalid"));
+            }
+            if row["takes_value"] != Value::Bool(true) {
+                failures.push(format!(
+                    "{label}: `{command}` `{long}` bare flag lists values"
+                ));
+            }
+        }
+        _ => failures.push(format!(
+            "{label}: `{command}` `{long}` `values` is neither null nor a list"
+        )),
     }
 }
 

@@ -8,6 +8,7 @@
 
 pub mod agents;
 pub mod approve;
+pub mod caller;
 pub mod contract;
 pub mod environment;
 pub mod hooks;
@@ -319,6 +320,13 @@ enum Approve {
     Deny,
     /// Approve everything above the ceiling. The declared unattended run; `--yes` spells it too.
     All,
+    /// Hand each decision to the process that spawned this run (atlas ADR 0104).
+    ///
+    /// The `approval-required` event on stdout is the question; one line on stdin answers it:
+    /// `{"call_id":"<id>","decision":"allow"}` or
+    /// `{"call_id":"<id>","decision":"deny","reason":"<why>"}`. Anything else, and a closed stdin,
+    /// refuses the call. Needs `--json`; refused on `chat` and beside `--yes`.
+    Caller,
 }
 
 /// Whether a declared scope is stated in the instruction as well as bound into the tools.
@@ -922,15 +930,18 @@ struct RunOptions {
     /// What asks is the loop's answer, taken per call from the catalogue entry's declared risk
     /// against a ceiling that defaults to low: every write and every `run` asks. Kept as its own
     /// spelling because it is what every existing unattended invocation says, and it wins over
-    /// `--approve` when both are given.
+    /// `--approve` when both are given — except `--approve caller`, beside which the run is
+    /// refused: one of the two would otherwise be silently ignored.
     #[arg(long)]
     yes: bool,
-    /// Who decides a call above the ceiling: `auto`, `prompt`, `deny` or `all`.
+    /// Who decides a call above the ceiling: `auto`, `prompt`, `deny`, `all` or `caller`.
     ///
     /// `auto` — the default — asks a person over `/dev/tty` when there is a terminal to ask on and
     /// stdin and stderr are one, and otherwise denies, saying so in one line before the run rather
     /// than leaving it to be discovered from a refusal. `prompt` asks or refuses the run by name.
-    /// `deny` is the library default, `DenyAll`. `all` is the declared unattended run.
+    /// `deny` is the library default, `DenyAll`. `all` is the declared unattended run. `caller`
+    /// hands each decision to the process that spawned this run (atlas ADR 0104): the
+    /// `approval-required` event on stdout asks, and one JSON line on stdin answers.
     ///
     /// This chooses the **command line's** approver. The library's default is `DenyAll` whatever
     /// this says, and a harness that approved by default would turn a review gate into decoration
@@ -2142,7 +2153,7 @@ fn prepare(
         &options.mcp_profiles,
         options.mcp_registry.as_deref(),
     )?;
-    let approvals = approver(options)?;
+    let approvals = approver(options, &cancel)?;
     let session_dir = session_dir(options)?;
     let session = open_session(options, &root, session_dir.as_deref())?;
     // The schema arrives already read — from a file under `--output-schema` — because the
@@ -2444,13 +2455,14 @@ fn delegation(options: &RunOptions) -> Option<harness_loop::Delegation> {
 /// **The library's default is untouched.** `harness_loop`'s own default approver is `DenyAll` and
 /// stays so (`AGENTS.md` invariant 12); what this picks is the command line's, for a person who is
 /// usually sitting in front of it. `--yes` wins over `--approve` because it is the older spelling
-/// of `all` and every unattended invocation already written says it.
+/// of `all` and every unattended invocation already written says it — except over `caller`, which
+/// [`caller_admitted`] refused beside `--yes` before this is reached.
 ///
 /// # Errors
 ///
 /// Only under `--approve prompt`: a person was asked for by name and there is no terminal to ask
 /// on, so the run refuses rather than quietly denying every call it was meant to put to them.
-fn approver(options: &RunOptions) -> Result<Box<dyn ApprovalPort>, String> {
+fn approver(options: &RunOptions, cancel: &LoopCancel) -> Result<Box<dyn ApprovalPort>, String> {
     let mode = if options.yes {
         Approve::All
     } else {
@@ -2459,6 +2471,9 @@ fn approver(options: &RunOptions) -> Result<Box<dyn ApprovalPort>, String> {
     match mode {
         Approve::All => Ok(Box::new(ApproveAll)),
         Approve::Deny => Ok(Box::new(DenyAll)),
+        // Admitted by `caller_admitted` before anything was resolved: `--json` is on, `--yes` is
+        // off and this is not `chat`, so stdin carries decisions and nothing else.
+        Approve::Caller => Ok(Box::new(caller::Caller::stdio(cancel.clone()))),
         Approve::Prompt => match approve::Terminal::open() {
             Ok(terminal) => Ok(Box::new(terminal)),
             Err(reason) => Err(format!(
@@ -2481,6 +2496,50 @@ fn approver(options: &RunOptions) -> Result<Box<dyn ApprovalPort>, String> {
             Ok(Box::new(DenyAll))
         }
     }
+}
+
+/// Refuses a `--approve caller` this invocation could not honour, before anything is resolved.
+///
+/// Each refusal is a run that never started (exit `1`, and the `refused` line under `--json`), and
+/// each closes a way the caller's decision could be lost without anybody being told:
+///
+/// - **without `--json`** there is no `approval-required` event on stdout, so the caller is never
+///   asked and every call would be refused by a decider nobody could see;
+/// - **beside `--yes`**, `--yes` wins over `--approve` everywhere else, so the run would approve
+///   every call and the process that launched it to decide would decide nothing;
+/// - **on `chat`**, stdin carries the questions, and a question read as a decision — or a decision
+///   read as a question — is the one confusion this approver must never have.
+///
+/// Called first, before the credential is renewed, because a refused run must leave nothing behind.
+fn caller_admitted(options: &RunOptions, chat: bool) -> Result<(), String> {
+    if options.approve != Approve::Caller {
+        return Ok(());
+    }
+    if chat {
+        return Err(
+            "`--approve caller` reads each decision from stdin, and `chat` reads its \
+                    questions from stdin: the two cannot share it. Use `run --json --approve \
+                    caller`, or another `--approve` mode on `chat`."
+                .to_owned(),
+        );
+    }
+    if options.yes {
+        return Err(
+            "`--yes` approves every call and `--approve caller` hands every call to the \
+                    process that launched this run; given together one of them would be silently \
+                    ignored. Pass one of them."
+                .to_owned(),
+        );
+    }
+    if !options.json {
+        return Err(
+            "`--approve caller` asks the process that launched this run through the \
+                    `--json` record — the `approval-required` event is the question — and \
+                    without `--json` there is no record to ask on. Add `--json`."
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 /// Where this run's session is written, or [`None`] when it must leave nothing behind.
@@ -2637,6 +2696,7 @@ fn unix_now() -> u64 {
 
 fn run_command(command: &RunCommand) -> Result<LoopStop, RunFailure> {
     let options = &command.options;
+    caller_admitted(options, false).map_err(RunFailure::Refused)?;
     let answer = schema(command.output_schema.as_deref()).map_err(RunFailure::Refused)?;
     let mut prepared = prepare(options, answer).map_err(RunFailure::Refused)?;
     install_interrupt(&prepared.cancel);
@@ -2695,6 +2755,7 @@ fn run_command(command: &RunCommand) -> Result<LoopStop, RunFailure> {
 fn chat_command(options: &RunOptions) -> Result<LoopStop, RunFailure> {
     use std::io::{BufRead as _, Write as _};
 
+    caller_admitted(options, true).map_err(RunFailure::Refused)?;
     // `chat` takes no `--output-schema`: a conversation has no single end for one to shape.
     let mut prepared = prepare(options, None).map_err(RunFailure::Refused)?;
     install_interrupt(&prepared.cancel);

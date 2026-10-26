@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-26
+
 ### Added
 
 - `--approve caller` on `run`: the process that launched the run decides each approval (atlas ADR 0104, points 2-3). The `approval-required` event on the `--json` record is the request; one stdin line answers it, `{"call_id":"<id>","decision":"allow"}` or `{"call_id":"<id>","decision":"deny","reason":"<non-empty>"}`. Another call's id, an unparseable line, an unknown decision (`replace` and `abstain` included), a `deny` without a reason, a line over 64 KiB or a call id already decided in this run denies the call by name; a closed stdin denies this and every later call without reading, said once on stderr, and an interrupt ends a run waiting on its caller. Refused before the run without `--json`, on `chat`, and beside `--yes`. A model whose ids repeat within a run has each repeat refused under this mode.
@@ -14,9 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - The CLI contract is cut as `contracts/cli/b10x-harness/2026-10-26`. Its rows carry `values`, the words a flag accepts (`--approve` gains `caller`); every other field is byte-identical to `2026-10-22.1`, and released versions are unchanged.
-
 - **Breaking:** the seven llm crates move from `0.8.1` to `0.15.0` (`84ded0f2`), under their new package names without the `b10x-` prefix. `b10x-harness-llm` re-exports `llm_core::Protocol` and `llm_credentials`, so an embedder now gets the 0.15.0 types: `Protocol` has the variant `BedrockConverse`, and `harness_llm::client` refuses it by name (`this build speaks no bedrock-converse wire`), as it refuses `ChatCompletions`.
-- A Messages run whose `--base-url` is OpenCode Go sends llm 0.15.0's `x-opencode-session` header, one session per client.
+- A Messages run whose `--base-url` is OpenCode Go sends llm 0.15.0's `x-opencode-session` header, one session per client; `app-server` builds a client per turn, so each of its turns opens a new session.
 - ESS 0.69.2 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `a3bc2df3`), up from 0.67.0; the generated model and suite are byte-identical.
 
 ## [0.19.0] - 2026-10-23

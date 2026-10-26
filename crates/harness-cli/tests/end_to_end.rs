@@ -1660,6 +1660,271 @@ fn asking_for_a_person_when_there_is_no_terminal_refuses_the_run_by_name() {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// `--approve caller`: the process that launched the run decides (atlas ADR 0104).
+// ---------------------------------------------------------------------------------------------
+
+/// The arguments every `--approve caller` run below shares, before the per-test extras.
+fn caller_arguments<'a>(fixture: &'a Fixture, workspace: &'a Path) -> Vec<&'a str> {
+    vec![
+        "run",
+        "--base-url",
+        &fixture.base_url,
+        "--model",
+        "b10x-emulated",
+        "--api-key-env",
+        "B10X_HARNESS_TEST_KEY",
+        "--no-session",
+        "--input",
+        "write the note",
+        "--substrate-embedded",
+        "--workspace",
+        workspace.to_str().expect("a utf-8 workspace path"),
+    ]
+}
+
+/// One run whose stdin is exactly `decisions`, closed after it.
+fn run_deciding(arguments: &[&str], decisions: &[u8]) -> Output {
+    let mut child = Command::new(BINARY)
+        .args(arguments)
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    stdin.write_all(decisions).expect("write the decisions");
+    drop(stdin);
+    let output = child.wait_with_output().expect("the run ends");
+    Output {
+        status: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+/// The text of the one tool result the model was sent on its second turn.
+fn replayed_result(record: &Path) -> String {
+    let second = recorded_turn(record, 2);
+    let result = second["input"]
+        .as_array()
+        .expect("input")
+        .iter()
+        .find(|entry| entry["type"] == "function_call_output")
+        .unwrap_or_else(|| panic!("the call's result is replayed: {second}"))
+        .clone();
+    let envelope: Value = serde_json::from_str(
+        result["output"]
+            .as_str()
+            .expect("llm's envelope is a string"),
+    )
+    .expect("llm's envelope is JSON");
+    assert_eq!(envelope["ok"], false, "a refused call fails: {envelope}");
+    envelope["output"]
+        .as_str()
+        .expect("the refusal as text")
+        .to_owned()
+}
+
+/// A run under `--approve caller` whose one call was refused, and what the model was told.
+fn refused_by_the_caller(workspace_name: &str, decisions: &[u8]) -> (Output, String) {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let record = dir.path().join("record.jsonl");
+    let fixture = recording("fake_responses.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace(workspace_name);
+    let mut arguments = caller_arguments(&fixture, &workspace);
+    arguments.extend(["--json", "--approve", "caller"]);
+    let output = run_deciding(&arguments, decisions);
+    assert_eq!(output.status, Some(0), "stderr: {}", output.stderr);
+    assert!(
+        !workspace.join("note.md").exists(),
+        "a refused write does not happen"
+    );
+    let resolved: Vec<Value> = events(&output)
+        .into_iter()
+        .filter(|event| event["kind"] == "approval-resolved")
+        .collect();
+    assert_eq!(resolved.len(), 1, "{}", output.stdout);
+    assert_eq!(resolved[0]["approved"], false, "{}", output.stdout);
+    let told = replayed_result(&record);
+    (output, told)
+}
+
+#[test]
+fn under_approve_caller_the_request_is_flushed_before_the_run_blocks_and_an_allow_lets_the_write_happen()
+ {
+    // The caller reads `approval-required` off stdout *while the run waits* and only then answers.
+    // A request held in a buffer until the run ended would deadlock this test rather than pass it.
+    let fixture = Fixture::start("flat-write");
+    let (_root, workspace) = adoptable_workspace("ws_caller_allow");
+    let mut arguments = caller_arguments(&fixture, &workspace);
+    arguments.extend(["--json", "--approve", "caller"]);
+    let mut child = Command::new(BINARY)
+        .args(&arguments)
+        .env("B10X_HARNESS_TEST_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
+    let mut seen: Vec<Value> = Vec::new();
+    let request = loop {
+        let mut line = String::new();
+        let read = stdout.read_line(&mut line).expect("read the record");
+        assert!(read > 0, "the record ended before asking: {seen:?}");
+        let event: Value = serde_json::from_str(&line).expect("a JSON event");
+        if event["kind"] == "approval-required" {
+            break event;
+        }
+        seen.push(event);
+    };
+    assert_eq!(request["name"], "file_write", "{request}");
+    let call_id = request["call_id"].as_str().expect("a call id").to_owned();
+    let requested = seen
+        .iter()
+        .find(|event| event["kind"] == "tool-requested" && event["call_id"] == call_id.as_str())
+        .unwrap_or_else(|| panic!("the arguments were announced first: {seen:?}"));
+    assert_eq!(requested["arguments"]["path"], "note.md", "{requested}");
+    assert!(
+        !workspace.join("note.md").exists(),
+        "nothing happens before the decision"
+    );
+
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    writeln!(
+        stdin,
+        "{}",
+        serde_json::json!({"call_id": call_id, "decision": "allow"})
+    )
+    .expect("answer");
+    drop(stdin);
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut stdout, &mut rest).expect("the rest of the record");
+    let status = child.wait().expect("the run ends");
+
+    assert_eq!(status.code(), Some(0), "record: {rest}");
+    assert!(
+        rest.contains(r#""kind":"approval-resolved""#) && rest.contains(r#""approved":true"#),
+        "{rest}"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("note.md")).expect("the file was written"),
+        "written by the harness\n"
+    );
+}
+
+#[test]
+fn under_approve_caller_a_deny_refuses_the_write_and_the_model_reads_the_callers_reason() {
+    let (_, told) = refused_by_the_caller(
+        "ws_caller_deny",
+        b"{\"call_id\":\"call_b10x_001\",\"decision\":\"deny\",\"reason\":\"notes go in the wiki\"}\n",
+    );
+    assert!(told.contains("notes go in the wiki"), "{told}");
+    assert!(told.contains("retrying cannot approve it"), "{told}");
+}
+
+#[test]
+fn under_approve_caller_an_answer_naming_another_call_refuses_this_one() {
+    let (_, told) = refused_by_the_caller(
+        "ws_caller_mismatch",
+        b"{\"call_id\":\"call_b10x_999\",\"decision\":\"allow\"}\n",
+    );
+    assert!(told.contains("another call"), "{told}");
+}
+
+#[test]
+fn under_approve_caller_a_malformed_line_refuses_the_call() {
+    let (_, told) = refused_by_the_caller("ws_caller_malformed", b"allow\n");
+    assert!(told.contains("not a decision"), "{told}");
+}
+
+#[test]
+fn under_approve_caller_a_closed_stdin_refuses_the_call_and_says_so_once() {
+    let (output, told) = refused_by_the_caller("ws_caller_closed", b"");
+    assert!(told.contains("stdin has closed"), "{told}");
+    assert_eq!(
+        output.stderr.matches("refused without reading").count(),
+        1,
+        "{}",
+        output.stderr
+    );
+}
+
+/// A run the command line refuses before any turn: exit 1, nothing sent, the refusal named.
+fn refused_before_any_turn(arguments: &[&str], naming: &[&str]) -> Output {
+    let output = run_deciding(arguments, b"");
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    for name in naming {
+        assert!(output.stderr.contains(name), "{name}: {}", output.stderr);
+    }
+    output
+}
+
+#[test]
+fn approve_caller_without_json_is_refused_before_any_turn() {
+    let record_dir = tempfile::tempdir().expect("a temporary directory");
+    let record = record_dir.path().join("record.jsonl");
+    let fixture = recording("fake_responses.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace("ws_caller_no_json");
+    let mut arguments = caller_arguments(&fixture, &workspace);
+    arguments.extend(["--approve", "caller"]);
+    refused_before_any_turn(&arguments, &["--approve caller", "--json"]);
+    assert!(!record.exists(), "no request reached the endpoint");
+}
+
+#[test]
+fn approve_caller_beside_yes_is_refused_rather_than_one_of_them_ignored() {
+    let record_dir = tempfile::tempdir().expect("a temporary directory");
+    let record = record_dir.path().join("record.jsonl");
+    let fixture = recording("fake_responses.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace("ws_caller_yes");
+    let mut arguments = caller_arguments(&fixture, &workspace);
+    arguments.extend(["--json", "--approve", "caller", "--yes"]);
+    let output = refused_before_any_turn(&arguments, &["--yes", "--approve caller"]);
+    assert!(
+        output.stdout.contains(r#""kind":"refused""#),
+        "under --json the record says the run never started: {}",
+        output.stdout
+    );
+    assert!(!record.exists(), "no request reached the endpoint");
+    assert!(!workspace.join("note.md").exists());
+}
+
+#[test]
+fn approve_caller_on_chat_is_refused_before_any_turn() {
+    let record_dir = tempfile::tempdir().expect("a temporary directory");
+    let record = record_dir.path().join("record.jsonl");
+    let fixture = recording("fake_responses.py", "flat-write", &record);
+    let (_root, workspace) = adoptable_workspace("ws_caller_chat");
+    let output = refused_before_any_turn(
+        &[
+            "chat",
+            "--base-url",
+            &fixture.base_url,
+            "--model",
+            "b10x-emulated",
+            "--api-key-env",
+            "B10X_HARNESS_TEST_KEY",
+            "--no-session",
+            "--substrate-embedded",
+            "--workspace",
+            workspace.to_str().expect("utf-8"),
+            "--json",
+            "--approve",
+            "caller",
+        ],
+        &["--approve caller", "chat"],
+    );
+    assert!(
+        output.stdout.contains(r#""kind":"refused""#),
+        "{}",
+        output.stdout
+    );
+    assert!(!record.exists(), "no request reached the endpoint");
+}
+
 #[test]
 fn raising_the_ceiling_lets_a_write_through_on_the_second_wire_too() {
     // The ceiling is the loop's, and the loop cannot tell which wire it got. One flag different

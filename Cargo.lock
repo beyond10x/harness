@@ -3075,8 +3075,8 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "llm-blocking"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "llm-core",
  "tokio",
@@ -3084,8 +3084,8 @@ dependencies = [
 
 [[package]]
 name = "llm-core"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "serde",
  "serde_json",
@@ -3095,8 +3095,8 @@ dependencies = [
 
 [[package]]
 name = "llm-credentials"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -3119,8 +3119,8 @@ dependencies = [
 
 [[package]]
 name = "llm-http"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3134,8 +3134,8 @@ dependencies = [
 
 [[package]]
 name = "llm-messages"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "http",
  "llm-core",
@@ -3149,8 +3149,8 @@ dependencies = [
 
 [[package]]
 name = "llm-providers"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "http",
  "llm-core",
@@ -3166,8 +3166,8 @@ dependencies = [
 
 [[package]]
 name = "llm-responses"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.15.0#84ded0f20ec99b01f6742d73c4e8eaf9c89ce63d"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
 dependencies = [
  "llm-core",
  "llm-credentials",

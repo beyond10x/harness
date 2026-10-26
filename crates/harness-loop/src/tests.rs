@@ -8028,3 +8028,210 @@ fn an_answer_valid_against_its_closed_schema_is_accepted_whatever_items_says_of_
     assert!(!failed, "a valid answer was refused: {output}");
     assert_eq!(outcome.structured, Some(answer));
 }
+
+// --- adversary: story:failed-run-ends-with-a-finished-line ---------------------------------------
+
+/// Acceptance 2: `after_compaction` is true exactly when a `conversation-compacted` warning was
+/// emitted in the failing request's turn before it, whether or not the summary changed the
+/// conversation. Here the summary turn fails on the wire with nothing elided, so the refused
+/// request carries the conversation unchanged — and it is still the request after a compaction:
+/// compaction ran and could not help, which is what a reader of the line needs to know.
+#[test]
+fn a_failed_request_after_a_compaction_that_changed_nothing_is_still_after_compaction() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(says_and_asks(
+                &long_argument(),
+                &[("call-1", "a", json!({}))],
+            )),
+            Err(WireError::protocol("the summary went wrong")),
+            Err(context_refused()),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(1_000);
+    let (outcome, sink) = harness.run();
+
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    assert_eq!(
+        compacted(&sink),
+        vec![(0, 0, true)],
+        "nothing elided and nothing folded"
+    );
+    // The refused request carried the conversation unchanged: every item the turn before it had,
+    // no elided result, no summary.
+    let refused = &harness.model.seen[2].items;
+    assert_eq!(elided(refused), 0, "{refused:?}");
+    assert!(
+        !refused.iter().any(
+            |item| matches!(item, Item::UserText { text } if text.starts_with(SUMMARY_MARKER))
+        ),
+        "no summary replaced anything"
+    );
+    assert!(
+        refused
+            .iter()
+            .any(|item| matches!(item, Item::AssistantText { text } if *text == long_argument())),
+        "the long text is still whole"
+    );
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert!(
+        sink.warnings()
+            .any(|(code, _)| code == "conversation-compacted"),
+        "the compaction was reported before the refused request"
+    );
+    assert_eq!(
+        finish["stop"]["after_compaction"], true,
+        "a compaction was reported before the refused request, though it changed nothing: {finish}"
+    );
+}
+
+/// The byte rule (no declared window) is a compaction too, and it reaches `after_compaction`
+/// through `compact`'s new return value. No test of the unit runs a failure behind it: every
+/// `after_compaction` case is `.windowed(..)`, so the no-window branch of `compact_run` could
+/// report `Unchanged` unconditionally and the suite would stay green.
+#[test]
+fn adversary_a_request_refused_after_the_byte_rule_compacted_is_named_as_after_a_compaction() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Err(context_refused())]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    );
+    let mut items = fat_conversation(10);
+    let (outcome, _, sink) = harness.run_in(&mut items);
+
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    let reported = compacted(&sink);
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert!(
+        reported[0].0 > 0 && !reported[0].2,
+        "the byte rule elided: {reported:?}"
+    );
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert_eq!(finish["stop"]["after_compaction"], true, "{finish}");
+    assert_eq!(finish["turns"], 1, "{finish}");
+}
+
+/// The other half of the byte rule: a conversation past the bound with nothing elidable is not
+/// compacted (no `conversation-compacted`), so the request that fails is not after one. Catches
+/// `compact` answering `true` from its `elided.count == 0` exit.
+#[test]
+fn adversary_a_request_refused_over_the_byte_bound_with_nothing_elidable_is_not_after_a_compaction()
+{
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Err(context_refused())]),
+        ScriptedTools::new(Vec::new()),
+    );
+    let mut items = vec![Item::user("x".repeat(MAX_CONVERSATION_BYTES + 1))];
+    let (outcome, _, sink) = harness.run_in(&mut items);
+
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    assert!(compacted(&sink).is_empty(), "{:?}", compacted(&sink));
+    assert!(
+        !sink
+            .warnings()
+            .any(|(code, _)| code == "conversation-compacted"),
+        "nothing was compacted"
+    );
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+}
+
+/// `resume_approval` refuses before anything runs (here: the run configuration changed). That is a
+/// `LoopError` exit of a run that started and suspended, and the unit claims every such exit ends
+/// with one `finished`. No test of the unit reads the sink of a refused resumption, so returning
+/// `admitted?` ahead of `finished` would leave the suite green.
+#[test]
+fn adversary_a_resumption_refused_before_it_runs_still_ends_with_one_failed_finish() {
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut first_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval("approval-adversary");
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut VecLoopSink::new())
+    .expect("suspends");
+
+    let mut resumed_model = ScriptedModel::new(vec![Ok(answer("must not be reached"))]);
+    let mut resumed_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut approvals = DenyAll;
+    let mut sink = VecLoopSink::new();
+    let error = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut approvals,
+        LoopConfig::new("different-model", "be useful"),
+    )
+    .resume_approval(
+        suspended.checkpoint.expect("checkpoint"),
+        ApprovalDecision::Approved,
+        &mut sink,
+    )
+    .expect_err("a checkpoint cannot be rebound to another run configuration");
+
+    assert!(matches!(error, LoopError::Config(_)), "{error:?}");
+    let [LoopEvent::Finished { stop, turns }] = sink.events() else {
+        panic!(
+            "one `finished` and nothing else for a resumption refused before it ran: {:?}",
+            sink.events()
+        );
+    };
+    assert_eq!(*turns, 1, "the turn the suspended run had taken");
+    assert!(
+        matches!(stop, LoopStop::Failed { cause, message, after_compaction: false }
+            if cause == "config" && message.contains("configuration changed")),
+        "{stop:?}"
+    );
+}
+
+/// `message` is "the error's text on one line". `str::lines` splits on `\n` and `\r\n` only, so a
+/// bare carriage return — a line break to a terminal and to Unicode's line-breaking rules — survives
+/// `one_line` inside the message. The text comes from an embedder's environment provider here, the
+/// one `LoopError` source whose words are not the loop's own.
+#[test]
+fn adversary_a_failure_whose_words_break_on_a_bare_carriage_return_is_still_one_line() {
+    let error = LoopError::Environment(EnvironmentError::Unavailable(
+        "the context service answered\rretry later".to_owned(),
+    ));
+    let LoopStop::Failed { message, .. } = LoopStop::failed(&error, false) else {
+        panic!("a failure is a failed stop");
+    };
+    assert!(
+        !message.contains('\r'),
+        "one line, and a bare carriage return ends one: {message:?}"
+    );
+    assert!(message.contains("retry later"), "never cut: {message:?}");
+}
+
+/// The class of the bare carriage return: every character Unicode makes a mandatory line break
+/// (UAX #14 BK, CR, LF, NL) ends a line, so none of them survives into `message`, and the words on
+/// either side of each are kept.
+#[test]
+fn a_failure_whose_words_break_on_any_unicode_line_terminator_is_still_one_line() {
+    for terminator in [
+        '\n', '\r', '\u{0B}', '\u{0C}', '\u{85}', '\u{2028}', '\u{2029}',
+    ] {
+        let error = LoopError::Environment(EnvironmentError::Unavailable(format!(
+            "the context service answered{terminator}retry later"
+        )));
+        let LoopStop::Failed { message, .. } = LoopStop::failed(&error, false) else {
+            panic!("a failure is a failed stop");
+        };
+        assert!(
+            !message.contains(terminator),
+            "one line, and {terminator:?} ends one: {message:?}"
+        );
+        assert!(
+            message.contains("answered retry later"),
+            "never cut, joined by a space: {terminator:?} {message:?}"
+        );
+    }
+}

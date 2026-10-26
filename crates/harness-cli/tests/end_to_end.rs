@@ -3697,3 +3697,44 @@ fn a_denied_call_reaches_the_messages_wire_as_a_failed_result_carrying_the_refus
         "the refusal, in the loop's words: {text}"
     );
 }
+
+// --- adversary: story:failed-run-ends-with-a-finished-line ---------------------------------------
+
+#[test]
+fn adversary_a_failed_run_that_files_a_session_ends_its_events_with_finished_then_the_session_line()
+{
+    // Acceptance 3: under `--json` the binary's last event line is the `finished` line; with a
+    // session written (the default) only the `session` line follows it, because `close_session`
+    // prints `{"kind":"session",...}` after the loop's last event. The unit's other cases run under
+    // `--no-session` (`run_against`), where `finished` is the last stdout line.
+    let fixture = Fixture::controlled("provider-fails-second");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let output = run_with_session(&fixture, &["--json"], workspace.path(), sessions.path());
+
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "finished").count(),
+        1,
+        "{kinds:?}"
+    );
+    let [.., finish, session] = events.as_slice() else {
+        panic!("at least a `finished` and a `session` line: {kinds:?}");
+    };
+    assert_eq!(
+        finish["kind"], "finished",
+        "the last event line is `finished`: {kinds:?}"
+    );
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(
+        session["kind"], "session",
+        "only the `session` line follows `finished`: {kinds:?}"
+    );
+    let filed = only_session(sessions.path());
+    assert_eq!(
+        session["id"], filed["id"],
+        "the `session` line names the session written: {session}"
+    );
+}

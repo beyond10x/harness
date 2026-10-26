@@ -117,7 +117,11 @@ pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
 /// `stop-hook-exhausted` and the run ends as the model asked.
 pub const MAX_STOP_HOOK_CONTINUES: u32 = 3;
 
-/// Why the loop stopped or suspended. Every variant is a real state, not an exception.
+/// Why the loop stopped or suspended.
+///
+/// Every variant except [`LoopStop::Failed`] is a real state of a [`LoopOutcome`], not an
+/// exception. `Failed` is only ever emitted in [`LoopEvent::Finished`] for a run that ended in a
+/// [`LoopError`], and never returned in a [`LoopOutcome`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum LoopStop {
@@ -180,9 +184,11 @@ pub enum LoopStop {
     /// `cause` names the class: `provider-` and the wire's error code (`provider-refused`,
     /// `provider-transport`, …) for a failed request, otherwise `budget`, `environment` or
     /// `config`. `message` is the error's own words, flattened onto one line and never cut
-    /// (`AGENTS.md` invariant 8). `after_compaction` is true exactly when the request that failed
-    /// was the first one after a compaction: the case a reader needs to tell a window the
-    /// compaction did not clear from any other refusal.
+    /// (`AGENTS.md` invariant 8). `after_compaction` is true exactly when a
+    /// `conversation-compacted` warning was emitted in the failing request's turn before it,
+    /// whether or not the summary changed the conversation: compaction ran and could not help,
+    /// which is the case a reader needs to tell a window the compaction did not clear from any
+    /// other refusal.
     Failed {
         cause: String,
         message: String,
@@ -209,13 +215,24 @@ impl LoopStop {
 ///
 /// Joined rather than cut (`AGENTS.md` invariant 8): any line of a provider's refusal may be the
 /// one that says why, and a line-delimited record has to stay line-delimited.
+///
+/// A line ends at every character Unicode makes a mandatory break (UAX #14 BK, CR, LF, NL), not
+/// only where [`str::lines`] splits: a bare `\r` is a line break to a terminal too.
 fn one_line(message: &str) -> String {
     message
-        .lines()
+        .split(is_line_break)
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Whether `character` is a mandatory line break: LF, CR, VT, FF, NEL, LS or PS.
+fn is_line_break(character: char) -> bool {
+    matches!(
+        character,
+        '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -861,8 +878,9 @@ struct RunState {
     nudged: u32,
     /// How many times a stop hook kept the run going ([`MAX_STOP_HOOK_CONTINUES`]).
     stop_continues: u32,
-    /// Whether the conversation request that failed was the first one after a compaction, for
-    /// the `after_compaction` of [`LoopStop::Failed`].
+    /// Whether a `conversation-compacted` warning was emitted in the failing conversation
+    /// request's turn before it, whether or not the summary changed the conversation, for the
+    /// `after_compaction` of [`LoopStop::Failed`].
     ///
     /// Set only where a conversation request fails, and never serialized: it says how a run
     /// ended, a checkpoint is taken from a run that has not, and an [`ApprovalCheckpoint`] an
@@ -1524,7 +1542,8 @@ enum Summarised {
 enum Compaction {
     /// Nothing: the conversation was under its trigger, or nothing in it could be made smaller.
     Unchanged,
-    /// The conversation was compacted and the run said so (`conversation-compacted`).
+    /// The run warned `conversation-compacted`, whether or not the summary changed the
+    /// conversation (a summary turn that failed on the wire with nothing elided is reported too).
     Reported,
     /// The run is over: the caller cancelled inside the summary turn, or it spent what was left.
     Stopped(LoopStop),
@@ -2721,7 +2740,8 @@ impl<'a> AgentLoop<'a> {
                 Ok(Attempt::Turn(outcome)) => outcome,
                 Ok(Attempt::Stopped(stop)) => return Ok(stop),
                 // The one place a conversation request fails, so the one place that knows whether
-                // a compaction shaped it. `finished` reads it into the run's terminal event.
+                // a compaction was reported before it in this turn. `finished` reads it into the
+                // run's terminal event.
                 Err(error) => {
                     state.failed_after_compaction = compacted;
                     return Err(error);
@@ -3077,8 +3097,9 @@ impl<'a> AgentLoop<'a> {
     /// Returns a stop only when the run ended inside the summary turn — a cancel, or no turn or
     /// time left to spend on one. A summary that fails on the wire is a warning: the conversation
     /// is merely larger than wanted, and ending the run over that would reintroduce the defect
-    /// this exists to remove. Otherwise it says whether it compacted, which is exactly when it
-    /// said so, so a request that fails next can be named as the one a compaction shaped.
+    /// this exists to remove. Otherwise it says whether it warned `conversation-compacted` —
+    /// including for a summary turn that failed with nothing elided — so a request that fails
+    /// next can be named as the one that followed a compaction.
     fn compact_run(
         &mut self,
         state: &mut RunState,

@@ -23,7 +23,7 @@ foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrat
 [tools](https://github.com/beyond10x/tools) for the tool contracts and default implementations —
 each pinned by git tag or exact revision, never by a sibling path, and on nothing that could embed
 it.** At `0.19.0` those pins are substrate `00fa634c` (`crates/harness-substrate/Cargo.toml`,
-package `=0.7.17`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.8.1` (`3eb94989`)
+package `=0.7.17`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.15.0` (`84ded0f2`)
 and tools tag `0.5.0` (`99e36edc`), all in `Cargo.toml` except substrate's. Substrate and mcp are
 pinned by revision, each the commit a release tag points at; llm and tools by tag, which
 `Cargo.lock` resolves to that commit. The arrow points inward — something else embeds this, never
@@ -377,9 +377,9 @@ are refused by name rather than answered with a silent success.
 one function; below it the loop holds a `ModelPort` and cannot tell which projection it got, which
 is the whole reason a second wire cost a second projection instead of a second loop.
 
-Both wires are `llm`'s client crates since llm `0.7.0` — `b10x-llm-responses` and
-`b10x-llm-messages` over `b10x-llm-http`, with the credential presentation in
-`b10x-llm-providers` — and [`crates/harness-llm`](crates/harness-llm/src/lib.rs)
+Both wires are `llm`'s client crates since llm `0.7.0` — `llm-responses` and
+`llm-messages` over `llm-http`, with the credential presentation in
+`llm-providers` — and [`crates/harness-llm`](crates/harness-llm/src/lib.rs)
 is the one crate where Harness's neutral values meet theirs: it translates a turn, a stream event,
 an outcome and an error, and bridges a blocking loop whose sink is not `Send` onto an async client.
 The request body, the stream decoder, the SSE framing, the retry rule, the status mapping and every

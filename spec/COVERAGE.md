@@ -10,7 +10,7 @@ mean the repository's entire implementation has an ESS domain.
 | Native loop outcomes | Completed, provider incomplete/output limit, input/output/turn ceilings, cancellation before dispatch, missing usage with and without token ceilings | `crates/harness-loop/src/lib.rs:123,2102,2812,2835` |
 | Approval and tool reach | Cheap read dispatches; medium-risk write is denied by DenyAll and admitted by ApproveAll; unpublished tool refuses; failed tool results remain visible and the model continues | `crates/harness-loop/src/approval.rs:49`; `crates/harness-loop/src/lib.rs:2073,3161`; `crates/harness-wire/src/envelope.rs:218` |
 
-The known `StopKind` vocabulary includes `max-cost`, `deadline`, `awaiting-approval` and
+The known `StopKind` vocabulary includes `max-cost`, `deadline`, `awaiting-approval`, `failed` and
 `unstructured`, but declaring their shape is not executing those paths. The initial suite does not
 claim that all fields or combinations of every `LoopStop` variant are constrained by the typed
 stop envelope: it is a struct with optional variant fields, and the authored scenarios assert the

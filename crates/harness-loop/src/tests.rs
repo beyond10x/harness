@@ -3051,6 +3051,334 @@ fn a_conversation_whose_tail_is_one_unbreakable_group_folds_nothing_rather_than_
     );
 }
 
+// --- a run that failed ends with a finished line ------------------------------------------------
+
+/// The run's one `finished` event, as the `--json` line a caller reads, once it is shown to be the
+/// last event of the stream.
+///
+/// Read as JSON rather than matched as a value, because the JSON is what a caller holds: a driver
+/// turns `{"kind":"finished","stop":{"kind":K}}` into its own session end, and a stream that stops
+/// without one leaves it nothing to name.
+fn the_one_finish(sink: &VecLoopSink) -> Value {
+    let last = sink.events().last().expect("the run emitted something");
+    assert!(
+        matches!(last, LoopEvent::Finished { .. }),
+        "the stream ends with `finished`, and this one ended on {last:?}"
+    );
+    let finishes = sink
+        .events()
+        .iter()
+        .filter(|event| matches!(event, LoopEvent::Finished { .. }))
+        .count();
+    assert_eq!(finishes, 1, "exactly one `finished`: {:?}", sink.events());
+    serde_json::to_value(last).expect("an event serializes")
+}
+
+/// What a provider says to a request whose conversation no longer fits its window.
+fn context_refused() -> WireError {
+    WireError::new(WireErrorCode::Refused, "context length exceeded", false)
+}
+
+#[test]
+fn every_way_a_run_can_fail_names_its_cause() {
+    let wire = |code| LoopError::Wire(WireError::new(code, "said why", false));
+    let named = [
+        (wire(WireErrorCode::Transport), "provider-transport"),
+        (wire(WireErrorCode::Protocol), "provider-protocol"),
+        (wire(WireErrorCode::Unauthorized), "provider-unauthorized"),
+        (wire(WireErrorCode::RateLimited), "provider-rate-limited"),
+        (wire(WireErrorCode::Refused), "provider-refused"),
+        (wire(WireErrorCode::TooLarge), "provider-too-large"),
+        (wire(WireErrorCode::Unsupported), "provider-unsupported"),
+        (wire(WireErrorCode::Cancelled), "provider-cancelled"),
+        (
+            LoopError::Budget(BudgetError::Zero { name: "max_turns" }),
+            "budget",
+        ),
+        (
+            LoopError::Environment(EnvironmentError::Unavailable("gone".to_owned())),
+            "environment",
+        ),
+        (LoopError::Config("a clash".to_owned()), "config"),
+    ];
+    for (error, cause) in &named {
+        assert_eq!(error.cause(), *cause, "{error}");
+        if let LoopError::Wire(wire) = error {
+            // The wire's own spelling of its code, so the two vocabularies cannot drift apart.
+            let code = serde_json::to_value(wire.code).expect("a code serializes");
+            assert_eq!(
+                *cause,
+                format!("provider-{}", code.as_str().expect("a code is a string")),
+                "{error}"
+            );
+        }
+        let LoopStop::Failed {
+            cause: stopped,
+            message,
+            after_compaction,
+        } = LoopStop::failed(error, false)
+        else {
+            panic!("a failure is a failed stop");
+        };
+        assert_eq!(stopped, *cause);
+        assert_eq!(
+            message,
+            error.to_string(),
+            "a one-line error is kept as it is"
+        );
+        assert!(!after_compaction);
+    }
+}
+
+#[test]
+fn a_failure_said_over_several_lines_is_named_on_one_and_whole() {
+    let error = LoopError::Wire(WireError::new(
+        WireErrorCode::Refused,
+        "HTTP 400\n\n   {\"error\": \"context length exceeded\"}  \n  try a shorter conversation",
+        false,
+    ));
+    let LoopStop::Failed { message, .. } = LoopStop::failed(&error, true) else {
+        panic!("a failure is a failed stop");
+    };
+    assert_eq!(
+        message,
+        "model wire refused: Refused: HTTP 400 {\"error\": \"context length exceeded\"} try a \
+         shorter conversation"
+    );
+}
+
+#[test]
+fn a_request_refused_after_a_compaction_ends_the_stream_with_a_failed_finish_naming_both() {
+    // The trial's shape (story:failed-run-ends-with-a-finished-line): a run near its declared
+    // window compacts, the next request fails on the wire, and the stream used to stop right after
+    // `turn-started`. A caller reading it could record only that the run ended without a line.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reporting(two_fat_calls(), 85_000)),
+            Err(context_refused()),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]).answering("a", fat_answer()),
+    )
+    .windowed(100_000);
+    let mut items = Vec::new();
+    let (outcome, _, sink) = harness.run_in(&mut items);
+
+    assert!(
+        sink.warnings()
+            .any(|(code, _)| code == "conversation-compacted"),
+        "the run compacted before the request that failed: {:?}",
+        sink.events()
+    );
+    assert_eq!(compacted(&sink), vec![(1, 0, false)]);
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["kind"], "finished", "{finish}");
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    let message = finish["stop"]["message"]
+        .as_str()
+        .expect("the failure is named in words");
+    assert!(message.contains("context length exceeded"), "{finish}");
+    assert!(!message.contains('\n'), "one line: {finish}");
+    assert_eq!(finish["stop"]["after_compaction"], true, "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
+
+    // A record, not a recovery: the caller still gets the error it always got, and the
+    // conversation it can save is the compacted one the refused request carried.
+    let LoopError::Wire(error) = outcome.expect_err("a refused request still fails the run") else {
+        panic!("a wire failure surfaces as a wire error");
+    };
+    assert_eq!(error.code, WireErrorCode::Refused);
+    assert_eq!(elided(&items), 1, "the compacted conversation: {items:?}");
+    assert_eq!(
+        items, harness.model.seen[1].items,
+        "exactly what the refused request carried"
+    );
+}
+
+#[test]
+fn the_same_refusal_without_a_compaction_is_not_put_down_to_one() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reporting(two_fat_calls(), 10_000)),
+            Err(context_refused()),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]).answering("a", fat_answer()),
+    )
+    .windowed(100_000);
+    let (outcome, sink) = harness.run();
+
+    assert!(compacted(&sink).is_empty(), "{:?}", compacted(&sink));
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
+}
+
+#[test]
+fn a_refusal_after_an_answered_turn_since_the_compaction_is_not_put_down_to_it() {
+    // `after_compaction` names the one request a compaction shaped. A turn answered in between
+    // shows the compacted conversation was accepted, so a later refusal is about something else.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reporting(two_fat_calls(), 85_000)),
+            Ok(reporting(asks_for(&[("call-3", "a", json!({}))]), 40_000)),
+            Err(context_refused()),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]).answering("a", fat_answer()),
+    )
+    .windowed(100_000);
+    let (outcome, sink) = harness.run();
+
+    assert_eq!(compacted(&sink), vec![(1, 0, false)], "one compaction only");
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+    assert_eq!(finish["turns"], 3, "{finish}");
+}
+
+#[test]
+fn a_run_refused_on_its_first_request_finishes_failed_after_one_turn() {
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Err(WireError::unauthorized("the key was rejected"))]),
+        ScriptedTools::new(Vec::new()),
+    );
+    let (outcome, sink) = harness.run();
+
+    assert!(matches!(outcome, Err(LoopError::Wire(_))), "{outcome:?}");
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["cause"], "provider-unauthorized", "{finish}");
+    assert!(
+        finish["stop"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("the key was rejected")),
+        "{finish}"
+    );
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+    assert_eq!(finish["turns"], 1, "{finish}");
+}
+
+#[test]
+fn a_run_whose_budget_is_refused_before_any_request_finishes_failed_after_none() {
+    // The same one place ends every error path, including the ones before `Started`: a caller
+    // reading the stream gets a terminal line however early the run could not proceed.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(answer("never asked"))]),
+        ScriptedTools::new(Vec::new()),
+    )
+    .budgeted(Budget {
+        max_cost_microunits: Some(1_000),
+        ..Budget::default()
+    });
+    let (outcome, sink) = harness.run();
+
+    assert!(matches!(outcome, Err(LoopError::Budget(_))), "{outcome:?}");
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["cause"], "budget", "{finish}");
+    assert_eq!(finish["turns"], 0, "{finish}");
+    assert!(harness.model.seen.is_empty(), "nothing was sent");
+}
+
+#[test]
+fn a_resumed_run_that_fails_on_the_wire_ends_with_a_failed_finish_too() {
+    let mut first_model = ScriptedModel::new(vec![Ok(asks_for(&[(
+        "call-1",
+        "fs.write",
+        json!({"path": "a"}),
+    )]))]);
+    let mut first_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut defer = DeferApproval("approval-5");
+    let suspended = AgentLoop::new(
+        &mut first_model,
+        &mut first_tools,
+        &mut defer,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .run("do the thing", &mut VecLoopSink::new())
+    .expect("suspends");
+    let checkpoint = suspended.checkpoint.expect("checkpoint");
+    let encoded = serde_json::to_value(&checkpoint).expect("checkpoint serializes");
+    assert!(
+        encoded["state"].get("failed_after_compaction").is_none(),
+        "a checkpoint keeps the shape an older loop can read: {encoded}"
+    );
+
+    let mut resumed_model = ScriptedModel::new(vec![Err(WireError::protocol(
+        "the stream stopped speaking the protocol",
+    ))]);
+    let mut resumed_tools = ScriptedTools::new(vec![spec("fs.write", Approval::Required)]);
+    let mut no_new_approval = DenyAll;
+    let mut sink = VecLoopSink::new();
+    let error = AgentLoop::new(
+        &mut resumed_model,
+        &mut resumed_tools,
+        &mut no_new_approval,
+        LoopConfig::new("scripted-model", "be useful"),
+    )
+    .resume_approval(checkpoint, ApprovalDecision::Approved, &mut sink)
+    .expect_err("the turn after the approved call broke");
+
+    assert!(matches!(error, LoopError::Wire(_)), "{error:?}");
+    assert_eq!(resumed_tools.calls.len(), 1, "the approved call ran first");
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(finish["stop"]["cause"], "provider-protocol", "{finish}");
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
+}
+
+#[test]
+fn a_delegate_whose_wire_breaks_ends_its_own_record_with_a_failed_finish_and_the_parent_goes_on() {
+    // The child's record is nested in the parent's, and a reader following it learns how it ended
+    // the same way a reader of any run does: from its last line. The parent's stop for it stays
+    // `ProviderIncomplete`, and the parent's own record still has exactly one bare `finished`.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(asks_for(&[(
+                "call-1",
+                "delegate",
+                json!({"task": "read every file"}),
+            )])),
+            Err(WireError::protocol("the stream closed mid-answer")),
+            Ok(answer("the delegate could not run")),
+        ]),
+        ScriptedTools::new(vec![spec("read", Approval::NotRequired)]),
+    )
+    .delegating(Delegation::default());
+    let (outcome, sink) = harness.run();
+    let outcome = outcome.expect("a child that broke is a failed result, not the parent's error");
+
+    assert_eq!(outcome.stop, LoopStop::Completed);
+    let child = delegated(&sink);
+    let last = child.last().expect("the child emitted something");
+    let LoopEvent::Finished { stop, turns } = last else {
+        panic!(
+            "the child's record ends with `finished`: {:?}",
+            child.iter().map(|event| kind(event)).collect::<Vec<_>>()
+        );
+    };
+    assert_eq!(
+        *stop,
+        LoopStop::Failed {
+            cause: "provider-protocol".to_owned(),
+            message: "model wire refused: Protocol: the stream closed mid-answer".to_owned(),
+            after_compaction: false,
+        }
+    );
+    assert_eq!(*turns, 1);
+    assert!(
+        matches!(&delegate_stops(&sink)[..], [LoopStop::ProviderIncomplete { reason }] if reason.contains("the stream closed mid-answer")),
+        "{:?}",
+        delegate_stops(&sink)
+    );
+    let finish = the_one_finish(&sink);
+    assert_eq!(finish["stop"]["kind"], "completed", "{finish}");
+}
+
 // --- what a summary turn actually sends ---------------------------------------------------------
 
 /// The one item a summary request carries, as text.
@@ -4599,7 +4927,7 @@ fn a_port_that_publishes_an_owned_name_refuses_the_run_before_any_byte_goes_out(
         clashing.model.seen.is_empty(),
         "the model port is never reached"
     );
-    assert!(sink.events().is_empty(), "not even a `Started`");
+    assert_only_a_config_finish(&sink);
 
     let mut delegating = Harness::new(
         ScriptedModel::new(vec![Ok(answer("never asked"))]),
@@ -4665,7 +4993,19 @@ fn a_port_that_would_route_an_owned_name_refuses_the_run_though_it_publishes_no_
         shadowed.model.seen.is_empty(),
         "the model port is never reached"
     );
-    assert!(sink.events().is_empty(), "not even a `Started`");
+    assert_only_a_config_finish(&sink);
+}
+
+/// Not even a `Started`: the stream of a run refused before it could be described is the one
+/// terminal event naming the refusal, and nothing else.
+fn assert_only_a_config_finish(sink: &VecLoopSink) {
+    let [LoopEvent::Finished { stop, turns: 0 }] = sink.events() else {
+        panic!("one `finished` and nothing before it: {:?}", sink.events());
+    };
+    assert!(
+        matches!(stop, LoopStop::Failed { cause, .. } if cause == "config"),
+        "{stop:?}"
+    );
 }
 
 #[test]

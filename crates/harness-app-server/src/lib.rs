@@ -650,7 +650,8 @@ fn terminal_status(stop: &LoopStop) -> &'static str {
         | LoopStop::Deadline { .. }
         | LoopStop::AwaitingApproval { .. }
         | LoopStop::ProviderIncomplete { .. }
-        | LoopStop::Unstructured { .. } => "failed",
+        | LoopStop::Unstructured { .. }
+        | LoopStop::Failed { .. } => "failed",
     }
 }
 
@@ -690,6 +691,11 @@ mod tests {
             LoopStop::Deadline { limit_ms: 1 },
             LoopStop::ProviderIncomplete {
                 reason: String::new(),
+            },
+            LoopStop::Failed {
+                cause: "provider-refused".to_owned(),
+                message: String::new(),
+                after_compaction: false,
             },
         ] {
             let status = terminal_status(&stop);

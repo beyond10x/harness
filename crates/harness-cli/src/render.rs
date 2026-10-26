@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use harness_loop::{LoopEvent, LoopSink};
+use harness_loop::{LoopEvent, LoopSink, LoopStop};
 
 /// Writes the run as it happens.
 ///
@@ -214,6 +214,37 @@ impl<O: Write, E: Write> Renderer<O, E> {
             _ => {}
         }
     }
+
+    /// The end of the run, as a person reading stdout and stderr is shown it.
+    ///
+    /// Split out of [`LoopSink::emit`] for the reason [`Self::started`] is: that match is the
+    /// whole renderer, and an arm growing should not be what pushes it over a lint.
+    fn finished(&mut self, stop: &LoopStop) {
+        // Nothing a person sees for a run that failed: the command writes the error itself, once,
+        // as `error: …` on stderr. A newline here would read as the answer having ended, and a
+        // note above that line would say the same thing twice. Under a schema the held answer
+        // goes with it.
+        if matches!(stop, LoopStop::Failed { .. }) {
+            self.answer = None;
+            return;
+        }
+        // No terminating newline under a schema: the answer line ends itself, and a run that never
+        // answered must leave stdout empty rather than nearly empty.
+        if self.structured {
+            // Only for a run that completed. A withdrawn answer, a bound, a cancel: the exit status
+            // says the run has no answer and stdout must say the same.
+            if stop.is_completed() {
+                self.answer();
+            } else {
+                // Dropped rather than held: a run with no answer has nothing to compose with.
+                self.answer = None;
+            }
+        } else {
+            let _ = writeln!(self.out);
+            let _ = self.out.flush();
+        }
+        self.note(&format!("{stop:?}"));
+    }
 }
 
 impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
@@ -317,25 +348,7 @@ impl<O: Write, E: Write> LoopSink for Renderer<O, E> {
             | LoopEvent::DelegateStarted { .. }
             | LoopEvent::DelegateFinished { .. }
             | LoopEvent::HookRan { .. }) => self.note(&owned_line(&event)),
-            LoopEvent::Finished { stop, .. } => {
-                // No terminating newline under a schema: the answer line ends itself, and a run
-                // that never answered must leave stdout empty rather than nearly empty.
-                if self.structured {
-                    // Only for a run that completed. A withdrawn answer, a bound, a cancel: the
-                    // exit status says the run has no answer and stdout must say the same.
-                    if stop.is_completed() {
-                        self.answer();
-                    } else {
-                        // Dropped rather than held: a run with no answer has nothing to compose
-                        // with.
-                        self.answer = None;
-                    }
-                } else {
-                    let _ = writeln!(self.out);
-                    let _ = self.out.flush();
-                }
-                self.note(&format!("{stop:?}"));
-            }
+            LoopEvent::Finished { stop, .. } => self.finished(&stop),
         }
     }
 }
@@ -426,7 +439,6 @@ fn owned_line(event: &LoopEvent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_loop::LoopStop;
     use harness_wire::ToolName;
 
     fn render(events: Vec<LoopEvent>, json: bool) -> (String, String) {
@@ -588,6 +600,51 @@ mod tests {
         ]);
         assert_eq!(out, "{\"files\":2,\"verdict\":\"ok\"}\n");
         assert!(err.contains("let me look"), "the prose is a note: {err}");
+    }
+
+    fn a_failure() -> LoopStop {
+        LoopStop::Failed {
+            cause: "provider-refused".to_owned(),
+            message: "model wire refused: Refused: context length exceeded".to_owned(),
+            after_compaction: true,
+        }
+    }
+
+    #[test]
+    fn a_failed_run_shows_a_person_nothing_its_error_line_does_not() {
+        // The error itself is written once, by the command, as `error: …` on stderr. A newline
+        // under half an answer and a `Failed { … }` note above that line would be two more ways of
+        // saying the same thing, and the newline would read as the answer having ended.
+        let (out, err) = render(
+            vec![
+                LoopEvent::TextDelta {
+                    text: "half an answ".to_owned(),
+                },
+                LoopEvent::Finished {
+                    stop: a_failure(),
+                    turns: 2,
+                },
+            ],
+            false,
+        );
+        assert_eq!(out, "half an answ", "nothing added to the answer stream");
+        assert_eq!(err, "", "nothing added to the progress stream");
+    }
+
+    #[test]
+    fn under_a_schema_a_failed_run_leaves_stdout_empty_whatever_it_had_answered() {
+        let (out, err) = render_structured(vec![
+            LoopEvent::Answered {
+                call_id: harness_wire::CallId::new("call-9").expect("valid"),
+                value: serde_json::json!({"verdict": "held"}),
+            },
+            LoopEvent::Finished {
+                stop: a_failure(),
+                turns: 2,
+            },
+        ]);
+        assert_eq!(out, "", "a run that failed has no answer");
+        assert!(!err.contains("Failed"), "{err}");
     }
 
     #[test]

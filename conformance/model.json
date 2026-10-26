@@ -213,6 +213,39 @@
               }
             },
             "naming": {}
+          },
+          {
+            "name": "cause",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "message",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "string"
+              }
+            },
+            "naming": {}
+          },
+          {
+            "name": "after_compaction",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "boolean"
+              }
+            },
+            "naming": {}
           }
         ],
         "invariants": []
@@ -234,7 +267,8 @@
           "cancelled",
           "awaiting-approval",
           "provider-incomplete",
-          "unstructured"
+          "unstructured",
+          "failed"
         ]
       },
       "naming": {}

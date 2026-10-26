@@ -168,12 +168,54 @@ pub enum LoopStop {
     Unstructured {
         asked_again: u32,
     },
+    /// The run could not proceed: a request failed on the wire, the turn environment could not be
+    /// obtained, or the run as configured or budgeted could not start.
+    ///
+    /// Never the stop of a [`LoopOutcome`]: [`AgentLoop::run`] and [`AgentLoop::run_in`] still
+    /// return the [`LoopError`], and nothing about the run is recovered. This stop exists so the
+    /// event stream of a run that failed still ends with a terminal [`LoopEvent::Finished`] naming
+    /// why. A stream that simply stopped left a caller reading it line by line holding a run that
+    /// ended and no reason, which it could only record as *ended without a line*.
+    ///
+    /// `cause` names the class: `provider-` and the wire's error code (`provider-refused`,
+    /// `provider-transport`, …) for a failed request, otherwise `budget`, `environment` or
+    /// `config`. `message` is the error's own words, flattened onto one line and never cut
+    /// (`AGENTS.md` invariant 8). `after_compaction` is true exactly when the request that failed
+    /// was the first one after a compaction: the case a reader needs to tell a window the
+    /// compaction did not clear from any other refusal.
+    Failed {
+        cause: String,
+        message: String,
+        after_compaction: bool,
+    },
 }
 
 impl LoopStop {
     pub fn is_completed(&self) -> bool {
         matches!(self, Self::Completed)
     }
+
+    /// The terminal stop of a run that ended in `error`.
+    fn failed(error: &LoopError, after_compaction: bool) -> Self {
+        Self::Failed {
+            cause: error.cause().to_owned(),
+            message: one_line(&error.to_string()),
+            after_compaction,
+        }
+    }
+}
+
+/// `message` on one line: each line trimmed, the blank ones dropped, the rest joined by a space.
+///
+/// Joined rather than cut (`AGENTS.md` invariant 8): any line of a provider's refusal may be the
+/// one that says why, and a line-delimited record has to stay line-delimited.
+fn one_line(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -342,6 +384,32 @@ pub enum LoopError {
     /// name in `tools` twice and leave the model able to address neither.
     #[error("the run cannot start: {0}")]
     Config(String),
+}
+
+impl LoopError {
+    /// The class of this failure, as the `cause` of [`LoopStop::Failed`] names it.
+    ///
+    /// A failed request is `provider-` and the wire's own error code, in the spelling the code
+    /// serializes as, so a caller can tell a provider's refusal from a dropped connection without
+    /// parsing words. The loop's own failures are named by their variant. Exhaustive over both
+    /// enums, so a new code or variant is a compile error here and never an unnamed cause.
+    fn cause(&self) -> &'static str {
+        match self {
+            Self::Wire(error) => match error.code {
+                WireErrorCode::Transport => "provider-transport",
+                WireErrorCode::Protocol => "provider-protocol",
+                WireErrorCode::Unauthorized => "provider-unauthorized",
+                WireErrorCode::RateLimited => "provider-rate-limited",
+                WireErrorCode::Refused => "provider-refused",
+                WireErrorCode::TooLarge => "provider-too-large",
+                WireErrorCode::Unsupported => "provider-unsupported",
+                WireErrorCode::Cancelled => "provider-cancelled",
+            },
+            Self::Budget(_) => "budget",
+            Self::Environment(_) => "environment",
+            Self::Config(_) => "config",
+        }
+    }
 }
 
 /// Ends the run between turns and between tool calls.
@@ -737,6 +805,34 @@ fn terminal_stop(reason: StopReason) -> LoopStop {
     }
 }
 
+/// Writes a run's terminal event, and hands back how the run ended.
+///
+/// **The one place a run's [`LoopEvent::Finished`] is written**, for [`AgentLoop::run_over`] and
+/// [`AgentLoop::resume_approval`] alike, on every way out: a stop or an error. A run that failed
+/// used to end its stream wherever the error left it, most often right after `turn-started`, and a
+/// caller reading the stream line by line could not tell that end from a process that died. The
+/// error now ends the stream as [`LoopStop::Failed`] and is still returned unchanged: the event
+/// records the failure, it does not recover from it.
+///
+/// A suspension writes nothing, because it is not an end: the run resumes from its checkpoint and
+/// finishes there.
+fn finished(
+    ended: Result<LoopStop, LoopError>,
+    state: &RunState,
+    sink: &mut dyn LoopSink,
+) -> Result<LoopStop, LoopError> {
+    let stop = match &ended {
+        Ok(LoopStop::AwaitingApproval { .. }) => return ended,
+        Ok(stop) => stop.clone(),
+        Err(error) => LoopStop::failed(error, state.failed_after_compaction),
+    };
+    sink.emit(LoopEvent::Finished {
+        stop,
+        turns: state.turns,
+    });
+    ended
+}
+
 /// Everything one run accumulates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -765,6 +861,14 @@ struct RunState {
     nudged: u32,
     /// How many times a stop hook kept the run going ([`MAX_STOP_HOOK_CONTINUES`]).
     stop_continues: u32,
+    /// Whether the conversation request that failed was the first one after a compaction, for
+    /// the `after_compaction` of [`LoopStop::Failed`].
+    ///
+    /// Set only where a conversation request fails, and never serialized: it says how a run
+    /// ended, a checkpoint is taken from a run that has not, and an [`ApprovalCheckpoint`] an
+    /// older loop wrote — read here under `deny_unknown_fields` — still loads.
+    #[serde(skip)]
+    failed_after_compaction: bool,
 }
 
 impl RunState {
@@ -791,6 +895,7 @@ impl RunState {
             structured: None,
             nudged: 0,
             stop_continues: 0,
+            failed_after_compaction: false,
         }
     }
 
@@ -1180,10 +1285,12 @@ fn bounded_json(value: &serde_json::Value) -> String {
 ///
 /// This is the **byte** rule, which is what a run with no declared context window still gets. With
 /// one, [`AgentLoop::compact_run`] decides in tokens and may summarise what elision cannot reach.
-fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
+///
+/// Returns whether it compacted, which is exactly when it said so.
+fn compact(items: &mut [Item], sink: &mut dyn LoopSink) -> bool {
     let before = measure(items);
     if before <= MAX_CONVERSATION_BYTES {
-        return;
+        return false;
     }
     let elided = elide(
         items,
@@ -1191,7 +1298,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         protected_bytes(COMPACTED_TARGET_BYTES),
     );
     if elided.count == 0 {
-        return;
+        return false;
     }
     let after = measure(items);
     // Said out loud: a model that suddenly cannot see a file it read has a right to a reason,
@@ -1216,6 +1323,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         bytes_after: after,
         summary_turn: false,
     });
+    true
 }
 
 /// The conversation's size, the way every threshold here measures it.
@@ -1410,6 +1518,16 @@ enum Summarised {
     Failed,
     /// The caller cancelled. The run is over.
     Cancelled,
+}
+
+/// What compacting before a request did.
+enum Compaction {
+    /// Nothing: the conversation was under its trigger, or nothing in it could be made smaller.
+    Unchanged,
+    /// The conversation was compacted and the run said so (`conversation-compacted`).
+    Reported,
+    /// The run is over: the caller cancelled inside the summary turn, or it spent what was left.
+    Stopped(LoopStop),
 }
 
 /// Whether this output has already been elided, so nothing is counted or elided twice.
@@ -1614,8 +1732,9 @@ fn child_result(call: &ToolCall, end: ChildEnd, child: &RunState) -> (LoopStop, 
         // A run that could not proceed at all never reached a stop of its own, and
         // `DelegateFinished` has to carry one. `ProviderIncomplete` is the variant that already
         // means *this run ended early, and here is the reason in words* — the reason is what a
-        // reader of the record needs, and inventing a variant would put a state in `LoopStop` that
-        // no run can actually stop in.
+        // reader of the record needs. Not `Failed`: that names a `LoopError`'s cause, and a child
+        // that panicked, which ends here too, has none. The child's own record still ends with
+        // its `Failed` finish, inside `Delegated`, when an error is what ended it.
         ChildEnd::Broke(reason) => (
             LoopStop::ProviderIncomplete {
                 reason: reason.clone(),
@@ -2144,7 +2263,8 @@ impl<'a> AgentLoop<'a> {
     /// Returns [`LoopError::Config`] and [`LoopError::Budget`] before the first request, for a
     /// run that could not be described and for one whose bound is unusable, and
     /// [`LoopError::Wire`] when a turn could not be obtained at all. A budget that *binds* is an
-    /// outcome, not an error.
+    /// outcome, not an error. Whichever error it is, the event stream still ends with one
+    /// [`LoopEvent::Finished`], whose [`LoopStop::Failed`] names it.
     pub fn run(
         &mut self,
         input: impl Into<String>,
@@ -2230,6 +2350,41 @@ impl<'a> AgentLoop<'a> {
         decision: ApprovalDecision,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopOutcome, LoopError> {
+        let admitted = self.admit_resumption(&checkpoint, &decision);
+        let ApprovalCheckpoint {
+            call,
+            invoked,
+            remaining_calls,
+            mut state,
+            remaining_duration_ms,
+            ..
+        } = checkpoint;
+        let ended = admitted.and_then(|()| {
+            let deadline = remaining_duration_ms
+                .map(Duration::from_millis)
+                .map(|remaining| Instant::now() + remaining);
+            self.refresh_environment(state.turns.saturating_add(1), sink)?;
+            self.resumed_decision = Some((call.call_id.clone(), invoked, decision));
+            let mut calls = Vec::with_capacity(remaining_calls.len().saturating_add(1));
+            calls.push(call);
+            calls.extend(remaining_calls);
+
+            match self.run_calls(&calls, &mut state, deadline, sink) {
+                Some(stop) => Ok(stop),
+                None => self.drive(&mut state, deadline, sink),
+            }
+        });
+        let stop = finished(ended, &state, sink)?;
+        let checkpoint = self.take_checkpoint(&state);
+        Ok(state.into_outcome(stop, checkpoint))
+    }
+
+    /// Whether this loop may resume `checkpoint` with `decision`, decided before anything runs.
+    fn admit_resumption(
+        &self,
+        checkpoint: &ApprovalCheckpoint,
+        decision: &ApprovalDecision,
+    ) -> Result<(), LoopError> {
         if checkpoint.format != "harness.approval-checkpoint/1"
             || checkpoint.checkpoint_id.trim().is_empty()
         {
@@ -2254,36 +2409,7 @@ impl<'a> AgentLoop<'a> {
             .as_ref()
             .is_some_and(|card| card.rates_for(&self.config.model).is_some());
         self.config.budget.validate(priced)?;
-
-        let ApprovalCheckpoint {
-            call,
-            invoked,
-            remaining_calls,
-            mut state,
-            remaining_duration_ms,
-            ..
-        } = checkpoint;
-        let deadline = remaining_duration_ms
-            .map(Duration::from_millis)
-            .map(|remaining| Instant::now() + remaining);
-        self.refresh_environment(state.turns.saturating_add(1), sink)?;
-        self.resumed_decision = Some((call.call_id.clone(), invoked, decision));
-        let mut calls = Vec::with_capacity(remaining_calls.len().saturating_add(1));
-        calls.push(call);
-        calls.extend(remaining_calls);
-
-        let stop = match self.run_calls(&calls, &mut state, deadline, sink) {
-            Some(stop) => stop,
-            None => self.drive(&mut state, deadline, sink)?,
-        };
-        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
-            sink.emit(LoopEvent::Finished {
-                stop: stop.clone(),
-                turns: state.turns,
-            });
-        }
-        let checkpoint = self.take_checkpoint(&state);
-        Ok(state.into_outcome(stop, checkpoint))
+        Ok(())
     }
 
     /// One whole run over a [`RunState`] the caller keeps hold of, ending in `Finished`.
@@ -2299,14 +2425,8 @@ impl<'a> AgentLoop<'a> {
         state: &mut RunState,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopStop, LoopError> {
-        let stop = self.drive_run(state, sink)?;
-        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
-            sink.emit(LoopEvent::Finished {
-                stop: stop.clone(),
-                turns: state.turns,
-            });
-        }
-        Ok(stop)
+        let ended = self.drive_run(state, sink);
+        finished(ended, state, sink)
     }
 
     fn take_checkpoint(&mut self, state: &RunState) -> Option<ApprovalCheckpoint> {
@@ -2576,9 +2696,11 @@ impl<'a> AgentLoop<'a> {
 
             // Before the request is built, so the turn that pays for a compaction is the one
             // that benefits from it.
-            if let Some(stop) = self.compact_run(state, deadline, sink) {
-                return Ok(stop);
-            }
+            let compacted = match self.compact_run(state, deadline, sink) {
+                Compaction::Stopped(stop) => return Ok(stop),
+                Compaction::Reported => true,
+                Compaction::Unchanged => false,
+            };
             // A summary turn is charged to the run like any other, so a ceiling it crosses binds
             // here rather than after the next turn's tool calls. Checked only after the ceilings
             // are counted, this was the one turn whose spend nothing looked at: a run could
@@ -2595,9 +2717,15 @@ impl<'a> AgentLoop<'a> {
             self.refresh_environment(turn, sink)?;
             state.turns += 1;
             sink.emit(LoopEvent::TurnStarted { turn: state.turns });
-            let outcome = match self.attempt_turn(state, deadline, sink)? {
-                Attempt::Turn(outcome) => outcome,
-                Attempt::Stopped(stop) => return Ok(stop),
+            let outcome = match self.attempt_turn(state, deadline, sink) {
+                Ok(Attempt::Turn(outcome)) => outcome,
+                Ok(Attempt::Stopped(stop)) => return Ok(stop),
+                // The one place a conversation request fails, so the one place that knows whether
+                // a compaction shaped it. `finished` reads it into the run's terminal event.
+                Err(error) => {
+                    state.failed_after_compaction = compacted;
+                    return Err(error);
+                }
             };
 
             let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
@@ -2946,18 +3074,23 @@ impl<'a> AgentLoop<'a> {
     /// is in things elision may not touch — user and assistant text, and the opaque reasoning items
     /// this loop carries verbatim across every tool round trip.
     ///
-    /// Returns a stop only when the caller cancelled inside the summary turn. A summary that fails
-    /// on the wire is a warning: the conversation is merely larger than wanted, and ending the run
-    /// over that would reintroduce the defect this exists to remove.
+    /// Returns a stop only when the run ended inside the summary turn — a cancel, or no turn or
+    /// time left to spend on one. A summary that fails on the wire is a warning: the conversation
+    /// is merely larger than wanted, and ending the run over that would reintroduce the defect
+    /// this exists to remove. Otherwise it says whether it compacted, which is exactly when it
+    /// said so, so a request that fails next can be named as the one a compaction shaped.
     fn compact_run(
         &mut self,
         state: &mut RunState,
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
-    ) -> Option<LoopStop> {
+    ) -> Compaction {
         let Some(window) = self.config.context_window else {
-            compact(&mut state.items, sink);
-            return None;
+            return if compact(&mut state.items, sink) {
+                Compaction::Reported
+            } else {
+                Compaction::Unchanged
+            };
         };
         let before = measure(&state.items);
         // The provider's own count wherever there is one: it includes the instruction and the tool
@@ -2965,7 +3098,7 @@ impl<'a> AgentLoop<'a> {
         // the wall. The estimate is the fallback for a provider that reports nothing.
         let occupied = estimated_tokens(before).max(state.reported_input.unwrap_or(0));
         if occupied < window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100 {
-            return None;
+            return Compaction::Unchanged;
         }
         // Expressed as *how many bytes to free* rather than as a size to reach, because what this
         // loop can shrink is `items` and the count that triggered may have measured more than
@@ -2981,10 +3114,10 @@ impl<'a> AgentLoop<'a> {
         let mut summary_turn = false;
         if measure(&state.items) > target {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
-                return Some(stop);
+                return Compaction::Stopped(stop);
             }
             match self.summarise(state, target, sink) {
-                Summarised::Cancelled => return Some(cancelled()),
+                Summarised::Cancelled => return Compaction::Stopped(cancelled()),
                 Summarised::Folded(count) => {
                     summarised = count;
                     summary_turn = true;
@@ -2994,7 +3127,7 @@ impl<'a> AgentLoop<'a> {
             }
         }
         if elided.count == 0 && summarised == 0 && !summary_turn {
-            return None;
+            return Compaction::Unchanged;
         }
 
         let after = measure(&state.items);
@@ -3017,7 +3150,7 @@ impl<'a> AgentLoop<'a> {
             bytes_after: after,
             summary_turn,
         });
-        None
+        Compaction::Reported
     }
 
     /// Spends one turn folding the earlier part of the conversation into a single item.

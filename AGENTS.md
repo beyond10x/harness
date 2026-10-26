@@ -173,6 +173,19 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   invocation, that nobody is watching. Changing `harness_loop`'s own default would be the
   invariant; changing the shell's is a product decision, and this is the record of it.
 
+  **Under metaharness the decision is the caller's** (atlas ADR 0104, points 2-3: L2 decides each
+  call, L1 enforces). `--approve caller` hands every approval to the process that spawned the run:
+  the `approval-required` event on the `--json` stdout is the request, and one JSON line on stdin
+  (`{"call_id":…,"decision":"allow"}` or `"deny"` with a `reason`) is the answer. Harness still asks
+  before the effect and still names the entry, not the verb; what changes is only who answers.
+  Everything that is not a well-formed `allow` for the call asked about is a denial the model is
+  told about, and a closed stdin denies the rest of the run. `replace` is refused until ADR 0104's
+  open question (how a rewrite reaches L1) is answered. The mode needs `--json`, is refused on
+  `chat` (stdin carries the questions there) and beside `--yes`. No tool, hook or MCP server of
+  a run may read this process's stdin: one that read a decision line would approve its own call.
+  Inside a delegate the request arrives wrapped in a `delegated` event, and the answer names the
+  inner `call_id`.
+
   **Bridge mode is the one place the approver is `ApproveAll`**
   (`crates/harness-app-server/src/lib.rs`): the client registered every tool and executes every
   `item/tool/call` itself, so the gate is the client's, and a second one on this side would decide

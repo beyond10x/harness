@@ -59,7 +59,10 @@ struct Sandbox {
 
 impl Sandbox {
     fn new() -> Self {
-        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).expect("a sandbox");
+        // Under `$TMPDIR`, not `CARGO_TARGET_TMPDIR`: the bus is a Unix socket, whose path may
+        // not exceed 108 bytes, and a target directory inside a managed worktree is long enough
+        // to break that before any command runs. `TempDir` removes the sandbox on drop.
+        let root = tempfile::tempdir().expect("a sandbox");
         for directory in ["home", "config", "state", "runtime", "workspace"] {
             std::fs::create_dir(root.path().join(directory)).expect("a sandbox directory");
         }

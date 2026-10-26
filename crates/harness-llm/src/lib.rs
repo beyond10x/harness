@@ -325,6 +325,17 @@ pub fn client(
     source: Option<Source>,
     cancel: &Cancel,
 ) -> Result<Box<dyn ModelPort + Send>, String> {
+    // Before the binding: `llm` refuses a Bedrock binding in its own words, and the refusal an
+    // embedder reads is this crate's, one per wire it does not speak.
+    match target.protocol {
+        Protocol::ChatCompletions => {
+            return Err("this build speaks no chat-completions wire".to_owned());
+        }
+        Protocol::BedrockConverse => {
+            return Err("this build speaks no bedrock-converse wire".to_owned());
+        }
+        Protocol::Messages | Protocol::Responses => {}
+    }
     let binding = binding(target, source.as_ref())?;
     let http = HttpClient::with_connect_timeout(LIMITS, CONNECT).map_err(|error| error.message)?;
     let resolver: Arc<dyn SecretResolver> = source.map_or_else(
@@ -351,11 +362,8 @@ pub fn client(
                 RESPONSES_WIRE,
             )
         }
-        Protocol::ChatCompletions => {
-            return Err("this build speaks no chat-completions wire".to_owned());
-        }
-        Protocol::BedrockConverse => {
-            return Err("this build speaks no bedrock-converse wire".to_owned());
+        Protocol::ChatCompletions | Protocol::BedrockConverse => {
+            unreachable!("refused before the binding")
         }
     };
     Ok(Box::new(LlmPort {

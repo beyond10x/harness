@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T22:18:24Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-builds-on-llm-0-16",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo xtask gate",
+    "reference": "gate-release.log on wave head ffc81b3 plus the release edits: gate: green, 63 test binaries ok, 1162 passed, 0 failed"
+  }
+}

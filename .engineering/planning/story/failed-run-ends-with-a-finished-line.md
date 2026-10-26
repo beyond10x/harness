@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:failed-run-ends-with-a-finished-line
 kind: story
-status: active
+status: implemented
 title: A run that fails ends with a finished line naming its cause
 summary: 'LoopError exits emit finished{stop: failed, cause, message, after_compaction}'
 relations:
@@ -12,23 +12,28 @@ scope:
 - confidence: cited
   path: conformance/model.json
 - confidence: cited
+  path: conformance/suite.json
+- confidence: cited
+  path: crates/harness-app-server/src/lib.rs
+- confidence: cited
   path: crates/harness-cli/src/render.rs
 - confidence: cited
   path: crates/harness-cli/tests/end_to_end.rs
 - confidence: cited
   path: crates/harness-cli/tests/fixtures/mcp_endpoint.rs
-- confidence: inferred
-  path: crates/harness-conformance
 - confidence: cited
   path: crates/harness-loop/src/lib.rs
 - confidence: cited
   path: crates/harness-loop/src/tests.rs
 - confidence: cited
+  path: spec/COVERAGE.md
+- confidence: cited
   path: spec/domains/loop.yaml
-revision: 11
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T21:05:42Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-26T21:05:42Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-26T22:18:36Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":2}}}
 ---
 ## Context
 
@@ -71,9 +76,11 @@ failed names its cause in it, so a caller reading the stream records why the run
    once, and `AgentLoop::run_in` still returns the same `LoopError`. `cause` names the class:
    `provider-<wire error code>` (`provider-refused`, `provider-transport`, `provider-protocol`,
    `provider-unauthorized`, `provider-rate-limited`, `provider-too-large`, `provider-unsupported`),
-   `environment`, `budget` or `config`. `after_compaction` is true exactly when the failing request
-   was the first one after a compaction.
-3. Under `--json` the binary's last stdout line is that `finished` line, and the exit status of a
+   `environment`, `budget` or `config`. `after_compaction` is true exactly when a
+   `conversation-compacted` warning was emitted in the failing request's turn before it, whether or
+   not the summary changed the conversation.
+3. Under `--json` the binary's last event line is that `finished` line (with `--no-session`, the
+   last stdout line; with a session written, only the `session` line follows it), and the exit status of a
    started run that failed stays 1.
 
 ## Out of scope

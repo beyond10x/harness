@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T21:23:08Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-builds-on-llm-0-16",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-llm --locked --test messages_usage_cost",
+    "reference": "u1-llm-016/red.log (llm 0.15.0: 0 passed, 2 failed, Unsupported message_delta.usage.cost) vs u1-llm-016/green.log (llm 0.16.0: passed)"
+  }
+}

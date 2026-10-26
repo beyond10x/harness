@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T22:18:36Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-builds-on-llm-0-16",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-harness-llm --locked --test messages_usage_cost (3 passed) and the adversary binaries adversary_u1_llm_0_16 and adversary_u1_llm_0_16_cli, green in cargo xtask gate at the wave head",
+    "reference": "u1-llm-016/green.log; gate-release.log"
+  }
+}

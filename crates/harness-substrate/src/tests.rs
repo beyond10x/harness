@@ -1143,6 +1143,12 @@ fn the_embedded_and_socket_paths_build_one_exec_input() {
     );
     assert!(input.capsule.is_none());
     assert!(input.lease_ttl_ms.is_none());
+    // Substrate 0.12 added these; absent and empty keep an unchanged start hashing as it did, and
+    // widen nothing: no aperture, `/workspace` as the working directory, no writable root outside.
+    assert!(input.sandbox.aperture.is_none());
+    assert!(input.sandbox.apertures.is_empty());
+    assert!(input.workdir.is_none());
+    assert!(input.writable_roots.is_empty());
 }
 
 #[test]

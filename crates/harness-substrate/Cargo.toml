@@ -26,8 +26,8 @@ tool-toolchain = { workspace = true }
 # Harness continues to request exact workspace access, no network and resource usage through the
 # existing embedded driver boundary. Both version requirements are exact so a resolver cannot
 # silently substitute a later contract for this selection.
-substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "00fa634cb24eb307946bfe3bbe40142f4b7a469a", version = "=0.7.17" }
-substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "00fa634cb24eb307946bfe3bbe40142f4b7a469a", version = "=0.7.17" }
+substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "65e1fca7185dfb0a5a116b70b9046b1de5722d68", version = "=0.12.0" }
+substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "65e1fca7185dfb0a5a116b70b9046b1de5722d68", version = "=0.12.0" }
 # Only to drive an async driver from a blocking workspace: one current-thread runtime, `block_on`
 # per operation, no concurrency anywhere.
 tokio = { version = "1", features = ["rt"] }

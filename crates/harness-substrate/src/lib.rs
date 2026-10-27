@@ -251,6 +251,7 @@ pub(crate) fn confined_exec_input(
             capability_snapshot: snapshot,
             network: NetworkMode::None,
             aperture: None,
+            apertures: Vec::new(),
             profile: SandboxProfile::Workspace,
             required: true,
         },
@@ -282,6 +283,10 @@ pub(crate) fn confined_exec_input(
         secret_slots: Vec::new(),
         capsule: None,
         lease_ttl_ms: None,
+        // Absent and empty are what every start before substrate 0.21.0 sent: the program starts
+        // in `/workspace` and nothing outside it is writable.
+        workdir: None,
+        writable_roots: Vec::new(),
     }
 }
 

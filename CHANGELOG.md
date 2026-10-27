@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.7.17` (`00fa634c`) to the release after `0.12.0`, which carries the confinement contract (ADR 0109). The embedded driver sends what it sent before: no aperture (`apertures` empty), `/workspace` as the working directory (`workdir` absent) and no writable root outside it; a workspace read takes the value of the driver's `Listed` answer.
+- ESS 0.70.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `077e4ee1`), up from 0.69.2; the generated model and suite are byte-identical.
+
 ## [0.20.0] - 2026-10-26
 
 ### Added

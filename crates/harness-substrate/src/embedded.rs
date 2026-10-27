@@ -392,9 +392,10 @@ impl Backend for Embedded {
                     .read_workspace_path(workspace, &root_name, path, &query),
             )
             .map_err(|error| Self::refused("workspace.file-read", &error))?;
-        let value = serde_json::to_value(result).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
-        })?;
+        let value =
+            serde_json::to_value(result.value).map_err(|error| SubstrateError::Unreadable {
+                reason: error.to_string(),
+            })?;
         // The driver answers the same document shape the wire does, so the reader is the same one.
         let data = value
             .pointer("/content/data")

@@ -454,7 +454,7 @@ impl Client {
     /// — addresses the workspace by that id; the root name only says which directory to adopt.
     ///
     /// A root name outside substrate's set is refused here, before anything is sent, with
-    /// `status: 0` as [`Self::admitted_snapshot`] refuses: the daemon would refuse it at
+    /// `status: 0` as `admitted_snapshot` refuses: the daemon would refuse it at
     /// `root_name`, and a request that cannot succeed only spends one of its ledger entries.
     ///
     /// # Errors

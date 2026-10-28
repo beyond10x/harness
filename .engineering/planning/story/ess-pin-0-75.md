@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-pin-0-75
 kind: story
-status: active
+status: implemented
 title: Harness runs its specification on ESS 0.75.0, the newest release
 summary: spec/ess-inputs.yaml and the conformance crate's ess-* pins move from 0.74.0 to 0.75.0
 tags:
@@ -24,10 +24,11 @@ scope:
   path: spec/README.md
 - confidence: cited
   path: spec/ess-inputs.yaml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T17:45:32Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-10-28T17:45:32Z", actor: "human:timo", revision: 10}
+- {from: "active", to: "implemented", at: "2026-10-28T17:50:40Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

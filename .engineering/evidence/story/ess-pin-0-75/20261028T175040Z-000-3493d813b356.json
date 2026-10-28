@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-28T17:50:40Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-pin-0-75",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local per-step gate (every cargo xtask gate step, each with its own exit status) at ab82405 on ESS 0.75.0: 15 of 15 steps exit 0, 1155/0, 8 ignored; 'Harness ESS: 29 total, 29 passed, 0 failed'; inert audit 0/29 as required; conformance/model.json and suite.json unchanged (clean tree after the specification step). The PR 57 Gate on the head that carries this record repeats it"
+  }
+}

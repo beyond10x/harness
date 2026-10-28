@@ -219,6 +219,15 @@ pub(crate) fn is_workspace_id(id: &str) -> bool {
     })
 }
 
+/// A daemon's answer as a refusal may quote it: its JSON text, through `{:?}`.
+///
+/// `serde_json`'s `Display` escapes only what JSON must, so DEL, C1 controls and bidirectional
+/// format characters in a string member come through raw and reach the operator's terminal. The
+/// `Debug` quoting escapes each of them, as the id and root-name refusals already do.
+fn quoted(value: &Value) -> String {
+    format!("{:?}", value.to_string())
+}
+
 /// One stream of one finished exec, as the model will read it.
 struct Output {
     text: String,
@@ -453,7 +462,7 @@ impl Client {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .ok_or_else(|| SubstrateError::Unreadable {
-                reason: format!("no workspace id in {value}"),
+                reason: format!("no workspace id in {}", quoted(&value)),
             })
     }
 
@@ -507,7 +516,7 @@ impl Client {
         let resource = value.get("result").unwrap_or(&value);
         let Some(id) = resource.get("id").and_then(Value::as_str) else {
             return Err(SubstrateError::Unreadable {
-                reason: format!("no workspace id in {value}"),
+                reason: format!("no workspace id in {}", quoted(&value)),
             });
         };
         // **The id is checked before anything carries it.** It goes verbatim into every later

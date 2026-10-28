@@ -1118,13 +1118,15 @@ struct ToolsOptions {
     /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
-    /// Adopt this directory under the socket daemon's workspace root, and act in it.
+    /// Adopt this directory under the socket daemon's workspace root, and list the tools a run in
+    /// it would have.
     ///
-    /// The name is one directory under the root the daemon serves (substrate's root-name set:
-    /// ASCII alphanumerics, `_` and `-`, not beginning with `-`), not a path on this host. The
-    /// daemon mints a workspace id for it, one stderr line names that id, and a later run passes it
-    /// with `--workspace-id` instead — adopting the same name twice is refused, and this binary
-    /// cannot list workspaces to find the earlier id. A refused adopt refuses the run.
+    /// **Listing adopts.** The daemon mints the workspace id here, as it would for a run, and one
+    /// stderr line names it. A later `run` or `tools` with the same `--substrate-adopt` is then
+    /// refused as already adopted: pass the printed id with `--workspace-id` instead, because this
+    /// binary cannot list workspaces to find it again. The name is one directory under the root
+    /// the daemon serves (substrate's root-name set: ASCII alphanumerics, `_` and `-`, not
+    /// beginning with `-`), not a path on this host. A refused adopt refuses the listing.
     #[arg(
         long,
         value_name = "ROOT_NAME",
@@ -1380,6 +1382,16 @@ fn apply_provider(
 /// `None`, an empty `Vec` or a `false` bool; this only ever fills those. So a typed flag wins
 /// because there is nothing left to fill, and no `ValueSource` bookkeeping can drift from it.
 ///
+/// **One fill is not of the same flag, and it gets the same rule by hand.** `write = true` means
+/// `--substrate-embedded`, which clap refuses beside `--substrate`. A typed `--substrate` socket
+/// therefore wins: the profile does not set the embedded driver under it, because this runs after
+/// clap's conflict check and would otherwise turn a run the operator pointed at a daemon into one
+/// that writes `--workspace` on this host and asks the daemon nothing. The profile's other write
+/// keys still fill what was not typed, and under a socket they act exactly as the same values
+/// typed beside `--substrate` would: `write-scope` and `allow-program` apply to the socket's
+/// workspace, and `toolchains` or `toolchain-specs` refuse the run by name, as `--toolchain` does
+/// there.
+///
 /// Returns the profiles that contributed, for `session.started` — the record that makes a file
 /// carrying a permission accountable.
 ///
@@ -1420,7 +1432,10 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         options.model = Some(model);
     }
     if wanted.write == Some(true) {
-        options.substrate_embedded = true;
+        // A typed socket wins; see the doc above.
+        if options.substrate.is_none() {
+            options.substrate_embedded = true;
+        }
         if options.write_scope.is_empty() {
             options.write_scope = wanted
                 .write_scope
@@ -3466,12 +3481,19 @@ fn socket_confined(
                         format!("`--substrate-adopt {root_name}` was refused: {body}")
                     }
                     // This subject's own earlier adopt of the name; its id is the way back in.
-                    harness_substrate::SubstrateError::Refused { status: 409, .. } => format!(
+                    // Keyed on the daemon's refusal code, not the status: another 409 is some
+                    // other conflict, and the hint would send the operator after an id that
+                    // does not exist.
+                    harness_substrate::SubstrateError::Refused { status: 409, ref body }
+                        if refusal_code(body).as_deref() == Some("workspace.already-exists") =>
+                    {
+                        format!(
                         "`--substrate-adopt {root_name}` was refused by the substrate daemon at \
                          `{}`: {error}; an earlier run already adopted it - pass the id that run \
                          printed with `--workspace-id` instead",
                         socket.display()
-                    ),
+                    )
+                    }
                     error => format!(
                         "`--substrate-adopt {root_name}` was refused by the substrate daemon at \
                          `{}`: {error}",
@@ -3493,6 +3515,15 @@ fn socket_confined(
     Ok(harness_substrate::ConfinedOperations::new(
         client, &facts, workspace, programs,
     ))
+}
+
+/// The refusal code a substrate error body names at `/error/code`, if it is that document.
+fn refusal_code(body: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .pointer("/error/code")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
 }
 
 /// Add only MCP tools whose local profile and live frozen snapshot agree byte-for-byte.
@@ -4929,6 +4960,36 @@ mod tests {
             );
             assert_eq!(daemon.paths().len(), 2, "nothing after the refusal");
             assert!(notice.is_empty(), "no id was minted to report");
+        }
+    }
+
+    #[test]
+    fn the_earlier_id_hint_is_given_for_workspace_already_exists_and_for_no_other_conflict() {
+        for (body, hinted) in [
+            (r#"{"error":{"code":"workspace.already-exists"}}"#, true),
+            (r#"{"error":{"code":"operation.conflict"}}"#, false),
+            (
+                r#"{"error":{"code":"operation.conflict","message":"workspace.already-exists"}}"#,
+                false,
+            ),
+            ("not a document", false),
+        ] {
+            let daemon = ScriptedDaemon::new(&[(200, MACHINE), (409, body)]);
+            let error = socket_confined(
+                harness_substrate::Client::with(daemon),
+                Path::new("/run/s.sock"),
+                Some("project"),
+                "default",
+                Vec::new(),
+                &mut Vec::new(),
+            )
+            .expect_err("refused");
+            assert!(error.contains(body), "the daemon's words: {error}");
+            assert_eq!(
+                error.contains("pass the id that run printed with `--workspace-id`"),
+                hinted,
+                "{body}: {error}"
+            );
         }
     }
 

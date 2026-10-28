@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T15:08:38Z",
+  "actor": "human:timo",
+  "artifact": "story:daemon-exec-start-adoption",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "B10X_SUBSTRATE_SOCKET=<scratch>/e2e/s.sock B10X_SUBSTRATE_ADOPT=harness cargo test -p b10x-harness-substrate --locked --test live -- --ignored, at unit/socket-adopt f7c02a0, against the substrate 0.14.0 release daemon (SHA256SUMS verified) serving confined exec in a delegated user cgroup: 2 passed, 0 failed; an_adopted_directory_is_reached_by_its_minted_id_and_runs_a_declared_program ok (adopted directory 'harness', write+read back, /bin/echo stdout 'adopted' exit 0). Baseline: the integration branch before the merge has no workspace_adopt, so the claim is new behaviour",
+    "reference": "scratch u2-live-treatment.log (session scratch, not committed)"
+  }
+}

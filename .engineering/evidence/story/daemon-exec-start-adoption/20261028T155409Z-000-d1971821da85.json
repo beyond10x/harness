@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T15:54:09Z",
+  "actor": "human:timo",
+  "artifact": "story:daemon-exec-start-adoption",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "B10X_SUBSTRATE_ADOPT=harness-final cargo test -p b10x-harness-substrate --locked --test live -- --ignored at wave/2026-10-28-substrate-adopt e57897b (after correction 1), against the substrate 0.14.0 release daemon: 2 passed, 0 failed; adopted.txt written into the adopted directory. Correction 2 (3beb86d) changed refusal wording only",
+    "reference": "scratch live-final.log (session scratch, not committed)"
+  }
+}

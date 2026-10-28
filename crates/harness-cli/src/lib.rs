@@ -559,6 +559,16 @@ struct RunOptions {
     /// that pays for a defaulted credential path at all.
     #[arg(skip)]
     credential_from_provider: Option<String>,
+    /// The profile keys that supplied the toolchain (`toolchains`, `toolchain-specs`), when a
+    /// profile did rather than a typed flag.
+    ///
+    /// Not a flag: nothing sets it but [`apply_profiles`]. A refusal of the toolchain names these
+    /// and [`Self::toolchain_profile_source`] instead of `--toolchain`, which was never typed.
+    #[arg(skip)]
+    toolchain_from_profile: Vec<&'static str>,
+    /// The config file those keys were read from.
+    #[arg(skip)]
+    toolchain_profile_source: Option<String>,
     /// The selected provider's alias table, retained for document-declared delegate models.
     #[arg(skip)]
     agent_model_aliases: std::collections::BTreeMap<String, String>,
@@ -1449,6 +1459,7 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
             && !toolchains.is_empty()
         {
             options.toolchain = Some(toolchains.join(","));
+            options.toolchain_from_profile.push("toolchains");
         }
         if options.toolchain_specs.is_empty()
             && let Some(specs) = wanted.toolchain_specs
@@ -1464,6 +1475,12 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
                     }
                 })
                 .collect();
+            if !options.toolchain_specs.is_empty() {
+                options.toolchain_from_profile.push("toolchain-specs");
+            }
+        }
+        if !options.toolchain_from_profile.is_empty() {
+            options.toolchain_profile_source = Some(source.clone());
         }
     }
     if options.approve_up_to.is_none()
@@ -2190,6 +2207,7 @@ fn prepare(
             toolchain: &confined_toolchain,
             process_workspace_access,
             scope: write_scope(&options.write_scope)?,
+            toolchain_origin: toolchain_origin(options),
         },
     )?;
     let tools = with_mcp(
@@ -3022,6 +3040,19 @@ fn programs(declared: &[String], toolchain: &harness_substrate::Toolchain) -> Ve
     programs
 }
 
+/// The profile keys and config file that supplied this run's toolchain, as a refusal names them,
+/// or `None` when no profile did.
+fn toolchain_origin(options: &RunOptions) -> Option<String> {
+    let source = options.toolchain_profile_source.as_ref()?;
+    let keys = options
+        .toolchain_from_profile
+        .iter()
+        .map(|key| format!("`{key}`"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    Some(format!("from the profile's {keys} in `{source}`"))
+}
+
 /// Everything about *where and how* a run may act, as one value.
 ///
 /// Grouped because they are one decision taken together — a socket or an embedded driver, the
@@ -3044,6 +3075,9 @@ struct Confinement<'a> {
     /// Where the run may write. Part of the confinement because it is the same decision: what this
     /// run may do, taken before it starts and not by it.
     scope: harness_catalogue::Scope,
+    /// Where the toolchain came from when a profile supplied it rather than a typed flag, so its
+    /// refusal names the profile key and file instead of a `--toolchain` nobody typed.
+    toolchain_origin: Option<String>,
 }
 
 /// One catalogue, published under whichever surface the run asked for.
@@ -3352,6 +3386,7 @@ fn published(
         toolchain,
         process_workspace_access,
         scope,
+        toolchain_origin,
     } = confinement;
     let publish = |catalogue: harness_catalogue::Catalogue| match surface {
         Surface::Flat => Published::Flat(harness_catalogue::Flat::new(catalogue)),
@@ -3406,7 +3441,12 @@ fn published(
         } else {
             "toolchain tools require `--substrate-embedded` so every command is confined"
         };
-        return Err(format!("`--toolchain` was refused: {boundary}"));
+        // Named by where it came from: a refusal of `--toolchain` sends an operator who typed none
+        // looking for a flag that is not on their command line.
+        return Err(match toolchain_origin {
+            Some(origin) => format!("the toolchain {origin} was refused: {boundary}"),
+            None => format!("`--toolchain` was refused: {boundary}"),
+        });
     }
 
     let Some(socket) = *substrate else {
@@ -3494,6 +3534,16 @@ fn socket_confined(
                         socket.display()
                     )
                     }
+                    // The daemon answered success, so it has most likely written the row; what
+                    // this build refused is its answer. Saying "refused by the daemon" would hide
+                    // that a retry of the same name now meets `workspace.already-exists`.
+                    harness_substrate::SubstrateError::Unreadable { .. } => format!(
+                        "`--substrate-adopt {root_name}`: the substrate daemon at `{}` accepted \
+                         the adopt, but its answer was not usable, so this run acts in nothing: \
+                         {error}. A workspace may now exist for root name `{root_name}`, so \
+                         adopting it again is refused as already adopted (409)",
+                        socket.display()
+                    ),
                     error => format!(
                         "`--substrate-adopt {root_name}` was refused by the substrate daemon at \
                          `{}`: {error}",
@@ -3958,6 +4008,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             toolchain: &confined_toolchain,
             process_workspace_access,
             scope: write_scope(&options.write_scope)?,
+            toolchain_origin: None,
         },
     )?;
     let tools = with_mcp(
@@ -4961,6 +5012,34 @@ mod tests {
             assert_eq!(daemon.paths().len(), 2, "nothing after the refusal");
             assert!(notice.is_empty(), "no id was minted to report");
         }
+    }
+
+    #[test]
+    fn an_adopt_answer_this_build_refuses_is_not_called_the_daemons_refusal() {
+        // A success whose id is outside the published pattern: the daemon wrote its row.
+        let answered = r#"{"result":{"id":"ws_a/..","origin":"adopted","root_name":"project"}}"#;
+        let daemon = ScriptedDaemon::new(&[(200, MACHINE), (200, answered)]);
+        let mut notice = Vec::new();
+        let error = socket_confined(
+            harness_substrate::Client::with(daemon.clone()),
+            Path::new("/run/s.sock"),
+            Some("project"),
+            "default",
+            Vec::new(),
+            &mut notice,
+        )
+        .expect_err("refused");
+        assert!(
+            !error.contains("refused by the substrate daemon"),
+            "{error}"
+        );
+        assert!(error.contains("accepted the adopt"), "{error}");
+        assert!(
+            error.contains("409"),
+            "says a retry meets the conflict: {error}"
+        );
+        assert_eq!(daemon.paths().len(), 2, "nothing acted in it");
+        assert!(notice.is_empty(), "no id is reported as the workspace");
     }
 
     #[test]

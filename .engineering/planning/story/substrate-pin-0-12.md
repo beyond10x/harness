@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:substrate-pin-0-12
 kind: story
-status: active
+status: implemented
 title: Harness embeds the newest Substrate release, and its specification runs on ESS 0.70.0
 summary: substrate-host and substrate-wire move from 0.7.17 to the release after 0.12.0; the wire's additive fields are named; ESS 0.69.2 -> 0.70.0
 tags:
 - adr-0109
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-27T08:58:29Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-27T08:58:29Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-28T14:50:21Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"artifact":1}}}
 ---
 ## Context
 

@@ -2,14 +2,15 @@
 format: aep.planning-md/3
 id: task:gate-token-steps-in-one-action
 kind: task
-status: proposed
+status: rejected
 title: The CI token step is written once
 relations:
 - decomposes: epic:gate-stays-trustworthy
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:33Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "rejected", at: "2026-10-28T14:51:24Z", actor: "human:timo", revision: 5}
 ---
 ## Evidence
 
@@ -28,3 +29,10 @@ No change to what runs.
 
 The token mint and the git URL rewrite are written once in `.github/workflows/`, and both jobs still
 build against the private dependency.
+
+## Rejected, 2026-10-28
+
+The duplicated steps exist because substrate was a private repository. It is public now
+(`gh api repos/beyond10x/substrate --jq .private` answers `false`, 2026-10-28), as is every other
+git source in `Cargo.lock`. The steps are removed rather than written once:
+`task:gate-mints-no-token`, wave substrate-adopt (item D142).

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T14:49:49Z",
+  "actor": "human:timo",
+  "artifact": "dependency-blocker:substrate-daemon-admits-operator-named-workspaces",
+  "kind": "dependency-blocker",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "artifact",
+    "source": "substrate tag 0.7.17 (00fa634cb24eb307946bfe3bbe40142f4b7a469a): CHANGELOG [0.7.17] 'workspace.adopt at POST /v1/workspaces/adopt (ADR 0035)'; crates/substrate-daemon/src/app/routes.rs routes /v1/workspaces/adopt at 0.7.17, 0.13.0 (c2b95f28, harness's pin) and 0.14.0 (0b9d50c6)",
+    "reference": "https://github.com/beyond10x/substrate/blob/0.14.0/adr/0035-an-operators-directory-is-served-after-an-explicit-adopt.md"
+  }
+}

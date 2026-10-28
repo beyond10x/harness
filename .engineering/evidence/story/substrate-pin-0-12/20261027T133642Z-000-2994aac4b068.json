@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-27T13:36:42Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-pin-0-12",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GitHub Actions Gate run 40509014289 (push to main, ef6df52e = tag 0.21.0), conclusion success: cargo xtask gate with b10x-substrate-host/-wire pinned =0.13.0 at c2b95f28; log line 'Harness ESS: 29 total, 29 passed, 0 failed, 0 skipped, 0 unsupported, 0 errors' on ess-conformance 0.70.0 rev 077e4ee1",
+    "reference": "https://github.com/beyond10x/harness/actions/runs/40509014289"
+  }
+}

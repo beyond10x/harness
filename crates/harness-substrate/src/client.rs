@@ -209,6 +209,16 @@ pub(crate) fn operation_identity(nanos: u128, process: u32, sequence: u64) -> St
     format!("op_{nanos}_{process}_{sequence}")
 }
 
+/// Whether `id` is a wire `workspace-id`: `^ws_[A-Za-z0-9]+$` (substrate ADR 0035 decision 2).
+///
+/// Written here because substrate-wire's own check is private. Byte-wise and ASCII-only, so a
+/// non-ASCII letter, a `/`, a `?`, whitespace or a control byte is outside it.
+pub(crate) fn is_workspace_id(id: &str) -> bool {
+    id.strip_prefix("ws_").is_some_and(|rest| {
+        !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    })
+}
+
 /// One stream of one finished exec, as the model will read it.
 struct Output {
     text: String,
@@ -463,7 +473,9 @@ impl Client {
     /// refusal it answers — `workspace.already-exists` (409) when this subject already adopted the
     /// name, `resource.not-found` (404) when there is no such directory or another subject holds
     /// it, `workspace.path-escape` (422) when the entry is not a directory this daemon owns — and
-    /// [`SubstrateError::Unreadable`] when the answer carries no workspace id.
+    /// [`SubstrateError::Unreadable`] when the answer carries no workspace id, an id outside the
+    /// published `^ws_[A-Za-z0-9]+$`, or a row for another root name or an origin other than
+    /// `adopted`.
     pub fn workspace_adopt(&self, root_name: &str) -> Result<String, SubstrateError> {
         if !substrate_wire::is_root_name(root_name) {
             return Err(SubstrateError::Refused {
@@ -492,14 +504,45 @@ impl Client {
             Some(&mutation(&self.operation(), &input)),
         )?;
         let value = Self::decode(status, body)?;
-        value
-            .pointer("/result/id")
-            .or_else(|| value.pointer("/id"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| SubstrateError::Unreadable {
+        let resource = value.get("result").unwrap_or(&value);
+        let Some(id) = resource.get("id").and_then(Value::as_str) else {
+            return Err(SubstrateError::Unreadable {
                 reason: format!("no workspace id in {value}"),
-            })
+            });
+        };
+        // **The id is checked before anything carries it.** It goes verbatim into every later
+        // route's path and into the run's stderr notice, so an answer outside the published
+        // pattern (ADR 0035 decision 2) is not a workspace this client will act in. Quoted with
+        // `{:?}` so a refusal cannot print a line break or a control byte it was handed.
+        if !is_workspace_id(id) {
+            return Err(SubstrateError::Unreadable {
+                reason: format!(
+                    "the adopt answered the workspace id {id:?}, which is outside the published \
+                     pattern `^ws_[A-Za-z0-9]+$`"
+                ),
+            });
+        }
+        // Decision 3: the result is the row for this root name, with `origin: adopted`. Another
+        // name or origin is not the directory that was asked for, and acting in it would write
+        // somewhere the operator did not name.
+        let root = resource.get("root_name").and_then(Value::as_str);
+        if root != Some(root_name) {
+            return Err(SubstrateError::Unreadable {
+                reason: format!(
+                    "the adopt of {root_name:?} answered a workspace for root name {root:?}"
+                ),
+            });
+        }
+        let origin = resource.get("origin").and_then(Value::as_str);
+        if origin != Some("adopted") {
+            return Err(SubstrateError::Unreadable {
+                reason: format!(
+                    "the adopt of {root_name:?} answered a workspace whose origin is {origin:?}, \
+                     not \"adopted\""
+                ),
+            });
+        }
+        Ok(id.to_owned())
     }
 
     /// `POST /v1/execs` then `GET /v1/execs/{id}/output` — run one argv and answer what it did.

@@ -333,11 +333,12 @@ material change. A missing interpreter is a failed gate,
 not a skipped check.
 
 **CI is `.github/workflows/gate.yml`**, and it runs `cargo xtask gate` itself rather than a copied
-step list, so the two cannot drift; a second job builds on the declared `rust-version`. It needs two
-repository secrets, `B10X_BOT_APP_ID` and `B10X_BOT_PRIVATE_KEY`, because the substrate dependency
-is a private repository and `GITHUB_TOKEN` cannot read it; without them the token step fails by name
-and nothing is built. They are provisioned from the atlas checkout —
-`bash ../atlas/scripts/bot-ci-secrets.sh beyond10x/harness` — never by hand.
+step list, so the two cannot drift; a second job builds on the declared `rust-version`. It needs no
+credential: every git dependency in `Cargo.lock` (`ess`, `llm`, `mcp`, `secrets`, `substrate`,
+`tools`) is a public repository, so the default checkout reads them all. Until 2026-10-28 both jobs
+minted a b10x-bot installation token because substrate was private; a token step that reaches
+nothing is a credential handed to a job for no reason, so do not add one back unless a private
+dependency arrives, and then name it here.
 
 **A green local gate does not guarantee a green CI.** The script is the same; the toolchain is not —
 CI installs whatever `stable` is that day, and a newer clippy can fail a commit that passed locally.
@@ -388,7 +389,7 @@ Automated commits and pushes use standalone `b10x-gates bot` and the GitHub App 
 `bot-token.sh` called — were copies of atlas's, left in the tree when this section moved to
 `b10x-gates bot` (`e506af2`, 2026-09-10), and are deleted. Nothing here ran them: not
 `cargo xtask gate` (`crates/harness-xtask/src/main.rs` runs one Python check and no other
-script), not `.github/workflows/gate.yml`, which mints its own installation token. A copy is also a
+script), not `.github/workflows/gate.yml`, which mints no token at all. A copy is also a
 divergence — this tree's `as-bot.sh` had fallen behind atlas's, missing its `GIT_CONFIG_GLOBAL`
 isolation and its refusal to push with `--no-verify`. Atlas and substrate keep their wrappers as
 their admitted delivery path by decision (atlas ADR 0057); harness is enrolled on standalone

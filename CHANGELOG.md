@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - ESS 0.74.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `085f893e`), up from 0.70.0; the generated model and suite are byte-identical.
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` (`c2b95f28`) to `0.14.0` (`0b9d50c6`), the newest release. The change is additive for Harness: the confinement profile's `workspace_access` and `output_retention` and `RunOutput`'s kept-output counts are not used here, and the embedded driver sends what it sent before.
+- The seven `llm-*` crates move from llm tag `0.15.0` (`84ded0f2`) to `0.16.0` (`33ae9001`), the newest release. A streamed Messages turn whose `message_delta.usage` carries `cost` now completes, the cost reaching the event sink as one `usage-extension` warning, where 0.15.0 refused the turn after its answer had streamed (`crates/harness-llm/tests/messages_usage_cost.rs`).
 
 ## [0.21.0] - 2026-10-27
 

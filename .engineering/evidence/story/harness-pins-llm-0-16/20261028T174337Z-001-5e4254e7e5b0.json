@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-28T17:43:37Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-pins-llm-0-16",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-llm --locked --test messages_usage_cost at 71ad8e3 on llm 0.16.0: 3 passed (numeric and object message_delta.usage.cost each complete the turn with one usage-extension warning). Baseline: the takt 0.17.0 trial on harness 0.21.0 / llm 0.15.0 was refused with 'llm 0.15.0 still refuses message_delta.usage.cost' (relayed by b10x-chef-orchestrator)"
+  }
+}

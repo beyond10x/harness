@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T17:43:37Z",
+  "actor": "human:timo",
+  "artifact": "story:daemon-exec-start-adoption",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GitHub Actions Gate run 40724199371 on PR 57 head 81c933f (wave/2026-10-28-substrate-adopt), conclusion success: Gate and MSRV 1.98 green with no token step (checkout uses only the default read token, persist-credentials false); 'Harness ESS: 29 total, 29 passed, 0 failed'",
+    "reference": "https://github.com/beyond10x/harness/actions/runs/40724199371"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-pin-0-14
 kind: story
-status: active
+status: implemented
 title: Harness embeds Substrate 0.14.0, the newest release
 summary: substrate-host and substrate-wire move from 0.13.0 to 0.14.0
 tags:
@@ -16,10 +16,11 @@ scope:
   path: Cargo.lock
 - confidence: cited
   path: crates/harness-substrate/Cargo.toml
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T14:51:06Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-28T14:51:06Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-28T17:43:41Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

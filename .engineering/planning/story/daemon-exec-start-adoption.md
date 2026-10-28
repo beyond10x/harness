@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:daemon-exec-start-adoption
 kind: story
-status: active
+status: implemented
 title: An adopted workspace can run an exec over the daemon path
 relations:
 - derived_from: epic:adoption-follow-ups
@@ -16,10 +16,11 @@ scope:
   path: crates/harness-substrate/tests/conformance.rs
 - confidence: cited
   path: crates/harness-substrate/tests/live.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
 - {from: "proposed", to: "active", at: "2026-10-28T14:50:44Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-28T17:43:41Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":2}}}
 ---
 ## What is missing
 

@@ -71,6 +71,9 @@ undecided) was fixed in the same correction: it is the same line and the same me
 - Full per-step gate at `e57897b`: 15 of 15 steps exit 0, 1144 passed, 0 failed, Harness ESS
   29/29. A run at the release head was stopped at 24G free (b10x-atlas disk request); the
   pull request's Gate is the gate of record for the final head.
+- The first Gate on PR 57 (run 40720846504) failed: `spec/COVERAGE.md` still named llm tag
+  `0.15.0`. Fixed in `81c933f`; the per-step gate there was 15 of 15, 1155 passed, 0 failed, and
+  Gate run 40724199371 passed with no token step. All four units are implemented on that run.
 
 ## Not done
 

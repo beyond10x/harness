@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-pins-llm-0-16
 kind: story
-status: active
+status: implemented
 title: Harness pins llm 0.16.0, the newest release
 summary: The seven llm crates move from 0.15.0 to 0.16.0, which carries a streamed Messages usage cost as a warning
 tags:
@@ -20,10 +20,11 @@ scope:
   path: STATUS.md
 - confidence: cited
   path: crates/harness-llm/tests/messages_usage_cost.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T15:49:46Z", actor: "human:timo", revision: 7}
 - {from: "proposed", to: "active", at: "2026-10-28T15:49:46Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-28T17:43:41Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Context
 

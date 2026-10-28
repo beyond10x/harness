@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: task:gate-mints-no-token
 kind: task
-status: active
+status: implemented
 title: The CI gate mints no token, because every dependency is public
 tags:
 - d142
 relations:
 - decomposes: epic:gate-stays-trustworthy
 - serves: vision:b10x-owns-its-loop
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T14:51:24Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-28T14:51:24Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-28T17:43:41Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"verification":1}}}
 ---
 ## Evidence
 

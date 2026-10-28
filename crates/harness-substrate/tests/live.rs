@@ -21,6 +21,58 @@ fn socket() -> Option<String> {
 }
 
 #[test]
+#[ignore = "story:daemon-exec-start-adoption: needs a running substrate daemon and a directory \
+            under its workspace root; set B10X_SUBSTRATE_SOCKET and B10X_SUBSTRATE_ADOPT"]
+fn an_adopted_directory_is_reached_by_its_minted_id_and_runs_a_declared_program() {
+    let Some(socket) = socket() else {
+        panic!("set B10X_SUBSTRATE_SOCKET to the daemon's socket");
+    };
+    let Some(root_name) = std::env::var("B10X_SUBSTRATE_ADOPT")
+        .ok()
+        .filter(|value| !value.is_empty())
+    else {
+        panic!("set B10X_SUBSTRATE_ADOPT to a directory name under the daemon's workspace root");
+    };
+    assert!(
+        !root_name.starts_with("ws_"),
+        "an adopted directory is named without `ws_`; the daemon mints that id"
+    );
+
+    let client = Client::at(&socket);
+    let facts = client.machine().expect("the daemon answers");
+    assert!(
+        facts.holds_workspaces(),
+        "this daemon serves no guarded workspace, so there is nothing to exercise"
+    );
+    let workspace = client
+        .workspace_adopt(&root_name)
+        .expect("the directory is adopted");
+    assert!(workspace.starts_with("ws_"), "a minted id: {workspace}");
+    assert_ne!(workspace, root_name, "addressed by its id, not its name");
+
+    let tools = ConfinedOperations::new(client, &facts, &workspace, vec!["/bin/echo".to_owned()]);
+    tools
+        .file_write("adopted.txt", "adopted\n")
+        .expect("the write lands");
+    let read = Client::at(&socket)
+        .file_read(&workspace, "adopted.txt")
+        .expect("reads back");
+    assert_eq!(read, "adopted\n");
+
+    if facts.confines_execution() {
+        let result = tools
+            .run(&["/bin/echo".to_owned(), "adopted".to_owned()])
+            .expect("the confined process runs in the adopted workspace");
+        assert_eq!(result["stdout"], serde_json::json!("adopted\n"), "{result}");
+        assert_eq!(
+            result["exit"]["exit"]["code"],
+            serde_json::json!(0),
+            "{result}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "needs a running substrate daemon; set B10X_SUBSTRATE_SOCKET"]
 fn a_confined_workspace_takes_a_write_reads_it_back_and_runs_a_declared_program() {
     let Some(socket) = socket() else {

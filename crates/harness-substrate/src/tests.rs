@@ -1025,6 +1025,115 @@ fn every_mutating_route_posts_a_fresh_operation_id_beside_its_input() {
     assert_ne!(ops[0].2, ops[1].2, "one id per mutation, never reused");
 }
 
+// --- workspace.adopt (substrate ADR 0035) -------------------------------------------------------
+
+/// The workspace resource a 0.19.0 daemon answers an adopt with: a minted id, not the root name.
+const ADOPTED: &str = r#"{"api_version":"1","request_id":"req_1","result":{"id":"ws_minted7","state":"ready","origin":"adopted","root_name":"project","labels":{}}}"#;
+
+#[test]
+fn an_adopt_posts_the_root_name_under_a_fresh_operation_and_answers_the_minted_id() {
+    let script = Scripted::new(vec![(200, ADOPTED), (200, ADOPTED)]);
+    let client = Client::with(script.clone());
+    let id = client.workspace_adopt("project").expect("adopted");
+    assert_eq!(id, "ws_minted7", "the minted id, never the root name");
+    client.workspace_adopt("project").expect("adopted again");
+
+    let seen = script.seen.lock().expect("not poisoned");
+    assert_eq!(seen.len(), 2, "one request per adopt: {seen:?}");
+    let (method, path, body) = &seen[0];
+    assert_eq!(method, "POST");
+    assert_eq!(path, "/v1/workspaces/adopt");
+    let body = body.as_ref().expect("a body");
+    assert_eq!(body.as_object().expect("an object").len(), 2, "{body}");
+    assert!(
+        is_operation_id(body["op"].as_str().expect("an op")),
+        "{body}"
+    );
+    assert_eq!(
+        body["input"],
+        json!({"root_name": "project", "labels": {}}),
+        "exactly the closed input schema: no lease, no storage limit"
+    );
+    let second = seen[1].2.as_ref().expect("a body");
+    assert_ne!(body["op"], second["op"], "a fresh operation id per adopt");
+}
+
+#[test]
+fn a_root_name_outside_substrates_set_is_refused_before_anything_is_sent() {
+    let long = "a".repeat(substrate_wire::MAX_ROOT_NAME_BYTES + 1);
+    for name in [
+        "",
+        "-leading",
+        "a/b",
+        ".",
+        "..",
+        ".hidden",
+        "café",
+        "with space",
+        long.as_str(),
+    ] {
+        let script = Scripted::new(vec![(200, ADOPTED)]);
+        let client = Client::with(script.clone());
+        match client.workspace_adopt(name) {
+            Err(SubstrateError::Refused { status: 0, body }) => {
+                assert!(body.contains("root name"), "names the rule: {body}");
+                assert!(body.contains("nothing was sent"), "{body}");
+            }
+            other => panic!("{name:?} answered {other:?}"),
+        }
+        assert!(
+            script.seen.lock().expect("not poisoned").is_empty(),
+            "{name:?} reached the daemon"
+        );
+    }
+}
+
+#[test]
+fn an_adopt_the_daemon_refuses_comes_back_with_its_status_and_its_body_unchanged() {
+    for (status, body) in [
+        (
+            409,
+            r#"{"api_version":"1","request_id":"req_2","error":{"code":"workspace.already-exists","message":"a workspace already holds root name `project`"}}"#,
+        ),
+        (
+            404,
+            r#"{"api_version":"1","request_id":"req_3","error":{"code":"resource.not-found","message":"not found"}}"#,
+        ),
+        (
+            422,
+            r#"{"api_version":"1","request_id":"req_4","error":{"code":"workspace.path-escape","address":"path"}}"#,
+        ),
+        (
+            507,
+            r#"{"api_version":"1","request_id":"req_5","error":{"code":"workspace.capacity"}}"#,
+        ),
+    ] {
+        let client = Client::with(Scripted::new(vec![(status, body)]));
+        match client.workspace_adopt("project") {
+            Err(SubstrateError::Refused {
+                status: answered,
+                body: said,
+            }) => {
+                assert_eq!(answered, status);
+                assert_eq!(said, body, "the daemon's words, unchanged");
+            }
+            other => panic!("{status} answered {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn an_adopt_answered_without_a_workspace_id_is_unreadable_rather_than_a_guess() {
+    let client = Client::with(Scripted::new(vec![(
+        200,
+        r#"{"result":{"origin":"adopted","root_name":"project"}}"#,
+    )]));
+    assert!(matches!(
+        client.workspace_adopt("project"),
+        Err(SubstrateError::Unreadable { .. })
+    ));
+}
+
 #[test]
 fn an_exec_over_the_socket_answers_what_the_program_said_and_how_it_ended() {
     // Read off a live daemon on 2026-08-29: the start answers the exec resource under `result`

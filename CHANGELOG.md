@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `--substrate-adopt <ROOT_NAME>` on `run`, `chat` and `tools`: the `--substrate` daemon adopts the directory of that name under its workspace root (substrate ADR 0035, `POST /v1/workspaces/adopt`, through the new `Client::workspace_adopt`) and the run acts in the `ws_…` id it mints, named in one stderr line for a later `--workspace-id`. Requires `--substrate`; refused beside `--substrate-embedded` or a given `--workspace-id`; a refused adopt refuses the run by name, and a `workspace.already-exists` refusal says to pass the earlier id. CLI contract cut as `2026-10-28`.
+
 ### Changed
 
 - ESS 0.74.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `085f893e`), up from 0.70.0; the generated model and suite are byte-identical.

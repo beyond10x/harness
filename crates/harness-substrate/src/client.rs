@@ -447,6 +447,61 @@ impl Client {
             })
     }
 
+    /// `POST /v1/workspaces/adopt` — serve a directory the operator placed under the daemon's
+    /// workspace root, and answer the id the daemon minted for it (substrate ADR 0035).
+    ///
+    /// **The answer is a `ws_…` id, never the root name.** Every later route — files, `exec.start`
+    /// — addresses the workspace by that id; the root name only says which directory to adopt.
+    ///
+    /// A root name outside substrate's set is refused here, before anything is sent, with
+    /// `status: 0` as [`Self::admitted_snapshot`] refuses: the daemon would refuse it at
+    /// `root_name`, and a request that cannot succeed only spends one of its ledger entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SubstrateError::Refused`] with the daemon's status and body unchanged for every
+    /// refusal it answers — `workspace.already-exists` (409) when this subject already adopted the
+    /// name, `resource.not-found` (404) when there is no such directory or another subject holds
+    /// it, `workspace.path-escape` (422) when the entry is not a directory this daemon owns — and
+    /// [`SubstrateError::Unreadable`] when the answer carries no workspace id.
+    pub fn workspace_adopt(&self, root_name: &str) -> Result<String, SubstrateError> {
+        if !substrate_wire::is_root_name(root_name) {
+            return Err(SubstrateError::Refused {
+                status: 0,
+                body: format!(
+                    "{root_name:?} is not a substrate root name: one path component of ASCII \
+                     alphanumerics, `_` and `-`, 1 to {} bytes, not beginning with `-` - so \
+                     nothing was sent",
+                    substrate_wire::MAX_ROOT_NAME_BYTES
+                ),
+            });
+        }
+        // Serialised by the wire crate's own type, as an exec input is: which members the closed
+        // input schema admits is substrate's to say. `labels` is required and empty for the reason
+        // `workspace_create` gives.
+        let input = serde_json::to_value(substrate_wire::WorkspaceAdoptInput {
+            root_name: root_name.into(),
+            labels: substrate_wire::Labels::new(),
+        })
+        .map_err(|error| SubstrateError::Unreadable {
+            reason: error.to_string(),
+        })?;
+        let (status, body) = self.transport.request(
+            "POST",
+            "/v1/workspaces/adopt",
+            Some(&mutation(&self.operation(), &input)),
+        )?;
+        let value = Self::decode(status, body)?;
+        value
+            .pointer("/result/id")
+            .or_else(|| value.pointer("/id"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| SubstrateError::Unreadable {
+                reason: format!("no workspace id in {value}"),
+            })
+    }
+
     /// `POST /v1/execs` then `GET /v1/execs/{id}/output` — run one argv and answer what it did.
     ///
     /// **An argv, never a command line.** The wire takes a list and substrate's own `exec.start`

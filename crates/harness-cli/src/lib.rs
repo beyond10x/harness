@@ -659,6 +659,20 @@ struct RunOptions {
     /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
+    /// Adopt this directory under the socket daemon's workspace root, and act in it.
+    ///
+    /// The name is one directory under the root the daemon serves (substrate's root-name set:
+    /// ASCII alphanumerics, `_` and `-`, not beginning with `-`), not a path on this host. The
+    /// daemon mints a workspace id for it, one stderr line names that id, and a later run passes it
+    /// with `--workspace-id` instead — adopting the same name twice is refused, and this binary
+    /// cannot list workspaces to find the earlier id. A refused adopt refuses the run.
+    #[arg(
+        long,
+        value_name = "ROOT_NAME",
+        requires = "substrate",
+        conflicts_with_all = ["substrate_embedded", "workspace_id"]
+    )]
+    substrate_adopt: Option<String>,
     /// How this native loop was launched: directly, or as a metaharness comparison arm.
     ///
     /// This is context, not permission. Metaharness sets it explicitly when it drives this binary;
@@ -669,7 +683,7 @@ struct RunOptions {
     ///
     /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
     /// identity there, and a caller-supplied name would have to satisfy a rule only the driver
-    /// knows.
+    /// knows. Under `--substrate-adopt` the daemon mints it, so the two are not given together.
     #[arg(long, default_value = "default")]
     workspace_id: String,
     /// A delegated cgroup subtree, so the embedded driver may confine a process.
@@ -1104,11 +1118,25 @@ struct ToolsOptions {
     /// and no scratch copy of the tree.
     #[arg(long, conflicts_with = "substrate")]
     substrate_embedded: bool,
+    /// Adopt this directory under the socket daemon's workspace root, and act in it.
+    ///
+    /// The name is one directory under the root the daemon serves (substrate's root-name set:
+    /// ASCII alphanumerics, `_` and `-`, not beginning with `-`), not a path on this host. The
+    /// daemon mints a workspace id for it, one stderr line names that id, and a later run passes it
+    /// with `--workspace-id` instead — adopting the same name twice is refused, and this binary
+    /// cannot list workspaces to find the earlier id. A refused adopt refuses the run.
+    #[arg(
+        long,
+        value_name = "ROOT_NAME",
+        requires = "substrate",
+        conflicts_with_all = ["substrate_embedded", "workspace_id"]
+    )]
+    substrate_adopt: Option<String>,
     /// Which confined workspace the write and execute tools act in.
     ///
     /// Ignored under `--substrate-embedded`, which opens one and names it: the driver mints the
     /// identity there, and a caller-supplied name would have to satisfy a rule only the driver
-    /// knows.
+    /// knows. Under `--substrate-adopt` the daemon mints it, so the two are not given together.
     #[arg(long, default_value = "default")]
     workspace_id: String,
     /// A delegated cgroup subtree, so the embedded driver may confine a process.
@@ -2142,6 +2170,7 @@ fn prepare(
             embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
+            adopt: options.substrate_adopt.as_deref(),
             programs: &confined_programs,
             toolchain: &confined_toolchain,
             process_workspace_access,
@@ -2991,6 +3020,9 @@ struct Confinement<'a> {
     embedded: bool,
     cgroup_root: Option<&'a std::path::Path>,
     workspace_id: &'a str,
+    /// The directory `--substrate-adopt` names under the socket daemon's root, adopted in place
+    /// of `workspace_id`.
+    adopt: Option<&'a str>,
     programs: &'a [String],
     toolchain: &'a harness_substrate::Toolchain,
     process_workspace_access: harness_substrate::ProcessWorkspaceAccess,
@@ -3300,6 +3332,7 @@ fn published(
         embedded,
         cgroup_root,
         workspace_id,
+        adopt,
         programs,
         toolchain,
         process_workspace_access,
@@ -3371,24 +3404,14 @@ fn published(
             withheld: harness_substrate::Facts::none().withheld(programs, false),
         });
     };
-    let client = harness_substrate::Client::at(socket);
-    // `machine()` and not `probe()`. `probe`'s "unreachable is not an error" is for a harness
-    // nobody pointed at a socket; here the operator did, so a daemon that is not there is the
-    // answer to a question that was asked and not the absence of one.
-    let facts = client.machine().map_err(|error| {
-        format!(
-            "no usable substrate daemon at `{}`: {error}",
-            socket.display()
-        )
-    })?;
-    // The client that probed is the client that serves: it holds the snapshot this document
-    // stated, so what was published and what an exec is admitted against are one reading.
-    let confined = harness_substrate::ConfinedOperations::new(
-        client,
-        &facts,
-        *workspace_id,
+    let confined = socket_confined(
+        harness_substrate::Client::at(socket),
+        socket,
+        *adopt,
+        workspace_id,
         programs.to_vec(),
-    )
+        &mut io::stderr(),
+    )?
     .with_process_workspace_access(process_workspace_access.clone());
     let withheld = confined.withheld().to_vec();
     Ok(Publication {
@@ -3398,6 +3421,78 @@ fn published(
         ),
         withheld,
     })
+}
+
+/// The confined workspace a socket-backed run acts in: `--workspace-id`'s, or the one the daemon
+/// mints when `--substrate-adopt` names a directory.
+///
+/// **One client throughout.** It probes the machine, adopts and then serves the tools, so the
+/// snapshot an exec is admitted against is the one publication read, and the adopt reaches the
+/// daemon that was just asked what it can confine.
+///
+/// The minted id goes to `notice` (stderr) in one line, because nothing else in this binary can
+/// recover it: a second adopt of the same name is refused `workspace.already-exists`, and there
+/// is no listing to read it back from.
+///
+/// # Errors
+///
+/// Names the daemon that could not be probed, or the adopt and the daemon's own refusal of it. A
+/// refused adopt refuses the run: a read-only fallback would report work as done that it never did.
+fn socket_confined(
+    client: harness_substrate::Client,
+    socket: &Path,
+    adopt: Option<&str>,
+    workspace_id: &str,
+    programs: Vec<String>,
+    notice: &mut dyn io::Write,
+) -> Result<harness_substrate::ConfinedOperations, String> {
+    // `machine()` and not `probe()`. `probe`'s "unreachable is not an error" is for a harness
+    // nobody pointed at a socket; here the operator did, so a daemon that is not there is the
+    // answer to a question that was asked and not the absence of one.
+    let facts = client.machine().map_err(|error| {
+        format!(
+            "no usable substrate daemon at `{}`: {error}",
+            socket.display()
+        )
+    })?;
+    let workspace = match adopt {
+        None => workspace_id.to_owned(),
+        Some(root_name) => {
+            let minted = client
+                .workspace_adopt(root_name)
+                .map_err(|error| match error {
+                    // Status 0 is the client's own refusal: no request was made.
+                    harness_substrate::SubstrateError::Refused { status: 0, body } => {
+                        format!("`--substrate-adopt {root_name}` was refused: {body}")
+                    }
+                    // This subject's own earlier adopt of the name; its id is the way back in.
+                    harness_substrate::SubstrateError::Refused { status: 409, .. } => format!(
+                        "`--substrate-adopt {root_name}` was refused by the substrate daemon at \
+                         `{}`: {error}; an earlier run already adopted it - pass the id that run \
+                         printed with `--workspace-id` instead",
+                        socket.display()
+                    ),
+                    error => format!(
+                        "`--substrate-adopt {root_name}` was refused by the substrate daemon at \
+                         `{}`: {error}",
+                        socket.display()
+                    ),
+                })?;
+            // A notice that cannot be written changes nothing about the run; the id is still the
+            // one it acts in.
+            let _ = writeln!(
+                notice,
+                "substrate adopted `{root_name}` as workspace {minted}; a later run reaches it \
+                 with --workspace-id {minted}"
+            );
+            minted
+        }
+    };
+    // The client that probed is the client that serves: it holds the snapshot this document
+    // stated, so what was published and what an exec is admitted against are one reading.
+    Ok(harness_substrate::ConfinedOperations::new(
+        client, &facts, workspace, programs,
+    ))
 }
 
 /// Add only MCP tools whose local profile and live frozen snapshot agree byte-for-byte.
@@ -3827,6 +3922,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             embedded: options.substrate_embedded,
             cgroup_root: options.cgroup_root.as_deref(),
             workspace_id: &options.workspace_id,
+            adopt: options.substrate_adopt.as_deref(),
             programs: &confined_programs,
             toolchain: &confined_toolchain,
             process_workspace_access,
@@ -4615,6 +4711,241 @@ mod tests {
             None,
             "the read view alone is not where this run works"
         );
+        // Adopting over the socket does not change that: the daemon's root is not knowable here.
+        assert_eq!(
+            recorded_cwd(
+                &options(&[
+                    "--substrate",
+                    "/run/substrate.sock",
+                    "--substrate-adopt",
+                    "project"
+                ]),
+                root
+            ),
+            None
+        );
+    }
+
+    // --- `--substrate-adopt` (substrate ADR 0035) ---------------------------------------------
+
+    /// Every subcommand that takes `--substrate`, as the argv that reaches it.
+    fn substrate_commands() -> [Vec<&'static str>; 3] {
+        let run = vec![
+            "b10x-harness",
+            "run",
+            "--base-url",
+            "https://gw.example/v1",
+            "--model",
+            "m",
+            "--input",
+            "hi",
+        ];
+        let chat = vec![
+            "b10x-harness",
+            "chat",
+            "--base-url",
+            "https://gw.example/v1",
+            "--model",
+            "m",
+        ];
+        [run, chat, vec!["b10x-harness", "tools"]]
+    }
+
+    #[test]
+    fn substrate_adopt_needs_a_socket_and_refuses_the_embedded_driver_and_a_named_workspace() {
+        for base in substrate_commands() {
+            let with = |extra: &[&str]| parse(&[base.clone(), extra.to_vec()].concat());
+            let adopted = with(&["--substrate", "/run/s.sock", "--substrate-adopt", "project"])
+                .unwrap_or_else(|error| panic!("{base:?}: {error}"));
+            let adopt = match &adopted.command {
+                Command::Run(command) => command.options.substrate_adopt.clone(),
+                Command::Chat(options) => options.substrate_adopt.clone(),
+                Command::Tools(options) => options.substrate_adopt.clone(),
+                _ => panic!("{base:?} parsed to another subcommand"),
+            };
+            assert_eq!(adopt.as_deref(), Some("project"), "{base:?}");
+
+            let refused = |extra: &[&str], names: &str| {
+                let error = with(extra).expect_err(&format!("{base:?} {extra:?} parsed"));
+                let said = error.to_string();
+                assert!(said.contains(names), "{base:?} {extra:?}: {said}");
+            };
+            refused(&["--substrate-adopt", "project"], "--substrate");
+            refused(
+                &["--substrate-embedded", "--substrate-adopt", "project"],
+                "--substrate-embedded",
+            );
+            refused(
+                &[
+                    "--substrate",
+                    "/run/s.sock",
+                    "--workspace-id",
+                    "ws_earlier",
+                    "--substrate-adopt",
+                    "project",
+                ],
+                "--workspace-id",
+            );
+        }
+    }
+
+    /// A daemon answered from a script, recording each method and path it was asked.
+    #[derive(Clone)]
+    struct ScriptedDaemon {
+        seen: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+        answers: std::sync::Arc<std::sync::Mutex<Vec<(u16, String)>>>,
+    }
+
+    impl ScriptedDaemon {
+        fn new(answers: &[(u16, &str)]) -> Self {
+            Self {
+                seen: std::sync::Arc::default(),
+                answers: std::sync::Arc::new(std::sync::Mutex::new(
+                    answers
+                        .iter()
+                        .map(|(status, body)| (*status, (*body).to_owned()))
+                        .collect(),
+                )),
+            }
+        }
+
+        fn paths(&self) -> Vec<String> {
+            self.seen
+                .lock()
+                .expect("not poisoned")
+                .iter()
+                .map(|(method, path)| format!("{method} {path}"))
+                .collect()
+        }
+    }
+
+    impl harness_substrate::Transport for ScriptedDaemon {
+        fn request(
+            &self,
+            method: &str,
+            path: &str,
+            _body: Option<&serde_json::Value>,
+        ) -> Result<(u16, String), harness_substrate::SubstrateError> {
+            self.seen
+                .lock()
+                .expect("not poisoned")
+                .push((method.to_owned(), path.to_owned()));
+            let mut answers = self.answers.lock().expect("not poisoned");
+            assert!(!answers.is_empty(), "asked {method} {path} past the script");
+            Ok(answers.remove(0))
+        }
+    }
+
+    const MACHINE: &str = r#"{"result":{"driver":"host","driver_version":"0.14.0","facts":{"workspace.guarded-io":true,"workspace.openat2-beneath":true,"workspace.atomic-replace":true}}}"#;
+    const ADOPTED: &str = r#"{"result":{"id":"ws_minted7","state":"ready","origin":"adopted","root_name":"project","labels":{}}}"#;
+    const FILE: &str = r#"{"result":{"content":{"encoding":"base64","data":"aGk="},"eof":true}}"#;
+
+    #[test]
+    fn the_socket_path_adopts_the_named_directory_and_acts_in_the_minted_id() {
+        let daemon = ScriptedDaemon::new(&[(200, MACHINE), (200, ADOPTED), (200, FILE)]);
+        let mut notice = Vec::new();
+        let confined = socket_confined(
+            harness_substrate::Client::with(daemon.clone()),
+            Path::new("/run/s.sock"),
+            Some("project"),
+            "default",
+            Vec::new(),
+            &mut notice,
+        )
+        .expect("adopted");
+        harness_catalogue::Operations::file_read(
+            &confined,
+            "a.txt",
+            harness_catalogue::ReadWindow::default(),
+        )
+        .expect("read");
+
+        let paths = daemon.paths();
+        assert_eq!(paths[0], "GET /v1/machine", "{paths:?}");
+        assert_eq!(paths[1], "POST /v1/workspaces/adopt", "{paths:?}");
+        assert!(
+            paths[2].starts_with("GET /v1/workspaces/ws_minted7/files/a.txt?"),
+            "the minted id, never the root name or `--workspace-id`'s default: {paths:?}"
+        );
+        assert_eq!(paths.len(), 3, "{paths:?}");
+
+        let notice = String::from_utf8(notice).expect("text");
+        assert_eq!(notice.lines().count(), 1, "one stderr line: {notice:?}");
+        assert!(notice.contains("`project`"), "{notice}");
+        assert!(notice.contains("--workspace-id ws_minted7"), "{notice}");
+    }
+
+    #[test]
+    fn the_socket_path_without_an_adopt_acts_in_the_named_workspace_and_adopts_nothing() {
+        let daemon = ScriptedDaemon::new(&[(200, MACHINE), (200, FILE)]);
+        let mut notice = Vec::new();
+        let confined = socket_confined(
+            harness_substrate::Client::with(daemon.clone()),
+            Path::new("/run/s.sock"),
+            None,
+            "ws_earlier",
+            Vec::new(),
+            &mut notice,
+        )
+        .expect("opened");
+        harness_catalogue::Operations::file_read(
+            &confined,
+            "a.txt",
+            harness_catalogue::ReadWindow::default(),
+        )
+        .expect("read");
+        let paths = daemon.paths();
+        assert_eq!(paths.len(), 2, "{paths:?}");
+        assert!(
+            paths[1].starts_with("GET /v1/workspaces/ws_earlier/files/a.txt?"),
+            "{paths:?}"
+        );
+        assert!(notice.is_empty());
+    }
+
+    #[test]
+    fn an_adopt_the_daemon_refuses_refuses_the_run_by_name_and_reads_nothing() {
+        let already = r#"{"error":{"code":"workspace.already-exists"}}"#;
+        let absent = r#"{"error":{"code":"resource.not-found"}}"#;
+        for (status, body) in [(409, already), (404, absent)] {
+            let daemon = ScriptedDaemon::new(&[(200, MACHINE), (status, body)]);
+            let mut notice = Vec::new();
+            let error = socket_confined(
+                harness_substrate::Client::with(daemon.clone()),
+                Path::new("/run/s.sock"),
+                Some("project"),
+                "default",
+                Vec::new(),
+                &mut notice,
+            )
+            .expect_err("refused");
+            assert!(error.contains("`--substrate-adopt project`"), "{error}");
+            assert!(error.contains(&status.to_string()), "{error}");
+            assert!(error.contains(body), "the daemon's words: {error}");
+            assert_eq!(
+                error.contains("--workspace-id"),
+                status == 409,
+                "only an earlier adopt is recovered by its id: {error}"
+            );
+            assert_eq!(daemon.paths().len(), 2, "nothing after the refusal");
+            assert!(notice.is_empty(), "no id was minted to report");
+        }
+    }
+
+    #[test]
+    fn a_root_name_outside_substrates_set_refuses_the_run_before_the_daemon_is_asked_to_adopt() {
+        let daemon = ScriptedDaemon::new(&[(200, MACHINE)]);
+        let error = socket_confined(
+            harness_substrate::Client::with(daemon.clone()),
+            Path::new("/run/s.sock"),
+            Some("../escape"),
+            "default",
+            Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect_err("refused");
+        assert!(error.contains("root name"), "{error}");
+        assert_eq!(daemon.paths(), ["GET /v1/machine"]);
     }
 
     #[cfg(unix)]

@@ -525,8 +525,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-host"
-version = "0.13.0"
-source = "git+https://github.com/beyond10x/substrate?rev=c2b95f2882ec1e425459b23ed9e48dae121ae6d3#c2b95f2882ec1e425459b23ed9e48dae121ae6d3"
+version = "0.14.0"
+source = "git+https://github.com/beyond10x/substrate?rev=0b9d50c6105cacc7f959eb41d5e65f252084a282#0b9d50c6105cacc7f959eb41d5e65f252084a282"
 dependencies = [
  "async-trait",
  "b10x-substrate-wire",
@@ -560,8 +560,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-wire"
-version = "0.13.0"
-source = "git+https://github.com/beyond10x/substrate?rev=c2b95f2882ec1e425459b23ed9e48dae121ae6d3#c2b95f2882ec1e425459b23ed9e48dae121ae6d3"
+version = "0.14.0"
+source = "git+https://github.com/beyond10x/substrate?rev=0b9d50c6105cacc7f959eb41d5e65f252084a282#0b9d50c6105cacc7f959eb41d5e65f252084a282"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4589,7 +4589,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

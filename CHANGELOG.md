@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-28
+
 ### Added
 
 - `--substrate-adopt <ROOT_NAME>` on `run`, `chat` and `tools`: the `--substrate` daemon adopts the directory of that name under its workspace root (substrate ADR 0035, `POST /v1/workspaces/adopt`, through the new `Client::workspace_adopt`) and the run acts in the `ws_…` id it mints, named in one stderr line for a later `--workspace-id`. Requires `--substrate`; refused beside `--substrate-embedded` or a given `--workspace-id`; a refused adopt refuses the run by name, and a `workspace.already-exists` refusal says to pass the earlier id. CLI contract cut as `2026-10-28`.
@@ -16,6 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - ESS 0.74.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `085f893e`), up from 0.70.0; the generated model and suite are byte-identical.
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` (`c2b95f28`) to `0.14.0` (`0b9d50c6`), the newest release. The change is additive for Harness: the confinement profile's `workspace_access` and `output_retention` and `RunOutput`'s kept-output counts are not used here, and the embedded driver sends what it sent before.
 - The seven `llm-*` crates move from llm tag `0.15.0` (`84ded0f2`) to `0.16.0` (`33ae9001`), the newest release. A streamed Messages turn whose `message_delta.usage` carries `cost` now completes, the cost reaching the event sink as one `usage-extension` warning, where 0.15.0 refused the turn after its answer had streamed (`crates/harness-llm/tests/messages_usage_cost.rs`).
+
+### Fixed
+
+- A profile with `write = true` no longer replaces a typed `--substrate` (with or without `--substrate-adopt`) by the embedded driver: the socket the operator named is the one the run acts through, and the profile's write scope and programs apply to it as the same values typed would. A toolchain the profile supplies is refused under a socket by its profile key and config file, not as a `--toolchain` nobody typed.
 
 ## [0.21.0] - 2026-10-27
 

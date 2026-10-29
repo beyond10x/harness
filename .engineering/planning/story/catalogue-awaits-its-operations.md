@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:catalogue-awaits-its-operations
 kind: story
-status: draft
+status: archived
 title: The catalogue's Operations are awaited, and synchronous tool calls leave the runtime worker
 relations:
 - decomposes: epic:async-native-loop
@@ -26,7 +26,9 @@ scope:
   path: crates/harness-catalogue/src/verbs.rs
 - confidence: cited
   path: crates/harness-substrate/src/tools.rs
-revision: 3
+revision: 4
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loop-runs-as-a-future
 kind: story
-status: draft
+status: archived
 title: The loop is a future, and run and run_in are its blocking facade
 relations:
 - decomposes: epic:async-native-loop
@@ -20,7 +20,9 @@ scope:
   path: crates/harness-loop/src/lib.rs
 - confidence: cited
   path: crates/harness-loop/src/tests.rs
-revision: 7
+revision: 8
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
 ---
 ## Outcome
 

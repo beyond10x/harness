@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:blocking-facade-keeps-sync-callers
 kind: story
-status: draft
+status: archived
 title: The asynchronous ports take the plain names, the synchronous duplicates go, and 0.23.0 says so
 relations:
 - decomposes: epic:async-native-loop
@@ -46,7 +46,9 @@ scope:
   path: crates/harness-substrate/src/embedded.rs
 - confidence: cited
   path: crates/harness-wire/src/port.rs
-revision: 5
+revision: 6
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":4}}}
 ---
 ## Outcome
 

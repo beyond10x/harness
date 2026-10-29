@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:mcp-and-substrate-await-their-drivers
 kind: story
-status: draft
+status: archived
 title: The MCP tool port and the embedded Substrate backend own no runtime
 relations:
 - decomposes: epic:async-native-loop
@@ -17,7 +17,9 @@ scope:
   path: crates/harness-substrate/src/tools.rs
 - confidence: cited
   path: crates/harness-substrate/tests/conformance.rs
-revision: 6
+revision: 7
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

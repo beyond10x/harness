@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-llm-awaits-the-model
 kind: story
-status: draft
+status: archived
 title: harness-llm awaits the llm model and builds no runtime
 relations:
 - decomposes: epic:async-native-loop
@@ -10,7 +10,9 @@ relations:
 scope:
 - confidence: cited
   path: crates/harness-llm/src/lib.rs
-revision: 6
+revision: 7
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

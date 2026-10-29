@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-model-and-tool-ports
 kind: story
-status: draft
+status: archived
 title: Asynchronous model, tool and stream ports exist beside the synchronous ones
 relations:
 - decomposes: epic:async-native-loop
@@ -21,7 +21,9 @@ scope:
   path: crates/harness-wire/src/lib.rs
 - confidence: cited
   path: crates/harness-wire/src/port.rs
-revision: 5
+revision: 6
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

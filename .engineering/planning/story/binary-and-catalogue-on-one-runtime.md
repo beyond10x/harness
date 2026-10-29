@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:binary-and-catalogue-on-one-runtime
 kind: story
-status: draft
+status: archived
 title: Binary, app server and conformance target await the loop on one runtime per process
 relations:
 - decomposes: epic:async-native-loop
@@ -39,7 +39,9 @@ scope:
   path: crates/harness-conformance/src/boundary.rs
 - confidence: inferred
   path: crates/harness-xtask/src/main.rs
-revision: 5
+revision: 6
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-29T03:13:27Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":3}}}
 ---
 ## Outcome
 

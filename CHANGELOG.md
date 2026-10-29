@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `harness_loop::LoopTaskError`: what a `LoopTask` future resolves to when it does not carry the command's answer: the builder's failure, a panic on the task's thread (message included), or a thread that is gone. The loop's own `LoopError` is part of the answer, in `Ran` and `RanIn`.
 - `harness_loop::Ran`: the answer of `LoopTask::run` and `LoopTask::resume_approval`, the run's result beside the sink.
 
+### Changed
+
+- ESS 0.76.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `d5c00e9c`), up from 0.75.0; the generated model and suite are byte-identical.
+
 ## [0.22.0] - 2026-10-28
 
 ### Added

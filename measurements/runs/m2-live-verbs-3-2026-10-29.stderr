@@ -1,0 +1,3 @@
+no terminal to ask; calls above the ceiling will be refused — pass --yes or --approve-up-to
+error: model wire refused: Protocol: model output contains a duplicate call or unpublished tool
+EXIT=1

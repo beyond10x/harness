@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:compaction-measured-live
 kind: story
-status: active
+status: implemented
 title: Compaction is measured against a real provider, not the emulator
 relations:
 - derived_from: epic:measured-not-emulated
@@ -13,10 +13,11 @@ scope:
   path: STATUS.md
 - confidence: inferred
   path: measurements
-revision: 6
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
 - {from: "proposed", to: "active", at: "2026-09-18T01:22:16Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"metric_observation":1}}, imported: true}
+- {from: "active", to: "implemented", at: "2026-10-29T11:11:27Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"metric_observation":1,"review_outcome":1}}}
 ---
 ## Evidence
 
@@ -35,3 +36,13 @@ The 2026-09-18 live Haiku run recorded in STATUS.md's Loop row and measurements/
 One live run long enough to trigger compaction, with the trigger point, the freed ratio, the summary
 turn's cost and whether the run completed afterwards recorded as `vendor_live` evidence — and
 `STATUS.md`'s loop row naming that run instead of naming the measurement as pending.
+
+## Resolution
+
+Implemented on 2026-10-29 under `approval-record:wave-live-pins-d200`.
+`measurements/runs/m1-tier-b-summary-2026-10-29.jsonl` (`vendor_live`, `claude-haiku-4-5-20251001`,
+Claude subscription login, declared window 12000): compaction fired at 10,127 tokens (84.4%), one
+summary turn (6,025 input, 402 output, 9,541 micro-USD at list price) folded 13 items, 0.2881 of the
+conversation was left, and the run finished `completed` 3 turns later with 8 of 8 keys correct.
+`STATUS.md`'s Loop row names the run. Figures and commands: `measurements/README.md` § *The live
+runs of 2026-10-29*.

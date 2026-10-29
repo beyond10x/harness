@@ -1,0 +1,23 @@
+Work through the chapters under `chapters/` in order, from `chapter-01.md` to `chapter-08.md`.
+
+For each chapter, in this order:
+
+1. read it with one `file_read` call, and read no other chapter in the same turn;
+2. in your next reply, before you call any tool, write an essay of at least 500 words on the
+   chapter's topic, in plain prose under a heading that names the chapter number;
+3. then read the next chapter.
+
+Each chapter file is short. The essays are the work: write every one in full, and do not shorten a
+later essay because earlier ones were long.
+
+When you have written all eight essays, answer with one line per chapter, in order, in exactly this
+form:
+
+    KEY-01 <value>
+    KEY-02 <value>
+    ...
+    KEY-08 <value>
+
+The value for each chapter appears once, in that chapter, and nowhere else in the workspace. Do not
+re-read a chapter you have already read: if you no longer have a chapter's key in front of you, say
+so on that line instead of inventing it.

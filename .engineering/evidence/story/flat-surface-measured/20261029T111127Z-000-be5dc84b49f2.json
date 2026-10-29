@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-29T11:11:27Z",
+  "actor": "human:timo",
+  "artifact": "story:flat-surface-measured",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "measurements/runs/m2-live-{flat,verbs}-{1,2,3}-2026-10-29.jsonl: python3 measurements/score.py surface --brief exit 0 on all six; flat 3/3 completed, verbs 0/3 (llm-core unpublished-name refusal, story:verbs-survives-a-bare-entry-call)"
+  }
+}

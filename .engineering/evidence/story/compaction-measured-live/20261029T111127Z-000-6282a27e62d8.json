@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-29T11:11:27Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-measured-live",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "measurements/runs/m1-tier-b-summary-2026-10-29.jsonl: python3 measurements/score.py compaction --context-window 12000 --require-compaction exit 0; summary_turn=True summarised=13, completed in 10 turns, 8 of 8 keys"
+  }
+}

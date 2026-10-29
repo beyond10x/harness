@@ -8,11 +8,13 @@ already emits rather than from instrumentation added to see them.
 
 | measurement | story | where it stands |
 | --- | --- | --- |
-| compaction against a real context window | `story:compaction-measured-live` | **the trigger and the ratio are measured**, once, on 2026-09-18 — `runs/m1-tier-a-2026-09-18.jsonl`. The summary prompt is not, and is still owed |
-| the flat surface against the three verbs | `story:flat-surface-measured` | open; needs N ≥ 3 paid pairs |
+| compaction against a real context window | `story:compaction-measured-live` | **measured.** The trigger and the ratio on 2026-09-18 (`runs/m1-tier-a-2026-09-18.jsonl`), the summary turn on 2026-10-29 (`runs/m1-tier-b-summary-2026-10-29.jsonl`) |
+| the flat surface against the three verbs | `story:flat-surface-measured` | **measured, 3 pairs on 2026-10-29** (`runs/m2-live-*-2026-10-29.jsonl`): flat 3 of 3 completed, verbs 0 of 3, each ended by `llm-core` refusing an unpublished-name call |
+| one live run per route through `llm` | `story:messages-cache-breakpoint-live-pin`, `story:responses-pin-from-live-bytes` | Messages cache write and read observed in `runs/m1-tier-b-summary-2026-10-29.jsonl`; Codex Responses refused on turn 2 (`runs/r1-live-codex-2026-10-29.jsonl`) |
 
-Everything here except `runs/m1-tier-a-2026-09-18.jsonl*` and its session file was produced without
-a provider, is free to reproduce, and is `provider_emulated`.
+Everything here except `runs/m1-tier-a-2026-09-18.jsonl*`, its session file and the
+`*-2026-10-29.*` records was produced without a provider, is free to reproduce, and is
+`provider_emulated`.
 
 > **Invariant 18.** A rehearsal against the deterministic local endpoint is `provider_emulated`,
 > and a rehearsal is **never the measurement**. It does not become one by being run again, by
@@ -20,8 +22,9 @@ a provider, is free to reproduce, and is `provider_emulated`.
 > cite a rehearsal as though it were a run, and nothing under `runs/m1-dry-*` or `runs/m2-dry-*`
 > closes any story in `epic:measured-not-emulated`.
 >
-> The one record in this directory that is **not** a rehearsal is `runs/m1-tier-a-2026-09-18.jsonl`,
-> which is `vendor_live`: a real request to `https://api.anthropic.com/v1` on
+> The records dated 2026-10-29 are `vendor_live` too; § *The live runs of 2026-10-29* says what
+> each is evidence about. The first record that is **not** a rehearsal is
+> `runs/m1-tier-a-2026-09-18.jsonl`, which is `vendor_live`: a real request to `https://api.anthropic.com/v1` on
 > `claude-haiku-4-5-20251001`, paid for, operator-authorized. It is evidence about compaction's
 > trigger and ratio **on that route and that model**, and about nothing else — it promotes no
 > contract, re-pins no wire, and says nothing about the Messages route or any other model. The
@@ -42,7 +45,13 @@ a provider, is free to reproduce, and is `provider_emulated`.
 | `dry-run-surfaces.sh` | one free walk per surface, proving the surface half of the scorer |
 | `prove-spend-ceiling.sh` | proves `--max-cost-microunits` is enforceable for the model the paid run names, without naming a provider |
 | `runs/m1-dry-*`, `runs/m2-dry-*` | records the free rehearsals wrote. `provider_emulated` |
-| `runs/m1-tier-a-2026-09-18.jsonl` | the one paid run: `vendor_live`, Tier A compaction, 2026-09-18. `.stderr` beside it is the same run's progress stream |
+| `runs/m1-tier-a-2026-09-18.jsonl` | the first paid run: `vendor_live`, Tier A compaction, 2026-09-18. `.stderr` beside it is the same run's progress stream |
+| `fixtures/summary-workspace/` | eight short chapters, one key each: the workspace of the summary-turn run, copied fresh per run. Static files, no generator |
+| `prompts/summary-task.txt` | the summary-turn task: an essay of at least 500 words per chapter, so the weight is in the model's own text and elision cannot reach the target |
+| `fixtures/surface-workspace/` | four files, the largest `docs/guide.md`: the workspace of the surface runs, copied fresh per arm per repeat |
+| `runs/m1-tier-b-summary-2026-10-29.jsonl` | `vendor_live`: the summary turn, 2026-10-29 |
+| `runs/m2-live-{flat,verbs}-{1,2,3}-2026-10-29.jsonl` | `vendor_live`: three flat/verbs pairs, 2026-10-29. `.stderr` beside a verbs record carries its refusal |
+| `runs/r1-live-codex-2026-10-29.jsonl` | `vendor_live`: one Codex Responses run, 2026-10-29, refused on turn 2. `.stderr` carries the refusal |
 
 Nothing in production was instrumented for any of this. Every figure comes from a typed event the
 loop already emits — `crates/harness-loop/src/event.rs`, `{"kind": ...}` in kebab-case. What was
@@ -205,10 +214,92 @@ nothing that carries a measurement.
 **ratio**, on the Responses route and `claude-haiku-4-5-20251001`. It is not evidence for the
 **summary prompt**, which never fired — measuring that needs a fixture whose weight is *not* in
 tool results, because elision reaches the target first on one whose weight is. It promotes no
-contract and re-pins no wire. `story:compaction-measured-live` keeps its third figure open.
+contract and re-pins no wire. The third figure was measured on 2026-10-29 (below).
 
-### Tier B, not taken
+## The live runs of 2026-10-29
 
-`story:flat-surface-measured` still needs N ≥ 3 paid pairs and is not authorized. Run
-`prove-spend-ceiling.sh` and `dry-run-surfaces.sh` first; they are free, and they are why the paid
-runs only have to be run once.
+Authorized by `approval-record:wave-live-pins-d200`. Every run used a subscription login named by a
+built-in provider (`claude`: the Claude login's token file; `codex`: the Codex login), never a
+key billed per token. Cost figures are the record's own `cost` events at the 2026-09-18 list
+prices; they are what the run would cost on a key, and nothing was billed per token. Built from
+`main` at `3eca074` (`llm` 0.16.0). Two kinds of path in each record were rewritten before commit,
+for the reason the Tier A section gives: the profile source is `$XDG_CONFIG_HOME/…` and the scratch
+workspace is `$SCRATCH/…`. Nothing else was touched.
+
+### Tier B: the summary turn — `runs/m1-tier-b-summary-2026-10-29.jsonl`
+
+A fresh copy of `fixtures/summary-workspace/` as the workspace, then
+
+```
+b10x-harness run --model haiku --context-window 12000 --workspace <copy> \
+    --input "$(cat prompts/summary-task.txt)" \
+    --prices rates/claude-haiku-4-5-2026-09-18.json --max-cost-microunits 400000 \
+    --max-turns 30 --no-session --json
+python3 score.py compaction runs/m1-tier-b-summary-2026-10-29.jsonl \
+    --context-window 12000 --require-compaction
+```
+
+| figure | value |
+| --- | --- |
+| compactions | 1 |
+| fired at | 10,127 occupied tokens — **84.4%** of the declared window, on the loop estimate |
+| freed | 0 results elided; **13 items folded** by one summary turn; 40,508 → 11,672 bytes, **0.2881** left |
+| summary turn | turn 7: 6,025 input tokens, 402 output, 6,022 written to the cache, **9,541 micro-USD** |
+| after it | 3 more turns, `completed` in 10 turns, 0 retries |
+| chapter keys | **8 of 8 correct** in the final answer, compared by hand against the chapter files — observed once |
+| usage | 53,662 input (22,704 cached read, 22,630 cache write), 12,901 output |
+| cost | 103,392 micro-USD at list price |
+
+The fixture puts the weight where elision cannot reach it, and the summary branch fired at the
+first compaction. Two observations beside the figures: the summary request wrote 6,022 tokens to the
+cache that no later turn reads, because it is a one-off request; and the turn after the fold read 0
+from the cache, because the conversation's prefix changed. Both are costs of the summary turn, not
+defects. The rolling breakpoint is visible in the same record: turn 4 wrote 5,143 tokens and turn 5
+read those 5,143 back.
+
+### Tier B: flat against verbs — `runs/m2-live-{flat,verbs}-{1,2,3}-2026-10-29.jsonl`
+
+Three repeats, each arm on a fresh copy of `fixtures/surface-workspace/`:
+
+```
+b10x-harness run --model haiku --surface <flat|verbs> --workspace <copy> \
+    --input "$(cat prompts/surface-task.txt)" \
+    --prices rates/claude-haiku-4-5-2026-09-18.json --max-cost-microunits 150000 \
+    --max-turns 20 --no-session --json
+python3 score.py surface <record> --arm <flat|verbs> --brief
+```
+
+| arm | completed | calls | discovery calls | failed calls | turns | micro-USD |
+| --- | --- | --- | --- | --- | --- | --- |
+| flat | 3 of 3 | 6, 6, 6 | 0 | 0 | 3, 3, 4 | 12,866; 12,943; 13,252 |
+| verbs | 0 of 3 | 1, 1, 1 | 1 | 0 | 2, 2, 2 | 2,608 each, turn 1 only |
+
+All three flat answers were right: 4 files, `docs/guide.md` the largest, `hello harness`.
+Provider-side argument rejections: 0 on either arm; the provider never refused a call.
+
+**Every verbs run ended on its second turn, and not on anything the surface does.** Turn 1 called
+`tool_search` and got the catalogue. Turn 2 called `find` and `file_read` by their entry names,
+which the verbs surface does not publish. The provider accepted those names and streamed them
+(read from the response bytes of a fourth, unrecorded run through a local recording proxy).
+`llm-core`'s `TurnOutcome::validate_for` (`crates/llm-core/src/turn.rs`, `llm` 0.16.0) then refused
+the whole turn as `model output contains a duplicate call or unpublished tool`, so the loop's own
+unpublished-tool routing never saw the calls, and the run ended where invariant 9 says the model
+should have been told. The verbs arm's cost is therefore not measured; its comparison waits on
+`story:verbs-survives-a-bare-entry-call`.
+
+### One run per route through `llm`
+
+* **Messages**: the Tier B summary record above. The cache is written and read through this
+  binary on `llm` 0.16.0.
+* **Codex Responses** — `runs/r1-live-codex-2026-10-29.jsonl`, `-p codex --surface flat` on
+  `gpt-5.6-sol` with the surface task. Turn 1 answered (1,221 input, 121 output tokens, `find` and
+  `file_read` called) with one `unknown-stream-event` warning. Turn 2 was refused: `HTTP endpoint
+  returned status 400`. The same run through a local recording proxy showed the request's
+  `input[6]` was the stream's `response.metadata` event, kept by `llm-responses` as an opaque item
+  and replayed by the loop, and the endpoint's answer was `invalid_request_error`, code
+  `invalid_value`: "Invalid value: 'response.metadata'". Both runs ended on turn 2; inferred, not observed: every tool-using Codex run through `llm`
+  0.16.0 that receives that event ends on its second turn (`story:responses-replays-no-stream-metadata`).
+
+The live byte pins the two wire stories asked for are `llm`'s since the wire crates moved there
+(invariant 14); `llm` 0.16.0 replays one live stream per route (`story:live-provider-captures`
+there).

@@ -95,7 +95,7 @@
         "scenario": "harness.loop/authored/call-write"
       },
       "scenarios/run-cancelled-before-provider.yaml": {
-        "digest": "sha256:27460cbe430208102ad957e66c6f4acb1593373f98df7c992eabf30c2260c871",
+        "digest": "sha256:b692207f0d976523c9943584786c2e91be427699433b125b0c35b74796747747",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-cancelled-before-provider"
       },
@@ -105,32 +105,32 @@
         "scenario": "harness.loop/authored/run-completed"
       },
       "scenarios/run-input-budget-unobservable.yaml": {
-        "digest": "sha256:10ea82d26629ac95693b5fe000cf16cc9252e00db3783d392451c6473ce6a62f",
+        "digest": "sha256:d28c0db22f943749578a4941a9d59e4fd146e5bb72a2b8d0e4f6c6e0ba48bcac",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-input-budget-unobservable"
       },
       "scenarios/run-input-limit.yaml": {
-        "digest": "sha256:cd33fc00463fe4e6f7f9a5b41dcf5fe9236831a3165fa3479d736991f55e81df",
+        "digest": "sha256:9b2592bb7ff6c640199a39776afecaf80f561856635a2e36bfe0ffbf34afc840",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-input-limit"
       },
       "scenarios/run-output-budget-unobservable.yaml": {
-        "digest": "sha256:e9d813d66fe090eebf2fb3f6f0ae582a6e4e94b29b28697b15db2042a3b2524e",
+        "digest": "sha256:1c5fdce5d3503492b433ed6ff559b247391077e2cdb4631f91c8687f23ac1628",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-output-budget-unobservable"
       },
       "scenarios/run-output-limit.yaml": {
-        "digest": "sha256:f247486063dabcaecf2b951243acc4e959fba8fcf6000c1d0735360f7bacda33",
+        "digest": "sha256:8456deeebb0504d6b3e036d1fa6eb83e33d45df6531bbf6e618d49644dda3514",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-output-limit"
       },
       "scenarios/run-provider-incomplete.yaml": {
-        "digest": "sha256:69c91162f9ea047e57c9453d331d9f6332176b3401f0cf02bf22ef8115e1c8a5",
+        "digest": "sha256:ed7e48cf6dfbfb395d8eb9fdce61b85af58079fd3c208fadf5d99e7a107416be",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-provider-incomplete"
       },
       "scenarios/run-provider-output-limit.yaml": {
-        "digest": "sha256:59676b5673fb8f0239eceeadaede91e06206a8db80031212c56cde414470deb7",
+        "digest": "sha256:1bd128c46bcae3329e1688b489c590e7fb217997c3f621fb729a5b561bb8bb4c",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-provider-output-limit"
       },
@@ -150,7 +150,7 @@
         "scenario": "harness.loop/authored/run-tool-write"
       },
       "scenarios/run-turn-limit.yaml": {
-        "digest": "sha256:9638047cb49ba90bfd65c02e043d18fda0710186beca9026cd8e58b6b45dbb9e",
+        "digest": "sha256:532285f98c2e70db8cb721d4984b5d8924af43013227ae4585b7b7fad02d8f9b",
         "disposition": "accepted",
         "scenario": "harness.loop/authored/run-turn-limit"
       },
@@ -185,9 +185,9 @@
     }
   },
   "provenance": {
-    "contract_digest": "6aaeed0d57bd3ca6f526b4a192bff370580416e28a53e9c834ca09b7d3b5d64e",
+    "contract_digest": "0a83da8262bfa9832c6597f4363f2dca3d420ee3f77bd6177f6ae61d6113a981",
     "scenario_initial_state": "empty",
-    "spec_digest": "19e974435fb3b920e9a921e8f3988bbbea46a257bf45ce4cf492b7ccf6e69db5",
+    "spec_digest": "74b36030963f3b91fe46f1db963c18a67c68ba8116a43357b3e2d28b6f7074b9",
     "specification_version": "v1",
     "suite_version": "ess-conformance/35",
     "system": "harness"
@@ -311,79 +311,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {},
@@ -1511,7 +1578,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -1519,7 +1626,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -1593,79 +1700,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -1676,7 +1850,9 @@
               "output_tokens": null,
               "stop": {
                 "kind": "cancelled",
-                "reason": "the caller cancelled"
+                "value": {
+                  "reason": "the caller cancelled"
+                }
               },
               "text": "",
               "tool_calls": 0.0,
@@ -1738,7 +1914,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -1746,7 +1962,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -1820,79 +2036,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -1964,7 +2247,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -1972,7 +2295,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -2040,79 +2363,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -2123,8 +2513,10 @@
               "output_tokens": null,
               "stop": {
                 "kind": "budget-unobservable",
-                "name": "max_input_tokens",
-                "reason": "a model request omitted usage"
+                "value": {
+                  "name": "max_input_tokens",
+                  "reason": "a model request omitted usage"
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -2186,7 +2578,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -2194,7 +2626,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -2268,79 +2700,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -2351,8 +2850,10 @@
               "output_tokens": 5.0,
               "stop": {
                 "kind": "max-input-tokens",
-                "limit": 10.0,
-                "reported": 10.0
+                "value": {
+                  "limit": 10.0,
+                  "reported": 10.0
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -2414,7 +2915,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -2422,7 +2963,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -2490,79 +3031,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -2573,8 +3181,10 @@
               "output_tokens": null,
               "stop": {
                 "kind": "budget-unobservable",
-                "name": "max_output_tokens",
-                "reason": "a model request omitted usage"
+                "value": {
+                  "name": "max_output_tokens",
+                  "reason": "a model request omitted usage"
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -2636,7 +3246,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -2644,7 +3294,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -2718,79 +3368,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -2801,8 +3518,10 @@
               "output_tokens": 5.0,
               "stop": {
                 "kind": "max-output-tokens",
-                "limit": 5.0,
-                "reported": 5.0
+                "value": {
+                  "limit": 5.0,
+                  "reported": 5.0
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -2864,7 +3583,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -2872,7 +3631,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -2947,79 +3706,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -3030,7 +3856,9 @@
               "output_tokens": 5.0,
               "stop": {
                 "kind": "provider-incomplete",
-                "reason": "provider reason"
+                "value": {
+                  "reason": "provider reason"
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -3092,7 +3920,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -3100,7 +3968,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -3174,79 +4042,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -3257,7 +4192,9 @@
               "output_tokens": 5.0,
               "stop": {
                 "kind": "provider-incomplete",
-                "reason": "max_output_tokens"
+                "value": {
+                  "reason": "max_output_tokens"
+                }
               },
               "text": "done",
               "tool_calls": 0.0,
@@ -3319,7 +4256,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -3327,7 +4304,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -3421,79 +4398,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -3565,7 +4609,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -3573,7 +4657,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -3667,79 +4751,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -3811,7 +4962,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -3819,7 +5010,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -3913,79 +5104,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -4057,7 +5315,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -4065,7 +5363,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -4141,79 +5439,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {
@@ -4224,7 +5589,9 @@
               "output_tokens": 5.0,
               "stop": {
                 "kind": "max-turns",
-                "limit": 1.0
+                "value": {
+                  "limit": 1.0
+                }
               },
               "text": "",
               "tool_calls": 1.0,
@@ -4286,7 +5653,47 @@
         },
         {
           "kind": "type",
+          "name": "harness.loop.AwaitingApprovalStop"
+        },
+        {
+          "kind": "type",
           "name": "harness.loop.Budget"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.BudgetUnobservableStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.CancelledStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.DeadlineStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.FailedStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxCostStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxInputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxOutputTokensStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.MaxTurnsStop"
+        },
+        {
+          "kind": "type",
+          "name": "harness.loop.ProviderIncompleteStop"
         },
         {
           "kind": "type",
@@ -4294,7 +5701,7 @@
         },
         {
           "kind": "type",
-          "name": "harness.loop.StopKind"
+          "name": "harness.loop.UnstructuredStop"
         },
         {
           "kind": "command",
@@ -4362,79 +5769,146 @@
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
-              "harness.loop.Stop": {
+              "harness.loop.AwaitingApprovalStop": {
                 "fields": [
                   {
-                    "name": "kind",
-                    "type": "harness.loop.StopKind"
-                  },
-                  {
-                    "name": "limit",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "name",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "limit_ms",
-                    "type": "Optional<Integer>"
-                  },
-                  {
                     "name": "checkpoint_id",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "asked_again",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "cause",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "message",
-                    "type": "Optional<String>"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Optional<Boolean>"
+                    "type": "String"
                   }
                 ],
                 "kind": "struct"
               },
-              "harness.loop.StopKind": {
-                "kind": "enum",
-                "variants": [
-                  "completed",
-                  "max-turns",
-                  "max-input-tokens",
-                  "max-output-tokens",
-                  "max-cost",
-                  "budget-unobservable",
-                  "deadline",
-                  "cancelled",
-                  "awaiting-approval",
-                  "provider-incomplete",
-                  "unstructured",
-                  "failed"
-                ]
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
               }
             },
             "expected": {

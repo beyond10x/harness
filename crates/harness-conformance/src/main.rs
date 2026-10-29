@@ -33,6 +33,10 @@ struct Args {
     /// Deliberately inert adapter: every authored scenario must fail.
     #[arg(long)]
     audit_noop: bool,
+    /// Rewrite conformance/model.json and conformance/suite.json from the pinned libraries instead
+    /// of refusing drift, then run as usual.
+    #[arg(long)]
+    write_projections: bool,
 }
 
 struct Target {
@@ -166,7 +170,7 @@ fn strings(value: &Value) -> Result<Vec<&str>> {
         })
         .collect()
 }
-fn compile(root: &Path) -> Result<AdmittedSuite> {
+fn compile(root: &Path, write: bool) -> Result<AdmittedSuite> {
     let spec = root.join("spec");
     let manifest: Value =
         serde_yaml_ng::from_str(&fs::read_to_string(spec.join("ess-inputs.yaml"))?)?;
@@ -192,6 +196,9 @@ fn compile(root: &Path) -> Result<AdmittedSuite> {
     let model = ess_domain::spec::Specification::assemble(parsed)
         .map_err(|e| format!("ESS assembly: {e:?}"))?;
     let ir = ess_compiler::compile(&model, &sources).map_err(|e| format!("ESS compile: {e:?}"))?;
+    if write {
+        fs::write(root.join("conformance/model.json"), ir.to_canonical_json())?;
+    }
     let expected_model: Value =
         serde_json::from_str(&fs::read_to_string(root.join("conformance/model.json"))?)?;
     let actual_model: Value = serde_json::from_str(&ir.to_canonical_json())?;
@@ -221,17 +228,23 @@ fn compile(root: &Path) -> Result<AdmittedSuite> {
     {
         return Err("ESS coverage inventory incomplete".into());
     }
+    if write {
+        let mut text =
+            serde_json::to_string_pretty(&serde_json::from_str::<Value>(suite.original_json())?)?;
+        text.push('\n');
+        fs::write(root.join("conformance/suite.json"), text)?;
+    }
     let expected: Value =
         serde_json::from_str(&fs::read_to_string(root.join("conformance/suite.json"))?)?;
     let actual: Value = serde_json::from_str(suite.original_json())?;
     if actual != expected {
-        return Err("conformance/suite.json differs from native ESS synthesis; regenerate with the pinned CLI".into());
+        return Err("conformance/suite.json differs from native ESS synthesis; regenerate with --write-projections".into());
     }
     AdmittedSuite::from_json(suite.original_json()).map_err(Into::into)
 }
 fn main() -> Result<()> {
     let args = Args::parse();
-    let admitted = compile(&args.root)?;
+    let admitted = compile(&args.root, args.write_projections)?;
     let run = Runner::new(
         RunnerConfig::default(),
         WallClock,

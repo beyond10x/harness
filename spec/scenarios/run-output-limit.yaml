@@ -43,8 +43,10 @@
       "response": {
         "stop": {
           "kind": "max-output-tokens",
-          "limit": 5,
-          "reported": 5
+          "value": {
+            "limit": 5,
+            "reported": 5
+          }
         },
         "text": "done",
         "turns": 1,

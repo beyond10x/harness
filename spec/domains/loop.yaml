@@ -4,10 +4,10 @@ summary: Observable native loop results and admission decisions; no durable run 
 # budget.rs:11-109; approval.rs:7-78; harness-wire/src/turn.rs and item.rs.
 # Run/Call are adapter names for existing AgentLoop methods, not additional product APIs.
 # Script is serialized TurnOutcome from an injected ModelPort, not a vendor protocol.
-# Budget, stop and usage are existing implementation types. Only Budget is structurally declared
-# here together with the observed stop envelope. A LoopStop is a return value, not a row
-# transitioning between persistent states. Stop fields retain serde spelling and absence.
-# Per-variant payload correlations are checked by authored scenarios, not the broad struct.
+# Budget, stop and usage are existing implementation types. Budget and the stop are declared
+# structurally here. A LoopStop is a return value, not a row transitioning between persistent
+# states. Stop is a union tagged by kind: one variant per LoopStop variant, each carrying exactly
+# that variant's fields with their serde spelling, so the type refuses a field another variant owns.
 types:
   - name: harness.loop.Budget
     kind: struct
@@ -18,25 +18,72 @@ types:
       - {name: max_output_tokens_per_turn, type: 'Optional<Integer>'}
       - {name: max_duration_ms, type: 'Optional<Integer>'}
       - {name: max_cost_microunits, type: 'Optional<Integer>'}
-  - name: harness.loop.StopKind
-    kind: enum
-    variants: [completed, max-turns, max-input-tokens, max-output-tokens, max-cost, budget-unobservable, deadline, cancelled, awaiting-approval, provider-incomplete, unstructured, failed]
   - name: harness.loop.Stop
+    kind: union
+    tag: kind
+    variants:
+      completed:
+      max-turns: harness.loop.MaxTurnsStop
+      max-input-tokens: harness.loop.MaxInputTokensStop
+      max-output-tokens: harness.loop.MaxOutputTokensStop
+      max-cost: harness.loop.MaxCostStop
+      budget-unobservable: harness.loop.BudgetUnobservableStop
+      deadline: harness.loop.DeadlineStop
+      cancelled: harness.loop.CancelledStop
+      awaiting-approval: harness.loop.AwaitingApprovalStop
+      provider-incomplete: harness.loop.ProviderIncompleteStop
+      unstructured: harness.loop.UnstructuredStop
+      failed: harness.loop.FailedStop
+  - name: harness.loop.MaxTurnsStop
     kind: struct
     fields:
-      - {name: kind, type: harness.loop.StopKind}
-      - {name: limit, type: 'Optional<Integer>'}
-      - {name: reported, type: 'Optional<Integer>'}
-      - {name: limit_micro_usd, type: 'Optional<Integer>'}
-      - {name: spent_micro_usd, type: 'Optional<Integer>'}
-      - {name: name, type: 'Optional<String>'}
-      - {name: reason, type: 'Optional<String>'}
-      - {name: limit_ms, type: 'Optional<Integer>'}
-      - {name: checkpoint_id, type: 'Optional<String>'}
-      - {name: asked_again, type: 'Optional<Integer>'}
-      - {name: cause, type: 'Optional<String>'}
-      - {name: message, type: 'Optional<String>'}
-      - {name: after_compaction, type: 'Optional<Boolean>'}
+      - {name: limit, type: Integer}
+  - name: harness.loop.MaxInputTokensStop
+    kind: struct
+    fields:
+      - {name: limit, type: Integer}
+      - {name: reported, type: Integer}
+  - name: harness.loop.MaxOutputTokensStop
+    kind: struct
+    fields:
+      - {name: limit, type: Integer}
+      - {name: reported, type: Integer}
+  - name: harness.loop.MaxCostStop
+    kind: struct
+    fields:
+      - {name: limit_micro_usd, type: Integer}
+      - {name: spent_micro_usd, type: Integer}
+  - name: harness.loop.BudgetUnobservableStop
+    kind: struct
+    fields:
+      - {name: name, type: String}
+      - {name: reason, type: String}
+  - name: harness.loop.DeadlineStop
+    kind: struct
+    fields:
+      - {name: limit_ms, type: Integer}
+  - name: harness.loop.CancelledStop
+    kind: struct
+    fields:
+      - {name: reason, type: String}
+  - name: harness.loop.AwaitingApprovalStop
+    kind: struct
+    fields:
+      - {name: checkpoint_id, type: String}
+  - name: harness.loop.ProviderIncompleteStop
+    kind: struct
+    fields:
+      - {name: reason, type: String}
+  - name: harness.loop.UnstructuredStop
+    kind: struct
+    fields:
+      - {name: asked_again, type: Integer}
+  - name: harness.loop.FailedStop
+    kind: struct
+    fields:
+      - {name: cause, type: String}
+      - {name: message, type: String}
+      - {name: after_compaction, type: Boolean}
 commands:
   - name: harness.loop.ValidateBudget
     # Calls Budget::validate; no state mutation or emitted event is claimed.

@@ -10,11 +10,20 @@ mean the repository's entire implementation has an ESS domain.
 | Native loop outcomes | Completed, provider incomplete/output limit, input/output/turn ceilings, cancellation before dispatch, missing usage with and without token ceilings | `crates/harness-loop/src/lib.rs:123,2102,2812,2835` |
 | Approval and tool reach | Cheap read dispatches; medium-risk write is denied by DenyAll and admitted by ApproveAll; unpublished tool refuses; failed tool results remain visible and the model continues | `crates/harness-loop/src/approval.rs:49`; `crates/harness-loop/src/lib.rs:2073,3161`; `crates/harness-wire/src/envelope.rs:218` |
 
-The known `StopKind` vocabulary includes `max-cost`, `deadline`, `awaiting-approval`, `failed` and
-`unstructured`, but declaring their shape is not executing those paths. The initial suite does not
-claim that all fields or combinations of every `LoopStop` variant are constrained by the typed
-stop envelope: it is a struct with optional variant fields, and the authored scenarios assert the
-combinations listed above.
+The stop `harness.loop.Stop` is a tagged union on `kind`: one variant per `LoopStop` variant
+(`crates/harness-loop/src/lib.rs:127-197`), each carrying exactly that variant's fields, required,
+with their serde spelling. ESS therefore refuses a stop no `LoopStop` can be, such as a `completed`
+stop carrying `limit_ms` (`crates/harness-conformance/tests/stop_union.rs`). The variants
+`max-cost`, `deadline`, `awaiting-approval`, `unstructured` and `failed` are declared but not
+executed: declaring their shape is not executing those paths, and `failed` is never returned by
+`run_in`.
+
+ESS 0.77.0 writes a union value adjacently tagged: the tag, and a payload variant's fields under
+`value` (`{"kind": "max-turns", "value": {"limit": 1}}`); a unit variant such as `completed` is the
+tag alone. `LoopStop` serializes internally tagged, its fields beside `kind`, and ESS has no form
+for that. The scenarios therefore write the adjacent form, and the adapter
+(`crates/harness-conformance/src/boundary.rs`, `tagged`) moves the production serialization's
+fields under `value` without computing any. The unit variant needs specification format `ess/22`.
 
 The following are **UNMAPPED** into this first ESS slice. They remain implemented and covered by
 existing repository tests, which are not automatically ESS conformance evidence. Closing each item

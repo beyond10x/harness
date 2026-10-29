@@ -69,6 +69,7 @@ mod memory;
 mod parallel;
 mod price;
 mod skill;
+mod task;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -109,6 +110,7 @@ pub use memory::{
 };
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
+pub use task::{LoopPorts, LoopTask, LoopTaskError, LoopTaskFuture, Ran, RanIn};
 
 /// How many times a `stop` hook may keep one run working after the model tried to end it.
 ///

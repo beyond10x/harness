@@ -7,6 +7,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** `LoopStop` gains the variant `Failed { cause, message, after_compaction }` (kind `failed`); a `match` over `LoopStop` needs an arm for it. A run that had started and then ended in a `LoopError` now emits one `finished` event with that stop before `AgentLoop::run_in` returns the same error. Before, its event stream ended on `turn-started` and `run --json` printed no terminal line, so a supervisor reading the record could not tell a failed run from a lost one. `cause` is `provider-<wire error code>` (`provider-refused`, `provider-transport`, …), `environment`, `budget` or `config`; `message` is the error on one line; `after_compaction` is true when a `conversation-compacted` warning came before the failing request in its turn. The exit status stays 1, human mode prints nothing new, and `app-server` maps the stop to status `failed`. Written on 2026-10-26 for a release that was never tagged; it lands here.
+- The seven `llm-*` crates move from llm tag `0.16.0` (`33ae9001`) to `0.17.0` (`d9282efa`), the newest release, and `harness-llm` sets llm's new `Controls::return_unpublished_calls` on every turn.
+
+### Fixed
+
+- A `--surface verbs` run whose model calls a catalogue entry by its own name (`find`, `file_read`) completes: the call reaches the loop, which routes it over the catalogue or answers it as a failed outcome (invariant 9). On llm 0.16.0 llm refused the whole turn (`model output contains a duplicate call or unpublished tool`) and every live verbs run ended on turn 2; on 0.17.0 three of three completed live (`measurements/runs/m2-live-verbs-*-llm017-2026-10-29.jsonl`).
+- A tool-using `-p codex` run passes its second turn. On llm 0.16.0 the Codex stream's `response.metadata` event became an opaque item that the next request replayed, and the endpoint refused it (`400 invalid_value`); llm 0.17.0 accepts the event without keeping it. Two of two live runs completed (`measurements/runs/r2-live-codex-*-llm017-2026-10-29.jsonl`).
+
 ## [0.22.0] - 2026-10-28
 
 ### Added

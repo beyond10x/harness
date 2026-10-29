@@ -9,9 +9,19 @@
         "summary": "Observable native loop results and admission decisions; no durable run entity is invented."
       },
       "types": [
+        "harness.loop.AwaitingApprovalStop",
         "harness.loop.Budget",
+        "harness.loop.BudgetUnobservableStop",
+        "harness.loop.CancelledStop",
+        "harness.loop.DeadlineStop",
+        "harness.loop.FailedStop",
+        "harness.loop.MaxCostStop",
+        "harness.loop.MaxInputTokensStop",
+        "harness.loop.MaxOutputTokensStop",
+        "harness.loop.MaxTurnsStop",
+        "harness.loop.ProviderIncompleteStop",
         "harness.loop.Stop",
-        "harness.loop.StopKind"
+        "harness.loop.UnstructuredStop"
       ],
       "entities": [],
       "commands": [
@@ -26,6 +36,24 @@
     }
   },
   "types": {
+    "harness.loop.AwaitingApprovalStop": {
+      "name": "harness.loop.AwaitingApprovalStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "checkpoint_id",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
     "harness.loop.Budget": {
       "name": "harness.loop.Budget",
       "body": {
@@ -102,148 +130,24 @@
       },
       "naming": {}
     },
-    "harness.loop.Stop": {
-      "name": "harness.loop.Stop",
+    "harness.loop.BudgetUnobservableStop": {
+      "name": "harness.loop.BudgetUnobservableStop",
       "body": {
         "kind": "struct",
         "fields": [
           {
-            "name": "kind",
-            "type_ref": {
-              "kind": "declared",
-              "name": "harness.loop.StopKind"
-            },
-            "naming": {}
-          },
-          {
-            "name": "limit",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "reported",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "limit_micro_usd",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "spent_micro_usd",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
             "name": "name",
             "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "string"
-              }
+              "kind": "primitive",
+              "name": "string"
             },
             "naming": {}
           },
           {
             "name": "reason",
             "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "string"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "limit_ms",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "checkpoint_id",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "string"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "asked_again",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "integer"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "cause",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "string"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "message",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "string"
-              }
-            },
-            "naming": {}
-          },
-          {
-            "name": "after_compaction",
-            "type_ref": {
-              "kind": "optional",
-              "of": {
-                "kind": "primitive",
-                "name": "boolean"
-              }
+              "kind": "primitive",
+              "name": "string"
             },
             "naming": {}
           }
@@ -252,24 +156,260 @@
       },
       "naming": {}
     },
-    "harness.loop.StopKind": {
-      "name": "harness.loop.StopKind",
+    "harness.loop.CancelledStop": {
+      "name": "harness.loop.CancelledStop",
       "body": {
-        "kind": "enum",
-        "variants": [
-          "completed",
-          "max-turns",
-          "max-input-tokens",
-          "max-output-tokens",
-          "max-cost",
-          "budget-unobservable",
-          "deadline",
-          "cancelled",
-          "awaiting-approval",
-          "provider-incomplete",
-          "unstructured",
-          "failed"
-        ]
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "reason",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.DeadlineStop": {
+      "name": "harness.loop.DeadlineStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "limit_ms",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.FailedStop": {
+      "name": "harness.loop.FailedStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "cause",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {}
+          },
+          {
+            "name": "message",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {}
+          },
+          {
+            "name": "after_compaction",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "boolean"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.MaxCostStop": {
+      "name": "harness.loop.MaxCostStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "limit_micro_usd",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          },
+          {
+            "name": "spent_micro_usd",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.MaxInputTokensStop": {
+      "name": "harness.loop.MaxInputTokensStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "limit",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          },
+          {
+            "name": "reported",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.MaxOutputTokensStop": {
+      "name": "harness.loop.MaxOutputTokensStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "limit",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          },
+          {
+            "name": "reported",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.MaxTurnsStop": {
+      "name": "harness.loop.MaxTurnsStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "limit",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.ProviderIncompleteStop": {
+      "name": "harness.loop.ProviderIncompleteStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "reason",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.Stop": {
+      "name": "harness.loop.Stop",
+      "body": {
+        "kind": "union",
+        "tag": "kind",
+        "variants": {
+          "awaiting-approval": {
+            "kind": "declared",
+            "name": "harness.loop.AwaitingApprovalStop"
+          },
+          "budget-unobservable": {
+            "kind": "declared",
+            "name": "harness.loop.BudgetUnobservableStop"
+          },
+          "cancelled": {
+            "kind": "declared",
+            "name": "harness.loop.CancelledStop"
+          },
+          "completed": null,
+          "deadline": {
+            "kind": "declared",
+            "name": "harness.loop.DeadlineStop"
+          },
+          "failed": {
+            "kind": "declared",
+            "name": "harness.loop.FailedStop"
+          },
+          "max-cost": {
+            "kind": "declared",
+            "name": "harness.loop.MaxCostStop"
+          },
+          "max-input-tokens": {
+            "kind": "declared",
+            "name": "harness.loop.MaxInputTokensStop"
+          },
+          "max-output-tokens": {
+            "kind": "declared",
+            "name": "harness.loop.MaxOutputTokensStop"
+          },
+          "max-turns": {
+            "kind": "declared",
+            "name": "harness.loop.MaxTurnsStop"
+          },
+          "provider-incomplete": {
+            "kind": "declared",
+            "name": "harness.loop.ProviderIncompleteStop"
+          },
+          "unstructured": {
+            "kind": "declared",
+            "name": "harness.loop.UnstructuredStop"
+          }
+        }
+      },
+      "naming": {}
+    },
+    "harness.loop.UnstructuredStop": {
+      "name": "harness.loop.UnstructuredStop",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "asked_again",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {}
+          }
+        ],
+        "invariants": []
       },
       "naming": {}
     }

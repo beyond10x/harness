@@ -19,6 +19,9 @@ cargo run --locked -p b10x-harness-conformance -- --root .
 cargo run --locked -p b10x-harness-conformance -- --root . --audit-noop
 ```
 
+`cargo run --locked -p b10x-harness-conformance -- --root . --write-projections` rewrites both
+generated projections from the pinned libraries instead of refusing drift, then runs the suite.
+
 The specification has three observation commands over existing APIs: `Budget::validate`,
 `AgentLoop::run_in` (also used by `run`) and `AgentLoop::call`. These names describe test adapters,
 not extra public commands. The target invokes the production implementation and reports its return
@@ -30,9 +33,9 @@ or network is required. This is deterministic native library evidence; it is not
 confinement evidence.
 
 Budget and stop values have typed ESS shapes. `LoopStop` values are returned results, not persistent
-entities, so the specification invents no identity or lifecycle for them. The stop envelope admits
-all actual variants and fields; payload correlations are asserted for the executed variants, with
-the remainder recorded in the inventory. Serialized provider-neutral turn fixtures stay JSON
+entities, so the specification invents no identity or lifecycle for them. The stop is a union
+tagged by `kind` with exactly the fields of each `LoopStop` variant; its wire form is ESS's adjacent
+tagging, not serde's ([COVERAGE.md](COVERAGE.md)). Serialized provider-neutral turn fixtures stay JSON
 because the boundary being exercised is the existing port contract. No new model implementation is hand-transcribed: the adapter deserializes existing production
 `Budget` and `TurnOutcome` types and serializes existing return values.
 

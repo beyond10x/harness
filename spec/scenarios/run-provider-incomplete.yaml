@@ -44,7 +44,9 @@
       "response": {
         "stop": {
           "kind": "provider-incomplete",
-          "reason": "provider reason"
+          "value": {
+            "reason": "provider reason"
+          }
         },
         "text": "done",
         "turns": 1,

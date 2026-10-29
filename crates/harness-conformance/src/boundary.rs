@@ -2,7 +2,8 @@
 use std::collections::VecDeque;
 
 use harness_loop::{
-    AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopConfig, RunLedger, VecLoopSink,
+    AgentLoop, ApprovalPort, ApproveAll, Budget, DenyAll, LoopConfig, LoopStop, RunLedger,
+    VecLoopSink,
 };
 use harness_wire::{
     Approval, CallId, Envelope, Item, ModelPort, Risk, StreamSink, ToolCall, ToolName, ToolOutcome,
@@ -127,7 +128,7 @@ fn run_loop(input: &Value) -> Result<Value> {
                 .filter(|item| matches!(item, Item::ToolResult { failed: true, .. }))
                 .count();
             Ok(
-                json!({"stop":outcome.stop,"text":outcome.text,"turns":outcome.turns,"model_calls":model.calls,"tool_calls":tools.calls,"failed_results":failures,"input_tokens":tokens.map(|v|v.0),"output_tokens":tokens.map(|v|v.1),"diagnostic":null}),
+                json!({"stop":tagged(&outcome.stop)?,"text":outcome.text,"turns":outcome.turns,"model_calls":model.calls,"tool_calls":tools.calls,"failed_results":failures,"input_tokens":tokens.map(|v|v.0),"output_tokens":tokens.map(|v|v.1),"diagnostic":null}),
             )
         }
         Err(error) => {
@@ -141,6 +142,24 @@ fn run_loop(input: &Value) -> Result<Value> {
             )
         }
     }
+}
+/// The production serialization of `stop`, in the wire form ESS gives a tagged union.
+///
+/// serde writes a variant's fields beside `kind` (`#[serde(tag = "kind")]`); ESS 0.77.0 writes them
+/// under `value`, and a unit variant as the tag alone (`spec/COVERAGE.md`). Members are moved, none
+/// is computed.
+fn tagged(stop: &LoopStop) -> Result<Value> {
+    let Value::Object(mut fields) = serde_json::to_value(stop)? else {
+        return Err("a loop stop serializes as an object".into());
+    };
+    let kind = fields
+        .remove("kind")
+        .ok_or("a loop stop serializes its kind")?;
+    Ok(if fields.is_empty() {
+        json!({"kind": kind})
+    } else {
+        json!({"kind": kind, "value": fields})
+    })
 }
 fn call(input: &Value) -> Result<Value> {
     let mut model = model(VecDeque::new())?;

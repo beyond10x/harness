@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T20:54:53Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-refusal-display-escapes-daemon-bytes",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-substrate --locked --test security_u2_refusal_text_p2",
+    "reference": "base 20b1a19 with the case un-ignored: FAILED 5 passed 1 failed (raw ESC, CSI, DEL, LF, U+202E); unit 4850c06: ok 6 passed"
+  }
+}

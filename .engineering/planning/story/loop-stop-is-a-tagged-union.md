@@ -9,15 +9,29 @@ relations:
 - informed_by: executable-system-specification:harness-runtime
 - serves: vision:b10x-owns-its-loop
 scope:
+- confidence: cited
+  path: CHANGELOG.md
 - confidence: inferred
   path: conformance/model.json
 - confidence: inferred
   path: conformance/suite.json
+- confidence: cited
+  path: crates/harness-conformance/src/boundary.rs
+- confidence: cited
+  path: crates/harness-conformance/src/main.rs
+- confidence: cited
+  path: crates/harness-conformance/tests/stop_union.rs
 - confidence: inferred
   path: spec/COVERAGE.md
+- confidence: cited
+  path: spec/README.md
 - confidence: inferred
   path: spec/domains/loop.yaml
-revision: 9
+- confidence: cited
+  path: spec/scenarios
+- confidence: cited
+  path: spec/system.yaml
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T20:48:00Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-29T20:48:01Z", actor: "human:timo", revision: 9}

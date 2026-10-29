@@ -11,10 +11,18 @@ relations:
 - serves: vision:b10x-owns-its-loop
 scope:
 - confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/harness-cli/src/lib.rs
+- confidence: cited
+  path: crates/harness-substrate/src/client.rs
+- confidence: cited
   path: crates/harness-substrate/src/lib.rs
 - confidence: cited
+  path: crates/harness-substrate/src/withheld.rs
+- confidence: cited
   path: crates/harness-substrate/tests/security_u2_refusal_text_p2.rs
-revision: 6
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T20:47:58Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-29T20:47:59Z", actor: "human:timo", revision: 6}

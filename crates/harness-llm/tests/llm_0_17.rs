@@ -66,9 +66,10 @@ fn answer(connection: TcpStream, body: &str) {
 }
 
 fn sse(events: &[(&str, serde_json::Value)]) -> String {
+    use std::fmt::Write as _;
     let mut body = String::new();
     for (name, data) in events {
-        body.push_str(&format!("event: {name}\ndata: {data}\n\n"));
+        write!(body, "event: {name}\ndata: {data}\n\n").expect("writing to a String");
     }
     body
 }

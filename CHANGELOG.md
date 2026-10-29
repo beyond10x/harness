@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-29
+
 ### Changed
 
 - ESS 0.77.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `f692aabb`), up from 0.75.0; on its own the move left the generated model and suite byte-identical.

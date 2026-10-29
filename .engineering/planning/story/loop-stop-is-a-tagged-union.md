@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loop-stop-is-a-tagged-union
 kind: story
-status: active
+status: implemented
 title: The loop stop is specified as a tagged union
 summary: Declare harness.loop.Stop as an ESS union tagged by kind, matching LoopStop serde shape
 relations:
@@ -31,10 +31,11 @@ scope:
   path: spec/scenarios
 - confidence: cited
   path: spec/system.yaml
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T20:48:00Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-29T20:48:01Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-29T21:23:17Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 

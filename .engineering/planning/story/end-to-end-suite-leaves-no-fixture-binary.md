@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:end-to-end-suite-leaves-no-fixture-binary
 kind: story
-status: active
+status: implemented
 title: The end_to_end suite leaves no fixture binary in TMPDIR
 summary: controlled_fixture_binary() keeps a tempdir per suite run; build into CARGO_TARGET_TMPDIR or hold the TempDir so nothing is left in the shared TMPDIR.
 relations:
@@ -10,10 +10,11 @@ relations:
 scope:
 - confidence: cited
   path: crates/harness-cli/tests/end_to_end.rs
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T20:47:59Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-29T20:48:00Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-29T21:23:15Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Context
 

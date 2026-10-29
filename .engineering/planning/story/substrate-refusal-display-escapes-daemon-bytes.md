@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-refusal-display-escapes-daemon-bytes
 kind: story
-status: active
+status: implemented
 title: A substrate refusal's text escapes the daemon's control bytes
 summary: SubstrateError::Refused displays the daemon body verbatim; escape control and bidi characters on display
 tags:
@@ -22,10 +22,11 @@ scope:
   path: crates/harness-substrate/src/withheld.rs
 - confidence: cited
   path: crates/harness-substrate/tests/security_u2_refusal_text_p2.rs
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T20:47:58Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-29T20:47:59Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-29T21:23:14Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Context
 

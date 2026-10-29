@@ -2,12 +2,18 @@
 format: aep.planning-md/3
 id: story:end-to-end-suite-leaves-no-fixture-binary
 kind: story
-status: draft
+status: active
 title: The end_to_end suite leaves no fixture binary in TMPDIR
 summary: controlled_fixture_binary() keeps a tempdir per suite run; build into CARGO_TARGET_TMPDIR or hold the TempDir so nothing is left in the shared TMPDIR.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+scope:
+- confidence: cited
+  path: crates/harness-cli/tests/end_to_end.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-29T20:47:59Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-29T20:48:00Z", actor: "human:timo", revision: 5}
 ---
 ## Context
 
@@ -23,15 +29,20 @@ Running the `end_to_end` suite leaves nothing behind in `$TMPDIR`.
 
 ## Acceptance
 
-After `cargo test -p b10x-harness-cli --locked --test end_to_end`, no directory the suite created
-remains under `$TMPDIR` (checked by a before/after listing of the suite's own prefix), and the
-controlled-endpoint cases still pass. The fixture binary is built once per test process, as now.
+Run with `TMPDIR` set to a fresh empty directory, `cargo test -p b10x-harness-cli --locked --test
+end_to_end` exits 0 and leaves that directory empty (`find "$TMPDIR" -mindepth 1` prints nothing),
+and the controlled-endpoint cases still pass. The fixture binary is built once per test process, as
+now.
 
 ## Scope
 
 - `crates/harness-cli/tests/end_to_end.rs` (`controlled_fixture_binary`): build into the crate's
-  target directory (`env!("CARGO_TARGET_TMPDIR")`) or keep the `TempDir` alive for the process.
+  target directory (`env!("CARGO_TARGET_TMPDIR")`, as `adversary_u2_profile_write.rs:27` does). A
+  `TempDir` held in the `static OnceLock` would never be dropped, so it is not an option.
 
 ## Out of scope
 
 - Any change to the fixture itself or the cases that use it.
+
+Revised 2026-10-29 from the acceptance critic's round (wave d221): the check uses a fresh `TMPDIR`,
+because `tempfile`'s default `.tmp` prefix is shared with every other process.

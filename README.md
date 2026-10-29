@@ -356,6 +356,12 @@ later milestones. The loop now validates every `answer` locally against its decl
 | command line | `b10x-harness run` and `b10x-harness chat`, over a workspace |
 | bridge | `b10x-harness app-server`, a process speaking the Codex app-server JSON-RPC format |
 
+**`LoopTask` is the recommended embedding.** An async program spawns one with a closure that builds
+the ports on the task's own thread, then awaits `run`, `run_in`, `resume_approval` or `call`. A
+program without an async runtime calls the same four methods on the synchronous `AgentLoop`. The
+[embedding guide](website/docs/guides/embedding.md) walks through both, and
+`crates/harness-loop/examples/` holds the three programs it quotes.
+
 The seam that makes this possible is [`ToolPort`](crates/harness-wire/src/port.rs): in-process it
 is a direct call, under a bridge it is a callback over the wire, and the loop cannot tell.
 

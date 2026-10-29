@@ -679,9 +679,15 @@ fn to_llm_request(
                 llm_core::ToolChoice::Named(tool_name(name.as_str())?)
             }
         },
-        // Harness's turn carries no thinking, parallel-tool-call or hint control to map; the
-        // empty value is the pre-0.7.0 turn exactly.
-        controls: llm_core::Controls::default(),
+        // Harness's turn carries no thinking, parallel-tool-call or hint control to map. One
+        // control is always set: a call to a tool this turn did not publish comes back to the
+        // loop, which answers it as a failed outcome the model learns from (invariant 9) and
+        // routes a bare entry name over a catalogue. Without it `llm` refuses the whole turn and
+        // the run ends (live, 2026-10-29: every `--surface verbs` run on llm 0.16.0).
+        controls: llm_core::Controls {
+            return_unpublished_calls: true,
+            ..llm_core::Controls::default()
+        },
     })
 }
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T12:51:12Z",
+  "actor": "human:timo",
+  "artifact": "story:verbs-survives-a-bare-entry-call",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "live run, subscription login, measurements/score.py surface --brief",
+    "reference": "measurements/runs/m2-live-verbs-{1,2,3}-llm017-2026-10-29.jsonl: 3 of 3 completed on llm 0.17.0"
+  }
+}

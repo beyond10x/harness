@@ -52,6 +52,8 @@ Everything here except `runs/m1-tier-a-2026-09-18.jsonl*`, its session file and 
 | `runs/m1-tier-b-summary-2026-10-29.jsonl` | `vendor_live`: the summary turn, 2026-10-29 |
 | `runs/m2-live-{flat,verbs}-{1,2,3}-2026-10-29.jsonl` | `vendor_live`: three flat/verbs pairs, 2026-10-29. `.stderr` beside a verbs record carries its refusal |
 | `runs/r1-live-codex-2026-10-29.jsonl` | `vendor_live`: one Codex Responses run, 2026-10-29, refused on turn 2. `.stderr` carries the refusal |
+| `runs/m2-live-verbs-{1,2,3}-llm017-2026-10-29.jsonl` | `vendor_live`: three verbs runs on `llm` 0.17.0, 2026-10-29, all completed |
+| `runs/r2-live-codex-{1,2}-llm017-2026-10-29.jsonl` | `vendor_live`: two Codex Responses runs on `llm` 0.17.0, 2026-10-29, both completed |
 
 Nothing in production was instrumented for any of this. Every figure comes from a typed event the
 loop already emits — `crates/harness-loop/src/event.rs`, `{"kind": ...}` in kebab-case. What was
@@ -285,7 +287,7 @@ which the verbs surface does not publish. The provider accepted those names and 
 the whole turn as `model output contains a duplicate call or unpublished tool`, so the loop's own
 unpublished-tool routing never saw the calls, and the run ended where invariant 9 says the model
 should have been told. The verbs arm's cost is therefore not measured; its comparison waits on
-`story:verbs-survives-a-bare-entry-call`.
+`story:verbs-survives-a-bare-entry-call`, measured on `llm` 0.17.0 below.
 
 ### One run per route through `llm`
 
@@ -298,8 +300,43 @@ should have been told. The verbs arm's cost is therefore not measured; its compa
   `input[6]` was the stream's `response.metadata` event, kept by `llm-responses` as an opaque item
   and replayed by the loop, and the endpoint's answer was `invalid_request_error`, code
   `invalid_value`: "Invalid value: 'response.metadata'". Both runs ended on turn 2; inferred, not observed: every tool-using Codex run through `llm`
-  0.16.0 that receives that event ends on its second turn (`story:responses-replays-no-stream-metadata`).
+  0.16.0 that receives that event ends on its second turn (`story:responses-replays-no-stream-metadata`;
+  on `llm` 0.17.0 see below).
 
 The live byte pins the two wire stories asked for are `llm`'s since the wire crates moved there
 (invariant 14); `llm` 0.16.0 replays one live stream per route (`story:live-provider-captures`
 there).
+
+### The same two measurements on `llm` 0.17.0 — `runs/m2-live-verbs-{1,2,3}-llm017-2026-10-29.jsonl`, `runs/r2-live-codex-{1,2}-llm017-2026-10-29.jsonl`
+
+Authorized by `approval-record:wave-llm017-d204`, on the same subscription logins and with the same
+two path rewrites. Built from `wave/2026-10-29-llm017` at `b9bd591` plus the pin to `llm` 0.17.0
+and `Controls::return_unpublished_calls` set by `harness-llm` (the change these runs measure).
+
+**Verbs**, the command of the flat-against-verbs section, three repeats:
+
+| arm | completed | calls | discovery calls | failed calls | turns | input / output tokens | micro-USD |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| verbs | 3 of 3 | 6, 6, 6 | 1 | 0 | 4, 4, 4 | 14,121 / 491; 14,235 / 613; 14,432 / 588 | 17,823; 18,569; 18,638 |
+| flat (above) | 3 of 3 | 6, 6, 6 | 0 | 0 | 3, 3, 4 | 8,661 / 636; 8,695 / 644; 9,977 / 655 | 12,866; 12,943; 13,252 |
+
+All three verbs answers were right. Every run took the same path: `tool_search` on turn 1, then
+`find` and four `file_read` calls by their entry names, never through `tool_invoke`. `llm` 0.17.0
+handed each unpublished call to the loop, which routed it over the catalogue and said so with an
+`unpublished-tool-routed` warning (five per run). On this task and this model the verbs surface
+costs about 40% more than flat: one extra turn and the catalogue in the context. Three repeats per
+arm, one model, one task: a measurement of this case, not of the surface in general.
+
+**Codex Responses**, `-p codex --surface flat` on `gpt-5.6-sol` with the surface task, two runs:
+
+| run | completed | calls | turns | input / output tokens per turn |
+| --- | --- | --- | --- | --- |
+| 1 | yes | `find`, then 4 `file_read` | 3 | 1,225 / 166; 1,446 / 193 (1,280 cached); 2,904 / 197 (1,280 cached) |
+| 2 | yes | 3 `dir_list`, 1 `file_read` | 3 | 1,225 / 165; 1,462 / 88; 1,728 / 204 (1,280 cached) |
+
+Both answers were right and both runs passed turn 2, where every Codex tool-using run on `llm`
+0.16.0 ended. Neither record carries an `unknown-stream-event` warning: `llm` 0.17.0 lists
+`response.metadata` among the stream events it accepts and does not act on
+(`crates/llm-responses/src/stream.rs`, `ACCEPTED_STREAM_EVENTS`), so it no longer becomes an opaque
+item. That the endpoint still sent the event on these runs is not observed; no recording proxy ran.
+No rate card for this model exists here, so the cost column is empty.

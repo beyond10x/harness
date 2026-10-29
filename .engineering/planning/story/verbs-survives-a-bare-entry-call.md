@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: story:verbs-survives-a-bare-entry-call
 kind: story
-status: draft
+status: implemented
 title: A verbs run survives a call to an entry by its own name
 relations:
 - derived_from: epic:measured-not-emulated
 - serves: vision:b10x-owns-its-loop
-revision: 1
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-29T12:51:12Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-29T12:51:12Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-29T12:51:13Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":2}}}
 ---
 ## Evidence
 
@@ -36,3 +40,20 @@ Three live `--surface verbs` runs of `prompts/surface-task.txt` through the re-p
 terminal the loop chose (completed or a named budget stop), none ended by the unpublished-name
 refusal, recorded as `vendor_live` beside the 2026-10-29 flat runs, with tool calls, discovery
 calls, tokens and cost reported per arm.
+
+## Resolution
+
+`llm` 0.17.0 adds `Controls::return_unpublished_calls` (default: refuse). `harness-llm` sets it on
+every turn (`crates/harness-llm/src/lib.rs`, `to_llm_request`), so a call to a tool the turn did not
+publish comes back to the loop, which routes a bare entry name over the catalogue or answers the
+call as a failed outcome (invariant 9).
+
+- Port test: `crates/harness-llm/tests/llm_0_17.rs`,
+  `a_call_to_an_unpublished_entry_reaches_the_loop_instead_of_ending_the_turn`, a loopback
+  Messages stream calling `find` with only `tool_search` published. With the control set to
+  `false` the test fails, so it holds the setting.
+- Live, 2026-10-29, Claude subscription login, `claude-haiku-4-5-20251001`:
+  `measurements/runs/m2-live-verbs-{1,2,3}-llm017-2026-10-29.jsonl`, `vendor_live`. 3 of 3
+  completed with the right answer; 6 calls (1 discovery, 0 failed), 4 turns, 14,121-14,432 input
+  tokens, 17,823-18,638 micro-USD at list price per run, beside the flat arm's 12,866-13,252
+  (`measurements/README.md`, *The same two measurements on `llm` 0.17.0*).

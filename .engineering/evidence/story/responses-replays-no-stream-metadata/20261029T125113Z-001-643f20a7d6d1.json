@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T12:51:13Z",
+  "actor": "human:timo",
+  "artifact": "story:responses-replays-no-stream-metadata",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "live run, subscription login, measurements/score.py surface --brief",
+    "reference": "measurements/runs/r2-live-codex-{1,2}-llm017-2026-10-29.jsonl: 2 of 2 completed past turn 2 on llm 0.17.0"
+  }
+}

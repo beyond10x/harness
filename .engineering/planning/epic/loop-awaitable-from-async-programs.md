@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: epic:loop-awaitable-from-async-programs
 kind: epic
-status: active
+status: implemented
 title: An async program awaits the loop through LoopTask, the documented default
 summary: LoopTask owns a run's ports and returns runtime-neutral futures for run, run_in, resume_approval and call; the synchronous AgentLoop stays for programs without a runtime.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T03:35:19Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":7}}}
 - {from: "proposed", to: "active", at: "2026-10-29T03:35:20Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "active", to: "implemented", at: "2026-10-29T04:51:27Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":7}}}
 ---
 ## Evidence
 
@@ -68,14 +69,19 @@ async runtime.
   the `LoopCancel`, installs it on every `AgentLoop` it builds (`with_cancel`,
   `crates/harness-loop/src/lib.rs:2081`), passes it to the builder, and exposes it as
   `cancel_handle()`. A port that checks its own token, such as `LlmPort`
-  (`crates/harness-llm/src/lib.rs:529,546`), holds the same one. Dropping an unfinished future
-  cancels the token. A run on a cancelled token ends as the synchronous loop's does, `Ok` with stop
-  `cancelled` (`lib.rs:2672-2673`); `harness_wire::Cancel` has no reset
+  (`crates/harness-llm/src/lib.rs:529,546`), holds the same one. Dropping a future whose command
+  is running cancels the token; dropping one whose command has not started skips that command and
+  cancels nothing (amended 2026-10-29 from adversary finding `task.rs:323`: a timed-out `call`
+  must not perform its effect, and cancelling would stop the command running ahead of it). A run
+  on a cancelled token ends as the synchronous loop's does, `Ok` with stop `cancelled`
+  (`lib.rs:2672-2673`); `harness_wire::Cancel` has no reset
   (`crates/harness-wire/src/cancel.rs:15-24`), so every later run on that task ends that way.
 - **D5 — additive.** No synchronous signature changes and no new `LoopError` variant. The futures
-  resolve to `Result<_, LoopTaskError>`, a new type: the loop's own `LoopError`, the builder's
-  failure, a panic on the task thread, or a task whose thread has gone. The next minor release
-  (0.23.0) lists both under Added.
+  resolve to `Result<_, LoopTaskError>`, a new type: the builder's failure, a panic on the task
+  thread, or a task whose thread has gone. The loop's own `LoopError` comes back inside `Ran`
+  (`run`, `resume_approval`) or `RanIn` (`run_in`) beside the sink, so a sink survives a loop error
+  (amended 2026-10-29 from adversary finding `task.rs:265`). The next minor release (0.23.0) lists
+  the new types under Added.
 - **D6 — spawning and dropping do not block.** `spawn` returns at once; a builder failure resolves
   the first command's future. Dropping the `LoopTask` closes the command channel and the thread
   drops the ports and exits on its own. `shutdown(self)` is the awaitable form: it resolves once

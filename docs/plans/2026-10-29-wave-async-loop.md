@@ -1,6 +1,19 @@
 # Wave 2026-10-29: LoopTask, the awaitable loop
 
-Status: approved by the operator on 2026-10-29 ("A"). Stage 2 running.
+Status: approved by the operator on 2026-10-29 ("A"). Closed 2026-10-29: three stories and the
+epic implemented; `cargo xtask gate` on `6696dfd`: `gate: green`, exit 0, 70 test binaries,
+1205 tests passed, Harness ESS 29/29.
+
+## Close
+
+| figure | value |
+|---|---|
+| adversary passes | loop-task 2 (5 then 1 introduced; 0 carried), real-ports 1 (2 pre-existing) |
+| review outcomes | loop-task pass 1 and 2 `fixed`; real-ports pass 1 `no-op` (filed) |
+| design amended from findings | epic D4 (a future dropped before its command starts skips it), D5 (`LoopError` returns inside `Ran`/`RanIn` with the sink) |
+| filed | `story:mcp-call-stops-when-the-loop-is-cancelled` (under `epic:async-native-loop`), scope added to `story:end-to-end-suite-leaves-no-fixture-binary` |
+| implementor spend | loop-task 162,360 + 218,618 + 253,737 tokens; real-ports 130,761; guide 144,485 |
+| adversary spend | loop-task 125,136 + 167,457 tokens; real-ports 112,371 |
 
 ## Unit records
 
@@ -11,9 +24,9 @@ is `target/` inside each tree; scratch is under the coordinator session's scratc
 | unit | managed id | branch | base | stage |
 |---|---|---|---|---|
 | integration | `harness-wave-async-loop` | `wave/2026-10-29-async-loop` | `3b62509` | plan merged |
-| `story:loop-task-awaits-a-run` | `harness-unit-loop-task` | `impl/loop-task-awaits-a-run` | `3b62509` | implementor dispatched |
-| `story:real-ports-run-under-an-awaited-loop` | — | — | — | waits for wave 1 |
-| `story:embedding-guide-recommends-loop-task` | — | — | — | waits for wave 1 |
+| `story:loop-task-awaits-a-run` | `harness-unit-loop-task` | `impl/loop-task-awaits-a-run` | `3938235` | adversary pass 1 red (5 introduced, `review-result:loop-task-adversary-pass-1`), correction round 1 green (267 cases), adversary pass 2: 1 introduced (`review-result:loop-task-adversary-pass-2`), correction round 2 green (272 cases), coordinator read the round-2 diff, VERIFIED, merged `b87c940`, tree finished |
+| `story:real-ports-run-under-an-awaited-loop` | `harness-unit-real-ports` | `impl/real-ports-run-under-an-awaited-loop` | `b87c940` | implementor green (413 cases, no production change); adversary pass 1: 2 pre-existing (`review-result:real-ports-adversary-pass-1`), filed as `story:mcp-call-stops-when-the-loop-is-cancelled` and `story:end-to-end-suite-leaves-no-fixture-binary`; red case re-pinned to today's 30 s wait; VERIFIED, merged `6696dfd`, tree finished |
+| `story:embedding-guide-recommends-loop-task` | `harness-unit-embedding-guide` | `impl/embedding-guide-recommends-loop-task` | `b87c940` | acceptance corrected at revision 9 (drop semantics, `Ran`); implementor green, no adversary, VERIFIED, merged `2b3f60a`, tree finished |
 
 ## History
 

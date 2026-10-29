@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loop-task-awaits-a-run
 kind: story
-status: active
+status: implemented
 title: LoopTask awaits a run, an approval resume and a single call
 summary: Owned ports, a dedicated run thread with no runtime context, a waker-completed future, cancel on drop.
 relations:
@@ -11,10 +11,8 @@ relations:
 scope:
 - confidence: cited
   path: CHANGELOG.md
-- confidence: inferred
+- confidence: cited
   path: Cargo.lock
-- confidence: inferred
-  path: conformance/suite.json
 - confidence: cited
   path: crates/harness-conformance/src/boundary.rs
 - confidence: cited
@@ -23,12 +21,17 @@ scope:
   path: crates/harness-loop/src/lib.rs
 - confidence: cited
   path: crates/harness-loop/src/task.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/harness-loop/tests/adversary_loop_task.rs
+- confidence: cited
+  path: crates/harness-loop/tests/adversary_loop_task_pass2.rs
+- confidence: cited
   path: crates/harness-loop/tests/awaited.rs
-revision: 9
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T03:35:23Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":7}}}
 - {from: "proposed", to: "active", at: "2026-10-29T03:35:23Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "active", to: "implemented", at: "2026-10-29T04:51:26Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":9,"verification":1}}}
 ---
 ## Outcome
 

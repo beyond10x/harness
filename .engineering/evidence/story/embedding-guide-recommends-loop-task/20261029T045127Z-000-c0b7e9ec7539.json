@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T04:51:27Z",
+  "actor": "human:timo",
+  "artifact": "story:embedding-guide-recommends-loop-task",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate on wave/2026-10-29-async-loop at 6696dfd: gate: green, EXIT=0; 70 test binaries ok, 1205 tests passed; Harness ESS 29/29",
+    "reference": "wave/gate.log"
+  }
+}

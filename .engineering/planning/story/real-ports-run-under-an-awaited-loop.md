@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:real-ports-run-under-an-awaited-loop
 kind: story
-status: active
+status: implemented
 title: The model, MCP and embedded Substrate ports run under LoopTask on both tokio flavours
 summary: End-to-end tests from tokio, both flavours, for the shipped ports built and dropped inside the LoopTask builder's thread.
 relations:
@@ -10,22 +10,25 @@ relations:
 - depends_on: story:loop-task-awaits-a-run
 - serves: vision:b10x-owns-its-loop
 scope:
-- confidence: inferred
-  path: CHANGELOG.md
+- confidence: cited
+  path: Cargo.lock
 - confidence: cited
   path: crates/harness-cli/Cargo.toml
 - confidence: cited
+  path: crates/harness-cli/tests/adversary_awaited_ports.rs
+- confidence: cited
   path: crates/harness-cli/tests/awaited_ports.rs
-- confidence: inferred
-  path: crates/harness-llm/src/lib.rs
-- confidence: inferred
-  path: crates/harness-mcp/src/lib.rs
-- confidence: inferred
-  path: crates/harness-substrate/src/embedded.rs
-revision: 9
+- confidence: cited
+  path: crates/harness-cli/tests/common/mod.rs
+- confidence: cited
+  path: crates/harness-cli/tests/end_to_end.rs
+- confidence: cited
+  path: crates/harness-cli/tests/fixtures/adversary_silent_mcp.rs
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T03:35:23Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":7}}}
 - {from: "proposed", to: "active", at: "2026-10-29T03:35:24Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "active", to: "implemented", at: "2026-10-29T04:51:27Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T04:36:14Z",
+  "actor": "human:timo",
+  "artifact": "story:embedding-guide-recommends-loop-task",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "VERIFIED: wave/embedding-guide/verify.sh — treatment: guide with 3 headings in order, 3 examples build and run exit 0, 5 LoopTask links; baseline: no guide, no examples, 0 links (new behaviour)",
+    "reference": "wave/embedding-guide/verify-baseline.txt vs wave/embedding-guide/verify-treatment.txt"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:embedding-guide-recommends-loop-task
 kind: story
-status: active
+status: implemented
 title: The embedding guide recommends LoopTask; the synchronous loop is the fallback
 summary: website guide, README link and rustdoc present LoopTask first.
 relations:
@@ -18,16 +18,19 @@ scope:
   path: crates/harness-loop/examples/blocking_run.rs
 - confidence: cited
   path: crates/harness-loop/examples/resume_an_approval.rs
-- confidence: inferred
+- confidence: cited
   path: crates/harness-loop/src/lib.rs
 - confidence: cited
+  path: crates/harness-loop/src/task.rs
+- confidence: cited
   path: website/docs/guides/embedding.md
-- confidence: inferred
+- confidence: cited
   path: website/sidebars.ts
-revision: 8
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T03:35:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":7}}}
 - {from: "proposed", to: "active", at: "2026-10-29T03:35:24Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":7}}}
+- {from: "active", to: "implemented", at: "2026-10-29T04:51:27Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
@@ -59,8 +62,12 @@ that a later release replaces behind the same methods.
   thread today and that a later release replaces that thread without changing `LoopTask`'s methods.
 - `README.md` links the guide from `## Three shells, one loop` and names `LoopTask` as the
   recommended embedding.
-- The guide states that dropping an unfinished `LoopTask` future cancels the task for good: every
-  later run on it stops `cancelled`.
+- The guide states that dropping a `LoopTask` future whose command is running cancels the task for
+  good (every later run on it stops `cancelled`), and that dropping one whose command has not
+  started skips that command. (Corrected 2026-10-29 from the shipped behaviour of
+  `story:loop-task-awaits-a-run`, adversary finding at `task.rs:323`.)
+- The guide's examples read `run` and `resume_approval` results as `Ran { result, sink }` and
+  `run_in` as `RanIn`; `LoopTaskError` has the variants `Build`, `Panicked` and `Gone`.
 - The rustdoc on `LoopTask` carries a doctest that compiles (`no_run`) under
   `cargo test -p b10x-harness-loop --doc`.
 - The doc comments of `AgentLoop`, `run`, `run_in`, `resume_approval` and `call` each contain the

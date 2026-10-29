@@ -7,7 +7,10 @@ title: The end_to_end suite leaves no fixture binary in TMPDIR
 summary: controlled_fixture_binary() keeps a tempdir per suite run; build into CARGO_TARGET_TMPDIR or hold the TempDir so nothing is left in the shared TMPDIR.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/harness-cli/tests/common/mod.rs
+revision: 2
 ---
 ## Context
 

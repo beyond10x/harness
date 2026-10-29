@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T04:25:07Z",
+  "actor": "human:timo",
+  "artifact": "story:loop-task-awaits-a-run",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "VERIFIED: cargo test -p b10x-harness-loop --locked --test awaited -- awaited_run_leaves_the_runtime_thread_free awaited_run_has_no_runtime_context the_future_needs_no_tokio (treatment 3 passed, exit 0); baseline wave/2026-10-29-async-loop has no LoopTask (git grep exit 1), new behaviour",
+    "reference": "wave/loop-task/verify-baseline.txt vs wave/loop-task/verify-treatment.txt"
+  }
+}

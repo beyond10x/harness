@@ -9,13 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- ESS 0.77.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `f692aabb`), up from 0.75.0; the generated model and suite are byte-identical (29 of 29 scenarios pass, 29 of 29 fail on the inert target).
+- ESS 0.77.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `f692aabb`), up from 0.75.0; on its own the move left the generated model and suite byte-identical.
 - `libz-sys` moves from 1.1.29 to 1.1.31 in `Cargo.lock` (RUSTSEC-2026-0418).
 - The ESS specification declares the loop stop `harness.loop.Stop` as a union tagged by `kind`, one variant per `LoopStop` variant with exactly its fields, in place of the `StopKind` enum and a struct of twelve optional fields, so ESS refuses a stop no `LoopStop` can be (a `completed` stop carrying `limit_ms`). The specification moves to format `ess/22` for the unit variant `completed`; scenarios and the conformance adapter use ESS's adjacent union form (`spec/COVERAGE.md`), and `b10x-harness-conformance --write-projections` regenerates the model and suite from the pinned libraries.
 
 ### Fixed
 
-- No byte a substrate daemon answered reaches the terminal raw any more. `SubstrateError::Refused` and `SubstrateError::Unreadable` escape control characters (ESC, C1, DEL, line breaks) and format characters such as U+202E in their `Display`, the way `escape_debug` does but leaving `"`, `'` and `\` as they are; the new `harness_substrate::inert` is that escaper, and `--substrate-adopt` uses it for a status-0 refusal, which a program on the socket can also produce by answering `HTTP/1.1 0`. The `body` and `reason` fields still hold the original text byte for byte.
+- `SubstrateError::Refused` and `SubstrateError::Unreadable` escape control characters (ESC, C1, DEL, line breaks) and format characters such as U+202E in their `Display`, the way `escape_debug` does but leaving `"`, `'` and `\` as they are; the new `harness_substrate::inert` is that escaper, and `--substrate-adopt` uses it for a status-0 refusal, which a program on the socket can also produce by answering `HTTP/1.1 0`, and a withheld-tool note escapes a fact value the daemon stated. The `body` and `reason` fields still hold the original text byte for byte.
 
 ## [0.23.0] - 2026-10-29
 

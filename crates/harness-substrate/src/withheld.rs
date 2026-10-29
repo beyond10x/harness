@@ -84,7 +84,10 @@ pub struct Withheld {
 /// The same word [`crate::Predicate::check`] uses, because *the machine did not say* and *the
 /// machine said no* are different answers and a reader has to be able to tell them apart.
 fn describe(value: Option<&Value>) -> String {
-    value.map_or_else(|| "nothing".to_owned(), ToString::to_string)
+    value.map_or_else(
+        || "nothing".to_owned(),
+        |value| crate::inert(&value.to_string()),
+    )
 }
 
 impl Facts {

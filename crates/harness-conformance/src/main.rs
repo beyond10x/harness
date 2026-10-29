@@ -170,8 +170,8 @@ fn compile(root: &Path) -> Result<AdmittedSuite> {
     let spec = root.join("spec");
     let manifest: Value =
         serde_yaml_ng::from_str(&fs::read_to_string(spec.join("ess-inputs.yaml"))?)?;
-    if manifest["requires"] != "ess 0.75.0" || manifest["format"] != "ess-inputs/2" {
-        return Err("ESS manifest must match the pinned 0.75.0 compiler".into());
+    if manifest["requires"] != "ess 0.77.0" || manifest["format"] != "ess-inputs/2" {
+        return Err("ESS manifest must match the pinned 0.77.0 compiler".into());
     }
     let paths = strings(&manifest["specification"])?;
     let texts: Vec<String> = paths

@@ -11,10 +11,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+mod common;
+
+use common::controlled_fixture_binary;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
 
@@ -99,32 +102,6 @@ fn controlled_endpoint(mode: &str) -> (Child, String) {
     let ready: Value = serde_json::from_str(&line).expect("the announcement is JSON");
     let url = ready["url"].as_str().expect("an endpoint URL").to_owned();
     (child, url)
-}
-
-fn controlled_fixture_binary() -> &'static Path {
-    static BINARY: OnceLock<PathBuf> = OnceLock::new();
-    BINARY
-        .get_or_init(|| {
-            let source =
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_endpoint.rs");
-            let directory = tempfile::tempdir()
-                .expect("a fixture build directory")
-                .keep();
-            let binary = directory.join("b10x-harness-mcp-endpoint");
-            let output = Command::new("rustc")
-                .args(["--edition=2024", "-C", "debuginfo=0", "-o"])
-                .arg(&binary)
-                .arg(&source)
-                .output()
-                .expect("the workspace Rust compiler runs");
-            assert!(
-                output.status.success(),
-                "controlled endpoint compiles: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            binary
-        })
-        .as_path()
 }
 
 struct McpFiles {

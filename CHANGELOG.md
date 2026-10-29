@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - ESS 0.77.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `f692aabb`), up from 0.75.0; the generated model and suite are byte-identical (29 of 29 scenarios pass, 29 of 29 fail on the inert target).
 - `libz-sys` moves from 1.1.29 to 1.1.31 in `Cargo.lock` (RUSTSEC-2026-0418).
 
+### Fixed
+
+- `SubstrateError::Refused` no longer prints the daemon's body raw: its `Display` escapes control characters (ESC, C1, DEL, line breaks) and bidi-format characters such as U+202E, the way `escape_debug` does but leaving quotes as they are, so a daemon answer cannot rewrite the operator's error line. The `body` field still holds the daemon's answer byte for byte.
+
 ## [0.23.0] - 2026-10-29
 
 ### Changed

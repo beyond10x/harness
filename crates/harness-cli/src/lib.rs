@@ -3516,9 +3516,14 @@ fn socket_confined(
             let minted = client
                 .workspace_adopt(root_name)
                 .map_err(|error| match error {
-                    // Status 0 is the client's own refusal: no request was made.
+                    // Status 0 is meant for the client's own refusal, where no request was made;
+                    // but a program on the socket can answer `HTTP/1.1 0` too, so the body is
+                    // printed only through `inert`.
                     harness_substrate::SubstrateError::Refused { status: 0, body } => {
-                        format!("`--substrate-adopt {root_name}` was refused: {body}")
+                        format!(
+                            "`--substrate-adopt {root_name}` was refused: {}",
+                            harness_substrate::inert(&body)
+                        )
                     }
                     // This subject's own earlier adopt of the name; its id is the way back in.
                     // Keyed on the daemon's refusal code, not the status: another 409 is some

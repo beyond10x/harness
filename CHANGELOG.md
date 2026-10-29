@@ -15,7 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- `SubstrateError::Refused` no longer prints the daemon's body raw: its `Display` escapes control characters (ESC, C1, DEL, line breaks) and bidi-format characters such as U+202E, the way `escape_debug` does but leaving quotes as they are, so a daemon answer cannot rewrite the operator's error line. The `body` field still holds the daemon's answer byte for byte.
+- No byte a substrate daemon answered reaches the terminal raw any more. `SubstrateError::Refused` and `SubstrateError::Unreadable` escape control characters (ESC, C1, DEL, line breaks) and format characters such as U+202E in their `Display`, the way `escape_debug` does but leaving `"`, `'` and `\` as they are; the new `harness_substrate::inert` is that escaper, and `--substrate-adopt` uses it for a status-0 refusal, which a program on the socket can also produce by answering `HTTP/1.1 0`. The `body` and `reason` fields still hold the original text byte for byte.
 
 ## [0.23.0] - 2026-10-29
 

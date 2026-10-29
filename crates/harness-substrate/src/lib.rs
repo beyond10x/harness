@@ -302,22 +302,32 @@ pub enum SubstrateError {
     /// `body` is the daemon's answer byte for byte; only the display escapes it (`inert`).
     #[error("the substrate daemon answered {status}: {}", inert(.body))]
     Refused { status: u16, body: String },
-    #[error("the substrate daemon's answer is not the document this build reads: {reason}")]
+    /// `reason` often quotes the daemon's answer (`serde_json`'s Display escapes only
+    /// U+0000..U+001F), so the display escapes it as `Refused` does its body.
+    #[error(
+        "the substrate daemon's answer is not the document this build reads: {}",
+        inert(.reason)
+    )]
     Unreadable { reason: String },
 }
 
-/// A refusal body as a terminal may print it: every character `escape_debug` would escape, except
-/// the quotes, which reach no terminal as anything but themselves.
+/// Text a daemon supplied, as a terminal may print it: every character `escape_debug` would
+/// escape, except `"`, `'` and `\`, which reach no terminal as anything but themselves.
 ///
 /// A daemon outside its own contract, or another program on the socket, can answer ESC, C1
 /// controls, DEL, a line break or a bidi override, and printed raw they rewrite the operator's
 /// error line. The judgement of what is not printable is `std`'s, the one the `{:?}` quoting in
-/// `client.rs` uses; the quotes are left alone so a JSON body and a sentence stay readable.
-fn inert(text: &str) -> String {
+/// `client.rs` uses. The quotes and the backslash are left alone so a JSON body and a sentence
+/// stay readable and text already quoted with `{:?}` passes through unchanged, not escaped twice.
+///
+/// Every `SubstrateError` display applies it; a caller that prints a `Refused` body or an
+/// `Unreadable` reason itself applies it too.
+#[must_use]
+pub fn inert(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
-            '"' | '\'' => shown.push(character),
+            '"' | '\'' | '\\' => shown.push(character),
             other => shown.extend(other.escape_debug()),
         }
     }

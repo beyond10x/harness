@@ -159,6 +159,10 @@ pub struct RanIn<S> {
 /// caller's runtime only ever holds futures; the ports never cross threads, so they need not be
 /// [`Send`].
 ///
+/// This is the recommended way to embed the loop; [`AgentLoop`] is the entry for a program without
+/// an async runtime. The thread is today's implementation, the synchronous loop run where it may
+/// block. A later release replaces that thread without changing this type's methods.
+///
 /// # Runtime-neutral futures
 ///
 /// [`run`](LoopTask::run), [`run_in`](LoopTask::run_in),
@@ -187,6 +191,33 @@ pub struct RanIn<S> {
 ///   with [`LoopStop::Cancelled`](crate::LoopStop::Cancelled). The token has no reset, so every
 ///   later run on the same task ends the same way; a caller that wants to run again starts
 ///   another task.
+///
+/// A timeout is such a drop. Here the builder opens real ports, so the example is compiled and
+/// not run:
+///
+/// ```no_run
+/// use std::time::Duration;
+///
+/// use b10x_harness_loop::{DenyAll, LoopCancel, LoopConfig, LoopPorts, LoopTask, NullLoopSink};
+/// # use harness_wire::{ModelPort, ToolPort};
+/// # fn model_client(_: &LoopCancel) -> Result<Box<dyn ModelPort>, String> { unimplemented!() }
+/// # fn workspace_tools() -> Result<Box<dyn ToolPort>, String> { unimplemented!() }
+/// # async fn deadline() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = LoopConfig::new("model", "Answer briefly.");
+/// let task = LoopTask::spawn(config, |cancel: &LoopCancel| {
+///     // A model client that holds the task's token stops its turn when the task is cancelled.
+///     let model = model_client(cancel)?;
+///     Ok::<_, String>(LoopPorts::boxed(model, workspace_tools()?, Box::new(DenyAll)))
+/// });
+/// let run = task.run("Fix the build.", NullLoopSink);
+/// match tokio::time::timeout(Duration::from_secs(600), run).await {
+///     Ok(ran) => println!("{:?}", ran?.result?.stop),
+///     // Dropped while running: the task is cancelled for good, so the next run needs a new task.
+///     Err(_elapsed) => task.shutdown().await?,
+/// }
+/// # Ok(())
+/// # }
+/// ```
 ///
 /// # Ending a task
 ///

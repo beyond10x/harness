@@ -185,9 +185,9 @@
     }
   },
   "provenance": {
-    "contract_digest": "ac58bd94b91ac04ce63b2df16e97b08b353010bf120c64cefb34bc4e4257535a",
+    "contract_digest": "6aaeed0d57bd3ca6f526b4a192bff370580416e28a53e9c834ca09b7d3b5d64e",
     "scenario_initial_state": "empty",
-    "spec_digest": "ad45285d5e29ef9a753bd0125797a7ad3ed79f34b0dfeed4c3a2745afca316fa",
+    "spec_digest": "19e974435fb3b920e9a921e8f3988bbbea46a257bf45ce4cf492b7ccf6e69db5",
     "specification_version": "v1",
     "suite_version": "ess-conformance/35",
     "system": "harness"
@@ -352,6 +352,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -369,7 +381,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -1621,6 +1634,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -1638,7 +1663,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -1835,6 +1861,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -1852,7 +1890,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -2042,6 +2081,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -2059,7 +2110,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -2257,6 +2309,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -2274,7 +2338,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -2466,6 +2531,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -2483,7 +2560,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -2681,6 +2759,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -2698,7 +2788,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -2897,6 +2988,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -2914,7 +3017,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -3111,6 +3215,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -3128,7 +3244,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -3345,6 +3462,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -3362,7 +3491,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -3578,6 +3708,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -3595,7 +3737,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -3811,6 +3954,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -3828,7 +3983,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -4026,6 +4182,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -4043,7 +4211,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },
@@ -4234,6 +4403,18 @@
                   {
                     "name": "asked_again",
                     "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "cause",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "message",
+                    "type": "Optional<String>"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Optional<Boolean>"
                   }
                 ],
                 "kind": "struct"
@@ -4251,7 +4432,8 @@
                   "cancelled",
                   "awaiting-approval",
                   "provider-incomplete",
-                  "unstructured"
+                  "unstructured",
+                  "failed"
                 ]
               }
             },

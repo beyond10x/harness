@@ -35,7 +35,12 @@ impl Fixture {
 
     /// Rust-only provider endpoint used by the outbound MCP composition tests.
     fn mcp_provider() -> Self {
-        let (child, base_url) = controlled_endpoint("provider");
+        Self::controlled("provider")
+    }
+
+    /// The same Rust endpoint, in one of its other provider modes.
+    fn controlled(mode: &str) -> Self {
+        let (child, base_url) = controlled_endpoint(mode);
         Self { child, base_url }
     }
 
@@ -1342,10 +1347,11 @@ fn a_run_that_broke_on_the_wire_files_what_it_bought_on_the_second_wire_too() {
 #[test]
 fn the_record_of_a_run_that_broke_after_a_turn_carries_that_turn_and_stops() {
     // What a driver above this process reads. The turn that was bought is in the record with its
-    // usage and its cost, the turn that broke is announced and never finishes, and there is no
-    // `finished` event at all — a run that ended on the wire must not be readable as one that
-    // completed. The failure itself is on stderr beside the exit status, because `refused` is
-    // reserved for a run that never started and this one did.
+    // usage and its cost, the turn that broke is announced and never finishes, and the record
+    // ends with one `finished` whose stop is `failed` — a run that ended on the wire must not be
+    // readable as one that completed, nor as a process that simply stopped writing. The failure
+    // is also on stderr beside the exit status, and it is not `refused`: that is reserved for a
+    // run that never started, and this one did.
     let fixture = Fixture::start("fails-after-turn");
     let workspace = workspace();
     let cards = tempfile::tempdir().expect("a temporary directory");
@@ -1371,18 +1377,14 @@ fn the_record_of_a_run_that_broke_after_a_turn_carries_that_turn_and_stops() {
         "the turn that answered and the one that broke: {kinds:?}"
     );
     assert_eq!(
-        kinds.last(),
-        Some(&"turn-started"),
-        "the record stops where the wire did: {kinds:?}"
+        kinds[kinds.len() - 2],
+        "turn-started",
+        "the record stops where the wire did, then says so: {kinds:?}"
     );
-    assert_eq!(
-        events.last().expect("a last event")["turn"],
-        serde_json::json!(2)
-    );
-    assert!(
-        !kinds.contains(&"finished"),
-        "a run that broke must not read as one that ended: {kinds:?}"
-    );
+    assert_eq!(events[events.len() - 2]["turn"], serde_json::json!(2));
+    let finish = assert_ends_failed(&events, "a run that broke on its second turn");
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
     assert!(
         !kinds.contains(&"refused"),
         "`refused` is for a run that never started, and this one did: {kinds:?}"
@@ -2059,6 +2061,93 @@ fn kinds(events: &[Value]) -> Vec<&str> {
         .collect()
 }
 
+/// The record of a run that broke ends with exactly one `finished`, whose stop is `failed`.
+///
+/// It used to end with no `finished` at all, which a driver reading the stream line by line could
+/// not tell from a process that died (story:failed-run-ends-with-a-finished-line). The `failed`
+/// stop is what keeps it from reading as a run that completed.
+fn assert_ends_failed<'a>(events: &'a [Value], what: &str) -> &'a Value {
+    let kinds = kinds(events);
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "finished").count(),
+        1,
+        "{what}: exactly one `finished`: {kinds:?}"
+    );
+    let last = events.last().expect("a last event");
+    assert_eq!(
+        last["kind"], "finished",
+        "{what}: the record ends with it: {kinds:?}"
+    );
+    assert_eq!(last["stop"]["kind"], "failed", "{what}: {last}");
+    last
+}
+
+#[test]
+fn a_run_refused_on_its_second_request_ends_its_json_record_with_a_failed_finish() {
+    // story:failed-run-ends-with-a-finished-line, acceptance 3, over the Rust endpoint: the first
+    // request is answered, the second is refused with an HTTP 400. The last stdout line names the
+    // end and its cause, and the exit status of a started run that failed is still 1.
+    let fixture = Fixture::controlled("provider-fails-second");
+    let workspace = workspace();
+    let output = run_against(&fixture, &["--json"], workspace.path());
+
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    let last = output.stdout.lines().last().expect("a last stdout line");
+    let finish: Value = serde_json::from_str(last).expect("the last line is JSON");
+    assert_eq!(finish["kind"], "finished", "{}", output.stdout);
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    // `llm-http` maps a 400 to `Refused`, not retriable, so the request is not attempted again.
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert!(
+        finish["stop"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("400") && !message.contains('\n')),
+        "{finish}"
+    );
+    assert_eq!(finish["stop"]["after_compaction"], false, "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
+
+    let events = events(&output);
+    assert_ends_failed(&events, "a run refused on its second request");
+    assert!(
+        !kinds(&events).contains(&"refused"),
+        "the run started, so there is no second terminal line: {}",
+        output.stdout
+    );
+    assert!(
+        output.stderr.contains("error: "),
+        "the shell still names the failure on stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn a_request_refused_after_a_compaction_ends_the_json_record_naming_the_compaction() {
+    // The trial's shape end to end: a declared window, a reported input past the point compaction
+    // starts, the conversation compacted, and the next request refused. The record says both.
+    let fixture = Fixture::controlled("provider-compacts-then-fails");
+    let workspace = workspace();
+    let output = run_against(
+        &fixture,
+        &["--json", "--context-window", "128000"],
+        workspace.path(),
+    );
+
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    let events = events(&output);
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "warning" && event["code"] == "conversation-compacted"),
+        "the run compacted before the request that failed: {}",
+        output.stdout
+    );
+    let finish = assert_ends_failed(&events, "a request refused after a compaction");
+    assert_eq!(finish["stop"]["cause"], "provider-refused", "{finish}");
+    assert_eq!(finish["stop"]["after_compaction"], true, "{finish}");
+    assert_eq!(finish["turns"], 2, "{finish}");
+}
+
 #[test]
 fn a_stop_hook_blocks_one_ending_and_the_run_turns_again_before_it_finishes() {
     // The operator's last word on a run that would end here. The first stop is refused with a
@@ -2283,10 +2372,7 @@ fn a_run_asked_for_a_schema_that_answers_in_prose_stops_without_an_answer() {
         "the held turn's prose still reached the record as it arrived (llm parity row R30): \
          {kinds:?}"
     );
-    assert!(
-        !kinds.contains(&"finished"),
-        "a run that broke must not read as one that ended: {kinds:?}"
-    );
+    assert_ends_failed(&events, "a run whose held turn llm refused");
     assert!(
         !kinds.contains(&"answered"),
         "no answer was given, so none is recorded: {kinds:?}"
@@ -3414,7 +3500,7 @@ fn final_after_shown_text(fixture: &Fixture, extra: &[&str], what: &str) {
         1,
         "{what}: the one delta shown, shown once: {kinds:?}"
     );
-    assert!(!kinds.contains(&"finished"), "{what}: {kinds:?}");
+    assert_ends_failed(&events, what);
 }
 
 #[test]
@@ -3609,5 +3695,46 @@ fn a_denied_call_reaches_the_messages_wire_as_a_failed_result_carrying_the_refus
     assert!(
         text.contains(DENIED),
         "the refusal, in the loop's words: {text}"
+    );
+}
+
+// --- adversary: story:failed-run-ends-with-a-finished-line ---------------------------------------
+
+#[test]
+fn adversary_a_failed_run_that_files_a_session_ends_its_events_with_finished_then_the_session_line()
+{
+    // Acceptance 3: under `--json` the binary's last event line is the `finished` line; with a
+    // session written (the default) only the `session` line follows it, because `close_session`
+    // prints `{"kind":"session",...}` after the loop's last event. The unit's other cases run under
+    // `--no-session` (`run_against`), where `finished` is the last stdout line.
+    let fixture = Fixture::controlled("provider-fails-second");
+    let workspace = workspace();
+    let sessions = tempfile::tempdir().expect("a temporary directory");
+    let output = run_with_session(&fixture, &["--json"], workspace.path(), sessions.path());
+
+    assert_eq!(output.status, Some(1), "stderr: {}", output.stderr);
+    let events = events(&output);
+    let kinds = kinds(&events);
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "finished").count(),
+        1,
+        "{kinds:?}"
+    );
+    let [.., finish, session] = events.as_slice() else {
+        panic!("at least a `finished` and a `session` line: {kinds:?}");
+    };
+    assert_eq!(
+        finish["kind"], "finished",
+        "the last event line is `finished`: {kinds:?}"
+    );
+    assert_eq!(finish["stop"]["kind"], "failed", "{finish}");
+    assert_eq!(
+        session["kind"], "session",
+        "only the `session` line follows `finished`: {kinds:?}"
+    );
+    let filed = only_session(sessions.path());
+    assert_eq!(
+        session["id"], filed["id"],
+        "the `session` line names the session written: {session}"
     );
 }

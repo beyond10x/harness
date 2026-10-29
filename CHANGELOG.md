@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `harness_loop::LoopTask`: the loop awaited from an async program. `LoopTask::spawn(config, build)` starts one thread with no runtime context and runs `build(&LoopCancel) -> Result<LoopPorts, E>` there; the model, tool and approval ports, and optional hooks and environment, are built, used and dropped on that thread and need not be `Send`. `run`, `run_in`, `resume_approval` and `call` send one command when called and return a `LoopTaskFuture` the thread completes through a waker, so it can be awaited on any executor; harness-loop gains no runtime dependency. Commands run one at a time in the order sent; each takes its sink by value and returns it on every exit path: `run` and `resume_approval` resolve to a `Ran` holding the run's `Result<LoopOutcome, LoopError>` and the sink, `run_in` to a `RanIn` that also holds the conversation and the spend, and `call` to the `ToolOutcome` and the sink. The task's one `LoopCancel` is handed to the builder and exposed as `cancel_handle()`. Dropping a future whose command has not started skips the command, so an abandoned `call` performs no effect; dropping one whose command is running cancels the token. `spawn` and dropping the task do not block; `shutdown()` resolves once the ports have dropped. The synchronous `AgentLoop` is unchanged.
+- `harness_loop::LoopTaskError`: what a `LoopTask` future resolves to when it does not carry the command's answer: the builder's failure, a panic on the task's thread (message included), or a thread that is gone. The loop's own `LoopError` is part of the answer, in `Ran` and `RanIn`.
+- `harness_loop::Ran`: the answer of `LoopTask::run` and `LoopTask::resume_approval`, the run's result beside the sink.
+
 ## [0.22.0] - 2026-10-28
 
 ### Added

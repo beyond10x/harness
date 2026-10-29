@@ -39,10 +39,7 @@ fn answer(stream: &mut std::os::unix::net::UnixStream) {
     } else {
         (
             "HTTP/1.1 0 X".to_owned(),
-            format!(
-                "\u{1b}]0;owned\u{7}{}x",
-                HOSTILE.iter().collect::<String>()
-            ),
+            format!("\u{1b}]0;owned\u{7}{}x", HOSTILE.iter().collect::<String>()),
         )
     };
     let response = format!(

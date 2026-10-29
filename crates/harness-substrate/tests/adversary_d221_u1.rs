@@ -42,8 +42,22 @@ const HOSTILE: [char; 5] = ['\u{1b}', '\u{9b}', '\u{7f}', '\n', '\u{202e}'];
 /// isolates, the Arabic letter mark, zero-width space/joiners, the BOM, line and paragraph
 /// separators, and a tag character.
 const WIDER: [char; 17] = [
-    '\u{85}', '\u{9d}', '\u{9c}', '\u{9f}', '\u{200e}', '\u{200f}', '\u{2066}', '\u{2067}',
-    '\u{2068}', '\u{2069}', '\u{61c}', '\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}', '\u{2028}',
+    '\u{85}',
+    '\u{9d}',
+    '\u{9c}',
+    '\u{9f}',
+    '\u{200e}',
+    '\u{200f}',
+    '\u{2066}',
+    '\u{2067}',
+    '\u{2068}',
+    '\u{2069}',
+    '\u{61c}',
+    '\u{200b}',
+    '\u{200c}',
+    '\u{200d}',
+    '\u{feff}',
+    '\u{2028}',
     '\u{e0041}',
 ];
 

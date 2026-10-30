@@ -66,7 +66,7 @@ Permission belongs in a named profile you can inspect and select deliberately:
 name = "confined-change"
 write = true
 approve-up-to = "low"
-write-scope = [".git/**=denied", "**=allowed"]
+write-scope = [".git/**=denied", ".b10x/**=denied", "**=allowed"]
 ```
 
 Preview the resolved argv without contacting a model:
@@ -115,6 +115,11 @@ repository. Another checkout, a parent directory or a subdirectory is not truste
 `b10x-harness profiles untrust .` takes it back. Trust is a decision about the path, not the file:
 once a repository is trusted, later edits to its file apply without a new `trust`.
 
+`untrust` also works for a repository that has since been deleted or moved, named the way you
+trusted it: `..` and a trailing slash are read as written, a symbolic link on the way is followed
+even when its target is gone, and a path that has since become a symbolic link loses both the entry
+for where it points and the entry for the path itself.
+
 The trust record must be yours: a `harness-trust.toml` owned by another user, or one its group or
 anyone else may write, refuses the run by name instead of being read. `trust` and `untrust` hold a
 lock beside it while they change it, so two at once cannot undo each other.
@@ -130,14 +135,24 @@ model is called. Permissions, endpoints, credentials and hooks stay in files you
 
 A trusted file is read only as a regular file of at most 64 KiB at exactly `.b10x/harness.toml`:
 a symbolic link there or on the way, a FIFO, a device, a larger file, text that is not UTF-8 or
-does not parse, and a value of the wrong type each refuse the run by name. No refusal quotes the
-file's text.
+does not parse, and a value of the wrong type each refuse the run by name, and so do a `provider`
+holding a control, bidi or other unprintable character and a `max-turns` below one. No refusal
+quotes the file's values; a refused key is named with every such character escaped, so nothing
+from the file acts on your terminal, and `profiles explain` shows a repository's `model` the same
+way.
 
-When the repository's `provider` is what chose the provider, a credential you typed
-(`--api-key-env`, `--api-key-file`, `--api-key-secret`, `--oauth-token-file`, `--oauth-token-env`)
-refuses the run before any request: you typed it for a provider you chose, and the repository
-does not get to decide which endpoint receives it. Choose the provider yourself with a `-p` profile
-or your own `[default]`, or type `--base-url` beside the credential.
+A run's default write scope denies `.b10x/**` as well as `.git/**`, so a run that may write cannot
+rewrite the profile the next run applies. A `write-scope` you write yourself replaces the default;
+keep `.b10x/**=denied` in it.
+
+A repository's `provider` reads that provider's default credential exactly as a typed `--provider`
+would, and nothing more: your `profiles trust` is what points Harness at it, and the credential
+stays paired with its own provider's endpoint. When the repository's `provider` is what chose the
+provider, a credential you typed (`--api-key-env`, `--api-key-file`, `--api-key-secret`,
+`--oauth-token-file`, `--oauth-token-env`) refuses the run before any request: you typed it for a
+provider you chose, and the repository does not get to decide which endpoint receives it. Choose
+the provider yourself with a `-p` profile or your own `[default]`, or type `--base-url` beside the
+credential.
 
 For those three keys the repository sits between your defaults and your choices:
 

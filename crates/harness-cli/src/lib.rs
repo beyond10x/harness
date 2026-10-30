@@ -3821,11 +3821,9 @@ fn trust_command(path: &std::path::Path, trusting: bool) -> Result<(), String> {
     } else {
         let done = trust::untrust(path, &record)?;
         if done.changed {
-            println!(
-                "untrusted {} in {}",
-                done.repository.display(),
-                record.display()
-            );
+            for repository in std::iter::once(&done.repository).chain(&done.also) {
+                println!("untrusted {} in {}", repository.display(), record.display());
+            }
         } else {
             println!(
                 "{} was not trusted in {}; nothing changed",
@@ -3867,7 +3865,7 @@ fn profiles_list(config: &profile::Config, source: &str, here: &Path) -> Result<
         profile::RepositoryProfile::Untrusted { file, workspace } => println!(
             "{:<10} {} (not trusted, not read; b10x-harness profiles trust {})",
             profile::REPOSITORY_PROFILE,
-            file.display(),
+            harness_substrate::inert(&file.display().to_string()),
             profile::shell_word(&workspace.display().to_string())
         ),
         profile::RepositoryProfile::Trusted(repository) => println!(
@@ -3930,10 +3928,15 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
                 let provider = provider::resolve(name, &config.providers)?;
                 println!("--base-url {}", provider.base_url);
                 println!("--wire {}", provider.wire);
+                // A repository's `model` is its latest commit's text: shown, never acted on by
+                // the terminal.
                 println!(
                     "--model {}",
-                    provider
-                        .exact_model(resolved.profile.model.as_deref().unwrap_or(&provider.model))
+                    harness_substrate::inert(
+                        &provider.exact_model(
+                            resolved.profile.model.as_deref().unwrap_or(&provider.model)
+                        )
+                    )
                 );
                 match &provider.credential {
                     provider::Credential::OauthFile { path, pointer } => {
@@ -3943,7 +3946,7 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
                     provider::Credential::ApiKeyEnv { name } => println!("--api-key-env {name}"),
                 }
             } else if let Some(model) = &resolved.profile.model {
-                println!("--model {model}");
+                println!("--model {}", harness_substrate::inert(model));
             }
             if let Some(turns) = resolved.profile.max_turns {
                 println!("--max-turns {turns}");

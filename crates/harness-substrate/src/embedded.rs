@@ -294,11 +294,9 @@ impl Backend for Embedded {
         let snapshot = self.driver.machine();
         let value =
             serde_json::to_value(&snapshot).map_err(|error| SubstrateError::Unreadable {
-                reason: error.to_string(),
+                reason: crate::unread(&error),
             })?;
-        serde_json::from_value(value).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
-        })
+        crate::read_facts(&value).map_err(|reason| SubstrateError::Unreadable { reason })
     }
 
     fn workspace_create(&self, lease_ttl_ms: u64) -> Result<String, SubstrateError> {
@@ -378,7 +376,7 @@ impl Backend for Embedded {
             ))
             .map_err(|error| Self::refused("workspace.file-write", &error))?;
         serde_json::to_value(observed).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
+            reason: crate::unread(&error),
         })
     }
 
@@ -423,7 +421,7 @@ impl Backend for Embedded {
             .map_err(|error| Self::refused("workspace.file-read", &error))?;
         let value =
             serde_json::to_value(result.value).map_err(|error| SubstrateError::Unreadable {
-                reason: error.to_string(),
+                reason: crate::unread(&error),
             })?;
         // The driver answers the same document shape the wire does, so the reader is the same one.
         let data = value

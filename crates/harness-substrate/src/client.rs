@@ -282,7 +282,7 @@ impl Client {
         }
         let value: Value =
             serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
-                reason: error.to_string(),
+                reason: crate::unread(&error),
             })?;
         // **The envelope, and the first live probe is why it is here.** Every route answers
         // `{api_version, request_id, result: {...}}` — the capability document is the `result`, not
@@ -294,11 +294,8 @@ impl Client {
         // Both shapes are accepted: a bare document is what every test fixture and every hand-made
         // example is, and refusing one would be refusing the thing the contract's own schemas show.
         let document = value.get("result").unwrap_or(&value);
-        let facts: Facts = serde_json::from_value(document.clone()).map_err(|error| {
-            SubstrateError::Unreadable {
-                reason: error.to_string(),
-            }
-        })?;
+        let facts =
+            crate::read_facts(document).map_err(|reason| SubstrateError::Unreadable { reason })?;
         let _ = self.machine.set(facts.clone());
         Ok(facts)
     }
@@ -496,7 +493,7 @@ impl Client {
             labels: substrate_wire::Labels::new(),
         })
         .map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
+            reason: crate::unread(&error),
         })?;
         let (status, body) = self.transport.request(
             "POST",
@@ -600,7 +597,7 @@ impl Client {
         // which is `required` is substrate's to say, and a body assembled here is a second opinion
         // about it.
         let input = serde_json::to_value(&input).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
+            reason: crate::unread(&error),
         })?;
         // `wait: true` holds the connection open until the program exits, so the answer is waited
         // for as long as the exec itself may run, plus the slack a probe gets.
@@ -687,7 +684,7 @@ impl Client {
             return Err(SubstrateError::Refused { status, body });
         }
         serde_json::from_str(&body).map_err(|error| SubstrateError::Unreadable {
-            reason: error.to_string(),
+            reason: crate::unread(&error),
         })
     }
 }

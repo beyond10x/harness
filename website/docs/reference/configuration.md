@@ -221,6 +221,9 @@ depend on a key somebody remembered to write.
 4. each `-p` in order, later winning a contested key — **whole keys, not merged**
 5. **a typed flag beats everything** — you are speaking now
 
+A trusted repository profile sits between 3 and 4, for the three keys it may set:
+`[default]` < the repository's `.b10x/harness.toml` < each `-p` < a typed flag.
+
 A profile may set `provider`, so one `-p` can move both the model and the endpoint.
 
 **Typing `--base-url` opts out of the provider entirely.** A provider is a bundle whose parts belong
@@ -274,7 +277,14 @@ A key this build does not read refuses the file by name rather than being skippe
 reason: a rule its author wrote and the run would not have applied is worse than a run that will
 not start.
 
-## Not yet
+## A repository's own profile
 
-A repository-local `./.b10x/harness.toml` is not read. It needs a trust decision first — a profile
-is executable policy, and a repository you cloned must not silently supply one.
+A repository may ship `<workspace>/.b10x/harness.toml`, and it is read only for a workspace you
+trusted with `b10x-harness profiles trust <PATH>`; until then it is not read at all and the run
+prints one line on standard error saying so. Trust is recorded by canonical path in
+`harness-trust.toml`, beside `harness.toml`, which is never edited; a record another user owns or
+may write refuses the run. The file is one `[default]` table that may set only `provider`, `model`
+and `max-turns`; any other key or table refuses the run by name, because a profile is executable
+policy and a repository you cloned must not supply one. Where the repository's `provider` chose the
+provider, a typed credential flag refuses the run before any request.
+See [Configure a provider and profile](../guides/profiles.md#let-a-repository-choose-its-model).

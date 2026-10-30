@@ -1,0 +1,87 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-two-calls-in-a-turn
+summary: A turn that asks two calls runs them in order inside the turn; a returned or denied call is followed by the turn's next call, asked or run, and only the last one leads to the next conversation turn.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-1, tool: write, text: short, then: write}
+    outcome: asked
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.Approve
+    input: {run_id: run-a}
+    outcome: approved
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned-then-ask
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.Approve
+    input: {run_id: run-a}
+    outcome: approved
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:05Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:06Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-3, tool: write, text: short, then: read}
+    outcome: asked
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:07Z
+    command: harness.loop.Deny
+    input: {run_id: run-a, reason: not now}
+    outcome: denied-then-call
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:08Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:09Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-5, tool: write, text: short, then: read}
+    outcome: asked
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:10Z
+    command: harness.loop.Approve
+    input: {run_id: run-a}
+    outcome: approved
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:11Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned-then-call
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:12Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 4}
+  - at: 2026-10-30T00:00:13Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-a, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger:
+        usage:
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+        cost_micro_usd: null
+        turns: 4
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 4, retries: 0}

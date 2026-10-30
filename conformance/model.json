@@ -768,7 +768,9 @@
         "kind": "enum",
         "variants": [
           "short",
-          "long"
+          "long",
+          "under-trigger",
+          "at-trigger"
         ]
       },
       "naming": {}
@@ -947,7 +949,20 @@
             "name": "boolean"
           },
           "naming": {
-            "summary": "the conversation holds long assistant text no summary has folded yet"
+            "summary": "the conversation passed the compaction trigger with assistant text no summary has folded yet"
+          }
+        },
+        {
+          "name": "next",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.Tool"
+            }
+          },
+          "naming": {
+            "summary": "the call the turn asked after the current one, not yet run: run_calls walks a turn's calls in order (3378-3467), and a deferral carries them as remaining_calls (3461)"
           }
         }
       ],
@@ -1030,6 +1045,48 @@
               "Suspended"
             ],
             "to": "AwaitingSummary"
+          },
+          {
+            "name": "ask-next",
+            "from": [
+              "AwaitingTool"
+            ],
+            "to": "AwaitingApproval"
+          },
+          {
+            "name": "call-next",
+            "from": [
+              "AwaitingTool"
+            ],
+            "to": "AwaitingTool"
+          },
+          {
+            "name": "deny-then-ask",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "AwaitingApproval"
+          },
+          {
+            "name": "deny-then-call",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "AwaitingTool"
+          },
+          {
+            "name": "resume-denied-then-ask",
+            "from": [
+              "Suspended"
+            ],
+            "to": "AwaitingApproval"
+          },
+          {
+            "name": "resume-denied-then-call",
+            "from": [
+              "Suspended"
+            ],
+            "to": "AwaitingTool"
           },
           {
             "name": "return",
@@ -1571,6 +1628,19 @@
             "name": "harness.loop.TextSize"
           },
           "naming": {}
+        },
+        {
+          "name": "then",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.Tool"
+            }
+          },
+          "naming": {
+            "summary": "a second call the same turn asks after the first, as call <call_id>-then"
+          }
         }
       ],
       "response": [
@@ -1591,7 +1661,12 @@
             "predicate": {
               "all": [
                 "tool == write",
-                "text == long"
+                {
+                  "any": [
+                    "text == long",
+                    "text == at-trigger"
+                  ]
+                }
               ]
             }
           },
@@ -1642,6 +1717,27 @@
                 "kind": "literal",
                 "value": "true"
               }
+            },
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "then",
+                "type_ref": {
+                  "kind": "optional",
+                  "of": {
+                    "kind": "declared",
+                    "name": "harness.loop.Tool"
+                  }
+                }
+              }
             }
           ]
         },
@@ -1687,6 +1783,27 @@
                 "kind": "literal",
                 "value": "0"
               }
+            },
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "then",
+                "type_ref": {
+                  "kind": "optional",
+                  "of": {
+                    "kind": "declared",
+                    "name": "harness.loop.Tool"
+                  }
+                }
+              }
             }
           ]
         },
@@ -1694,7 +1811,12 @@
           "name": "called-long",
           "condition": {
             "kind": "when",
-            "predicate": "text == long"
+            "predicate": {
+              "any": [
+                "text == long",
+                "text == at-trigger"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -1743,6 +1865,27 @@
                 "kind": "literal",
                 "value": "true"
               }
+            },
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "then",
+                "type_ref": {
+                  "kind": "optional",
+                  "of": {
+                    "kind": "declared",
+                    "name": "harness.loop.Tool"
+                  }
+                }
+              }
             }
           ]
         },
@@ -1786,6 +1929,27 @@
               "value": {
                 "kind": "literal",
                 "value": "0"
+              }
+            },
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "then",
+                "type_ref": {
+                  "kind": "optional",
+                  "of": {
+                    "kind": "declared",
+                    "name": "harness.loop.Tool"
+                  }
+                }
               }
             }
           ]
@@ -1993,6 +2157,100 @@
         }
       ],
       "outcomes": [
+        {
+          "name": "returned-then-ask",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == write"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "ask-next",
+              "from": [
+                "AwaitingTool"
+              ],
+              "to": "AwaitingApproval"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
+        {
+          "name": "returned-then-call",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == read"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "call-next",
+              "from": [
+                "AwaitingTool"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
         {
           "name": "returned-then-summarise",
           "condition": {
@@ -2308,6 +2566,100 @@
         }
       ],
       "outcomes": [
+        {
+          "name": "denied-then-ask",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == write"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "deny-then-ask",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "AwaitingApproval"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
+        {
+          "name": "denied-then-call",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == read"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "deny-then-call",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
         {
           "name": "denied-then-summarise",
           "condition": {
@@ -2938,6 +3290,100 @@
         }
       ],
       "outcomes": [
+        {
+          "name": "resumed-denied-then-ask",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == write"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "resume-denied-then-ask",
+              "from": [
+                "Suspended"
+              ],
+              "to": "AwaitingApproval"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
+        {
+          "name": "resumed-denied-then-call",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "next == read"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "resume-denied-then-call",
+              "from": [
+                "Suspended"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "next",
+              "target_type": {
+                "kind": "optional",
+                "of": {
+                  "kind": "declared",
+                  "name": "harness.loop.Tool"
+                }
+              },
+              "value": {
+                "kind": "cleared"
+              }
+            }
+          ]
+        },
         {
           "name": "resumed-denied-then-summarise",
           "condition": {

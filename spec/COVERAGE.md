@@ -9,9 +9,10 @@ mean the repository's entire implementation has an ESS domain.
 | Budget admission | All six zero bounds, valid empty budget, cost ceiling requires a priced run | `crates/harness-loop/src/budget.rs:11,67` |
 | Native loop outcomes | Completed, provider incomplete/output limit, input/output/turn ceilings, cancellation before dispatch, missing usage with and without token ceilings | `crates/harness-loop/src/lib.rs:123,2103,2813,2836` |
 | Approval and tool reach | Cheap read dispatches; medium-risk write is denied by DenyAll and admitted by ApproveAll; unpublished tool refuses; failed tool results remain visible and the model continues | `crates/harness-loop/src/approval.rs:49`; `crates/harness-loop/src/lib.rs:2074,3162`; `crates/harness-wire/src/envelope.rs:218` |
-| Loop control states | Entity `harness.loop.Loop`: seven states, 17 transitions, each command edge its own transition. Covered: the turn, the tool round trip, approval (approved, denied, deferred), resumption from the serialized checkpoint (approved, denied), the compaction summary turn (folded, kept), retry, retries exhausted, a refusal that is not retriable, and cancellation. Every command is also refused for an unknown run and in each state that does not await it | `crates/harness-loop/src/lib.rs:857,2706,2738,2796,2818,3104,3122,3197,3224,3363,3462,4553,4598` |
+| Loop control states | Entity `harness.loop.Loop`: seven states, 23 transitions, each command edge its own transition. Covered: the turn; the tool round trip; a turn of two calls, whose next call is asked or run after the first returned, was denied or was denied on resumption; approval (approved, denied, deferred); resumption from the serialized checkpoint (approved, denied); the compaction trigger at 80% of the window; the summary turn (folded, kept); a failure after a summary turn, folded or failed; retry, retries exhausted, a refusal that is not retriable, and cancellation | `crates/harness-loop/src/lib.rs:857,2706,2738,2796,2818,3104,3122,3197,3224,3363-3467,4553,4598` |
+| Loop refusals | 83 of the 183 scenarios: 71 refuse a command in a state that does not await it (`NotAwaiting`) and 12 refuse an unknown run (`UnknownRun`). Both are the adapter's view of the loop, computed by `awaited()` in `crates/harness-conformance/src/boundary.rs` from the state it observed. `AgentLoop` makes neither refusal: its ports are only ever answered when the loop asks | `crates/harness-conformance/src/boundary.rs` (`awaited`, `Loops::decide`) |
 | Run ledger | `harness.loop.RunLedger` (`usage`, `cost_micro_usd`, `turns`), compared on every terminal answer of a fresh run; a resumed run writes none (`ledger: null`) | `crates/harness-loop/src/lib.rs:352-363,1027,2341,2367` |
-| Approval checkpoint | `harness.approval-checkpoint/1` as `harness.loop.ApprovalCheckpoint`: every field typed, the format a one-variant enum; the deferred answer carries the production value, and the resume scenarios load that exact JSON back through `resume_approval` | `crates/harness-loop/src/lib.rs:282-290,2403-2415,2452-2455,4616` |
+| Approval checkpoint | `harness.approval-checkpoint/1` as `harness.loop.ApprovalCheckpoint`: every field typed, the format a one-variant enum. The deferred answer carries the production value. `loop-approval-resumed`, `loop-approval-resume-denied-summarises`, `loop-approval-deferred-twice` and `loop-approval-resumed-runs-the-next-call` load it back through `resume_approval`: a resumed run continues the turn count, a run deferred again after resuming hands back a checkpoint that resumes, and the call after the deferred one still runs. The suite does not hold which id the checkpoint carries, which calls `remaining_calls` holds, or that the resumed conversation answers the deferred call once; the Rust cases in `crates/harness-conformance/tests/adversary_d288_u4.rs` do: `the_deferred_checkpoint_holds_the_id_the_stop_names_and_the_exact_call`, `a_deferred_call_keeps_the_calls_its_turn_asked_after_it` and `a_deferred_call_is_answered_once_in_the_resumed_conversation` | `crates/harness-loop/src/lib.rs:282-290,2367-2415,2452-2462,3460-3466,4616` |
 
 ### The Loop entity
 
@@ -27,14 +28,35 @@ publishes `state`, `turns` and `retries` as the adapter observed them.
 
 `turns` counts as `RunState.turns` does (`lib.rs:2738`), summary turns included (`lib.rs:3231`).
 `retries` is the attempt number of the last `TurnRetried` (`lib.rs:2824`), back to 0 when a turn is
-answered. `unfolded` says the conversation passed the compaction trigger (80% of a 4096-token
-window, `lib.rs:1105,3122`) with at least `SUMMARY_MIN_FOLD_BYTES` to fold (`lib.rs:1119,3207`):
-the adapter's long tool text is 16 KiB, so a `long` call is followed by a summary turn before the
-next conversation turn.
+answered. `next` is the call a turn asked after the current one and has not run yet (`run_calls`,
+`lib.rs:3378-3467`); `CallTool`'s optional `then` asks it. `unfolded` says the conversation passed
+the compaction trigger with at least `SUMMARY_MIN_FOLD_BYTES` to fold (`lib.rs:1119,3207`), so the
+next conversation turn is preceded by a summary turn.
 
-Two temporary production mutations were each caught by the suite and reverted: `MAX_TURN_RETRIES`
-3 → 2 failed 5 scenarios (`FailTurn` exhausted and retried, transitions `fail` and `retry`, authored
-`loop-retries-exhausted`); not counting a summary turn (`lib.rs:3231`) failed 9.
+The trigger is held at its edge by `loop-compaction-trigger-at-eighty-percent`. Its two runs answer
+with the same 9 KiB of text, about 58% of the 4096-token window by the byte estimate. The provider
+reports 3275 input tokens for one turn and 3276, 80% of the window, for the other. The trigger reads
+the larger of the reported count and the estimate (`lib.rs:971,3121`), and only the second run is
+summarised. The suite holds the trigger through the provider's reported count. It holds the byte
+estimate only above the trigger: the `long` text is 16 KiB, 100% of the window. The Rust case
+`the_compaction_trigger_is_eighty_percent_of_the_declared_window`
+(`crates/harness-conformance/tests/adversary_d288_u4.rs`) holds the estimate at the same edge.
+
+Temporary production mutations, each run against the suite and reverted. Each failed the scenarios
+named. The first two were run against the suite's earlier 165 scenarios, the rest against all 183:
+
+| Mutation of `crates/harness-loop/src/lib.rs` | Failed |
+| --- | --- |
+| `MAX_TURN_RETRIES` 3 → 2 (165) | 5: `FailTurn` exhausted and retried, transitions `fail` and `retry`, `loop-retries-exhausted` |
+| a summary turn not counted (`3231`, 165) | 9: the six summarise outcomes and transitions, `loop-approval-resume-denied-summarises`, `loop-compaction-summary-failed`, `loop-compaction-summary-turn` |
+| trigger at 100% (`1105`), and `<=` for `<` (`3122`) | `loop-compaction-trigger-at-eighty-percent` |
+| `failed_after_compaction` always false (`2747`) | `loop-failed-after-a-summary`, `loop-failed-after-a-failed-summary` |
+| a failed summary turn not reported (`3147`) | `loop-failed-after-a-failed-summary` |
+| `remaining_calls` emptied (`2460`) | 5: `loop-approval-resumed-runs-the-next-call`, `ResumeDenied` then-ask and then-call outcomes and transitions |
+| a resumed run hands back no checkpoint (`2398`) | `loop-approval-deferred-twice` (the adapter cannot name the deferral) |
+
+Mutations the suite does not catch: another checkpoint id (`2456`), and the deferred call completed
+before the deferral (`3460-3466`). The Rust cases named in the Approval checkpoint row catch them.
 
 **Serde decision.** `RunLedger` derives `Serialize` and `Deserialize` with `deny_unknown_fields`
 (`lib.rs:350-351`), as `ApprovalCheckpoint`, `RunState` and `Usage` already do. The adapter
@@ -83,9 +105,16 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
   `price.rs:90`, `answer.rs`, `delegate.rs`, `hook.rs`. Add controlled clock/provider fixtures
   before claiming these stop variants or controls execute.
 - **UNMAPPED: the rest of compaction and retry.** Elision without a summary turn (a fold under
-  `SUMMARY_MIN_FOLD_BYTES`, `lib.rs:1387,3207`), the trigger measured from a provider's reported
-  input tokens, the retry backoff's duration, and cancellation inside the backoff
-  (`lib.rs:2817-2818,2836`). The Loop scenarios use one fixed window and backoff.
+  `SUMMARY_MIN_FOLD_BYTES`, `lib.rs:1387,3207`), the byte estimate at the trigger's edge (held by a
+  Rust case, see the Loop entity above), the retry backoff's duration, and cancellation inside the
+  backoff (`lib.rs:2817-2818,2836`). The Loop scenarios use one fixed window and backoff.
+- **UNMAPPED: turns of more than two calls, and batches beyond two reads.** `CallTool` asks one or
+  two calls. Two reads are a batch (`lib.rs:3442-3453`) that the adapter's port takes through the
+  default `ToolPort::call_batch` (`crates/harness-wire/src/port.rs:314`), one call after the other,
+  so the scenarios observe it call by call. Three or more calls, a port that runs a batch side by
+  side or answers it miscounted (`lib.rs:4321-4372`), an answer tool beside other calls
+  (`lib.rs:3374-3415`), and the loop's own tools and delegation (`lib.rs:3417-3440`) are not Loop
+  scenarios.
 - **UNMAPPED: approval checkpoint refusals and contents.** `resume_approval` refuses a malformed
   checkpoint and one taken under another configuration (`lib.rs:2403-2420`); a deferral with an
   empty checkpoint id fails the call (`lib.rs:4627`); a delegate cannot defer (`lib.rs:4616-4625`).

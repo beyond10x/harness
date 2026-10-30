@@ -43,3 +43,9 @@ scenarios:
   - scenarios/loop-retries-exhausted.yaml
   - scenarios/loop-failed-not-retriable.yaml
   - scenarios/loop-cancelled.yaml
+  - scenarios/loop-failed-after-a-summary.yaml
+  - scenarios/loop-failed-after-a-failed-summary.yaml
+  - scenarios/loop-approval-deferred-twice.yaml
+  - scenarios/loop-approval-resumed-runs-the-next-call.yaml
+  - scenarios/loop-two-calls-in-a-turn.yaml
+  - scenarios/loop-compaction-trigger-at-eighty-percent.yaml

@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:substrate-escape-is-injective
 kind: story
-status: draft
+status: active
 title: A raw control character and its spelled-out escape display differently
 relations:
 - serves: vision:b10x-owns-its-loop
 - informed_by: review-result:adversary-d221-u1-pass-2
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 3}
 ---
 ## Context
 

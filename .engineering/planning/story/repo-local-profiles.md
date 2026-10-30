@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:repo-local-profiles
 kind: story
-status: proposed
+status: active
 title: A repository may supply profiles, once a trust decision says how
 relations:
 - derived_from: epic:adoption-follow-ups
@@ -12,9 +12,10 @@ scope:
   path: crates/harness-cli/src/profile.rs
 - confidence: inferred
   path: website/docs/guides/profiles.md
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## What is missing
 

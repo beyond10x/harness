@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:harness-loop-modeled-in-ess
 kind: story
-status: draft
+status: active
 title: 'Harness''s loop is modeled in ESS: ledger, approval checkpoint, turn/tool/compaction states and conformance'
 summary: One ESS modeling story folding the run ledger and approval-checkpoint drafts plus the loop's turn, tool round trip and compaction states, with a conformance suite against the real loop. Draft, after 0.15.0; ess:specifying.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 3}
 ---
 ## Context
 

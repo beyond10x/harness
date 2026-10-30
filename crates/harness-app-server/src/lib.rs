@@ -202,6 +202,11 @@ impl TurnControl {
         self.cancel.cancel();
     }
 
+    /// Whether an interrupt has asked this turn to stop, answered yet or not.
+    pub(crate) fn stopping(&self) -> bool {
+        self.requested.load(Ordering::SeqCst)
+    }
+
     /// Whether a frame this turn was cancelled by is still unanswered.
     pub(crate) fn owes(&self) -> bool {
         self.owed.load(Ordering::SeqCst) > 0
@@ -603,15 +608,19 @@ impl Server<'_> {
         // once the slot is empty no interrupt can be counted against this turn any more, and the
         // count the settle waits for is final before it starts. Settling first left a gap between
         // the settle's last look at the count and the read of `requested` below: an interrupt
-        // decoded in it made the turn `interrupted` and was answered after `turn/completed`
-        // (`an_interrupt_decoded_as_its_turn_ends_is_answered_in_one_of_two_orders` in
-        // `harness-cli`'s `bridge_mode.rs`: 11 and 28 of 20000 attempts in two sweeps before this
-        // order, 0 of 20000 after it). One decoded from here on is the main loop's, answered after
+        // decoded in it made the turn `interrupted` and was answered after `turn/completed` (11 and
+        // 28 of 20000 swept attempts before this order, 0 of 20000 after it).
+        // `tests::an_interrupt_decoded_after_the_settle_does_not_decide_the_ended_turn` puts one
+        // in that gap on every run. One decoded from here on is the main loop's, answered after
         // the terminal frame of a turn it did not decide.
         self.clear_active();
         if let Err(error) = self.wire.settle_interrupts(control) {
             sink.broken.get_or_insert(error);
         }
+        // Test-only seam, compiled out of every shipped build: holds open the gap between the
+        // settle and the read of `requested` below.
+        #[cfg(test)]
+        tests::after_settle();
 
         // An interrupt that was actually asked for is the reason this turn ended, even if the
         // connection then dropped or the run could not proceed at all. Letting a later write
@@ -682,6 +691,222 @@ fn turn_input(params: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::RefCell;
+    use std::io::Read;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::time::Duration;
+
+    const READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+    thread_local! {
+        /// What [`after_settle`] runs on the thread serving a connection, when a test set it.
+        static AFTER_SETTLE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+    }
+
+    /// Runs the hook a test installed on this thread, between a turn's settle and the read of
+    /// whether the turn was asked to stop. Called from `drive_turn` in test builds only.
+    pub(super) fn after_settle() {
+        let hook = AFTER_SETTLE.with(|cell| cell.borrow_mut().take());
+        if let Some(mut hook) = hook {
+            hook();
+            AFTER_SETTLE.with(|cell| *cell.borrow_mut() = Some(hook));
+        }
+    }
+
+    /// Stdin as chunks the test hands over, reporting on `used` how many chunks the reading thread
+    /// has used up each time it asks for more. The reading thread decodes, counts and queues a
+    /// frame before it reads again, so a count that covers a chunk proves all of it was decoded.
+    struct ChunkInput {
+        chunks: Receiver<Vec<u8>>,
+        current: Vec<u8>,
+        position: usize,
+        taken: usize,
+        used: Sender<usize>,
+    }
+
+    impl Read for ChunkInput {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let available = self.fill_buf()?;
+            let length = available.len().min(out.len());
+            out[..length].copy_from_slice(&available[..length]);
+            self.consume(length);
+            Ok(length)
+        }
+    }
+
+    impl BufRead for ChunkInput {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            while self.position == self.current.len() {
+                let _ = self.used.send(self.taken);
+                match self.chunks.recv() {
+                    Ok(chunk) => {
+                        self.current = chunk;
+                        self.position = 0;
+                        self.taken += 1;
+                    }
+                    Err(_) => return Ok(&[]),
+                }
+            }
+            Ok(&self.current[self.position..])
+        }
+
+        fn consume(&mut self, amount: usize) {
+            self.position += amount;
+        }
+    }
+
+    /// Stdout, one decoded frame per line, sent to the test.
+    struct FrameOutput {
+        pending: Vec<u8>,
+        frames: Sender<Value>,
+    }
+
+    impl Write for FrameOutput {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.pending.extend_from_slice(bytes);
+            while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = self.pending.drain(..=end).collect();
+                let frame = serde_json::from_slice(&line).map_err(std::io::Error::other)?;
+                let _ = self.frames.send(frame);
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn line(frame: &Value) -> Vec<u8> {
+        format!("{frame}\n").into_bytes()
+    }
+
+    fn wait_used(used: &Receiver<usize>, number: usize) {
+        loop {
+            match used.recv_timeout(READ_TIMEOUT) {
+                Ok(count) if count >= number => return,
+                Ok(_) => {}
+                Err(error) => panic!("the reading thread did not decode chunk {number}: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_interrupt_decoded_after_the_settle_does_not_decide_the_ended_turn() {
+        // story:bridge-mode-interrupt-cases-are-deterministic. `drive_turn` once settled what its
+        // turn owed and only then let go of the turn, and an interrupt decoded between the
+        // settle's last look at the count and the read of `requested` made the turn
+        // `interrupted` and was answered after `turn/completed`. The window is a few
+        // instructions wide, so `after_settle` holds it open: the turn has failed (its model
+        // client will not build), its settle is over, and only then is the interrupt handed to
+        // the reading thread and decoded.
+        //
+        // With the turn let go of before the settle, the interrupt finds no turn: the turn
+        // reports `failed` and the main loop answers the interrupt after the terminal frame.
+        // With the order reversed, the reading thread counts it against the turn that is over,
+        // and the turn reports `interrupted` with its interrupt still unanswered.
+        let (chunk_sender, chunks) = channel::<Vec<u8>>();
+        let (used_sender, used) = channel::<usize>();
+        let (frame_sender, frames) = channel::<Value>();
+        let mut hook_sender = Some(chunk_sender.clone());
+        let server = std::thread::spawn(move || {
+            AFTER_SETTLE.with(|cell| {
+                *cell.borrow_mut() = Some(Box::new(move || {
+                    if let Some(sender) = hook_sender.take() {
+                        sender
+                            .send(line(
+                                &json!({"id": 99, "method": "turn/interrupt", "params": {}}),
+                            ))
+                            .expect("the reading thread is alive");
+                        wait_used(&used, 3);
+                    }
+                }));
+            });
+            let config = ServerConfig {
+                model: "b10x-emulated".to_owned(),
+                budget: Budget::default(),
+                context_window: None,
+                version: "test".to_owned(),
+            };
+            let input = ChunkInput {
+                chunks,
+                current: Vec::new(),
+                position: 0,
+                taken: 0,
+                used: used_sender,
+            };
+            let output = FrameOutput {
+                pending: Vec::new(),
+                frames: frame_sender,
+            };
+            let mut new_model = |_cancel: LoopCancel| -> Result<Box<dyn ModelPort>, String> {
+                Err("the model client will not build".to_owned())
+            };
+            serve(&config, &mut new_model, input, output)
+        });
+
+        let next = || {
+            frames
+                .recv_timeout(READ_TIMEOUT)
+                .expect("the server writes within the timeout")
+        };
+        let mut chunk = line(
+            &json!({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "test"}}}),
+        );
+        chunk.extend(line(&json!({"method": "initialized", "params": {}})));
+        chunk.extend(line(
+            &json!({"id": 2, "method": "thread/start", "params": {}}),
+        ));
+        chunk_sender
+            .send(chunk)
+            .expect("the reading thread is alive");
+        let thread_id = loop {
+            let frame = next();
+            if frame.get("id") == Some(&json!(2)) {
+                break frame["result"]["thread"]["id"].clone();
+            }
+        };
+        chunk_sender
+            .send(line(&json!({"id": 50, "method": "turn/start", "params": {
+                "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+            }})))
+            .expect("the reading thread is alive");
+
+        let mut seen = Vec::new();
+        let terminal = loop {
+            let frame = next();
+            seen.push(frame.clone());
+            if frame.get("method").and_then(Value::as_str) == Some("turn/completed") {
+                break frame;
+            }
+        };
+        let answered_first = seen.iter().any(|frame| frame.get("id") == Some(&json!(99)));
+        assert!(
+            !answered_first,
+            "an interrupt decoded after the turn's settle was answered before its terminal frame: \
+             {seen:?}"
+        );
+        assert_eq!(
+            terminal["params"]["turn"]["status"],
+            json!("failed"),
+            "an interrupt decoded after the turn's settle decided the ended turn's status, and \
+             was still unanswered at its terminal frame \
+             (story:bridge-mode-interrupt-cases-are-deterministic): {seen:?}"
+        );
+        let late = next();
+        assert!(
+            late.get("id") == Some(&json!(99)) && late["error"].is_null(),
+            "the interrupt the ended turn did not take is answered by the main loop, after the \
+             terminal frame: {late}"
+        );
+
+        drop(chunk_sender);
+        server
+            .join()
+            .expect("the server thread did not panic")
+            .expect("the connection ends cleanly when its input closes");
+    }
 
     #[test]
     fn every_terminal_status_is_one_the_pinned_client_accepts() {

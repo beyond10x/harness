@@ -2,20 +2,59 @@
 format: aep.planning-md/3
 id: story:repo-local-profiles
 kind: story
-status: active
+status: implemented
 title: A repository may supply profiles, once a trust decision says how
 relations:
 - derived_from: epic:adoption-follow-ups
 - serves: vision:b10x-owns-its-loop
 scope:
-- confidence: inferred
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: STATUS.md
+- confidence: cited
+  path: contracts/cli/b10x-harness/2026-10-30
+- confidence: cited
+  path: crates/harness-cli/src/contract.rs
+- confidence: cited
+  path: crates/harness-cli/src/lib.rs
+- confidence: cited
   path: crates/harness-cli/src/profile.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/harness-cli/src/trust.rs
+- confidence: cited
+  path: crates/harness-cli/tests/adversary_d288_u1.rs
+- confidence: cited
+  path: crates/harness-cli/tests/adversary_repo_profiles.rs
+- confidence: cited
+  path: crates/harness-cli/tests/repository_profiles.rs
+- confidence: cited
+  path: crates/harness-cli/tests/security_d288_u1.rs
+- confidence: cited
+  path: crates/harness-cli/tests/security_d288_u1_p2.rs
+- confidence: cited
+  path: crates/harness-cli/tests/security_repo_profiles.rs
+- confidence: cited
+  path: crates/harness-llm/src/lib.rs
+- confidence: cited
+  path: spec/COVERAGE.md
+- confidence: cited
+  path: website/docs/concepts/tools-and-approvals.md
+- confidence: cited
   path: website/docs/guides/profiles.md
-revision: 6
+- confidence: cited
+  path: website/docs/reference/cli.md
+- confidence: cited
+  path: website/docs/reference/configuration.md
+- confidence: cited
+  path: website/docs/tutorials/confined-change.md
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:32Z", actor: "human:timo", revision: 3, imported: true}
 - {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-30T20:19:32Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## What is missing
 

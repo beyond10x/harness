@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bridge-interrupt-start-window-under-load
 kind: story
-status: active
+status: implemented
 title: The bridge's start-window interrupt test decides the same way under load
 summary: 'Filed from adversary pass 1 of wave llm-1: 1 miss in 8 suite runs on a loaded machine; the pin''s role is an unmeasured hypothesis.'
 relations:
@@ -14,11 +14,16 @@ scope:
 - confidence: cited
   path: crates/harness-app-server/src/lib.rs
 - confidence: cited
+  path: crates/harness-app-server/src/session.rs
+- confidence: cited
+  path: crates/harness-app-server/tests/adversary_d288_u2.rs
+- confidence: cited
   path: crates/harness-cli/tests/bridge_mode.rs
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 6}
 - {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 7}
+- {from: "active", to: "implemented", at: "2026-10-30T20:19:33Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

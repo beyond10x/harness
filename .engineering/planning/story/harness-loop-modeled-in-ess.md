@@ -2,15 +2,45 @@
 format: aep.planning-md/3
 id: story:harness-loop-modeled-in-ess
 kind: story
-status: active
+status: implemented
 title: 'Harness''s loop is modeled in ESS: ledger, approval checkpoint, turn/tool/compaction states and conformance'
 summary: One ESS modeling story folding the run ledger and approval-checkpoint drafts plus the loop's turn, tool round trip and compaction states, with a conformance suite against the real loop. Draft, after 0.15.0; ess:specifying.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: cited
+  path: STATUS.md
+- confidence: cited
+  path: conformance
+- confidence: cited
+  path: crates/harness-conformance/src/boundary.rs
+- confidence: cited
+  path: crates/harness-conformance/src/main.rs
+- confidence: cited
+  path: crates/harness-conformance/tests/adversary_d221_u3.rs
+- confidence: cited
+  path: crates/harness-conformance/tests/adversary_d288_u4.rs
+- confidence: cited
+  path: crates/harness-loop/src/lib.rs
+- confidence: cited
+  path: spec/COVERAGE.md
+- confidence: cited
+  path: spec/README.md
+- confidence: cited
+  path: spec/components.yaml
+- confidence: cited
+  path: spec/domains/loop.yaml
+- confidence: cited
+  path: spec/ess-inputs.yaml
+- confidence: cited
+  path: spec/scenarios
+- confidence: cited
+  path: spec/system.yaml
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T20:19:34Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

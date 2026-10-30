@@ -2,15 +2,31 @@
 format: aep.planning-md/3
 id: story:substrate-escape-is-injective
 kind: story
-status: active
+status: implemented
 title: A raw control character and its spelled-out escape display differently
 relations:
 - serves: vision:b10x-owns-its-loop
 - informed_by: review-result:adversary-d221-u1-pass-2
-revision: 3
+scope:
+- confidence: cited
+  path: crates/harness-substrate/src/client.rs
+- confidence: cited
+  path: crates/harness-substrate/src/embedded.rs
+- confidence: cited
+  path: crates/harness-substrate/src/lib.rs
+- confidence: cited
+  path: crates/harness-substrate/src/tests.rs
+- confidence: cited
+  path: crates/harness-substrate/tests/adversary_d221_u1_p2.rs
+- confidence: cited
+  path: crates/harness-substrate/tests/adversary_d288_u3.rs
+- confidence: cited
+  path: crates/harness-substrate/tests/escaped_once.rs
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T20:19:34Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

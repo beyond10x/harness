@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T20:19:33Z",
+  "actor": "human:timo",
+  "artifact": "story:bridge-mode-interrupt-cases-are-deterministic",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate ~/.cache/harness-d288/gate-close.sh at fa672fa",
+    "reference": "package gate at fa672fa (cli, app-server, substrate+conformance, conformance, loop, llm): EXIT=0 after the rustdoc fix; 1050 passed, 0 failed, 2 ignored; Harness ESS 183/183, inert 0/183"
+  }
+}

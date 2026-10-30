@@ -212,7 +212,10 @@ still meets the default approver, which denies — see [Approvals](../concepts/t
 deliberate and not a convenience: running against a real checkout is what these mechanisms make
 ordinary, and a model rewriting history there is the failure they make possible for the first
 time. It must not depend on a key somebody remembered to write. `.b10x/**` is denied because a
-trusted repository's `.b10x/harness.toml` is applied by the next run.
+trusted repository's `.b10x/harness.toml` is applied by the next run. The default applies where
+Harness sets the scope, a profile with `write = true` and no `write-scope`; a `write-scope` you
+write or type replaces it, and a run switched to writing by a typed `--substrate-embedded` or
+`--substrate` gets none, so deny `.b10x/**` there yourself.
 
 ## What wins
 
@@ -289,7 +292,9 @@ may write refuses the run. The file is one `[default]` table that may set only `
 and `max-turns`; any other key or table refuses the run by name, because a profile is executable
 policy and a repository you cloned must not supply one. A `provider` holding a control, bidi or
 other unprintable character and a `max-turns` below one refuse the run too, naming the key and not
-the value. A repository's `provider` reads that provider's default credential exactly as a typed
-`--provider` would, and nothing more; where the repository's `provider` chose the provider, a typed
-credential flag refuses the run before any request.
+the value. A repository's `provider` reads that provider's default credential exactly as the same
+`provider` in your own `[default]` or a `-p` profile would, and nothing more; for `codex` that
+includes renewing a token near expiry and rewriting the vendor's own login file,
+`~/.codex/auth.json`, as choosing `codex` yourself does. Where the repository's `provider` chose
+the provider, a typed credential flag refuses the run before any request.
 See [Configure a provider and profile](../guides/profiles.md#let-a-repository-choose-its-model).

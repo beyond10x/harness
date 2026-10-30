@@ -137,22 +137,26 @@ A trusted file is read only as a regular file of at most 64 KiB at exactly `.b10
 a symbolic link there or on the way, a FIFO, a device, a larger file, text that is not UTF-8 or
 does not parse, and a value of the wrong type each refuse the run by name, and so do a `provider`
 holding a control, bidi or other unprintable character and a `max-turns` below one. No refusal
-quotes the file's values; a refused key is named with every such character escaped, so nothing
-from the file acts on your terminal, and `profiles explain` shows a repository's `model` the same
-way.
+quotes the file's values. Nothing the repository controls reaches your terminal raw: a refused
+key, the `model` in `profiles explain` and in a refusal, and a path inside the workspace (its
+name, a link target) are shown with every such character escaped.
 
-A run's default write scope denies `.b10x/**` as well as `.git/**`, so a run that may write cannot
-rewrite the profile the next run applies. A `write-scope` you write yourself replaces the default;
-keep `.b10x/**=denied` in it.
+The default write scope denies `.b10x/**` as well as `.git/**`. It applies where Harness sets the
+scope: a run a profile switches to writing with `write = true` and no `write-scope` of its own. A
+`write-scope` in a profile or a typed `--write-scope` replaces it, and a run you switch to writing
+yourself with `--substrate-embedded` or `--substrate` gets no default scope; in each of those, deny
+`.b10x/**` yourself, or a run that may write can rewrite the profile the next run applies.
 
-A repository's `provider` reads that provider's default credential exactly as a typed `--provider`
-would, and nothing more: your `profiles trust` is what points Harness at it, and the credential
-stays paired with its own provider's endpoint. When the repository's `provider` is what chose the
-provider, a credential you typed (`--api-key-env`, `--api-key-file`, `--api-key-secret`,
-`--oauth-token-file`, `--oauth-token-env`) refuses the run before any request: you typed it for a
-provider you chose, and the repository does not get to decide which endpoint receives it. Choose
-the provider yourself with a `-p` profile or your own `[default]`, or type `--base-url` beside the
-credential.
+A repository's `provider` reads that provider's default credential exactly as the same `provider`
+in your own `[default]` or a `-p` profile would, and nothing more: your `profiles trust` is what
+points Harness at it, and the credential stays paired with its own provider's endpoint. For
+`codex` that includes what choosing `codex` yourself does: the run renews a token near expiry and
+rewrites the vendor's own login file, `~/.codex/auth.json`. When the repository's `provider` is
+what chose the provider, a credential you typed (`--api-key-env`, `--api-key-file`,
+`--api-key-secret`, `--oauth-token-file`, `--oauth-token-env`) refuses the run before any
+request: you typed it for a provider you chose, and the repository does not get to decide which
+endpoint receives it. Choose the provider yourself with a `-p` profile or your own `[default]`, or
+type `--base-url` beside the credential.
 
 For those three keys the repository sits between your defaults and your choices:
 

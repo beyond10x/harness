@@ -210,7 +210,7 @@ pub fn load_repository(workspace: &Path) -> Result<Profile, String> {
     let workspace = workspace.canonicalize().map_err(|error| {
         format!(
             "the workspace `{}` cannot be resolved: {error}",
-            workspace.display()
+            shown(workspace)
         )
     })?;
     let file = repository_file(&workspace);
@@ -236,14 +236,11 @@ fn read_repository_text(file: &Path) -> Result<String, String> {
             "the repository profile `{}` {what}. A repository profile is read only as a regular \
              file of at most 64 KiB, at exactly `.b10x/harness.toml` inside the workspace. Nothing \
              from this file was applied.",
-            file.display()
+            shown(file)
         )
     };
     let unreadable = |error: std::io::Error| {
-        format!(
-            "reading the repository profile `{}`: {error}",
-            file.display()
-        )
+        format!("reading the repository profile `{}`: {error}", shown(file))
     };
     let named = std::fs::symlink_metadata(file).map_err(unreadable)?;
     if named.file_type().is_symlink() {
@@ -256,7 +253,7 @@ fn read_repository_text(file: &Path) -> Result<String, String> {
     if resolved != file {
         return Err(refused(&format!(
             "resolves to `{}`, through a symbolic link on the way",
-            resolved.display()
+            shown(&resolved)
         )));
     }
     let mut opened = std::fs::File::open(file).map_err(unreadable)?;
@@ -326,7 +323,7 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
         format!(
             "the repository profile `{}` does not parse, at {}. Nothing from this file was \
              applied.",
-            file.display(),
+            shown(file),
             parse_failure(text, &error)
         )
     })?;
@@ -360,7 +357,7 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
              `approve-up-to`, `allow-program`, the write scope, toolchains, plugins, hooks) and \
              where a provider points (`[providers]`) stay in the operator's own configuration. \
              Nothing from this file was applied.",
-            file.display(),
+            shown(file),
             refused.join(", ")
         ));
     }
@@ -396,7 +393,7 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
     } else {
         Err(format!(
             "the repository profile `{}`: {}. Nothing from this file was applied.",
-            file.display(),
+            shown(file),
             mistyped.join("; ")
         ))
     }
@@ -411,6 +408,12 @@ fn unprintable(text: &str) -> bool {
     })
 }
 
+/// A path as a terminal may print it, through `inert`: a workspace's name and a link target inside
+/// it are the repository's text, and every character a terminal acts on is shown escaped.
+fn shown(path: &Path) -> String {
+    inert(&path.display().to_string())
+}
+
 /// The one line a run prints when the workspace's profile was not read.
 ///
 /// One line whatever the workspace is called: the paths are shown through `inert`, and the
@@ -420,8 +423,8 @@ pub fn untrusted_notice(file: &Path, workspace: &Path) -> String {
     format!(
         "warning [repository-profile] `{}` was not read: `{}` is not a trusted repository. To \
          apply it: b10x-harness profiles trust {}",
-        inert(&file.display().to_string()),
-        inert(&workspace.display().to_string()),
+        shown(file),
+        shown(workspace),
         shell_word(&workspace.display().to_string())
     )
 }

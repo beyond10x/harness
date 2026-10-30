@@ -27,7 +27,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -335,9 +335,10 @@ pub fn trust(path: &Path, record: &Path) -> Result<Changed, String> {
 /// Every entry the path can name is removed, so a repository that moved or was deleted after it
 /// was trusted can still be untrusted by the spelling it was trusted by:
 ///
-/// - the path resolved the way `trust` resolves it; for a path that no longer exists, `..` is
-///   taken lexically, the deepest ancestor that exists is canonicalised and the rest appended,
-///   and a dangling symbolic link on the way is followed to where it points;
+/// - the path resolved the way `trust` resolves it: canonicalised when it exists; otherwise
+///   resolved component by component as the kernel would, `..` landing where the kernel's `..`
+///   lands and a dangling symbolic link read against the directory it really sits in, with only
+///   the part that does not exist taken as spelled ([`resolved`]);
 /// - the location the path names, its parent resolved that way and its last component kept, which
 ///   is the entry for a trusted directory whose path has since become a symbolic link.
 ///
@@ -347,13 +348,12 @@ pub fn trust(path: &Path, record: &Path) -> Result<Changed, String> {
 pub fn untrust(path: &Path, record: &Path) -> Result<Changed, String> {
     let unresolved =
         |error: std::io::Error| format!("`{}` cannot be resolved: {error}", path.display());
-    let spelled = lexical(&std::path::absolute(path).map_err(unresolved)?);
-    let repository = resolve(&spelled, 0);
+    let spelled = std::path::absolute(path).map_err(unresolved)?;
+    let repository = resolved(&spelled);
     let mut names = vec![repository.clone()];
     if let (Some(parent), Some(last)) = (spelled.parent(), spelled.file_name()) {
-        names.push(resolve(parent, 0).join(last));
+        names.push(resolved(parent).join(last));
     }
-    names.push(spelled);
     let _held = lock(record)?;
     let mut trust = load(record)?;
     let mut removed = Vec::new();
@@ -377,57 +377,64 @@ pub fn untrust(path: &Path, record: &Path) -> Result<Changed, String> {
     })
 }
 
-/// How many symbolic links [`resolve`] follows before it stops, as the kernel does.
+/// How many symbolic links [`resolve`] follows before it takes the rest as spelled, as the kernel
+/// gives up.
 const LINK_LIMIT: usize = 40;
 
-/// `path` without `.` components, `..` taken against the component before it, and no trailing
-/// separator. Lexical: no symbolic link is consulted, so this is how the operator spelled it.
-fn lexical(path: &Path) -> PathBuf {
-    let mut normal = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normal.pop();
-            }
-            other => normal.push(other),
-        }
-    }
-    normal
+/// An absolute `path` canonicalised when it exists, and otherwise [`resolve`]d.
+fn resolved(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| resolve(path, 0))
 }
 
-/// An absolute, lexical `path` resolved as far as the filesystem allows.
+/// An absolute `path` resolved the way the kernel resolves it, for as long as it exists.
 ///
-/// A path that exists is canonicalised. One that does not is resolved through the deepest
-/// ancestor that does, with the rest appended; a dangling symbolic link on the way is followed to
-/// the path it names, up to [`LINK_LIMIT`] links.
+/// Component by component, onto a directory that holds no symbolic link: `.` is skipped; `..`
+/// leaves that directory, so it lands where the kernel's `..` lands; a component that is a link is
+/// replaced by its target, read against the directory the link really sits in, and the result is
+/// resolved again, up to [`LINK_LIMIT`] links. From the first component that does not exist the
+/// rest is taken lexically ([`spelled`]): that is the one part no filesystem can resolve.
 fn resolve(path: &Path, links: usize) -> PathBuf {
-    let mut existing = path.to_path_buf();
-    let mut rest = Vec::new();
-    loop {
-        if let Ok(canonical) = existing.canonicalize() {
-            return append(canonical, &rest);
-        }
-        if links < LINK_LIMIT
-            && let Ok(target) = std::fs::read_link(&existing)
-        {
-            let base = existing.parent().unwrap_or(Path::new("/"));
-            return append(resolve(&lexical(&base.join(target)), links + 1), &rest);
-        }
-        match (existing.file_name(), existing.parent()) {
-            (Some(last), Some(parent)) => {
-                rest.push(last.to_owned());
-                existing = parent.to_path_buf();
+    let mut resolved = PathBuf::new();
+    let mut components = path.components();
+    while let Some(component) = components.next() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => resolved.push(component),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                resolved.pop();
             }
-            _ => return path.to_path_buf(),
+            Component::Normal(name) => {
+                let candidate = resolved.join(name);
+                let Ok(found) = std::fs::symlink_metadata(&candidate) else {
+                    return spelled(candidate, components);
+                };
+                if found.file_type().is_symlink() && links < LINK_LIMIT {
+                    let Ok(target) = std::fs::read_link(&candidate) else {
+                        return spelled(candidate, components);
+                    };
+                    // An absolute target replaces `resolved`; a relative one is read against it.
+                    let mut next = resolved.join(target);
+                    next.extend(components);
+                    return resolve(&next, links + 1);
+                }
+                resolved = candidate;
+            }
         }
     }
+    resolved
 }
 
-/// `base` with `rest`, gathered last component first, appended in order.
-fn append(mut base: PathBuf, rest: &[std::ffi::OsString]) -> PathBuf {
-    for component in rest.iter().rev() {
-        base.push(component);
+/// `base` with `rest` appended as spelled: `.` skipped and `..` taken against the component before
+/// it, since nothing here exists for the kernel to resolve.
+fn spelled<'a>(mut base: PathBuf, rest: impl Iterator<Item = Component<'a>>) -> PathBuf {
+    for component in rest {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                base.pop();
+            }
+            other => base.push(other),
+        }
     }
     base
 }
@@ -572,6 +579,58 @@ mod tests {
         assert_eq!(removed.repository, canonical);
         assert!(removed.changed);
         assert_eq!(load(&machine.record()).expect("reads"), Trust::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrust_takes_dot_dot_after_a_link_the_way_the_kernel_does_and_spares_the_link_sibling() {
+        let machine = Machine::new();
+        let project = machine.repository("data/x/proj");
+        let named = machine.repository("data/x/sibling");
+        let bystander = machine.repository("sibling");
+        let link = machine.root.path().join("proj-link");
+        std::os::unix::fs::symlink(&project, &link).expect("a symlink");
+        let spelled = link.join("..").join("sibling");
+        trust(&spelled, &machine.record()).expect("trusted");
+        trust(&bystander, &machine.record()).expect("trusted");
+
+        let removed = untrust(&spelled, &machine.record()).expect("untrust");
+
+        assert_eq!(removed.repository, named.canonicalize().expect("canonical"));
+        assert!(removed.also.is_empty(), "{removed:?}");
+        let left = load(&machine.record()).expect("reads");
+        assert!(left.admits(&bystander.canonicalize().expect("canonical")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrust_reads_a_dangling_relative_link_against_the_directory_it_really_sits_in() {
+        let machine = Machine::new();
+        let real_work = machine.repository("data/work");
+        let release = machine.repository("data/releases/v2");
+        let entry = release.canonicalize().expect("canonical");
+        std::os::unix::fs::symlink("../releases/v2", real_work.join("current")).expect("a link");
+        let work = machine.root.path().join("work");
+        std::os::unix::fs::symlink(&real_work, &work).expect("a symlinked directory");
+        trust(&work.join("current"), &machine.record()).expect("trusted");
+        std::fs::remove_dir_all(&release).expect("deleted, leaving the link dangling");
+
+        let removed = untrust(&work.join("current"), &machine.record()).expect("untrust");
+
+        assert!(removed.changed, "{removed:?}");
+        assert_eq!(removed.repository, entry);
+        assert_eq!(load(&machine.record()).expect("reads"), Trust::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrust_of_a_cycle_of_links_ends_and_changes_nothing() {
+        let machine = Machine::new();
+        let directory = machine.repository("loop");
+        std::os::unix::fs::symlink("b/x", directory.join("a")).expect("a link");
+        std::os::unix::fs::symlink("a/y", directory.join("b")).expect("a link");
+        let removed = untrust(&directory.join("a").join("z"), &machine.record()).expect("untrust");
+        assert!(!removed.changed, "{removed:?}");
     }
 
     #[cfg(unix)]

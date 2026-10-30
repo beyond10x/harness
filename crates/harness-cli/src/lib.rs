@@ -1574,11 +1574,12 @@ fn refuse_a_typed_credential_for_a_repository_provider(
         return Ok(());
     };
     Err(format!(
-        "the trusted repository profile `{file}` chose the provider (provider = {chosen:?}), and \
+        "the trusted repository profile `{}` chose the provider (provider = {chosen:?}), and \
          `{flag}` names a credential you typed for a provider you chose. A repository profile may \
          pick the provider; it may not decide which endpoint receives a credential you typed. \
          Choose the provider yourself, with a `-p` profile or your own `[default]` that sets \
-         `provider`, or type `--base-url` beside the credential. Nothing was sent."
+         `provider`, or type `--base-url` beside the credential. Nothing was sent.",
+        harness_substrate::inert(file)
     ))
 }
 
@@ -3801,6 +3802,12 @@ fn read_config() -> Result<(profile::Config, String), String> {
     Ok((config, path.display().to_string()))
 }
 
+/// A path as a terminal may print it: a repository's link target or directory name is its own
+/// text, so every character a terminal acts on is shown escaped (`harness_substrate::inert`).
+fn shown(path: &Path) -> String {
+    harness_substrate::inert(&path.display().to_string())
+}
+
 /// `profiles trust|untrust <PATH>`, which write the trust record and nothing else.
 fn trust_command(path: &std::path::Path, trusting: bool) -> Result<(), String> {
     let record = profile::trust_path().ok_or_else(|| {
@@ -3813,22 +3820,18 @@ fn trust_command(path: &std::path::Path, trusting: bool) -> Result<(), String> {
         } else {
             "already trusted"
         };
-        println!(
-            "{verb} {} in {}",
-            done.repository.display(),
-            record.display()
-        );
+        println!("{verb} {} in {}", shown(&done.repository), shown(&record));
     } else {
         let done = trust::untrust(path, &record)?;
         if done.changed {
             for repository in std::iter::once(&done.repository).chain(&done.also) {
-                println!("untrusted {} in {}", repository.display(), record.display());
+                println!("untrusted {} in {}", shown(repository), shown(&record));
             }
         } else {
             println!(
                 "{} was not trusted in {}; nothing changed",
-                done.repository.display(),
-                record.display()
+                shown(&done.repository),
+                shown(&record)
             );
         }
     }
@@ -3871,7 +3874,7 @@ fn profiles_list(config: &profile::Config, source: &str, here: &Path) -> Result<
         profile::RepositoryProfile::Trusted(repository) => println!(
             "{:<10} {} (trusted)",
             profile::REPOSITORY_PROFILE,
-            repository.source
+            harness_substrate::inert(&repository.source)
         ),
     }
     for profile in &config.profiles {
@@ -3920,7 +3923,7 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
                 println!(
                     "profile {} <- {} ({})",
                     used.name,
-                    used.source,
+                    harness_substrate::inert(&used.source),
                     &used.sha256[..12]
                 );
             }

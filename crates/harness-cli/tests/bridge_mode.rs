@@ -1752,10 +1752,15 @@ fn an_interrupt_decoded_as_its_turn_ends_is_answered_in_one_of_two_orders() {
     // after it. The fix lets go of the turn first, under the lock the reading thread counts under,
     // so the count the settle waits for is final before the settle starts.
     //
-    // No rate. A correct server takes one of the two orders on every attempt, under any load; the
-    // sweep only decides how many attempts land near the end of the turn. Its 100 microseconds
-    // cover where that end fell on the machine it was measured on (misses at 27 to 73 µs), and
-    // this case was red in 5 of 5 suite runs before the fix, each red naming its attempt.
+    // No rate. A correct server takes one of the two orders on every attempt, under any load, and
+    // this case asserts only that, attempt by attempt. The delay does not place the interrupt at
+    // the end of the turn: both orders occur at every delay from 25 ns to 100 µs, so where an
+    // attempt lands is the scheduler's doing, and the case does not check that it saw both orders.
+    // It is a net across the whole binary path, not the guard for the fix: a copy of it counting
+    // misses passed the server before the fix in 1 of 24 runs (up to 8 misses in the others) and
+    // 0 misses in 13 runs after it. The deterministic guard is
+    // `an_interrupt_decoded_after_the_settle_does_not_decide_the_ended_turn` in
+    // `harness-app-server`'s `lib.rs`, which holds the gap open on every run.
     const ATTEMPTS: u32 = 4000;
     const STEP: Duration = Duration::from_nanos(25);
     let mut orders = std::collections::BTreeMap::<&str, u32>::new();

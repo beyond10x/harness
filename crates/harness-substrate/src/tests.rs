@@ -1430,6 +1430,39 @@ fn a_confined_workspace_lists_searches_and_finds_through_nothing_and_says_so() {
     }
 }
 
+/// `story:substrate-escape-is-injective`: the driver's refusal is kept as it said it and escaped
+/// once, by `inert`, when displayed. Its `Debug` quoting escapes `\` already, and `inert` would
+/// show every one of those backslashes doubled.
+#[test]
+fn an_embedded_driver_refusal_is_kept_raw_and_displayed_escaped_once() {
+    let hostile = "a\u{1b}\\b";
+    let error = substrate_host::DriverError {
+        class: substrate_host::DriverErrorClass::Refused,
+        code: "workspace.path-escape",
+        message: format!("no {hostile}"),
+        address: Some(hostile.to_owned()),
+        retriable: false,
+    };
+    let refused = super::embedded::driver_refusal("workspace.file-read", &error);
+    let shown = refused.to_string();
+    let SubstrateError::Refused { status: 0, body } = refused else {
+        panic!("answered {refused:?}")
+    };
+    assert!(
+        body.starts_with("workspace.file-read: workspace.path-escape: "),
+        "story:substrate-escape-is-injective: context, then the driver's code: {body:?}"
+    );
+    assert!(
+        body.contains(&format!("no {hostile}")) && body.contains(&format!("\"{hostile}\"")),
+        "story:substrate-escape-is-injective: the body holds the message and address as said: \
+         {body:?}"
+    );
+    assert!(
+        shown.contains(r"no a\u{1b}\\b") && !shown.contains(r"\\u{1b}"),
+        "story:substrate-escape-is-injective: the display escapes them once: {shown}"
+    );
+}
+
 #[test]
 fn an_exec_identity_is_the_shape_substrate_admits() {
     // `admit` requires `^ex_[A-Za-z0-9_]+$`. This was `exec-<pid>-<argv joined by dashes>` - wrong

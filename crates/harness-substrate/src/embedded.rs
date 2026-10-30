@@ -49,7 +49,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
+use substrate_host::{DispatchOutcome, Driver as _, DriverError, HostConfig, HostDriver};
 use substrate_wire::{
     EmptySource, ExecEnvironment, ExecOutputQuery, FileMode, FileReadQuery, OutputStream,
     WorkspaceCreateInput, WorkspaceSource,
@@ -158,7 +158,7 @@ impl Embedded {
             config.capsule_root = state.join("b10x-harness/capsules");
         }
         let driver = HostDriver::open(config).map_err(|error| SubstrateError::Unreadable {
-            reason: format!("the embedded driver did not open: {error:?}"),
+            reason: format!("the embedded driver did not open: {}", driver_said(&error)),
         })?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -250,14 +250,43 @@ impl Embedded {
         Ok(name.to_owned())
     }
 
-    fn refused(context: &str, error: &impl std::fmt::Debug) -> SubstrateError {
-        SubstrateError::Refused {
-            // Not an HTTP status: there is no HTTP. `0` is the honest stand-in and the message
-            // carries the driver's own typed refusal, which is the part a reader acts on.
-            status: 0,
-            body: format!("{context}: {error:?}"),
-        }
+    fn refused(context: &str, error: &DriverError) -> SubstrateError {
+        driver_refusal(context, error)
     }
+}
+
+/// The driver's typed refusal as a `Refused`, its own function so the text is testable without a
+/// driver.
+pub(crate) fn driver_refusal(context: &str, error: &DriverError) -> SubstrateError {
+    SubstrateError::Refused {
+        // Not an HTTP status: there is no HTTP. `0` is the honest stand-in and the message
+        // carries the driver's own typed refusal, which is the part a reader acts on.
+        status: 0,
+        body: format!("{context}: {}", driver_said(error)),
+    }
+}
+
+/// Every field of the driver's refusal, its strings as the driver said them.
+///
+/// Not `{:?}`: `Debug` quotes the message and the address, escaping each `\` in them, and the
+/// error's display escapes the whole body again (`inert`), which would show every backslash of
+/// that quoting doubled. The class is a field-less enum, so its `Debug` is only its name.
+fn driver_said(error: &DriverError) -> String {
+    format!(
+        "{}: {} (class {:?}, address {}, {})",
+        error.code,
+        error.message,
+        error.class,
+        error
+            .address
+            .as_deref()
+            .map_or_else(|| "none".to_owned(), |address| format!("\"{address}\"")),
+        if error.retriable {
+            "retriable"
+        } else {
+            "not retriable"
+        }
+    )
 }
 
 impl Backend for Embedded {

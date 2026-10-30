@@ -8,7 +8,6 @@
 use b10x_harness_substrate::inert;
 
 #[test]
-#[ignore = "story:substrate-escape-is-injective: inert leaves the backslash raw since aec6a5d"]
 fn a_raw_control_character_and_its_spelled_out_escape_display_differently() {
     let raw = "a\u{1b}[2Jb";
     let spelled = r"a\u{1b}[2Jb";
@@ -20,7 +19,6 @@ fn a_raw_control_character_and_its_spelled_out_escape_display_differently() {
 }
 
 #[test]
-#[ignore = "story:substrate-escape-is-injective: inert leaves the backslash raw since aec6a5d"]
 fn a_raw_line_break_and_a_spelled_out_one_display_differently() {
     let raw = "ok\nerror: forged";
     let spelled = r"ok\nerror: forged";

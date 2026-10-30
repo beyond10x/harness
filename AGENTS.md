@@ -146,6 +146,13 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   name the path or variable the operator passed, which is the operator's own input. **There is no ambient
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
+
+  **Named exception: a trusted repository's `provider`.** A `provider` set in a trusted
+  repository's `.b10x/harness.toml` reads that provider's default credential exactly as a typed
+  `--provider` would, and nothing more: the credential stays paired with its own provider's
+  endpoint, and a credential flag the operator typed is refused rather than sent to the provider
+  the repository chose. The operator's `profiles trust <PATH>` is the pointing; an untrusted file is
+  not read at all. No other key in a repository profile reaches a credential.
 - **Approvals are the review gate (invariant 12).** Adding a path that reaches a tool without
   consulting the approver removes the gate rather than tuning it. What asks is **derived, never
   declared**: the loop reads `ToolPort::invoked` — for a verb over a catalogue, the entry's own

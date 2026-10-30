@@ -168,6 +168,8 @@ pub struct Changed {
     pub repository: PathBuf,
     /// Whether the record changed.
     pub changed: bool,
+    /// Further entries `untrust` removed: the other spellings the same path named.
+    pub also: Vec<PathBuf>,
 }
 
 /// Reads the trust record, or an empty one where there is none.
@@ -324,35 +326,110 @@ pub fn trust(path: &Path, record: &Path) -> Result<Changed, String> {
     Ok(Changed {
         repository,
         changed,
+        also: Vec::new(),
     })
 }
 
 /// Removes a repository from the record.
 ///
-/// Canonicalised like `trust`; a path that no longer exists — a repository deleted after it was
-/// trusted — is made absolute instead, so its entry can still be removed by naming it.
+/// Every entry the path can name is removed, so a repository that moved or was deleted after it
+/// was trusted can still be untrusted by the spelling it was trusted by:
+///
+/// - the path resolved the way `trust` resolves it; for a path that no longer exists, `..` is
+///   taken lexically, the deepest ancestor that exists is canonicalised and the rest appended,
+///   and a dangling symbolic link on the way is followed to where it points;
+/// - the location the path names, its parent resolved that way and its last component kept, which
+///   is the entry for a trusted directory whose path has since become a symbolic link.
 ///
 /// # Errors
 ///
-/// Names a record that cannot be read or written.
+/// Names a path that cannot be made absolute, and a record that cannot be read or written.
 pub fn untrust(path: &Path, record: &Path) -> Result<Changed, String> {
-    let repository = match path.canonicalize() {
-        Ok(canonical) => canonical,
-        Err(_) => std::path::absolute(path)
-            .map_err(|error| format!("`{}` cannot be resolved: {error}", path.display()))?,
-    };
+    let unresolved =
+        |error: std::io::Error| format!("`{}` cannot be resolved: {error}", path.display());
+    let spelled = lexical(&std::path::absolute(path).map_err(unresolved)?);
+    let repository = resolve(&spelled, 0);
+    let mut names = vec![repository.clone()];
+    if let (Some(parent), Some(last)) = (spelled.parent(), spelled.file_name()) {
+        names.push(resolve(parent, 0).join(last));
+    }
+    names.push(spelled);
     let _held = lock(record)?;
     let mut trust = load(record)?;
-    let changed = repository
-        .to_str()
-        .is_some_and(|key| trust.repositories.remove(key));
+    let mut removed = Vec::new();
+    for name in names {
+        if name
+            .to_str()
+            .is_some_and(|key| trust.repositories.remove(key))
+        {
+            removed.push(name);
+        }
+    }
+    let changed = !removed.is_empty();
     if changed {
         save(record, &trust)?;
     }
+    let mut removed = removed.into_iter();
     Ok(Changed {
-        repository,
+        repository: removed.next().unwrap_or(repository),
         changed,
+        also: removed.collect(),
     })
+}
+
+/// How many symbolic links [`resolve`] follows before it stops, as the kernel does.
+const LINK_LIMIT: usize = 40;
+
+/// `path` without `.` components, `..` taken against the component before it, and no trailing
+/// separator. Lexical: no symbolic link is consulted, so this is how the operator spelled it.
+fn lexical(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
+}
+
+/// An absolute, lexical `path` resolved as far as the filesystem allows.
+///
+/// A path that exists is canonicalised. One that does not is resolved through the deepest
+/// ancestor that does, with the rest appended; a dangling symbolic link on the way is followed to
+/// the path it names, up to [`LINK_LIMIT`] links.
+fn resolve(path: &Path, links: usize) -> PathBuf {
+    let mut existing = path.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(canonical) = existing.canonicalize() {
+            return append(canonical, &rest);
+        }
+        if links < LINK_LIMIT
+            && let Ok(target) = std::fs::read_link(&existing)
+        {
+            let base = existing.parent().unwrap_or(Path::new("/"));
+            return append(resolve(&lexical(&base.join(target)), links + 1), &rest);
+        }
+        match (existing.file_name(), existing.parent()) {
+            (Some(last), Some(parent)) => {
+                rest.push(last.to_owned());
+                existing = parent.to_path_buf();
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `base` with `rest`, gathered last component first, appended in order.
+fn append(mut base: PathBuf, rest: &[std::ffi::OsString]) -> PathBuf {
+    for component in rest.iter().rev() {
+        base.push(component);
+    }
+    base
 }
 
 #[cfg(unix)]
@@ -451,6 +528,79 @@ mod tests {
             !again.changed,
             "untrusting what is not trusted changes nothing"
         );
+    }
+
+    #[test]
+    fn untrust_removes_a_deleted_repository_named_through_dot_dot_or_a_trailing_slash() {
+        let machine = Machine::new();
+        let here = machine.repository("here");
+        for spelling in ["gone/", "here/../gone", "./here/./../gone//"] {
+            let gone = machine.repository("gone");
+            let canonical = gone.canonicalize().expect("canonical");
+            trust(&gone, &machine.record()).expect("trusted");
+            std::fs::remove_dir_all(&gone).expect("deleted");
+
+            let removed =
+                untrust(&machine.root.path().join(spelling), &machine.record()).expect("untrust");
+            assert!(removed.changed, "{spelling}: {removed:?}");
+            assert_eq!(removed.repository, canonical, "{spelling}");
+            assert!(!load(&machine.record()).expect("reads").admits(&canonical));
+        }
+        assert!(here.exists(), "nothing but the record was touched");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrust_follows_a_dangling_link_and_a_symlinked_parent_to_the_entry() {
+        let machine = Machine::new();
+        let real = machine.repository("real");
+        let canonical = real.canonicalize().expect("canonical");
+        let link = machine.root.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("a symlink");
+        let nested = machine.repository("real/work");
+        let nested_canonical = nested.canonicalize().expect("canonical");
+        trust(&link, &machine.record()).expect("trusted through the link");
+        trust(&link.join("work"), &machine.record()).expect("trusted through the parent link");
+        std::fs::remove_dir_all(&nested).expect("deleted");
+
+        let removed = untrust(&link.join("work"), &machine.record()).expect("untrust");
+        assert_eq!(removed.repository, nested_canonical);
+        assert!(removed.changed);
+
+        std::fs::remove_dir_all(&real).expect("deleted, leaving the link dangling");
+        let removed = untrust(&link, &machine.record()).expect("untrust");
+        assert_eq!(removed.repository, canonical);
+        assert!(removed.changed);
+        assert_eq!(load(&machine.record()).expect("reads"), Trust::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrust_of_a_path_that_became_a_link_removes_both_entries_it_names() {
+        let machine = Machine::new();
+        let work = machine.repository("work");
+        let moved = machine.repository("moved");
+        let (work_canonical, moved_canonical) = (
+            work.canonicalize().expect("canonical"),
+            moved.canonicalize().expect("canonical"),
+        );
+        trust(&work, &machine.record()).expect("trusted");
+        trust(&moved, &machine.record()).expect("trusted");
+        std::fs::remove_dir_all(&work).expect("removed");
+        std::os::unix::fs::symlink(&moved, &work).expect("the old path now a link");
+
+        let removed = untrust(&work, &machine.record()).expect("untrust");
+        assert!(removed.changed);
+        assert_eq!(
+            removed.repository, moved_canonical,
+            "where it points, first"
+        );
+        assert_eq!(
+            removed.also,
+            vec![work_canonical],
+            "and the location it names"
+        );
+        assert_eq!(load(&machine.record()).expect("reads"), Trust::default());
     }
 
     #[test]

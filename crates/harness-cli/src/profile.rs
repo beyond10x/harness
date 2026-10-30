@@ -34,8 +34,10 @@
 //! any other profile.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use harness_substrate::inert;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -328,23 +330,27 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
             parse_failure(text, &error)
         )
     })?;
+    // A refused name is the file's text, and a quoted TOML key may hold any character: it is named
+    // through `inert`, so a control or bidi character in it is shown escaped and never reaches the
+    // terminal as one.
     let mut refused = Vec::new();
     let mut default = toml::Table::new();
     for (key, value) in document {
+        let shown = inert(&key);
         match (key.as_str(), value) {
             ("default", toml::Value::Table(table)) => default = table,
-            (_, toml::Value::Table(_)) => refused.push(format!("`[{key}]`")),
+            (_, toml::Value::Table(_)) => refused.push(format!("`[{shown}]`")),
             (_, toml::Value::Array(items))
                 if !items.is_empty() && items.iter().all(toml::Value::is_table) =>
             {
-                refused.push(format!("`[[{key}]]`"));
+                refused.push(format!("`[[{shown}]]`"));
             }
-            _ => refused.push(format!("`{key}`")),
+            _ => refused.push(format!("`{shown}`")),
         }
     }
     for key in default.keys() {
         if !REPOSITORY_KEYS.contains(&key.as_str()) {
-            refused.push(format!("`{key}`"));
+            refused.push(format!("`{}`", inert(key)));
         }
     }
     if !refused.is_empty() {
@@ -364,13 +370,22 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
     let mut mistyped = Vec::new();
     for (key, value) in default {
         match (key.as_str(), value) {
+            // A provider is a name from a table, and a name holding a control, bidi or other
+            // unprintable character names none; refused here by key, since every message that
+            // names an unknown provider would otherwise quote it.
+            ("provider", toml::Value::String(text)) if unprintable(&text) => {
+                mistyped.push(
+                    "`provider` holds a control, bidi or other unprintable character".to_owned(),
+                );
+            }
             ("provider", toml::Value::String(text)) => profile.provider = Some(text),
             ("model", toml::Value::String(text)) => profile.model = Some(text),
-            ("max-turns", toml::Value::Integer(turns)) if turns >= 0 => {
+            // Zero admits no turn: the run would refuse it anyway, without naming this file.
+            ("max-turns", toml::Value::Integer(turns)) if turns >= 1 => {
                 profile.max_turns = u64::try_from(turns).ok();
             }
             ("max-turns", _) => {
-                mistyped.push("`max-turns` must be a whole number, zero or more".to_owned());
+                mistyped.push("`max-turns` must be a whole number, at least one".to_owned());
             }
             // Only `provider` and `model` are left: every other key was refused above.
             (other, _) => mistyped.push(format!("`{other}` must be a string")),
@@ -387,24 +402,57 @@ fn parse_repository(file: &Path, text: &str) -> Result<Profile, String> {
     }
 }
 
+/// Whether `text` holds a character `std` judges unprintable: a control, bidi or other format
+/// character, which a terminal acts on or does not show. Quotes and the backslash print as
+/// themselves.
+fn unprintable(text: &str) -> bool {
+    text.chars().any(|character| {
+        !matches!(character, '"' | '\'' | '\\') && character.escape_debug().len() > 1
+    })
+}
+
 /// The one line a run prints when the workspace's profile was not read.
+///
+/// One line whatever the workspace is called: the paths are shown through `inert`, and the
+/// command through [`shell_word`], which spells a control character with an escape.
 #[must_use]
 pub fn untrusted_notice(file: &Path, workspace: &Path) -> String {
     format!(
         "warning [repository-profile] `{}` was not read: `{}` is not a trusted repository. To \
          apply it: b10x-harness profiles trust {}",
-        file.display(),
-        workspace.display(),
+        inert(&file.display().to_string()),
+        inert(&workspace.display().to_string()),
         shell_word(&workspace.display().to_string())
     )
 }
 
-/// `text` as one word a POSIX shell reads back unchanged.
+/// `text` as one word a POSIX shell reads back unchanged, on one line.
+///
+/// Plain text as it is; otherwise single-quoted; and text holding an unprintable character (a
+/// newline, ESC, a bidi override) as a dollar-single-quoted word (POSIX.1-2024, and bash, zsh and
+/// ksh before it) with every byte of such a character spelled as a three-digit octal escape.
 pub(crate) fn shell_word(text: &str) -> String {
     let plain =
         |character: char| character.is_ascii_alphanumeric() || "/._-+=:,@%".contains(character);
     if !text.is_empty() && text.chars().all(plain) {
         return text.to_owned();
+    }
+    if unprintable(text) {
+        let mut word = String::from("$'");
+        for character in text.chars() {
+            match character {
+                '\\' => word.push_str("\\\\"),
+                '\'' => word.push_str("\\'"),
+                other if unprintable(other.encode_utf8(&mut [0; 4])) => {
+                    for byte in other.encode_utf8(&mut [0; 4]).bytes() {
+                        let _ = write!(word, "\\{byte:03o}");
+                    }
+                }
+                other => word.push(other),
+            }
+        }
+        word.push('\'');
+        return word;
     }
     format!("'{}'", text.replace('\'', "'\\''"))
 }
@@ -448,7 +496,6 @@ pub fn digest(profile: &Profile) -> String {
         .finalize()
         .iter()
         .fold(String::new(), |mut text, byte| {
-            use std::fmt::Write as _;
             let _ = write!(text, "{byte:02x}");
             text
         })
@@ -602,9 +649,17 @@ fn overlay_plumbing(into: &mut Profile, from: &Profile) {
 /// **`.git/**` is denied, and that default is the guard on the whole feature.** Running in a real
 /// checkout is new; a model rewriting history there is the failure it makes possible for the first
 /// time, and it must not depend on a key somebody remembered to write.
+///
+/// **`.b10x/**` is denied for the same reason**: a trusted repository's `.b10x/harness.toml` is
+/// applied by the next run, so a run that could rewrite it could choose the next run's provider,
+/// model and turn budget.
 #[must_use]
 pub fn default_write_scope() -> Vec<String> {
-    vec![".git/**=denied".to_owned(), "**=allowed".to_owned()]
+    vec![
+        ".git/**=denied".to_owned(),
+        ".b10x/**=denied".to_owned(),
+        "**=allowed".to_owned(),
+    ]
 }
 
 /// A starter config, for `profiles init`.
@@ -623,7 +678,8 @@ pub fn starter() -> String {
          name = \"write\"\n\
          write = true\n\
          approve-up-to = \"high\"\n\
-         # Absent, the scope denies `.git/**` and allows the rest. Restate it to widen or narrow.\n\
+         # Absent, the scope denies `.git/**` and `.b10x/**` and allows the rest. Restate it to widen\n\
+         # or narrow.\n\
          # allow-program = [\"/usr/bin/git\"]\n\
          \n\
          # Optional: change one field of a built-in provider, keeping the rest.\n\
@@ -736,6 +792,35 @@ mod tests {
                 .any(|rule| rule.starts_with(".git/**=denied")),
             "{:?}",
             default_write_scope()
+        );
+    }
+
+    #[test]
+    fn the_default_write_scope_denies_the_repository_profile_and_allows_the_rest() {
+        // A trusted repository's `.b10x/harness.toml` is applied by the next run: a run able to
+        // rewrite it could choose the next run's provider, model and turn budget.
+        let scope = harness_catalogue::Scope::of(
+            default_write_scope()
+                .iter()
+                .map(|rule| harness_catalogue::ScopeRule::parse(rule).expect("a rule"))
+                .collect(),
+        );
+        for operation in ["file.write", "file.edit"] {
+            for path in [".b10x/harness.toml", ".b10x/other", ".git/config"] {
+                assert!(
+                    scope.refusal(operation, path).is_some(),
+                    "{operation} {path} is denied by default"
+                );
+            }
+            assert_eq!(
+                scope.refusal(operation, "src/main.rs"),
+                None,
+                "{operation} elsewhere is allowed"
+            );
+        }
+        assert!(
+            scope.refusal_of_directory("file.write", ".b10x").is_some(),
+            "a write through the `.b10x` directory is refused too"
         );
     }
 
@@ -988,6 +1073,91 @@ mod tests {
             notice.contains("b10x-harness profiles trust '/srv/my repo'"),
             "a command a shell reads as one path: {notice}"
         );
+    }
+
+    #[test]
+    fn the_notice_is_one_line_when_the_workspace_name_holds_a_newline_or_an_escape() {
+        let notice = untrusted_notice(
+            Path::new("/srv/a\nb\u{1b}[2J\u{202e}c/.b10x/harness.toml"),
+            Path::new("/srv/a\nb\u{1b}[2J\u{202e}c"),
+        );
+        assert!(!notice.contains('\n'), "one line: {notice:?}");
+        assert!(
+            !notice.contains('\u{1b}') && !notice.contains('\u{202e}'),
+            "{notice:?}"
+        );
+        assert!(
+            notice.ends_with("b10x-harness profiles trust $'/srv/a\\012b\\033[2J\\342\\200\\256c'"),
+            "the command spells each byte of what it cannot show: {notice}"
+        );
+    }
+
+    #[test]
+    fn a_shell_word_keeps_plain_and_quoted_spellings_and_escapes_only_the_unprintable() {
+        assert_eq!(shell_word("/srv/repo"), "/srv/repo");
+        assert_eq!(shell_word("/srv/it's"), "'/srv/it'\\''s'");
+        assert_eq!(shell_word("/srv/x\ty'z\\"), "$'/srv/x\\011y\\'z\\\\'");
+    }
+
+    #[test]
+    fn a_refused_key_name_is_shown_escaped_and_on_one_line() {
+        let repo =
+            Repo::with("[default]\n\"x\\u001B[2J\\nforged\" = 1\n[\"t\\u202Eable\"]\nk = 1\n")
+                .trusted();
+        let error = repo.read().expect_err("refused");
+        assert!(!error.contains('\n'), "one line: {error:?}");
+        assert!(
+            !error.contains('\u{1b}') && !error.contains('\u{202e}'),
+            "{error:?}"
+        );
+        assert!(error.contains("`x\\u{1b}[2J\\nforged`"), "{error}");
+        assert!(error.contains("`[t\\u{202e}able]`"), "{error}");
+    }
+
+    #[test]
+    fn a_provider_holding_an_unprintable_character_is_refused_by_key_and_not_shown() {
+        for provider in [
+            "VALUE-ONE\\r\\u001B[2K",
+            "VALUE\\u202ETWO",
+            "VALUE-THREE\\u0007",
+        ] {
+            let repo = Repo::with(&format!("[default]\nprovider = \"{provider}\"\n")).trusted();
+            let error = repo.read().expect_err(provider);
+            assert!(error.contains("`provider`"), "{provider}: {error}");
+            assert!(
+                error.contains(&canonical_file(&repo)),
+                "{provider}: {error}"
+            );
+            assert!(
+                !error.contains("VALUE"),
+                "the value is never shown: {error:?}"
+            );
+        }
+        let repo = Repo::with("[default]\nprovider = \"openai\"\n").trusted();
+        assert_eq!(
+            read_profile(&repo).provider.as_deref(),
+            Some("openai"),
+            "a printable name is read"
+        );
+    }
+
+    #[test]
+    fn a_repository_max_turns_of_zero_is_refused_at_read_and_one_is_read() {
+        let repo = Repo::with("[default]\nmax-turns = 0\n").trusted();
+        let error = repo.read().expect_err("zero admits no turn");
+        assert!(error.contains("`max-turns`"), "{error}");
+        assert!(error.contains("at least one"), "{error}");
+        assert!(error.contains(&canonical_file(&repo)), "{error}");
+        let repo = Repo::with("[default]\nmax-turns = 1\n").trusted();
+        assert_eq!(read_profile(&repo).max_turns, Some(1), "one is read");
+    }
+
+    /// The profile a trusted repository's file gives.
+    fn read_profile(repo: &Repo) -> Profile {
+        match repo.read().expect("read") {
+            RepositoryProfile::Trusted(read) => read.profile,
+            other => panic!("not read as trusted: {other:?}"),
+        }
     }
 
     #[test]

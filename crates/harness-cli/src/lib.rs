@@ -18,6 +18,7 @@ pub mod provider;
 mod render;
 pub mod skills;
 pub mod transcript;
+pub mod trust;
 
 use std::fmt::Write as _;
 use std::fs;
@@ -378,6 +379,21 @@ enum ProfilesCommand {
     },
     /// Write a starter config, and print where it went.
     Init,
+    /// Let this repository's own `.b10x/harness.toml` apply to runs over it.
+    ///
+    /// Recorded by canonical path in `harness-trust.toml`, beside the operator's config; that
+    /// config itself is never edited. A repository profile may set only `provider`, `model` and
+    /// `max-turns`. Trust is per path: another checkout, a parent or a subdirectory is not trusted
+    /// by this.
+    Trust {
+        /// The workspace directory. It must exist, and is recorded by its canonical path.
+        path: PathBuf,
+    },
+    /// Stop applying a repository's own `.b10x/harness.toml`.
+    Untrust {
+        /// The workspace directory, canonicalised; one that no longer exists is made absolute.
+        path: PathBuf,
+    },
 }
 
 /// `providers <verb>`.
@@ -550,6 +566,9 @@ struct RunOptions {
     /// `b10x-harness profiles explain -p <name>` prints the argv it expands to before a token is
     /// spent, and `session.started` names every profile that contributed with a digest of what it
     /// said. That record is the condition on which a file is allowed to carry a permission at all.
+    ///
+    /// A trusted workspace's own `.b10x/harness.toml` (`profiles trust`) sits between `[default]`
+    /// and the first `-p`, and may set only `provider`, `model` and `max-turns`.
     #[arg(short = 'p', long = "profile", value_name = "NAME")]
     profile: Vec<String>,
     /// The provider whose default supplied the credential, when one did.
@@ -1408,8 +1427,12 @@ fn apply_provider(
 /// # Errors
 ///
 /// Names the missing endpoint or model, the profile that is not in the file, the provider that
-/// does not exist, or a configuration that declares programs without `write`.
+/// does not exist, a configuration that declares programs without `write`, and a trusted
+/// repository profile that carries a key or table it may not.
 fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, String> {
+    // Before the operator's config, so an untrusted file is announced however the run then ends.
+    // Nothing can be trusted without a config directory, so there is nothing to apply below.
+    let repository = repository_profile(&options.workspace)?;
     let Some(path) = profile::config_path() else {
         // No `HOME` and no `XDG_CONFIG_HOME`: there is no file to read, but the run still owes
         // the caller the same refusal. Returning early past the check below is what made a
@@ -1420,7 +1443,10 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
     };
     let source = path.display().to_string();
     let config = profile::load(&path)?;
-    let resolved = profile::resolve(&config, &options.profile, &source)?;
+    let resolved = profile::resolve(&config, repository.as_ref(), &options.profile, &source)?;
+    if let (Some(chosen), Some(repository)) = (&resolved.repository_provider, &repository) {
+        refuse_a_typed_credential_for_a_repository_provider(options, chosen, &repository.source)?;
+    }
     let wanted = resolved.profile;
 
     // **A typed `--base-url` means the provider is not consulted at all.**
@@ -1434,13 +1460,18 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
     // So naming the endpoint yourself opts out of the whole bundle, rather than a piece of it
     // arriving to keep you company. The profile's *permission* keys below still apply: those are
     // about what the run may do, not about who it is talking to.
-    apply_provider(options, wanted.provider.as_deref(), &config.providers)?;
-
+    //
+    // **The profiles' model is filled first**, so the provider expands it through its alias table
+    // and keeps it. Filled after, it arrived to find the provider's own default already in place
+    // and was dropped — a `[default] model`, a `-p` model and a repository's all lost to
+    // `provider.model`, while `profiles explain` printed the one the profile named.
     if let Some(model) = wanted.model
         && options.model.is_none()
     {
         options.model = Some(model);
     }
+    apply_provider(options, wanted.provider.as_deref(), &config.providers)?;
+
     if wanted.write == Some(true) {
         // A typed socket wins; see the doc above.
         if options.substrate.is_none() {
@@ -1509,6 +1540,68 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
 
     require_endpoint_and_model(options, Some(&source))?;
     Ok(resolved.used)
+}
+
+/// Refuses a credential the operator typed when a trusted repository profile chose the provider.
+///
+/// A typed credential is meant for the provider the operator chose. Where the repository's
+/// `provider` is what chose it (`profile::Resolved::repository_provider`), sending the typed one
+/// there would let a file that arrived with the code decide which vendor receives the operator's
+/// key. Refused by name before any request, so the run never starts; a typed `--base-url`
+/// consults no provider and is not refused.
+///
+/// # Errors
+///
+/// Names the repository file, the provider it chose, the typed flag and how to choose yourself.
+fn refuse_a_typed_credential_for_a_repository_provider(
+    options: &RunOptions,
+    chosen: &str,
+    file: &str,
+) -> Result<(), String> {
+    if options.base_url.is_some() {
+        return Ok(());
+    }
+    let typed = [
+        ("--api-key-file", options.api_key_file.is_some()),
+        ("--api-key-env", options.api_key_env.is_some()),
+        ("--api-key-secret", options.api_key_secret.is_some()),
+        ("--oauth-token-file", options.oauth_token_file.is_some()),
+        ("--oauth-token-env", options.oauth_token_env.is_some()),
+    ]
+    .into_iter()
+    .find_map(|(flag, typed)| typed.then_some(flag));
+    let Some(flag) = typed else {
+        return Ok(());
+    };
+    Err(format!(
+        "the trusted repository profile `{file}` chose the provider (provider = {chosen:?}), and \
+         `{flag}` names a credential you typed for a provider you chose. A repository profile may \
+         pick the provider; it may not decide which endpoint receives a credential you typed. \
+         Choose the provider yourself, with a `-p` profile or your own `[default]` that sets \
+         `provider`, or type `--base-url` beside the credential. Nothing was sent."
+    ))
+}
+
+/// The workspace's own profile, when the operator trusted it.
+///
+/// The one fixed place a repository may speak, `<workspace>/.b10x/harness.toml`; nothing walks up
+/// the tree or looks anywhere else. An untrusted file is not read, and the run says so in one
+/// stderr line — even under `--quiet`, because a configuration that silently did not apply is
+/// the failure the line exists to prevent.
+///
+/// # Errors
+///
+/// Names a trust record that cannot be read, and a trusted file that cannot be read, does not
+/// parse, or carries a key or table a repository profile may not.
+fn repository_profile(workspace: &Path) -> Result<Option<profile::Repository>, String> {
+    match profile::repository(workspace, profile::trust_path().as_deref())? {
+        profile::RepositoryProfile::Absent => Ok(None),
+        profile::RepositoryProfile::Untrusted { file, workspace } => {
+            eprintln!("{}", profile::untrusted_notice(&file, &workspace));
+            Ok(None)
+        }
+        profile::RepositoryProfile::Trusted(repository) => Ok(Some(*repository)),
+    }
 }
 
 /// Refuse a run that has no endpoint or no model, naming what to type.
@@ -3708,44 +3801,122 @@ fn read_config() -> Result<(profile::Config, String), String> {
     Ok((config, path.display().to_string()))
 }
 
-/// `profiles list|show|explain|init`.
-fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
-    if let ProfilesCommand::Init = verb {
-        let path = profile::config_path().ok_or_else(|| "nowhere to write a config".to_owned())?;
-        if path.exists() {
-            // Never overwritten: a config is the operator's, and one silently replaced is a set of
-            // rules they thought they had.
-            return Err(format!(
-                "`{}` is already there. Read it, or move it aside first.",
-                path.display()
-            ));
+/// `profiles trust|untrust <PATH>`, which write the trust record and nothing else.
+fn trust_command(path: &std::path::Path, trusting: bool) -> Result<(), String> {
+    let record = profile::trust_path().ok_or_else(|| {
+        "no `XDG_CONFIG_HOME` and no `HOME`, so there is nowhere a trust record could be".to_owned()
+    })?;
+    if trusting {
+        let done = trust::trust(path, &record)?;
+        let verb = if done.changed {
+            "trusted"
+        } else {
+            "already trusted"
+        };
+        println!(
+            "{verb} {} in {}",
+            done.repository.display(),
+            record.display()
+        );
+    } else {
+        let done = trust::untrust(path, &record)?;
+        if done.changed {
+            println!(
+                "untrusted {} in {}",
+                done.repository.display(),
+                record.display()
+            );
+        } else {
+            println!(
+                "{} was not trusted in {}; nothing changed",
+                done.repository.display(),
+                record.display()
+            );
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("creating `{}`: {error}", parent.display()))?;
-        }
-        std::fs::write(&path, profile::starter())
-            .map_err(|error| format!("writing `{}`: {error}", path.display()))?;
-        println!("{}", path.display());
-        return Ok(());
     }
+    Ok(())
+}
+
+/// `profiles init`: writes the commented starter, and never over an existing config.
+fn profiles_init() -> Result<(), String> {
+    let path = profile::config_path().ok_or_else(|| "nowhere to write a config".to_owned())?;
+    if path.exists() {
+        // Never overwritten: a config is the operator's, and one silently replaced is a set of
+        // rules they thought they had.
+        return Err(format!(
+            "`{}` is already there. Read it, or move it aside first.",
+            path.display()
+        ));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("creating `{}`: {error}", parent.display()))?;
+    }
+    std::fs::write(&path, profile::starter())
+        .map_err(|error| format!("writing `{}`: {error}", path.display()))?;
+    println!("{}", path.display());
+    Ok(())
+}
+
+/// `profiles list`, in precedence order: `[default]`, the repository profile of `here` with its
+/// trust, then every named profile.
+fn profiles_list(config: &profile::Config, source: &str, here: &Path) -> Result<(), String> {
+    println!("default    {source}");
+    match profile::repository(here, profile::trust_path().as_deref())? {
+        profile::RepositoryProfile::Absent => {}
+        profile::RepositoryProfile::Untrusted { file, workspace } => println!(
+            "{:<10} {} (not trusted, not read; b10x-harness profiles trust {})",
+            profile::REPOSITORY_PROFILE,
+            file.display(),
+            profile::shell_word(&workspace.display().to_string())
+        ),
+        profile::RepositoryProfile::Trusted(repository) => println!(
+            "{:<10} {} (trusted)",
+            profile::REPOSITORY_PROFILE,
+            repository.source
+        ),
+    }
+    for profile in &config.profiles {
+        if let Some(name) = &profile.name {
+            println!("{name:<10} {source}");
+        }
+    }
+    Ok(())
+}
+
+/// `profiles list|show|explain|init|trust|untrust`.
+///
+/// `list`, `show` and `explain` read the repository profile of the current directory: the
+/// workspace a run gets when `--workspace` is not typed.
+fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
+    match verb {
+        ProfilesCommand::Trust { path } => return trust_command(path, true),
+        ProfilesCommand::Untrust { path } => return trust_command(path, false),
+        _ => {}
+    }
+    if let ProfilesCommand::Init = verb {
+        return profiles_init();
+    }
+    let here = std::path::Path::new(".");
     let (config, source) = read_config()?;
     match verb {
-        ProfilesCommand::Init => unreachable!("handled above"),
-        ProfilesCommand::List => {
-            println!("default    {source}");
-            for profile in &config.profiles {
-                if let Some(name) = &profile.name {
-                    println!("{name:<10} {source}");
-                }
-            }
+        ProfilesCommand::Init | ProfilesCommand::Trust { .. } | ProfilesCommand::Untrust { .. } => {
+            unreachable!("handled above")
         }
+        ProfilesCommand::List => profiles_list(&config, &source, here)?,
         ProfilesCommand::Show { name } => {
-            let resolved = profile::resolve(&config, std::slice::from_ref(name), &source)?;
+            let repository = repository_profile(here)?;
+            let resolved = profile::resolve(
+                &config,
+                repository.as_ref(),
+                std::slice::from_ref(name),
+                &source,
+            )?;
             println!("{:#?}", resolved.profile);
         }
         ProfilesCommand::Explain { profile: wanted } => {
-            let resolved = profile::resolve(&config, wanted, &source)?;
+            let repository = repository_profile(here)?;
+            let resolved = profile::resolve(&config, repository.as_ref(), wanted, &source)?;
             // The point of the verb: what this will actually run as, before a token is spent.
             for used in &resolved.used {
                 println!(
@@ -3771,6 +3942,11 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
                     }
                     provider::Credential::ApiKeyEnv { name } => println!("--api-key-env {name}"),
                 }
+            } else if let Some(model) = &resolved.profile.model {
+                println!("--model {model}");
+            }
+            if let Some(turns) = resolved.profile.max_turns {
+                println!("--max-turns {turns}");
             }
             if resolved.profile.write == Some(true) {
                 println!("--substrate-embedded");

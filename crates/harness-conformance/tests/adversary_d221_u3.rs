@@ -470,8 +470,8 @@ fn with_value(stop: &mut Value, f: impl FnOnce(&mut Map<String, Value>)) -> bool
 fn the_unperturbed_production_boundary_passes_every_scenario() {
     let (_, _, passed) = run(|_| false);
     assert_eq!(
-        passed, 165,
-        "story:harness-loop-modeled-in-ess: 29 scenarios before, plus 124 generated and 12 \
+        passed, 183,
+        "story:harness-loop-modeled-in-ess: 29 scenarios before, plus 136 generated and 18 \
          authored ones for the Loop entity"
     );
 }

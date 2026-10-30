@@ -54,11 +54,11 @@ fail independently of those counts. ESS report/2 and its detailed run are writte
 `.engineering/drafts/harness-native-{report,run}.json`. The exact committed suite is the evidence
 import's `--suite` input.
 
-The declared slice has **165 scenarios: 38 authored and 127 generated**. Generated scenarios
+The declared slice has **183 scenarios: 44 authored and 139 generated**. Generated scenarios
 hold the response shape and, for the Loop entity, every outcome, transition and refusal; authored
 scenarios pin actual outcome values, effects and refusals.
-The inert target accepts commands but returns an empty response: all 165 scenarios fail, including
-all 38 authored scenarios. The audit gate rejects an authored scenario that passes this target.
+The inert target accepts commands but returns an empty response: all 183 scenarios fail, including
+all 44 authored scenarios. The audit gate rejects an authored scenario that passes this target.
 [Mutation evidence](../conformance/mutation-evidence.json) records temporary production changes
 that made named scenarios fail; the source was restored after each mutation. It is dated 2026-10-03,
 before 0.18.0 removed the `harness.flow` domain with the `workflow` verb, so its counts are over 42

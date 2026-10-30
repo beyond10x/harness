@@ -1,0 +1,63 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-approval-deferred-twice
+summary: A run resumed from its checkpoint that is deferred again hands back a second checkpoint, which resumes in turn; a resumed run writes no ledger.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-7, tool: write, text: short}
+    outcome: asked
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.Defer
+    input: {run_id: run-a, checkpoint_id: cp-1}
+    outcome: deferred
+    response:
+      stop: {kind: awaiting-approval, value: {checkpoint_id: cp-1}}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.ResumeApproved
+    input: {run_id: run-a}
+    outcome: resumed
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:05Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-8, tool: write, text: short}
+    outcome: asked
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:06Z
+    command: harness.loop.Defer
+    input: {run_id: run-a, checkpoint_id: cp-2}
+    outcome: deferred
+    response:
+      stop: {kind: awaiting-approval, value: {checkpoint_id: cp-2}}
+      ledger: null
+  - at: 2026-10-30T00:00:07Z
+    command: harness.loop.ResumeApproved
+    input: {run_id: run-a}
+    outcome: resumed
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:08Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:09Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-a, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger: null
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 3, retries: 0}

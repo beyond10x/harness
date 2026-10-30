@@ -219,18 +219,37 @@ const CONTEXT_WINDOW: u64 = 4096;
 /// Long assistant text: over 80 % of `CONTEXT_WINDOW` at four bytes a token, and over
 /// `SUMMARY_MIN_FOLD_BYTES`, so the next turn is a summary turn.
 const LONG_TEXT_BYTES: usize = 16 * 1024;
+/// Text for the trigger's edge: over `SUMMARY_MIN_FOLD_BYTES`, and about 58 % of `CONTEXT_WINDOW`
+/// at four bytes a token, so the provider's reported count decides whether the trigger fires.
+const EDGE_TEXT_BYTES: usize = 9 * 1024;
+/// 80 % of `CONTEXT_WINDOW`, written out rather than computed from the loop's constant, so a
+/// changed trigger in the loop is a failed scenario and not a moved fixture.
+const TRIGGER_TOKENS: u64 = 3276;
+/// The input tokens an ordinary turn reports.
+const REPORTED_TOKENS: u64 = 100;
 /// How long the adapter waits for the loop to block again or return before calling it stuck.
 const PATIENCE: Duration = Duration::from_secs(30);
 
-/// The usage every answered turn reports, so the ledger has something exact to carry.
-fn usage() -> Usage {
+/// The usage an answered turn reports, so the ledger has something exact to carry.
+fn usage_of(input_tokens: u64) -> Usage {
     Usage {
         model: "fixture".to_owned(),
-        input_tokens: 100,
+        input_tokens,
         output_tokens: 10,
         cached_input_tokens: 0,
         cache_creation_input_tokens: None,
     }
+}
+
+/// The assistant text and reported input tokens of a `harness.loop.TextSize`.
+fn sized(size: &str) -> Result<(String, u64)> {
+    Ok(match size {
+        "short" => ("Calling the tool.".to_owned(), REPORTED_TOKENS),
+        "long" => (text_of(LONG_TEXT_BYTES), REPORTED_TOKENS),
+        "under-trigger" => (text_of(EDGE_TEXT_BYTES), TRIGGER_TOKENS - 1),
+        "at-trigger" => (text_of(EDGE_TEXT_BYTES), TRIGGER_TOKENS),
+        other => return Err(format!("no text size {other}").into()),
+    })
 }
 
 fn config() -> LoopConfig {
@@ -701,6 +720,10 @@ fn awaited(command: &str) -> Option<&'static [&'static str]> {
 }
 
 fn turn(text: String, calls: Vec<ToolCall>) -> TurnOutcome {
+    reported_turn(text, calls, REPORTED_TOKENS)
+}
+
+fn reported_turn(text: String, calls: Vec<ToolCall>, input_tokens: u64) -> TurnOutcome {
     let stop_reason = if calls.is_empty() {
         StopReason::EndTurn
     } else {
@@ -711,15 +734,15 @@ fn turn(text: String, calls: Vec<ToolCall>) -> TurnOutcome {
     TurnOutcome {
         stop_reason,
         items,
-        usage: Some(usage()),
+        usage: Some(usage_of(input_tokens)),
     }
 }
 
-fn long_text() -> String {
+fn text_of(bytes: usize) -> String {
     "The earlier conversation, at length. "
-        .repeat(LONG_TEXT_BYTES / 37 + 1)
+        .repeat(bytes / 37 + 1)
         .chars()
-        .take(LONG_TEXT_BYTES)
+        .take(bytes)
         .collect()
 }
 
@@ -840,31 +863,38 @@ impl Loops {
 /// Answers the port `session` is blocked on, or resumes it, and names the branch it observed.
 fn answer(session: &mut Session, command: &str, input: &Value) -> Result<Answer> {
     let retries_before = session.retries;
-    let long = input["text"] == "long";
-    let step = reply(session, command, input, long)?;
+    // The text sizes the specification says pass the trigger. `CallTool` names its branch from
+    // this, as the specification's guard does; whether the loop agrees is what the next answer
+    // observes (a summary turn, or none).
+    let long = matches!(input["text"].as_str(), Some("long" | "at-trigger"));
+    let step = reply(session, command, input)?;
     named(session, command, &step, long, retries_before)
 }
 
 /// Sends `command`'s answer to the port `session` is blocked on, or resumes the suspended run, and
 /// returns the loop's next step.
-fn reply(session: &mut Session, command: &str, input: &Value, long: bool) -> Result<Step> {
+fn reply(session: &mut Session, command: &str, input: &Value) -> Result<Step> {
     Ok(match command {
         "harness.loop.AnswerTurn" => session.answer(Reply::Model(Ok(turn(
             string(input, "text")?.to_owned(),
             Vec::new(),
         ))))?,
         "harness.loop.CallTool" => {
-            let call = ToolCall {
-                call_id: CallId::new(string(input, "call_id")?)?,
+            let call_id = string(input, "call_id")?;
+            let mut calls = vec![ToolCall {
+                call_id: CallId::new(call_id)?,
                 name: ToolName::new(string(input, "tool")?)?,
                 arguments: json!({}),
-            };
-            let text = if long {
-                long_text()
-            } else {
-                "Calling the tool.".to_owned()
-            };
-            session.answer(Reply::Model(Ok(turn(text, vec![call]))))?
+            }];
+            if let Some(then) = input.get("then").and_then(Value::as_str) {
+                calls.push(ToolCall {
+                    call_id: CallId::new(format!("{call_id}-then"))?,
+                    name: ToolName::new(then)?,
+                    arguments: json!({}),
+                });
+            }
+            let (text, reported) = sized(string(input, "text")?)?;
+            session.answer(Reply::Model(Ok(reported_turn(text, calls, reported))))?
         }
         "harness.loop.FailTurn" => {
             session.answer(Reply::Model(Err(if boolean(input, "retriable")? {
@@ -918,10 +948,14 @@ fn named(
     retries_before: u64,
 ) -> Result<Answer> {
     let at_turn = json!({"turn": session.turn});
-    let summary_next = |then: &str, otherwise: &str, step: &Step| match step {
-        Step::Blocked(Port::Summary) => Some(then.to_owned()),
-        Step::Blocked(Port::Model) => Some(otherwise.to_owned()),
-        _ => None,
+    // Where the loop went after a call was answered: the turn's next call (asked or run), a
+    // summary turn, or the next conversation turn.
+    let after = |base: &str, step: &Step| match step {
+        Step::Blocked(Port::Approval) => Some(format!("{base}-then-ask")),
+        Step::Blocked(Port::Tool) => Some(format!("{base}-then-call")),
+        Step::Blocked(Port::Summary) => Some(format!("{base}-then-summarise")),
+        Step::Blocked(Port::Model) => Some(base.to_owned()),
+        Step::Ended(_) => None,
     };
     let outcome = match (command, step) {
         ("harness.loop.AnswerTurn", Step::Ended(ended))
@@ -968,13 +1002,9 @@ fn named(
         }
         ("harness.loop.Approve", Step::Blocked(Port::Tool)) => Some("approved".to_owned()),
         ("harness.loop.ResumeApproved", Step::Blocked(Port::Tool)) => Some("resumed".to_owned()),
-        ("harness.loop.Deny", step) => summary_next("denied-then-summarise", "denied", step),
-        ("harness.loop.ResumeDenied", step) => {
-            summary_next("resumed-denied-then-summarise", "resumed-denied", step)
-        }
-        ("harness.loop.CompleteTool", step) => {
-            summary_next("returned-then-summarise", "returned", step)
-        }
+        ("harness.loop.Deny", step) => after("denied", step),
+        ("harness.loop.ResumeDenied", step) => after("resumed-denied", step),
+        ("harness.loop.CompleteTool", step) => after("returned", step),
         ("harness.loop.AnswerSummary", Step::Blocked(Port::Model)) if session.folded() > 0 => {
             Some("folded".to_owned())
         }

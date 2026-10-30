@@ -1,0 +1,70 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-compaction-trigger-at-eighty-percent
+summary: Compaction starts at 80% of the 4096-token window; 9 KiB of text reported at 3275 input tokens is not summarised, at 3276 it is.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-1, tool: read, text: under-trigger}
+    outcome: called
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-a, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger:
+        usage:
+          - {model: fixture, input_tokens: 3275, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+        cost_micro_usd: null
+        turns: 2
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-b}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:05Z
+    command: harness.loop.CallTool
+    input: {run_id: run-b, call_id: call-1, tool: read, text: at-trigger}
+    outcome: called-long
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:06Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-b}
+    outcome: returned-then-summarise
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:07Z
+    command: harness.loop.AnswerSummary
+    input: {run_id: run-b}
+    outcome: folded
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:08Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-b, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger:
+        usage:
+          - {model: fixture, input_tokens: 3276, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+        cost_micro_usd: null
+        turns: 3
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 2, retries: 0}
+  - view: harness.loop.Loops
+    contains: {run_id: run-b, state: Stopped, turns: 3, retries: 0}

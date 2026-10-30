@@ -158,12 +158,19 @@ types:
   - name: harness.loop.Tool
     kind: enum
     variants: [read, write]
-  # How much assistant text a turn answers with: short stays under the compaction trigger of the
-  # adapter's declared context window; long passes it (lib.rs:3122) with more than
-  # SUMMARY_MIN_FOLD_BYTES (lib.rs:1119) to fold, so the next turn is a summary turn.
+  # How much assistant text a turn answers with, and the input tokens its usage reports, against the
+  # adapter's declared 4096-token window. The trigger reads the larger of the provider's reported
+  # input count (971) and the byte estimate at ESTIMATED_BYTES_PER_TOKEN (1099, 1358, 3121), and
+  # fires at COMPACTION_TRIGGER_PERCENT (1105), 80% of the window: 3276 tokens (3122).
+  # short: a sentence, reported at 100 tokens; stays under the trigger.
+  # long: 16 KiB, reported at 100 tokens; the estimate alone passes the trigger.
+  # under-trigger: 9 KiB, reported at 3275 tokens, one under the trigger.
+  # at-trigger: 9 KiB, reported at 3276 tokens, exactly the trigger.
+  # 9 KiB and 16 KiB both exceed SUMMARY_MIN_FOLD_BYTES (1119), so past the trigger the next turn
+  # is a summary turn; 9 KiB alone is under the trigger by estimate.
   - name: harness.loop.TextSize
     kind: enum
-    variants: [short, long]
+    variants: [short, long, under-trigger, at-trigger]
 entities:
   - name: harness.loop.Loop
     identity:
@@ -172,7 +179,8 @@ entities:
     fields:
       - {name: turns, type: Integer, summary: 'RunState.turns: +1 at each conversation turn (2738) and summary turn (3231)'}
       - {name: retries, type: Integer, summary: 'attempt_turn''s retries of the current turn (2803, 2824)'}
-      - {name: unfolded, type: Boolean, summary: 'the conversation holds long assistant text no summary has folded yet'}
+      - {name: unfolded, type: Boolean, summary: 'the conversation passed the compaction trigger with assistant text no summary has folded yet'}
+      - {name: next, type: 'Optional<harness.loop.Tool>', summary: 'the call the turn asked after the current one, not yet run: run_calls walks a turn''s calls in order (3378-3467), and a deferral carries them as remaining_calls (3461)'}
     lifecycle:
       # AwaitingModel: drive asked the model for a conversation turn (attempt_turn, 2807).
       # AwaitingApproval: the approval gate asked the approver (4598).
@@ -204,6 +212,18 @@ entities:
         # resume_approval with Denied (4579-4584), then drive (2394).
         - {name: resume-denied, from: [Suspended], to: AwaitingModel}
         - {name: resume-denied-then-summarise, from: [Suspended], to: AwaitingSummary}
+        # The tool returned and the turn asked another call: run_calls completes the call (3466)
+        # and walks to the next (3467, 3378), which the gate asks about (4590, 4598) or runs (4547).
+        - {name: ask-next, from: [AwaitingTool], to: AwaitingApproval}
+        - {name: call-next, from: [AwaitingTool], to: AwaitingTool}
+        # Denied with another call after it in the turn: a failed result (4606-4614, 3466), then
+        # run_calls walks to the next call (3467, 3378).
+        - {name: deny-then-ask, from: [AwaitingApproval], to: AwaitingApproval}
+        - {name: deny-then-call, from: [AwaitingApproval], to: AwaitingTool}
+        # resume_approval with Denied runs the checkpoint's remaining_calls after the denied one
+        # (2388-2393, 4579-4584), through run_calls (3378).
+        - {name: resume-denied-then-ask, from: [Suspended], to: AwaitingApproval}
+        - {name: resume-denied-then-call, from: [Suspended], to: AwaitingTool}
         # The tool returned; drive turns again (2771-2774, 2712).
         - {name: return, from: [AwaitingTool], to: AwaitingModel}
         # The tool returned and compaction asks for a summary first (2719, 3122, 3141).
@@ -264,7 +284,7 @@ commands:
       - {name: diagnostic, type: 'Optional<String>'}
     outcomes: [{name: returned, returns: true}]
   - name: harness.loop.Call
-    # AgentLoop::call uses the same gate as model-issued tool calls (lib.rs:2073).
+    # AgentLoop::call (lib.rs:2259) uses the same gate as model-issued tool calls.
     input:
       - {name: name, type: String, example: read}
       - {name: approve, type: Boolean}
@@ -314,37 +334,38 @@ commands:
         payload:
           harness.loop.NotAwaiting: {state: {subject: state}}
   - name: harness.loop.CallTool
-    # The model answers a conversation turn with text and one call of a published tool.
+    # The model answers a conversation turn with text and one call of a published tool, or two.
     input:
       - {name: run_id, type: harness.loop.RunId}
       - {name: call_id, type: String}
       - {name: tool, type: harness.loop.Tool}
       - {name: text, type: harness.loop.TextSize}
+      - {name: then, type: 'Optional<harness.loop.Tool>', summary: 'a second call the same turn asks after the first, as call <call_id>-then'}
     response:
       - {name: turn, type: Integer}
     outcomes:
       - name: asked-long
-        when: {all: [tool == write, text == long]}
+        when: {all: [tool == write, {any: [text == long, text == at-trigger]}]}
         moves: harness.loop.Loop.ask
         instance: run_id
-        sets: {retries: 0, unfolded: true}
+        sets: {retries: 0, unfolded: true, next: input.then}
         returns: true
       - name: asked
         when: tool == write
         moves: harness.loop.Loop.ask
         instance: run_id
-        sets: {retries: 0}
+        sets: {retries: 0, next: input.then}
         returns: true
       - name: called-long
-        when: text == long
+        when: {any: [text == long, text == at-trigger]}
         moves: harness.loop.Loop.call
         instance: run_id
-        sets: {retries: 0, unfolded: true}
+        sets: {retries: 0, unfolded: true, next: input.then}
         returns: true
       - name: called
         moves: harness.loop.Loop.call
         instance: run_id
-        sets: {retries: 0}
+        sets: {retries: 0, next: input.then}
         returns: true
       - name: unknown
         unknown_instance: true
@@ -385,6 +406,18 @@ commands:
     response:
       - {name: turn, type: Integer}
     outcomes:
+      - name: denied-then-ask
+        when_subject: {predicate: next == write}
+        moves: harness.loop.Loop.deny-then-ask
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
+      - name: denied-then-call
+        when_subject: {predicate: next == read}
+        moves: harness.loop.Loop.deny-then-call
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
       - name: denied-then-summarise
         when_subject: {predicate: unfolded == true}
         moves: harness.loop.Loop.deny-then-summarise
@@ -459,6 +492,18 @@ commands:
     response:
       - {name: turn, type: Integer}
     outcomes:
+      - name: resumed-denied-then-ask
+        when_subject: {predicate: next == write}
+        moves: harness.loop.Loop.resume-denied-then-ask
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
+      - name: resumed-denied-then-call
+        when_subject: {predicate: next == read}
+        moves: harness.loop.Loop.resume-denied-then-call
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
       - name: resumed-denied-then-summarise
         when_subject: {predicate: unfolded == true}
         moves: harness.loop.Loop.resume-denied-then-summarise
@@ -487,6 +532,18 @@ commands:
     response:
       - {name: turn, type: Integer}
     outcomes:
+      - name: returned-then-ask
+        when_subject: {predicate: next == write}
+        moves: harness.loop.Loop.ask-next
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
+      - name: returned-then-call
+        when_subject: {predicate: next == read}
+        moves: harness.loop.Loop.call-next
+        instance: run_id
+        sets: {next: {cleared: true}}
+        returns: true
       - name: returned-then-summarise
         when_subject: {predicate: unfolded == true}
         moves: harness.loop.Loop.return-then-summarise

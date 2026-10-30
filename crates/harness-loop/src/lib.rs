@@ -347,7 +347,8 @@ impl ApprovalCheckpoint {
 /// **Replaced, never accumulated.** One ledger holds one run: the figures are this run's, not the
 /// session's, so a caller reusing a ledger across runs reads the last run and does its own folding
 /// — which is what `usage` being one entry per billed turn is for.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunLedger {
     /// One entry per turn the provider reported for, this run's delegates included.
     ///

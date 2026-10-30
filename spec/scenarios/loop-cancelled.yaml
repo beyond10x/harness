@@ -1,0 +1,20 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-cancelled
+summary: A model read the caller cancelled ends the run as a cancelled stop, not a failure.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CancelTurn
+    input: {run_id: run-a}
+    outcome: cancelled
+    response:
+      stop: {kind: cancelled, value: {reason: the caller cancelled}}
+      ledger: {usage: [], cost_micro_usd: null, turns: 1}
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 1, retries: 0}

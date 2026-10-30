@@ -1,5 +1,5 @@
 domain: harness.loop
-summary: Observable native loop results and admission decisions; no durable run entity is invented.
+summary: Native loop results, admission decisions, the run ledger, the approval checkpoint and the loop's control states as observed at its ports.
 # Sources: crates/harness-loop/src/lib.rs:123-218,338-486,2002-2143,2812-2885;
 # budget.rs:11-109; approval.rs:7-78; harness-wire/src/turn.rs and item.rs.
 # Run/Call are adapter names for existing AgentLoop methods, not additional product APIs.
@@ -8,6 +8,12 @@ summary: Observable native loop results and admission decisions; no durable run 
 # structurally here. A LoopStop is a return value, not a row transitioning between persistent
 # states. Stop is a union tagged by kind: one variant per LoopStop variant, each carrying exactly
 # that variant's fields with their serde spelling, so the type refuses a field another variant owns.
+#
+# Loop (story:harness-loop-modeled-in-ess) is the control state of one AgentLoop run, not a stored
+# row: which upstream port the running loop is blocked on (model, approver, tool, or the model for a
+# summary turn), suspended at an approval checkpoint, or ended. Its commands are the answers those
+# ports give; the conformance adapter plays model, approver and tool and observes where the real
+# loop blocks next. Line numbers below are crates/harness-loop/src/lib.rs unless a file is named.
 types:
   - name: harness.loop.Budget
     kind: struct
@@ -84,6 +90,150 @@ types:
       - {name: cause, type: String}
       - {name: message, type: String}
       - {name: after_compaction, type: Boolean}
+  # RunLedger, lib.rs:351-364: what one run spent, written on every exit path of run_in
+  # (lib.rs:2341, from RunState::ledger at 1027-1033). Serialized by the serde derive at 351.
+  - name: harness.loop.RunLedger
+    kind: struct
+    fields:
+      - {name: usage, type: 'List<harness.loop.Usage>', summary: 'lib.rs:356 one entry per turn the provider reported for; empty means unknown'}
+      - {name: cost_micro_usd, type: 'Optional<Integer>', summary: 'lib.rs:361 absent when nothing priced the model'}
+      - {name: turns, type: Integer, summary: 'lib.rs:363 the turns this run started, summary turns included'}
+  # Usage, crates/harness-wire/src/turn.rs:302-322.
+  - name: harness.loop.Usage
+    kind: struct
+    fields:
+      - {name: model, type: String, summary: 'harness-wire turn.rs:303'}
+      - {name: input_tokens, type: Integer, summary: 'harness-wire turn.rs:304'}
+      - {name: output_tokens, type: Integer, summary: 'harness-wire turn.rs:305'}
+      - {name: cached_input_tokens, type: Integer, summary: 'harness-wire turn.rs:306'}
+      - {name: cache_creation_input_tokens, type: 'Optional<Integer>', summary: 'harness-wire turn.rs:321 absent when unreported'}
+  # ToolCall, crates/harness-wire/src/item.rs:9-13.
+  - name: harness.loop.ToolCall
+    kind: struct
+    fields:
+      - {name: call_id, type: String, summary: 'harness-wire item.rs:10'}
+      - {name: name, type: String, summary: 'harness-wire item.rs:11'}
+      - {name: arguments, type: Json, summary: 'harness-wire item.rs:12'}
+  # The checkpoint's format tag: the one value take_checkpoint writes (lib.rs:2455) and
+  # admit_resumption accepts (lib.rs:2408). A second version is a second variant.
+  - name: harness.loop.CheckpointFormat
+    kind: enum
+    variants: ['harness.approval-checkpoint/1']
+  # ApprovalCheckpoint, lib.rs:280-291, taken by take_checkpoint (lib.rs:2452-2464) when the
+  # approval port defers (lib.rs:4616-4654) and admitted by admit_resumption (lib.rs:2403-2433).
+  - name: harness.loop.ApprovalCheckpoint
+    kind: struct
+    fields:
+      - {name: format, type: harness.loop.CheckpointFormat, summary: 'lib.rs:283 written at 2455, checked at 2408'}
+      - {name: checkpoint_id, type: String, summary: 'lib.rs:284 minted by the approval port; empty is refused at 2409 and 4627'}
+      - {name: config, type: Json, summary: 'lib.rs:285 the LoopConfig the run was taken under, compared at 2415; structure UNMAPPED'}
+      - {name: call, type: harness.loop.ToolCall, summary: 'lib.rs:286 the exact call awaiting a decision'}
+      - {name: invoked, type: Json, summary: 'lib.rs:287 the resolved ToolSpec the decision covers; structure UNMAPPED'}
+      - {name: remaining_calls, type: 'List<harness.loop.ToolCall>', summary: 'lib.rs:288 the turn''s later calls, filled at 3461'}
+      - {name: state, type: harness.loop.RunState, summary: 'lib.rs:289 the run state at the suspension'}
+      - {name: remaining_duration_ms, type: 'Optional<Integer>', summary: 'lib.rs:290 what was left of max_duration_ms, absent without one'}
+  # RunState, lib.rs:855-891: everything one run accumulates, as a checkpoint carries it.
+  # failed_after_compaction (lib.rs:889-890) is serde(skip) and never in a checkpoint.
+  - name: harness.loop.RunState
+    kind: struct
+    fields:
+      - {name: items, type: 'List<Json>', summary: 'lib.rs:858 the conversation; Item structure UNMAPPED'}
+      - {name: usage, type: 'List<harness.loop.Usage>', summary: 'lib.rs:859'}
+      - {name: turns, type: Integer, summary: 'lib.rs:860'}
+      - {name: input_total, type: Integer, summary: 'lib.rs:861'}
+      - {name: output_total, type: Integer, summary: 'lib.rs:862'}
+      - {name: cost_total, type: 'Optional<Integer>', summary: 'lib.rs:864'}
+      - {name: usage_unobservable, type: Boolean, summary: 'lib.rs:866'}
+      - {name: cost_unobservable, type: Boolean, summary: 'lib.rs:868'}
+      - {name: reported_input, type: 'Optional<Integer>', summary: 'lib.rs:874'}
+      - {name: text, type: String, summary: 'lib.rs:875'}
+      - {name: structured, type: 'Optional<Json>', summary: 'lib.rs:877'}
+      - {name: nudged, type: Integer, summary: 'lib.rs:879'}
+      - {name: stop_continues, type: Integer, summary: 'lib.rs:881'}
+  - name: harness.loop.RunId
+    kind: newtype
+    of: String
+  # The adapter's two tools (crates/harness-conformance/src/boundary.rs): read is Risk::Low and
+  # runs unattended, write is Risk::Medium and is asked (lib.rs:4380 asks, 4590).
+  - name: harness.loop.Tool
+    kind: enum
+    variants: [read, write]
+  # How much assistant text a turn answers with: short stays under the compaction trigger of the
+  # adapter's declared context window; long passes it (lib.rs:3122) with more than
+  # SUMMARY_MIN_FOLD_BYTES (lib.rs:1119) to fold, so the next turn is a summary turn.
+  - name: harness.loop.TextSize
+    kind: enum
+    variants: [short, long]
+entities:
+  - name: harness.loop.Loop
+    identity:
+      name: run_id
+      type: harness.loop.RunId
+    fields:
+      - {name: turns, type: Integer, summary: 'RunState.turns: +1 at each conversation turn (2738) and summary turn (3231)'}
+      - {name: retries, type: Integer, summary: 'attempt_turn''s retries of the current turn (2803, 2824)'}
+      - {name: unfolded, type: Boolean, summary: 'the conversation holds long assistant text no summary has folded yet'}
+    lifecycle:
+      # AwaitingModel: drive asked the model for a conversation turn (attempt_turn, 2807).
+      # AwaitingApproval: the approval gate asked the approver (4598).
+      # AwaitingTool: invoke called the tool port (4547).
+      # AwaitingSummary: compact_run asked the model for a summary turn with no tools (3224, 3235).
+      # Suspended: the approver deferred; run_calls returned AwaitingApproval (3462) and run_in
+      # handed back the checkpoint (2344).
+      # Stopped: the run returned a stop (2759 completed, 2812-2813 and 3142 cancelled).
+      # Failed: the run returned an error (2818-2819, 2747), recorded as LoopStop::Failed (845).
+      initial: AwaitingModel
+      states: [AwaitingModel, AwaitingApproval, AwaitingTool, AwaitingSummary, Suspended, Stopped, Failed]
+      terminal: [Stopped, Failed]
+      transitions:
+        # The model asked a call the approver need not see: run_calls (2761) to invoke (4403),
+        # approval_gate returns None (4590), the tool port is called (4547).
+        - {name: call, from: [AwaitingModel], to: AwaitingTool}
+        # The model asked a call over the unattended ceiling: approval_gate asks (4590, 4598).
+        - {name: ask, from: [AwaitingModel], to: AwaitingApproval}
+        # Approved (4599-4604): the gate returns None and the tool port is called (4547).
+        - {name: approve, from: [AwaitingApproval], to: AwaitingTool}
+        # Denied (4606-4614): a failed result, then drive turns again (2771-2774, 2712).
+        - {name: deny, from: [AwaitingApproval], to: AwaitingModel}
+        # Denied, and the next turn's compaction asks for a summary first (2719, 3141).
+        - {name: deny-then-summarise, from: [AwaitingApproval], to: AwaitingSummary}
+        # Deferred (4616-4654): run_calls returns AwaitingApproval (3462), take_checkpoint (2452).
+        - {name: defer, from: [AwaitingApproval], to: Suspended}
+        # resume_approval with Approved (2367-2392): the gate admits the resumed call (4578).
+        - {name: resume, from: [Suspended], to: AwaitingTool}
+        # resume_approval with Denied (4579-4584), then drive (2394).
+        - {name: resume-denied, from: [Suspended], to: AwaitingModel}
+        - {name: resume-denied-then-summarise, from: [Suspended], to: AwaitingSummary}
+        # The tool returned; drive turns again (2771-2774, 2712).
+        - {name: return, from: [AwaitingTool], to: AwaitingModel}
+        # The tool returned and compaction asks for a summary first (2719, 3122, 3141).
+        - {name: return-then-summarise, from: [AwaitingTool], to: AwaitingSummary}
+        # A retriable wire error under MAX_TURN_RETRIES (786): the same request again (2818-2832).
+        - {name: retry, from: [AwaitingModel], to: AwaitingModel}
+        # The summary replaced the fold (3257-3287), then the conversation turn (2738).
+        - {name: fold, from: [AwaitingSummary], to: AwaitingModel}
+        # The summary turn failed (3240-3248): the run goes on with the conversation unfolded.
+        - {name: keep, from: [AwaitingSummary], to: AwaitingModel}
+        # A turn with no calls ends the run (2758-2759).
+        - {name: complete, from: [AwaitingModel], to: Stopped}
+        # A cancelled read is a stop, not a failure (2812-2813, 3237-3238 and 3142).
+        - {name: cancel, from: [AwaitingModel, AwaitingSummary], to: Stopped}
+        # A non-retriable error, or the fourth retriable one, ends the run in error (2818-2819).
+        - {name: fail, from: [AwaitingModel], to: Failed}
+events:
+  # The adapter's record that a run began; not the --json LoopEvent record (out of scope).
+  - name: harness.loop.LoopStarted
+    fields:
+      - {name: run_id, type: harness.loop.RunId}
+errors:
+  - name: harness.loop.NotAwaiting
+    summary: The loop is not blocked on the port this answer is for.
+    fields:
+      - {name: state, type: harness.loop.Loop.State}
+  - name: harness.loop.UnknownRun
+    summary: No loop runs under this identity.
+    fields:
+      - {name: run_id, type: harness.loop.RunId}
 commands:
   - name: harness.loop.ValidateBudget
     # Calls Budget::validate; no state mutation or emitted event is claimed.
@@ -123,3 +273,351 @@ commands:
       - {name: tool_calls, type: Integer}
       - {name: refusal, type: 'Optional<Json>'}
     outcomes: [{name: returned, returns: true}]
+  # The Loop commands answer the port the running loop is blocked on. Each refuses an identity no
+  # loop runs under (UnknownRun) and an answer for a port the loop is not blocked on (NotAwaiting).
+  - name: harness.loop.StartLoop
+    # AgentLoop::run_in (lib.rs:2329) over an empty conversation, until the first model request.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: requested
+        creates: harness.loop.Loop
+        instance: run_id
+        sets: {turns: 1, retries: 0, unfolded: false}
+        emits: [harness.loop.LoopStarted]
+        payload:
+          harness.loop.LoopStarted: {run_id: input.run_id}
+        returns: true
+  - name: harness.loop.AnswerTurn
+    # The model answers a conversation turn with text and no tool call.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: text, type: String}
+    response:
+      - {name: stop, type: harness.loop.Stop}
+      - {name: ledger, type: 'Optional<harness.loop.RunLedger>', summary: 'absent for a resumed run: resume_approval (lib.rs:2367) writes no ledger'}
+    outcomes:
+      - name: completed
+        moves: harness.loop.Loop.complete
+        instance: run_id
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.CallTool
+    # The model answers a conversation turn with text and one call of a published tool.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: call_id, type: String}
+      - {name: tool, type: harness.loop.Tool}
+      - {name: text, type: harness.loop.TextSize}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: asked-long
+        when: {all: [tool == write, text == long]}
+        moves: harness.loop.Loop.ask
+        instance: run_id
+        sets: {retries: 0, unfolded: true}
+        returns: true
+      - name: asked
+        when: tool == write
+        moves: harness.loop.Loop.ask
+        instance: run_id
+        sets: {retries: 0}
+        returns: true
+      - name: called-long
+        when: text == long
+        moves: harness.loop.Loop.call
+        instance: run_id
+        sets: {retries: 0, unfolded: true}
+        returns: true
+      - name: called
+        moves: harness.loop.Loop.call
+        instance: run_id
+        sets: {retries: 0}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.Approve
+    # The approval port answers Approved (approval.rs:8).
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: approved
+        moves: harness.loop.Loop.approve
+        instance: run_id
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.Deny
+    # The approval port answers Denied (approval.rs:9-11).
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: reason, type: String}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: denied-then-summarise
+        when_subject: {predicate: unfolded == true}
+        moves: harness.loop.Loop.deny-then-summarise
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: denied
+        moves: harness.loop.Loop.deny
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.Defer
+    # The approval port answers Deferred (approval.rs:13-15); run_in returns the checkpoint.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: checkpoint_id, type: String}
+    response:
+      - {name: stop, type: harness.loop.Stop}
+      - {name: ledger, type: 'Optional<harness.loop.RunLedger>', summary: 'run_in''s ledger (lib.rs:2341); absent for a resumed run'}
+      - {name: checkpoint, type: harness.loop.ApprovalCheckpoint}
+    outcomes:
+      - name: deferred
+        moves: harness.loop.Loop.defer
+        instance: run_id
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.ResumeApproved
+    # AgentLoop::resume_approval (lib.rs:2367) with Approved, on the serialized checkpoint.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: resumed
+        moves: harness.loop.Loop.resume
+        instance: run_id
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.ResumeDenied
+    # AgentLoop::resume_approval (lib.rs:2367) with Denied, on the serialized checkpoint.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: reason, type: String}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: resumed-denied-then-summarise
+        when_subject: {predicate: unfolded == true}
+        moves: harness.loop.Loop.resume-denied-then-summarise
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: resumed-denied
+        moves: harness.loop.Loop.resume-denied
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.CompleteTool
+    # The tool port returns a successful result.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: returned-then-summarise
+        when_subject: {predicate: unfolded == true}
+        moves: harness.loop.Loop.return-then-summarise
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: returned
+        moves: harness.loop.Loop.return
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.FailTurn
+    # The model port fails a conversation turn: WireError::transport is retriable,
+    # WireError::protocol is not (harness-wire lib.rs:78-85).
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: retriable, type: Boolean}
+    response:
+      - {name: turn, type: Integer}
+      - {name: stop, type: 'Optional<harness.loop.Stop>', summary: 'the failed stop the run finished with (lib.rs:845); absent while it retries'}
+      - {name: ledger, type: 'Optional<harness.loop.RunLedger>', summary: 'run_in''s ledger on the error path (lib.rs:2341); absent while it retries and for a resumed run'}
+    outcomes:
+      - name: exhausted
+        when_subject: {predicate: retries >= 3}
+        moves: harness.loop.Loop.fail
+        instance: run_id
+        returns: true
+      - name: failed
+        when: retriable == false
+        moves: harness.loop.Loop.fail
+        instance: run_id
+        returns: true
+      - name: retried
+        moves: harness.loop.Loop.retry
+        instance: run_id
+        sets: {retries: {increment: 1}}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.AnswerSummary
+    # The model answers the summary turn with text.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: folded
+        moves: harness.loop.Loop.fold
+        instance: run_id
+        sets: {turns: {increment: 1}, unfolded: false}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.FailSummary
+    # The model port fails the summary turn.
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: turn, type: Integer}
+    outcomes:
+      - name: kept
+        moves: harness.loop.Loop.keep
+        instance: run_id
+        sets: {turns: {increment: 1}}
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+  - name: harness.loop.CancelTurn
+    # The model port reports the read cancelled (WireError::cancelled, harness-wire lib.rs:98).
+    input:
+      - {name: run_id, type: harness.loop.RunId}
+    response:
+      - {name: stop, type: harness.loop.Stop}
+      - {name: ledger, type: 'Optional<harness.loop.RunLedger>', summary: 'absent for a resumed run'}
+    outcomes:
+      - name: cancelled
+        moves: harness.loop.Loop.cancel
+        instance: run_id
+        returns: true
+      - name: unknown
+        unknown_instance: true
+        error: harness.loop.UnknownRun
+        payload:
+          harness.loop.UnknownRun: {run_id: input.run_id}
+      - name: not-awaiting
+        wrong_state: true
+        error: harness.loop.NotAwaiting
+        payload:
+          harness.loop.NotAwaiting: {state: {subject: state}}
+views:
+  - name: harness.loop.Loops
+    # Read from the adapter's observations of the running loop: the port it is blocked on, the
+    # last TurnStarted and the TurnRetried events since it.
+    source: harness.loop.Loop
+    consistency: read_your_writes
+    fields:
+      - {name: run_id, type: harness.loop.RunId}
+      - {name: state, type: harness.loop.Loop.State}
+      - {name: turns, type: Integer}
+      - {name: retries, type: Integer}

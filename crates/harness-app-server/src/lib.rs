@@ -490,6 +490,7 @@ impl Server<'_> {
             return Err(error.into());
         }
 
+        // `drive_turn` clears the slot itself, before it settles, on every path out of it.
         let outcome = self.drive_turn(
             &thread_id,
             &turn_id,
@@ -498,7 +499,6 @@ impl Server<'_> {
             &control,
             new_model,
         );
-        self.clear_active();
 
         let mut writer = self.wire.writer.borrow_mut();
         match outcome {
@@ -598,6 +598,17 @@ impl Server<'_> {
         // a turn cancelled before its first event never reaches that drain, one cancelled before
         // it began never starts a stream to drain between, and one that failed outright reaches
         // neither.
+        //
+        // The turn is let go of first. `Watch` counts under the same lock `clear_active` takes, so
+        // once the slot is empty no interrupt can be counted against this turn any more, and the
+        // count the settle waits for is final before it starts. Settling first left a gap between
+        // the settle's last look at the count and the read of `requested` below: an interrupt
+        // decoded in it made the turn `interrupted` and was answered after `turn/completed`
+        // (`an_interrupt_decoded_as_its_turn_ends_is_answered_in_one_of_two_orders` in
+        // `harness-cli`'s `bridge_mode.rs`: 11 and 28 of 20000 attempts in two sweeps before this
+        // order, 0 of 20000 after it). One decoded from here on is the main loop's, answered after
+        // the terminal frame of a turn it did not decide.
+        self.clear_active();
         if let Err(error) = self.wire.settle_interrupts(control) {
             sink.broken.get_or_insert(error);
         }

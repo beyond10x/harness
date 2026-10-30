@@ -208,10 +208,11 @@ startup** rather than leaving the model to discover it by being refused mid-run.
 Turning writing on does not turn off the approval gate. `write = true` with no `approve-up-to`
 still meets the default approver, which denies — see [Approvals](../concepts/tools-and-approvals.md).
 
-`write-scope` defaults to denying `.git/**` and allowing the rest. That default is deliberate and
-not a convenience: running against a real checkout is what these mechanisms make ordinary, and a
-model rewriting history there is the failure they make possible for the first time. It must not
-depend on a key somebody remembered to write.
+`write-scope` defaults to denying `.git/**` and `.b10x/**` and allowing the rest. That default is
+deliberate and not a convenience: running against a real checkout is what these mechanisms make
+ordinary, and a model rewriting history there is the failure they make possible for the first
+time. It must not depend on a key somebody remembered to write. `.b10x/**` is denied because a
+trusted repository's `.b10x/harness.toml` is applied by the next run.
 
 ## What wins
 
@@ -249,6 +250,7 @@ profile write <- /home/you/.config/b10x/harness.toml (37550c38dd29)
 --oauth-token-file /home/you/.claude/.credentials.json
 --substrate-embedded
 --write-scope .git/**=denied
+--write-scope .b10x/**=denied
 --write-scope **=allowed
 --approve-up-to high
 ```
@@ -285,6 +287,9 @@ prints one line on standard error saying so. Trust is recorded by canonical path
 `harness-trust.toml`, beside `harness.toml`, which is never edited; a record another user owns or
 may write refuses the run. The file is one `[default]` table that may set only `provider`, `model`
 and `max-turns`; any other key or table refuses the run by name, because a profile is executable
-policy and a repository you cloned must not supply one. Where the repository's `provider` chose the
-provider, a typed credential flag refuses the run before any request.
+policy and a repository you cloned must not supply one. A `provider` holding a control, bidi or
+other unprintable character and a `max-turns` below one refuse the run too, naming the key and not
+the value. A repository's `provider` reads that provider's default credential exactly as a typed
+`--provider` would, and nothing more; where the repository's `provider` chose the provider, a typed
+credential flag refuses the run before any request.
 See [Configure a provider and profile](../guides/profiles.md#let-a-repository-choose-its-model).

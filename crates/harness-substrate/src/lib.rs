@@ -339,5 +339,68 @@ pub fn inert(text: &str) -> String {
     shown
 }
 
+/// A `serde_json` error as a reason, holding no text the answer supplied.
+///
+/// A syntax, end-of-input or I/O error displays as one of `serde_json`'s fixed messages and its
+/// position, and is kept. A data error displays whatever the `Deserialize` impl said, and serde
+/// writes an unexpected string as `string {:?}`: a `Debug` quote of the answer's text, which the
+/// error's display would escape a second time (`inert`). So a data error is reduced to its
+/// position, and a reader that wants to say which value was wrong checks the shape itself and
+/// quotes the raw value, as [`read_facts`] does.
+pub(crate) fn unread(error: &serde_json::Error) -> String {
+    match error.classify() {
+        serde_json::error::Category::Data if error.line() == 0 => {
+            "a value is not the type this build reads".to_owned()
+        }
+        serde_json::error::Category::Data => format!(
+            "a value is not the type this build reads (line {}, column {})",
+            error.line(),
+            error.column()
+        ),
+        _ => error.to_string(),
+    }
+}
+
+/// A machine document as [`Facts`], or the member that is not the shape this build reads, quoting
+/// the value the document holds there.
+///
+/// The checks are the ones `Facts`'s `Deserialize` makes, made here first so that the reason names
+/// the raw value instead of carrying serde's `{:?}` quote of it (see [`unread`]).
+pub(crate) fn read_facts(document: &Value) -> Result<Facts, String> {
+    let Some(members) = document.as_object() else {
+        return Err(format!(
+            "the machine document is {}, not an object",
+            described(document)
+        ));
+    };
+    for name in ["driver", "driver_version"] {
+        if let Some(value) = members.get(name)
+            && !(value.is_string() || value.is_null())
+        {
+            return Err(format!(
+                "the machine document's `{name}` is {}, not a string",
+                described(value)
+            ));
+        }
+    }
+    if let Some(value) = members.get("facts")
+        && !value.is_object()
+    {
+        return Err(format!(
+            "the machine document's `facts` is {}, not a map of facts",
+            described(value)
+        ));
+    }
+    serde_json::from_value(document.clone()).map_err(|error| unread(&error))
+}
+
+/// A value a reason names: a string raw between quotes, anything else as its JSON text.
+fn described(value: &Value) -> String {
+    match value {
+        Value::String(text) => format!("the string \"{text}\""),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests;

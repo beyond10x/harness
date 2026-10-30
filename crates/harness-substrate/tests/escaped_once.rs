@@ -137,6 +137,45 @@ fn a_root_name_refused_before_sending_is_kept_raw_and_displayed_escaped_once() {
     }
 }
 
+/// The machine document itself answered as a string: serde would quote it with `{:?}` in its own
+/// message, so the reason is built here from the raw value.
+#[test]
+fn a_machine_document_that_is_a_string_is_kept_raw_and_displayed_escaped_once() {
+    let body = serde_json::json!({ "result": HOSTILE }).to_string();
+    let error = Client::with(Answering::with(200, body))
+        .machine()
+        .expect_err("a string is not a machine document");
+    let shown = error.to_string();
+    let SubstrateError::Unreadable { reason } = error else {
+        panic!("answered {error:?}")
+    };
+    assert!(
+        reason.contains(&format!("\"{HOSTILE}\"")),
+        "story:substrate-escape-is-injective: the reason holds the document as answered: \
+         {reason:?}"
+    );
+    assert!(
+        shown.contains(&format!("\"{SHOWN}\"")) && !shown.contains(r"\\u{1b}"),
+        "story:substrate-escape-is-injective: the display escapes it once: {shown}"
+    );
+}
+
+/// `driver` answered as something other than a string: named by member, with the raw value.
+#[test]
+fn a_machine_driver_that_is_not_a_string_is_named_without_serde_text() {
+    let body = serde_json::json!({ "result": { "driver": [HOSTILE] } }).to_string();
+    let error = Client::with(Answering::with(200, body))
+        .machine()
+        .expect_err("a list is not a driver name");
+    let SubstrateError::Unreadable { reason } = error else {
+        panic!("answered {error:?}")
+    };
+    assert!(
+        reason.contains("`driver`") && !reason.contains("invalid type"),
+        "story:substrate-escape-is-injective: the reason is this build's, not serde's: {reason:?}"
+    );
+}
+
 #[test]
 fn a_status_line_that_is_not_one_is_kept_raw_and_displayed_escaped_once() {
     let dir = tempfile::tempdir().expect("a directory");

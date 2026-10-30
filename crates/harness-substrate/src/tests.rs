@@ -1463,6 +1463,25 @@ fn an_embedded_driver_refusal_is_kept_raw_and_displayed_escaped_once() {
     );
 }
 
+/// `story:substrate-escape-is-injective`: a `serde_json` data error writes an unexpected string as
+/// `string {:?}`, so its message never reaches a reason; a syntax error's message is fixed text
+/// and its position, and does.
+#[test]
+fn a_serde_data_error_reaches_no_reason_and_a_syntax_error_does() {
+    let data = serde_json::from_value::<u8>(json!("a\u{1b}\\b")).expect_err("not a number");
+    let reason = super::unread(&data);
+    assert!(
+        !reason.contains("a\\u{1b}") && !reason.contains("invalid type"),
+        "story:substrate-escape-is-injective: serde's data message is not the reason: {reason:?}"
+    );
+    let syntax = serde_json::from_str::<Value>("{\"a\": tru}").expect_err("not JSON");
+    assert_eq!(
+        super::unread(&syntax),
+        syntax.to_string(),
+        "story:substrate-escape-is-injective: a syntax error keeps serde's fixed message"
+    );
+}
+
 #[test]
 fn an_exec_identity_is_the_shape_substrate_admits() {
     // `admit` requires `^ex_[A-Za-z0-9_]+$`. This was `exec-<pid>-<argv joined by dashes>` - wrong

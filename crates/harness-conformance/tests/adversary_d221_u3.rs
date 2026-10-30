@@ -318,7 +318,9 @@ type Perturb = fn(&mut Value) -> bool;
 struct Target {
     perturb: Perturb,
     current: Mutex<String>,
-    touched: Mutex<BTreeSet<String>>,
+    /// Each scenario the perturbation reached, with the commands whose stop it changed.
+    touched: Mutex<BTreeMap<String, BTreeSet<String>>>,
+    loops: boundary::Loops,
 }
 fn unavailable(error: impl std::fmt::Display) -> TargetError {
     TargetError::unavailable("native boundary", error.to_string())
@@ -329,9 +331,11 @@ impl ConformanceTarget for Target {
     }
     fn begin_scenario(&self, ctx: &ScenarioContext) -> std::result::Result<(), TargetError> {
         *self.current.lock().unwrap() = serde_json::to_string(&ctx.scenario).unwrap();
+        self.loops.begin(&ctx.correlation.to_string());
         Ok(())
     }
-    fn end_scenario(&self, _: &ScenarioContext) -> std::result::Result<(), TargetError> {
+    fn end_scenario(&self, ctx: &ScenarioContext) -> std::result::Result<(), TargetError> {
+        self.loops.end(&ctx.correlation.to_string());
         Ok(())
     }
     fn execute_command(
@@ -339,30 +343,38 @@ impl ConformanceTarget for Target {
         request: SemanticCommandRequest,
     ) -> std::result::Result<SemanticCommandResult, TargetError> {
         let input = integer_tokens(serde_json::to_value(&request.input).map_err(unavailable)?);
-        let mut response =
-            boundary::execute(&request.command.to_string(), &input).map_err(unavailable)?;
-        if let Some(stop) = response.get_mut("stop")
+        let command = request.command.to_string();
+        let mut answer = self
+            .loops
+            .execute(&request.correlation.to_string(), &command, &input)
+            .map_err(unavailable)?;
+        if let Some(stop) = answer
+            .response
+            .as_mut()
+            .and_then(|response| response.get_mut("stop"))
             && (self.perturb)(stop)
         {
             self.touched
                 .lock()
                 .unwrap()
-                .insert(self.current.lock().unwrap().clone());
+                .entry(self.current.lock().unwrap().clone())
+                .or_default()
+                .insert(command.clone());
         }
-        let mut result = SemanticCommandResult::took(ess_conformance::scenario::OutcomeRef::new(
-            request.command,
-            "returned".parse().map_err(unavailable)?,
-        ));
-        let fields: BTreeMap<String, Node> =
-            serde_json::from_value(response).map_err(unavailable)?;
-        result.response = Some(fields);
-        Ok(result)
+        answer.into_result(&command).map_err(unavailable)
     }
     fn query_view(
         &self,
-        _: SemanticViewRequest,
+        request: SemanticViewRequest,
     ) -> std::result::Result<SemanticViewResult, TargetError> {
-        Err(TargetError::unsupported("view", "none"))
+        let rows = self
+            .loops
+            .rows(&request.correlation.to_string())
+            .into_iter()
+            .map(serde_json::from_value::<BTreeMap<String, Node>>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        Ok(SemanticViewResult::of(rows))
     }
     fn observe_events(
         &self,
@@ -396,7 +408,12 @@ impl Clock for WallClock {
 
 /// Runs the checked-in suite (drift-checked against native synthesis by `cargo xtask
 /// specification`) against the production boundary with `perturb` applied to every stop; returns
-/// (scenarios the perturbation touched, those of them that still passed, total passed).
+/// (scenarios that observed a perturbed stop, those of them that still passed, total passed).
+///
+/// A scenario observes a stop when it checks the direct response of a command whose stop was
+/// perturbed. Since story:harness-loop-modeled-in-ess a scenario may also reach a state through a
+/// command that returns a stop and never read that response: the stop it arranges with is the
+/// subject of that command's own scenarios, which must fail, and not of this one.
 fn run(perturb: Perturb) -> (BTreeSet<String>, Vec<String>, usize) {
     let admitted = AdmittedSuite::from_json(
         &fs::read_to_string(root().join("conformance/suite.json")).unwrap(),
@@ -405,7 +422,8 @@ fn run(perturb: Perturb) -> (BTreeSet<String>, Vec<String>, usize) {
     let target = Target {
         perturb,
         current: Mutex::new(String::new()),
-        touched: Mutex::new(BTreeSet::new()),
+        touched: Mutex::new(BTreeMap::new()),
+        loops: boundary::Loops::default(),
     };
     let run = Runner::new(
         RunnerConfig::default(),
@@ -413,14 +431,24 @@ fn run(perturb: Perturb) -> (BTreeSet<String>, Vec<String>, usize) {
         Ids::for_suite(admitted.suite()),
     )
     .run_admitted(&admitted, &target);
-    let touched = target.touched.into_inner().unwrap();
+    let perturbed = target.touched.into_inner().unwrap();
+    let mut touched = BTreeSet::new();
     let mut survived = Vec::new();
     let mut passed = 0;
     for scenario in &run.scenarios {
         let id = serde_json::to_string(&scenario.scenario).unwrap();
+        let observed = perturbed.get(&id).is_some_and(|commands| {
+            commands.iter().any(|command| {
+                let read = format!("direct response {command}");
+                scenario.checks.iter().any(|check| check.about == read)
+            })
+        });
+        if observed {
+            touched.insert(id.clone());
+        }
         if scenario.status == Status::Passed {
             passed += 1;
-            if touched.contains(&id) {
+            if observed {
                 survived.push(id);
             }
         }
@@ -441,7 +469,11 @@ fn with_value(stop: &mut Value, f: impl FnOnce(&mut Map<String, Value>)) -> bool
 #[test]
 fn the_unperturbed_production_boundary_passes_every_scenario() {
     let (_, _, passed) = run(|_| false);
-    assert_eq!(passed, 29);
+    assert_eq!(
+        passed, 165,
+        "story:harness-loop-modeled-in-ess: 29 scenarios before, plus 124 generated and 12 \
+         authored ones for the Loop entity"
+    );
 }
 
 #[test]
@@ -452,7 +484,11 @@ fn a_stop_that_gained_a_field_fails_its_scenarios() {
         })
     });
     assert!(touched.len() >= 8, "touched {touched:?}");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -469,7 +505,11 @@ fn a_stop_with_a_renamed_field_fails_its_scenarios() {
         })
     });
     assert!(touched.len() >= 8, "touched {touched:?}");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -481,7 +521,11 @@ fn a_stop_that_lost_a_field_fails_its_scenarios() {
         })
     });
     assert!(touched.len() >= 8, "touched {touched:?}");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -494,7 +538,11 @@ fn a_stop_in_the_serde_form_fails_its_scenarios() {
         true
     });
     assert!(touched.len() >= 8, "touched {touched:?}");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -507,7 +555,11 @@ fn a_stop_with_an_unknown_kind_fails_its_scenarios() {
         _ => false,
     });
     assert!(touched.len() >= 9, "touched {touched:?}");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -521,7 +573,11 @@ fn a_completed_stop_with_an_empty_value_fails_its_scenarios() {
         }
     });
     assert!(!touched.is_empty(), "touched nothing");
-    assert_eq!(survived, Vec::<String>::new());
+    assert_eq!(
+        survived,
+        Vec::<String>::new(),
+        "story:harness-loop-modeled-in-ess: a scenario that read the perturbed stop passed"
+    );
 }
 
 #[test]
@@ -545,7 +601,11 @@ fn a_stop_with_a_changed_value_fails_its_scenarios() {
         .iter()
         .filter(|id| id.contains("/authored/"))
         .collect();
-    assert_eq!(authored, Vec::<&String>::new());
+    assert_eq!(
+        authored,
+        Vec::<&String>::new(),
+        "story:harness-loop-modeled-in-ess: an authored scenario that read the perturbed stop passed"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

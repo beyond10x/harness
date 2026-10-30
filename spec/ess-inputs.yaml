@@ -31,3 +31,15 @@ scenarios:
   - scenarios/run-cancelled-before-provider.yaml
   - scenarios/run-input-budget-unobservable.yaml
   - scenarios/run-output-budget-unobservable.yaml
+  - scenarios/loop-completed-after-a-tool.yaml
+  - scenarios/loop-approval-approved.yaml
+  - scenarios/loop-approval-denied.yaml
+  - scenarios/loop-approval-deferred.yaml
+  - scenarios/loop-approval-resumed.yaml
+  - scenarios/loop-approval-resume-denied-summarises.yaml
+  - scenarios/loop-compaction-summary-turn.yaml
+  - scenarios/loop-compaction-summary-failed.yaml
+  - scenarios/loop-retried-then-answered.yaml
+  - scenarios/loop-retries-exhausted.yaml
+  - scenarios/loop-failed-not-retriable.yaml
+  - scenarios/loop-cancelled.yaml

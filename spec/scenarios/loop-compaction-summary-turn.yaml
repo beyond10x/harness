@@ -1,0 +1,41 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-compaction-summary-turn
+summary: Long assistant text past the compaction trigger is folded by a summary turn, which is counted and billed like any other turn.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-1, tool: read, text: long}
+    outcome: called-long
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned-then-summarise
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.AnswerSummary
+    input: {run_id: run-a}
+    outcome: folded
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-a, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger:
+        usage:
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+        cost_micro_usd: null
+        turns: 3
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 3, retries: 0}

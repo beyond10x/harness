@@ -1,0 +1,23 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-failed-not-retriable
+summary: A wire failure that is not retriable ends the run failed at once, and the ledger still records the turn it started.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: false}
+    outcome: failed
+    response:
+      turn: 1
+      stop:
+        kind: failed
+        value: {cause: provider-protocol, message: 'model wire refused: Protocol: the provider refused the request', after_compaction: false}
+      ledger: {usage: [], cost_micro_usd: null, turns: 1}
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Failed, turns: 1, retries: 0}

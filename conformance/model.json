@@ -6,36 +6,164 @@
     "harness.loop": {
       "name": "harness.loop",
       "naming": {
-        "summary": "Observable native loop results and admission decisions; no durable run entity is invented."
+        "summary": "Native loop results, admission decisions, the run ledger, the approval checkpoint and the loop's control states as observed at its ports."
       },
       "types": [
+        "harness.loop.ApprovalCheckpoint",
         "harness.loop.AwaitingApprovalStop",
         "harness.loop.Budget",
         "harness.loop.BudgetUnobservableStop",
         "harness.loop.CancelledStop",
+        "harness.loop.CheckpointFormat",
         "harness.loop.DeadlineStop",
         "harness.loop.FailedStop",
+        "harness.loop.Loop.State",
         "harness.loop.MaxCostStop",
         "harness.loop.MaxInputTokensStop",
         "harness.loop.MaxOutputTokensStop",
         "harness.loop.MaxTurnsStop",
         "harness.loop.ProviderIncompleteStop",
+        "harness.loop.RunId",
+        "harness.loop.RunLedger",
+        "harness.loop.RunState",
         "harness.loop.Stop",
-        "harness.loop.UnstructuredStop"
+        "harness.loop.TextSize",
+        "harness.loop.Tool",
+        "harness.loop.ToolCall",
+        "harness.loop.UnstructuredStop",
+        "harness.loop.Usage"
       ],
-      "entities": [],
+      "entities": [
+        "harness.loop.Loop"
+      ],
       "commands": [
+        "harness.loop.AnswerSummary",
+        "harness.loop.AnswerTurn",
+        "harness.loop.Approve",
         "harness.loop.Call",
+        "harness.loop.CallTool",
+        "harness.loop.CancelTurn",
+        "harness.loop.CompleteTool",
+        "harness.loop.Defer",
+        "harness.loop.Deny",
+        "harness.loop.FailSummary",
+        "harness.loop.FailTurn",
+        "harness.loop.ResumeApproved",
+        "harness.loop.ResumeDenied",
         "harness.loop.Run",
+        "harness.loop.StartLoop",
         "harness.loop.ValidateBudget"
       ],
-      "events": [],
-      "errors": [],
-      "views": [],
+      "events": [
+        "harness.loop.LoopStarted"
+      ],
+      "errors": [
+        "harness.loop.NotAwaiting",
+        "harness.loop.UnknownRun"
+      ],
+      "views": [
+        "harness.loop.Loops"
+      ],
       "actors": []
     }
   },
   "types": {
+    "harness.loop.ApprovalCheckpoint": {
+      "name": "harness.loop.ApprovalCheckpoint",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "format",
+            "type_ref": {
+              "kind": "declared",
+              "name": "harness.loop.CheckpointFormat"
+            },
+            "naming": {
+              "summary": "lib.rs:283 written at 2455, checked at 2408"
+            }
+          },
+          {
+            "name": "checkpoint_id",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {
+              "summary": "lib.rs:284 minted by the approval port; empty is refused at 2409 and 4627"
+            }
+          },
+          {
+            "name": "config",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "json"
+            },
+            "naming": {
+              "summary": "lib.rs:285 the LoopConfig the run was taken under, compared at 2415; structure UNMAPPED"
+            }
+          },
+          {
+            "name": "call",
+            "type_ref": {
+              "kind": "declared",
+              "name": "harness.loop.ToolCall"
+            },
+            "naming": {
+              "summary": "lib.rs:286 the exact call awaiting a decision"
+            }
+          },
+          {
+            "name": "invoked",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "json"
+            },
+            "naming": {
+              "summary": "lib.rs:287 the resolved ToolSpec the decision covers; structure UNMAPPED"
+            }
+          },
+          {
+            "name": "remaining_calls",
+            "type_ref": {
+              "kind": "list",
+              "of": {
+                "kind": "declared",
+                "name": "harness.loop.ToolCall"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:288 the turn's later calls, filled at 3461"
+            }
+          },
+          {
+            "name": "state",
+            "type_ref": {
+              "kind": "declared",
+              "name": "harness.loop.RunState"
+            },
+            "naming": {
+              "summary": "lib.rs:289 the run state at the suspension"
+            }
+          },
+          {
+            "name": "remaining_duration_ms",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:290 what was left of max_duration_ms, absent without one"
+            }
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
     "harness.loop.AwaitingApprovalStop": {
       "name": "harness.loop.AwaitingApprovalStop",
       "body": {
@@ -174,6 +302,16 @@
       },
       "naming": {}
     },
+    "harness.loop.CheckpointFormat": {
+      "name": "harness.loop.CheckpointFormat",
+      "body": {
+        "kind": "enum",
+        "variants": [
+          "harness.approval-checkpoint/1"
+        ]
+      },
+      "naming": {}
+    },
     "harness.loop.DeadlineStop": {
       "name": "harness.loop.DeadlineStop",
       "body": {
@@ -223,6 +361,22 @@
           }
         ],
         "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.Loop.State": {
+      "name": "harness.loop.Loop.State",
+      "body": {
+        "kind": "enum",
+        "variants": [
+          "AwaitingApproval",
+          "AwaitingModel",
+          "AwaitingSummary",
+          "AwaitingTool",
+          "Failed",
+          "Stopped",
+          "Suspended"
+        ]
       },
       "naming": {}
     },
@@ -340,6 +494,219 @@
       },
       "naming": {}
     },
+    "harness.loop.RunId": {
+      "name": "harness.loop.RunId",
+      "body": {
+        "kind": "newtype",
+        "of": {
+          "kind": "primitive",
+          "name": "string"
+        },
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.RunLedger": {
+      "name": "harness.loop.RunLedger",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "usage",
+            "type_ref": {
+              "kind": "list",
+              "of": {
+                "kind": "declared",
+                "name": "harness.loop.Usage"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:356 one entry per turn the provider reported for; empty means unknown"
+            }
+          },
+          {
+            "name": "cost_micro_usd",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:361 absent when nothing priced the model"
+            }
+          },
+          {
+            "name": "turns",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:363 the turns this run started, summary turns included"
+            }
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
+    "harness.loop.RunState": {
+      "name": "harness.loop.RunState",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "items",
+            "type_ref": {
+              "kind": "list",
+              "of": {
+                "kind": "primitive",
+                "name": "json"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:858 the conversation; Item structure UNMAPPED"
+            }
+          },
+          {
+            "name": "usage",
+            "type_ref": {
+              "kind": "list",
+              "of": {
+                "kind": "declared",
+                "name": "harness.loop.Usage"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:859"
+            }
+          },
+          {
+            "name": "turns",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:860"
+            }
+          },
+          {
+            "name": "input_total",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:861"
+            }
+          },
+          {
+            "name": "output_total",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:862"
+            }
+          },
+          {
+            "name": "cost_total",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:864"
+            }
+          },
+          {
+            "name": "usage_unobservable",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "boolean"
+            },
+            "naming": {
+              "summary": "lib.rs:866"
+            }
+          },
+          {
+            "name": "cost_unobservable",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "boolean"
+            },
+            "naming": {
+              "summary": "lib.rs:868"
+            }
+          },
+          {
+            "name": "reported_input",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:874"
+            }
+          },
+          {
+            "name": "text",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {
+              "summary": "lib.rs:875"
+            }
+          },
+          {
+            "name": "structured",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "json"
+              }
+            },
+            "naming": {
+              "summary": "lib.rs:877"
+            }
+          },
+          {
+            "name": "nudged",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:879"
+            }
+          },
+          {
+            "name": "stop_continues",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "lib.rs:881"
+            }
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
     "harness.loop.Stop": {
       "name": "harness.loop.Stop",
       "body": {
@@ -395,6 +762,68 @@
       },
       "naming": {}
     },
+    "harness.loop.TextSize": {
+      "name": "harness.loop.TextSize",
+      "body": {
+        "kind": "enum",
+        "variants": [
+          "short",
+          "long"
+        ]
+      },
+      "naming": {}
+    },
+    "harness.loop.Tool": {
+      "name": "harness.loop.Tool",
+      "body": {
+        "kind": "enum",
+        "variants": [
+          "read",
+          "write"
+        ]
+      },
+      "naming": {}
+    },
+    "harness.loop.ToolCall": {
+      "name": "harness.loop.ToolCall",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "call_id",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {
+              "summary": "harness-wire item.rs:10"
+            }
+          },
+          {
+            "name": "name",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {
+              "summary": "harness-wire item.rs:11"
+            }
+          },
+          {
+            "name": "arguments",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "json"
+            },
+            "naming": {
+              "summary": "harness-wire item.rs:12"
+            }
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
+    },
     "harness.loop.UnstructuredStop": {
       "name": "harness.loop.UnstructuredStop",
       "body": {
@@ -412,11 +841,635 @@
         "invariants": []
       },
       "naming": {}
+    },
+    "harness.loop.Usage": {
+      "name": "harness.loop.Usage",
+      "body": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "model",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "string"
+            },
+            "naming": {
+              "summary": "harness-wire turn.rs:303"
+            }
+          },
+          {
+            "name": "input_tokens",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "harness-wire turn.rs:304"
+            }
+          },
+          {
+            "name": "output_tokens",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "harness-wire turn.rs:305"
+            }
+          },
+          {
+            "name": "cached_input_tokens",
+            "type_ref": {
+              "kind": "primitive",
+              "name": "integer"
+            },
+            "naming": {
+              "summary": "harness-wire turn.rs:306"
+            }
+          },
+          {
+            "name": "cache_creation_input_tokens",
+            "type_ref": {
+              "kind": "optional",
+              "of": {
+                "kind": "primitive",
+                "name": "integer"
+              }
+            },
+            "naming": {
+              "summary": "harness-wire turn.rs:321 absent when unreported"
+            }
+          }
+        ],
+        "invariants": []
+      },
+      "naming": {}
     }
   },
   "conversions": [],
-  "entities": {},
+  "entities": {
+    "harness.loop.Loop": {
+      "name": "harness.loop.Loop",
+      "domain": "harness.loop",
+      "identity": {
+        "name": "run_id",
+        "type_ref": {
+          "kind": "declared",
+          "name": "harness.loop.RunId"
+        },
+        "naming": {}
+      },
+      "fields": [
+        {
+          "name": "turns",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {
+            "summary": "RunState.turns: +1 at each conversation turn (2738) and summary turn (3231)"
+          }
+        },
+        {
+          "name": "retries",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {
+            "summary": "attempt_turn's retries of the current turn (2803, 2824)"
+          }
+        },
+        {
+          "name": "unfolded",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {
+            "summary": "the conversation holds long assistant text no summary has folded yet"
+          }
+        }
+      ],
+      "state_type": "harness.loop.Loop.State",
+      "lifecycle": {
+        "states": [
+          "AwaitingApproval",
+          "AwaitingModel",
+          "AwaitingSummary",
+          "AwaitingTool",
+          "Failed",
+          "Stopped",
+          "Suspended"
+        ],
+        "initial": "AwaitingModel",
+        "terminal": [
+          "Failed",
+          "Stopped"
+        ],
+        "transitions": [
+          {
+            "name": "call",
+            "from": [
+              "AwaitingModel"
+            ],
+            "to": "AwaitingTool"
+          },
+          {
+            "name": "ask",
+            "from": [
+              "AwaitingModel"
+            ],
+            "to": "AwaitingApproval"
+          },
+          {
+            "name": "approve",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "AwaitingTool"
+          },
+          {
+            "name": "deny",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "deny-then-summarise",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "AwaitingSummary"
+          },
+          {
+            "name": "defer",
+            "from": [
+              "AwaitingApproval"
+            ],
+            "to": "Suspended"
+          },
+          {
+            "name": "resume",
+            "from": [
+              "Suspended"
+            ],
+            "to": "AwaitingTool"
+          },
+          {
+            "name": "resume-denied",
+            "from": [
+              "Suspended"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "resume-denied-then-summarise",
+            "from": [
+              "Suspended"
+            ],
+            "to": "AwaitingSummary"
+          },
+          {
+            "name": "return",
+            "from": [
+              "AwaitingTool"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "return-then-summarise",
+            "from": [
+              "AwaitingTool"
+            ],
+            "to": "AwaitingSummary"
+          },
+          {
+            "name": "retry",
+            "from": [
+              "AwaitingModel"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "fold",
+            "from": [
+              "AwaitingSummary"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "keep",
+            "from": [
+              "AwaitingSummary"
+            ],
+            "to": "AwaitingModel"
+          },
+          {
+            "name": "complete",
+            "from": [
+              "AwaitingModel"
+            ],
+            "to": "Stopped"
+          },
+          {
+            "name": "cancel",
+            "from": [
+              "AwaitingModel",
+              "AwaitingSummary"
+            ],
+            "to": "Stopped"
+          },
+          {
+            "name": "fail",
+            "from": [
+              "AwaitingModel"
+            ],
+            "to": "Failed"
+          }
+        ]
+      },
+      "invariants": [],
+      "naming": {}
+    }
+  },
   "commands": {
+    "harness.loop.AnswerSummary": {
+      "name": "harness.loop.AnswerSummary",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "folded",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "fold",
+              "from": [
+                "AwaitingSummary"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            },
+            {
+              "target": "unfolded",
+              "target_type": {
+                "kind": "primitive",
+                "name": "boolean"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.AnswerTurn": {
+      "name": "harness.loop.AnswerTurn",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "text",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "stop",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Stop"
+          },
+          "naming": {}
+        },
+        {
+          "name": "ledger",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.RunLedger"
+            }
+          },
+          "naming": {
+            "summary": "absent for a resumed run: resume_approval (lib.rs:2367) writes no ledger"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "completed",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "complete",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "Stopped"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.Approve": {
+      "name": "harness.loop.Approve",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "approved",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "approve",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
     "harness.loop.Call": {
       "name": "harness.loop.Call",
       "domain": "harness.loop",
@@ -479,6 +1532,1552 @@
           "test_strategy": "default_branch",
           "emits": [],
           "returns": true
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.CallTool": {
+      "name": "harness.loop.CallTool",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "call_id",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        },
+        {
+          "name": "tool",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Tool"
+          },
+          "naming": {}
+        },
+        {
+          "name": "text",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.TextSize"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "asked-long",
+          "condition": {
+            "kind": "when",
+            "predicate": {
+              "all": [
+                "tool == write",
+                "text == long"
+              ]
+            }
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "ask",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "AwaitingApproval"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "construct_input",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "0"
+              }
+            },
+            {
+              "target": "unfolded",
+              "target_type": {
+                "kind": "primitive",
+                "name": "boolean"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "true"
+              }
+            }
+          ]
+        },
+        {
+          "name": "asked",
+          "condition": {
+            "kind": "when",
+            "predicate": "tool == write"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "ask",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "AwaitingApproval"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "construct_input",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "0"
+              }
+            }
+          ]
+        },
+        {
+          "name": "called-long",
+          "condition": {
+            "kind": "when",
+            "predicate": "text == long"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "call",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "construct_input",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "0"
+              }
+            },
+            {
+              "target": "unfolded",
+              "target_type": {
+                "kind": "primitive",
+                "name": "boolean"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "true"
+              }
+            }
+          ]
+        },
+        {
+          "name": "called",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "call",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "0"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.CancelTurn": {
+      "name": "harness.loop.CancelTurn",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "stop",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Stop"
+          },
+          "naming": {}
+        },
+        {
+          "name": "ledger",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.RunLedger"
+            }
+          },
+          "naming": {
+            "summary": "absent for a resumed run"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "cancelled",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "cancel",
+              "from": [
+                "AwaitingModel",
+                "AwaitingSummary"
+              ],
+              "to": "Stopped"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.CompleteTool": {
+      "name": "harness.loop.CompleteTool",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "returned-then-summarise",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "unfolded == true"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "return-then-summarise",
+              "from": [
+                "AwaitingTool"
+              ],
+              "to": "AwaitingSummary"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "returned",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "return",
+              "from": [
+                "AwaitingTool"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.Defer": {
+      "name": "harness.loop.Defer",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "checkpoint_id",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "stop",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Stop"
+          },
+          "naming": {}
+        },
+        {
+          "name": "ledger",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.RunLedger"
+            }
+          },
+          "naming": {
+            "summary": "run_in's ledger (lib.rs:2341); absent for a resumed run"
+          }
+        },
+        {
+          "name": "checkpoint",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.ApprovalCheckpoint"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "deferred",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "defer",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "Suspended"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.Deny": {
+      "name": "harness.loop.Deny",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "reason",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "denied-then-summarise",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "unfolded == true"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "deny-then-summarise",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "AwaitingSummary"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "denied",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "deny",
+              "from": [
+                "AwaitingApproval"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.FailSummary": {
+      "name": "harness.loop.FailSummary",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "kept",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "keep",
+              "from": [
+                "AwaitingSummary"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.FailTurn": {
+      "name": "harness.loop.FailTurn",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "retriable",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "stop",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.Stop"
+            }
+          },
+          "naming": {
+            "summary": "the failed stop the run finished with (lib.rs:845); absent while it retries"
+          }
+        },
+        {
+          "name": "ledger",
+          "type_ref": {
+            "kind": "optional",
+            "of": {
+              "kind": "declared",
+              "name": "harness.loop.RunLedger"
+            }
+          },
+          "naming": {
+            "summary": "run_in's ledger on the error path (lib.rs:2341); absent while it retries and for a resumed run"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "exhausted",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "retries >= 3"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "fail",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "Failed"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "failed",
+          "condition": {
+            "kind": "when",
+            "predicate": "retriable == false"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "fail",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "Failed"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "construct_input",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "retried",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "retry",
+              "from": [
+                "AwaitingModel"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.ResumeApproved": {
+      "name": "harness.loop.ResumeApproved",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "resumed",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "resume",
+              "from": [
+                "Suspended"
+              ],
+              "to": "AwaitingTool"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
+    "harness.loop.ResumeDenied": {
+      "name": "harness.loop.ResumeDenied",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "reason",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "resumed-denied-then-summarise",
+          "condition": {
+            "kind": "subject_predicate",
+            "predicate": "unfolded == true"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "resume-denied-then-summarise",
+              "from": [
+                "Suspended"
+              ],
+              "to": "AwaitingSummary"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "observe_subject_fact",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "resumed-denied",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "moves",
+            "transition": {
+              "name": "resume-denied",
+              "from": [
+                "Suspended"
+              ],
+              "to": "AwaitingModel"
+            },
+            "instance": {
+              "from": "supplied",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "increment",
+                "by": "1"
+              }
+            }
+          ]
+        },
+        {
+          "name": "unknown",
+          "condition": {
+            "kind": "unknown_instance"
+          },
+          "test_strategy": "send_unknown_identity",
+          "emits": [],
+          "error": "harness.loop.UnknownRun",
+          "error_payload": [
+            {
+              "target": "run_id",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.RunId"
+              },
+              "value": {
+                "kind": "input_field",
+                "field": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "not-awaiting",
+          "condition": {
+            "kind": "wrong_state"
+          },
+          "complete_refusal": true,
+          "test_strategy": "arrange_state",
+          "emits": [],
+          "error": "harness.loop.NotAwaiting",
+          "error_payload": [
+            {
+              "target": "state",
+              "target_type": {
+                "kind": "declared",
+                "name": "harness.loop.Loop.State"
+              },
+              "value": {
+                "kind": "subject_state",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.Loop.State"
+                }
+              }
+            }
+          ]
         }
       ],
       "naming": {}
@@ -622,6 +3221,117 @@
       ],
       "naming": {}
     },
+    "harness.loop.StartLoop": {
+      "name": "harness.loop.StartLoop",
+      "domain": "harness.loop",
+      "input": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "response": [
+        {
+          "name": "turn",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "outcomes": [
+        {
+          "name": "requested",
+          "condition": {
+            "kind": "otherwise"
+          },
+          "subject": {
+            "entity": "harness.loop.Loop",
+            "effect": "creates",
+            "instance": {
+              "from": "observed",
+              "event": "harness.loop.LoopStarted",
+              "field": {
+                "name": "run_id",
+                "type_ref": {
+                  "kind": "declared",
+                  "name": "harness.loop.RunId"
+                },
+                "naming": {}
+              }
+            }
+          },
+          "test_strategy": "default_branch",
+          "emits": [
+            "harness.loop.LoopStarted"
+          ],
+          "payload": [
+            {
+              "event": "harness.loop.LoopStarted",
+              "fields": [
+                {
+                  "target": "run_id",
+                  "target_type": {
+                    "kind": "declared",
+                    "name": "harness.loop.RunId"
+                  },
+                  "value": {
+                    "kind": "input_field",
+                    "field": "run_id",
+                    "type_ref": {
+                      "kind": "declared",
+                      "name": "harness.loop.RunId"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "returns": true,
+          "sets": [
+            {
+              "target": "turns",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "1"
+              }
+            },
+            {
+              "target": "retries",
+              "target_type": {
+                "kind": "primitive",
+                "name": "integer"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "0"
+              }
+            },
+            {
+              "target": "unfolded",
+              "target_type": {
+                "kind": "primitive",
+                "name": "boolean"
+              },
+              "value": {
+                "kind": "literal",
+                "value": "false"
+              }
+            }
+          ]
+        }
+      ],
+      "naming": {}
+    },
     "harness.loop.ValidateBudget": {
       "name": "harness.loop.ValidateBudget",
       "domain": "harness.loop",
@@ -678,9 +3388,99 @@
       "naming": {}
     }
   },
-  "events": {},
-  "errors": {},
-  "views": {},
+  "events": {
+    "harness.loop.LoopStarted": {
+      "name": "harness.loop.LoopStarted",
+      "domain": "harness.loop",
+      "fields": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ],
+      "naming": {}
+    }
+  },
+  "errors": {
+    "harness.loop.NotAwaiting": {
+      "name": "harness.loop.NotAwaiting",
+      "domain": "harness.loop",
+      "summary": "The loop is not blocked on the port this answer is for.",
+      "fields": [
+        {
+          "name": "state",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Loop.State"
+          },
+          "naming": {}
+        }
+      ]
+    },
+    "harness.loop.UnknownRun": {
+      "name": "harness.loop.UnknownRun",
+      "domain": "harness.loop",
+      "summary": "No loop runs under this identity.",
+      "fields": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        }
+      ]
+    }
+  },
+  "views": {
+    "harness.loop.Loops": {
+      "name": "harness.loop.Loops",
+      "domain": "harness.loop",
+      "source": "harness.loop.Loop",
+      "fields": [
+        {
+          "name": "run_id",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.RunId"
+          },
+          "naming": {}
+        },
+        {
+          "name": "state",
+          "type_ref": {
+            "kind": "declared",
+            "name": "harness.loop.Loop.State"
+          },
+          "naming": {}
+        },
+        {
+          "name": "turns",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        },
+        {
+          "name": "retries",
+          "type_ref": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "naming": {}
+        }
+      ],
+      "consistency": "read_your_writes",
+      "assertion_style": "expect",
+      "naming": {}
+    }
+  },
   "actors": {},
   "bindings": {},
   "components": {
@@ -690,8 +3490,21 @@
         "harness.loop"
       ],
       "accepts": [
+        "harness.loop.AnswerSummary",
+        "harness.loop.AnswerTurn",
+        "harness.loop.Approve",
         "harness.loop.Call",
+        "harness.loop.CallTool",
+        "harness.loop.CancelTurn",
+        "harness.loop.CompleteTool",
+        "harness.loop.Defer",
+        "harness.loop.Deny",
+        "harness.loop.FailSummary",
+        "harness.loop.FailTurn",
+        "harness.loop.ResumeApproved",
+        "harness.loop.ResumeDenied",
         "harness.loop.Run",
+        "harness.loop.StartLoop",
         "harness.loop.ValidateBudget"
       ],
       "publishes": [],

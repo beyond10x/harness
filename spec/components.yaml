@@ -4,4 +4,4 @@ components:
     owns:
       domains: [harness.loop]
     accepts:
-      commands: [harness.loop.Run, harness.loop.Call, harness.loop.ValidateBudget]
+      commands: [harness.loop.Run, harness.loop.Call, harness.loop.ValidateBudget, harness.loop.StartLoop, harness.loop.AnswerTurn, harness.loop.CallTool, harness.loop.Approve, harness.loop.Deny, harness.loop.Defer, harness.loop.ResumeApproved, harness.loop.ResumeDenied, harness.loop.CompleteTool, harness.loop.FailTurn, harness.loop.AnswerSummary, harness.loop.FailSummary, harness.loop.CancelTurn]

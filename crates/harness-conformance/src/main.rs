@@ -16,7 +16,7 @@ use ess_conformance::{
     },
 };
 use ess_primitives::{node::Node, time::Timestamp};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
@@ -41,6 +41,7 @@ struct Args {
 
 struct Target {
     noop: bool,
+    loops: boundary::Loops,
 }
 impl ConformanceTarget for Target {
     fn identity(&self) -> std::result::Result<ImplementationIdentity, TargetError> {
@@ -53,10 +54,12 @@ impl ConformanceTarget for Target {
             env!("CARGO_PKG_VERSION"),
         ))
     }
-    fn begin_scenario(&self, _: &ScenarioContext) -> std::result::Result<(), TargetError> {
+    fn begin_scenario(&self, context: &ScenarioContext) -> std::result::Result<(), TargetError> {
+        self.loops.begin(&context.correlation.to_string());
         Ok(())
     }
-    fn end_scenario(&self, _: &ScenarioContext) -> std::result::Result<(), TargetError> {
+    fn end_scenario(&self, context: &ScenarioContext) -> std::result::Result<(), TargetError> {
+        self.loops.end(&context.correlation.to_string());
         Ok(())
     }
     fn execute_command(
@@ -65,28 +68,39 @@ impl ConformanceTarget for Target {
     ) -> std::result::Result<SemanticCommandResult, TargetError> {
         let input = integer_tokens(serde_json::to_value(&request.input).map_err(unavailable)?)
             .map_err(unavailable)?;
-        let response = if self.noop {
-            json!({})
-        } else {
-            boundary::execute(&request.command.to_string(), &input).map_err(unavailable)?
-        };
-        let mut result = SemanticCommandResult::took(ess_conformance::scenario::OutcomeRef::new(
-            request.command,
-            "returned".parse().map_err(unavailable)?,
-        ));
-        let fields: BTreeMap<String, Node> =
-            serde_json::from_value(response).map_err(unavailable)?;
-        result.response = Some(fields);
-        Ok(result)
+        if self.noop {
+            let mut result =
+                SemanticCommandResult::took(ess_conformance::scenario::OutcomeRef::new(
+                    request.command,
+                    "returned".parse().map_err(unavailable)?,
+                ));
+            result.response = Some(BTreeMap::new());
+            return Ok(result);
+        }
+        let command = request.command.to_string();
+        self.loops
+            .execute(&request.correlation.to_string(), &command, &input)
+            .and_then(|answer| answer.into_result(&command))
+            .map_err(unavailable)
     }
     fn query_view(
         &self,
-        _: SemanticViewRequest,
+        request: SemanticViewRequest,
     ) -> std::result::Result<SemanticViewResult, TargetError> {
-        Err(TargetError::unsupported(
-            "view",
-            "loop values have no persistent view boundary",
-        ))
+        if self.noop || request.view.to_string() != "harness.loop.Loops" {
+            return Err(TargetError::unsupported(
+                "view",
+                "only the Loops view of the running loops is published",
+            ));
+        }
+        let rows = self
+            .loops
+            .rows(&request.correlation.to_string())
+            .into_iter()
+            .map(serde_json::from_value::<BTreeMap<String, Node>>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        Ok(SemanticViewResult::of(rows))
     }
     fn observe_events(
         &self,
@@ -254,6 +268,7 @@ fn main() -> Result<()> {
         &admitted,
         &Target {
             noop: args.audit_noop,
+            loops: boundary::Loops::default(),
         },
     );
     let report = CountReport::from_run(&run, &admitted)?;

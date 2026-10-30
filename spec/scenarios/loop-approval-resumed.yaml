@@ -1,0 +1,41 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-approval-resumed
+summary: An approval resumed from the serialized checkpoint runs the exact suspended call and continues the turn count; a resumed run writes no ledger.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-7, tool: write, text: short}
+    outcome: asked
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.Defer
+    input: {run_id: run-a, checkpoint_id: cp-1}
+    outcome: deferred
+    response:
+      stop: {kind: awaiting-approval, value: {checkpoint_id: cp-1}}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.ResumeApproved
+    input: {run_id: run-a}
+    outcome: resumed
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:05Z
+    command: harness.loop.AnswerTurn
+    input: {run_id: run-a, text: Done.}
+    outcome: completed
+    response:
+      stop: {kind: completed}
+      ledger: null
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 2, retries: 0}

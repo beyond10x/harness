@@ -7,6 +7,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-30
+
+### Added
+
+- Repository profiles: a trusted workspace's `.b10x/harness.toml` may set `provider`, `model` and `max-turns` in a `[default]` table, and nothing else; any other table or key refuses the run and names it escaped. `profiles trust <PATH>` and `profiles untrust <PATH>` keep the trust list by canonical path in `harness-trust.toml` beside the user's profiles, under a lock, and refuse a record that is not the user's own or not mode 0600; `untrust` resolves a path the way `trust` does, including `..` after a link, a trailing slash, a symlinked parent, a dangling link (also a relative one under a symlinked directory) and a path that has since become a link. An untrusted file is not read, and the run prints one stderr line that says how to trust it. Precedence is the user's `[default]`, then the repository, then `-p`, then a typed flag; `session.started.profiles` records the repository file's path and digest. A provider that cannot be printed or a `max-turns` below 1 is refused, and so is a typed credential flag when the repository chose the provider. CLI contract cut as `2026-10-30`.
+- `profiles list`, `profiles show` and `profiles explain` include the repository profile; `explain` prints the `--model` and `--max-turns` it resolves to, escaped so the printed command can be pasted.
+- The ESS specification models the agent loop's control states as the entity `harness.loop.Loop` (7 states, 23 transitions, including turns of several calls), the run ledger and `harness.approval-checkpoint/1`, with the `harness.loop.Loops` view and 18 authored scenarios: the 80% compaction trigger at its edge, a failure after a summary or a failed summary, a second deferral and a resumed run carrying on with its turn's next call. `cargo xtask specification` runs 183 scenarios against the real loop, up from 29, and none passes on the inert target. `spec/system.yaml` moves from format `ess/22` to `ess/23`.
+
+### Changed
+
+- The default write scope also denies `.b10x/**`, so a run a profile switches to writing cannot change the repository profile that chose its own provider; the confined-change tutorial and the tools-and-approvals example type it too. A typed `--write-scope` or a typed `--substrate` run must deny it itself (`story:typed-substrate-run-gets-the-default-write-scope`).
+- `RunLedger` derives `Serialize` and `Deserialize` with `deny_unknown_fields`.
+
+### Fixed
+
+- A profile's `model` was dropped when the same profile set a `provider`.
+- Nothing a repository or a path controls reaches the terminal raw: repository-profile refusals, the trust and untrust lines, `profiles list` and `profiles explain`, and the model's binding-id refusal escape control characters.
+- A substrate refusal's `Display` escapes `\` again, so a raw control character and its spelled-out escape no longer print the same; each refusal is escaped exactly once. An embedded-driver refusal lists the driver error's fields, and a daemon answer of the wrong shape names the member and its value; serde's message no longer reaches the refusal.
+- Bridge mode answers an interrupt before `turn/completed` on every path, including a turn whose budget is refused or whose model client does not build. An interrupt decoded just as a turn ends no longer marks that turn `interrupted` with its answer arriving after the terminal frame; the order is held by a deterministic in-process case, and the start-window case passed 20 of 20 runs under load.
+- Bridge mode no longer refuses a `turn/start` sent right behind an interrupt while a turn streams with "cannot be served while a turn is running": the interrupted turn ends and the next turn starts. The same request is still refused between two interrupts owed to one turn and while a tool call is outstanding (`story:bridge-turn-start-after-interrupt-on-every-path`).
+
 ## [0.24.0] - 2026-10-29
 
 ### Changed

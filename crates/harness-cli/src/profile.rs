@@ -196,7 +196,7 @@ pub fn repository(
 
 /// Reads a workspace's own profile, refusing every key and table it may not carry, by name.
 ///
-/// The text comes from [`read_repository_text`]: a regular file at exactly
+/// The text comes from `read_repository_text`: a regular file at exactly
 /// `<canonical workspace>/.b10x/harness.toml`, at most [`REPOSITORY_LIMIT`] bytes. It is parsed as
 /// a plain table first, so a refusal can name **every** key and table it will not apply at once,
 /// rather than one per attempt the way a typed parse would. The admitted keys' types are checked
@@ -417,7 +417,7 @@ fn shown(path: &Path) -> String {
 /// The one line a run prints when the workspace's profile was not read.
 ///
 /// One line whatever the workspace is called: the paths are shown through `inert`, and the
-/// command through [`shell_word`], which spells a control character with an escape.
+/// command through `shell_word`, which spells a control character with an escape.
 #[must_use]
 pub fn untrusted_notice(file: &Path, workspace: &Path) -> String {
     format!(

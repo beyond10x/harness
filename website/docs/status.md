@@ -10,7 +10,7 @@ custom_edit_url: null
 
 # Status
 
-35 capabilities are shipped and 2 are planned, as of 2026-10-22, in workspace version `0.24.0`. **Shipped** means implemented on `main` and held by a named test in the repository; `harness-docs` generates this page and `website/data/status.json` from one list and fails when a test it names is gone. **Planned** means recorded on the repository's plan and not built. What a green test does not show, and what Harness does not do, is on [Limitations](./limitations.md).
+35 capabilities are shipped and 2 are planned, as of 2026-10-22, in workspace version `0.25.0`. **Shipped** means implemented on `main` and held by a named test in the repository; `harness-docs` generates this page and `website/data/status.json` from one list and fails when a test it names is gone. **Planned** means recorded on the repository's plan and not built. What a green test does not show, and what Harness does not do, is on [Limitations](./limitations.md).
 
 ## Provider wires
 

@@ -21,7 +21,7 @@
 //!
 //! A record another user could write would let them make a repository's profile apply to this
 //! user's runs, so one that is not owned by the user running this, or that its group or anyone
-//! else may write, is refused by name rather than read ([`judge`]). Changes are made under an
+//! else may write, is refused by name rather than read (`judge`). Changes are made under an
 //! exclusive lock on [`LOCK_FILE`], so two `trust` or `untrust` commands at the same moment cannot
 //! each read the record and write back their own copy over the other's.
 
@@ -181,7 +181,7 @@ pub struct Changed {
 /// # Errors
 ///
 /// Names the record when it is there and cannot be read or parsed, and when another user owns it
-/// or may write it ([`judge`]). A parse failure is named by line and column and never quotes the
+/// or may write it (`judge`). A parse failure is named by line and column and never quotes the
 /// record's text.
 pub fn load(record: &Path) -> Result<Trust, String> {
     use std::io::Read as _;
@@ -338,7 +338,7 @@ pub fn trust(path: &Path, record: &Path) -> Result<Changed, String> {
 /// - the path resolved the way `trust` resolves it: canonicalised when it exists; otherwise
 ///   resolved component by component as the kernel would, `..` landing where the kernel's `..`
 ///   lands and a dangling symbolic link read against the directory it really sits in, with only
-///   the part that does not exist taken as spelled ([`resolved`]);
+///   the part that does not exist taken as spelled (`resolved`);
 /// - the location the path names, its parent resolved that way and its last component kept, which
 ///   is the entry for a trusted directory whose path has since become a symbolic link.
 ///

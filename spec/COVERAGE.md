@@ -66,8 +66,9 @@ behaviour: nothing in the loop serializes the ledger.
 
 **ESS 0.77.0 workarounds.**
 
-- ESS 0.77.0 accepts `summary:` on fields but refuses it on a transition, a state and an enum type.
-  Their source citations are YAML comments in `spec/domains/loop.yaml`.
+- ESS 0.77.0 accepts `summary:` on fields and enum variants, and on an enum type under `naming:`,
+  but takes none on a transition or a state; their source citations are YAML comments in
+  `spec/domains/loop.yaml`.
 - The view is `read_your_writes`, which ESS 0.77.0 reads only behind a consistency token, so the
   adapter returns a write counter as the `ConsistencyToken` on every Loop answer, refusals
   included. The view is read from the same observations that decided the answer.

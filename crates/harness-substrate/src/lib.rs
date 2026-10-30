@@ -312,13 +312,18 @@ pub enum SubstrateError {
 }
 
 /// Text a daemon supplied, as a terminal may print it: every character `escape_debug` would
-/// escape, except `"`, `'` and `\`, which reach no terminal as anything but themselves.
+/// escape, except `"` and `'`, which reach no terminal as anything but themselves.
 ///
 /// A daemon outside its own contract, or another program on the socket, can answer ESC, C1
 /// controls, DEL, a line break or a bidi override, and printed raw they rewrite the operator's
-/// error line. The judgement of what is not printable is `std`'s, the one the `{:?}` quoting in
-/// `client.rs` uses. The quotes and the backslash are left alone so a JSON body and a sentence
-/// stay readable and text already quoted with `{:?}` passes through unchanged, not escaped twice.
+/// error line. The judgement of what is not printable is `std`'s. The quotes are left alone so a
+/// JSON body and a sentence stay readable.
+///
+/// **The backslash is escaped, so the display is injective on what it rewrites**: a raw ESC shows
+/// as `\u{1b}` and the six characters `\u{1b}` as `\\u{1b}`, and a daemon cannot print text that
+/// reads as a control character it never sent. That makes it an escape and not a filter, so it is
+/// applied once, to raw text: a reason or body holds the value as it was given, never a `{:?}`
+/// quote of it, which `inert` would show with every backslash doubled.
 ///
 /// Every `SubstrateError` display applies it; a caller that prints a `Refused` body or an
 /// `Unreadable` reason itself applies it too.
@@ -327,7 +332,7 @@ pub fn inert(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
-            '"' | '\'' | '\\' => shown.push(character),
+            '"' | '\'' => shown.push(character),
             other => shown.extend(other.escape_debug()),
         }
     }

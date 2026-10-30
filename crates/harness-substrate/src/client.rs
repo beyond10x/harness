@@ -135,7 +135,7 @@ impl Transport for UnixTransport {
             .nth(1)
             .and_then(|code| code.parse::<u16>().ok())
             .ok_or_else(|| SubstrateError::Unreadable {
-                reason: format!("the first line is not a status line: {status_line:?}"),
+                reason: format!("the first line is not a status line: \"{status_line}\""),
             })?;
 
         let mut length: Option<usize> = None;
@@ -217,15 +217,6 @@ pub(crate) fn is_workspace_id(id: &str) -> bool {
     id.strip_prefix("ws_").is_some_and(|rest| {
         !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_alphanumeric())
     })
-}
-
-/// A daemon's answer as a refusal may quote it: its JSON text, through `{:?}`.
-///
-/// `serde_json`'s `Display` escapes only what JSON must, so DEL, C1 controls and bidirectional
-/// format characters in a string member come through raw and reach the operator's terminal. The
-/// `Debug` quoting escapes each of them, as the id and root-name refusals already do.
-fn quoted(value: &Value) -> String {
-    format!("{:?}", value.to_string())
 }
 
 /// One stream of one finished exec, as the model will read it.
@@ -462,7 +453,7 @@ impl Client {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .ok_or_else(|| SubstrateError::Unreadable {
-                reason: format!("no workspace id in {}", quoted(&value)),
+                reason: format!("no workspace id in {value}"),
             })
     }
 
@@ -490,7 +481,7 @@ impl Client {
             return Err(SubstrateError::Refused {
                 status: 0,
                 body: format!(
-                    "{root_name:?} is not a substrate root name: one path component of ASCII \
+                    "\"{root_name}\" is not a substrate root name: one path component of ASCII \
                      alphanumerics, `_` and `-`, 1 to {} bytes, not beginning with `-` - so \
                      nothing was sent",
                     substrate_wire::MAX_ROOT_NAME_BYTES
@@ -516,17 +507,18 @@ impl Client {
         let resource = value.get("result").unwrap_or(&value);
         let Some(id) = resource.get("id").and_then(Value::as_str) else {
             return Err(SubstrateError::Unreadable {
-                reason: format!("no workspace id in {}", quoted(&value)),
+                reason: format!("no workspace id in {value}"),
             });
         };
         // **The id is checked before anything carries it.** It goes verbatim into every later
         // route's path and into the run's stderr notice, so an answer outside the published
-        // pattern (ADR 0035 decision 2) is not a workspace this client will act in. Quoted with
-        // `{:?}` so a refusal cannot print a line break or a control byte it was handed.
+        // pattern (ADR 0035 decision 2) is not a workspace this client will act in. The reason
+        // holds the id as answered; the error's display escapes it (`inert`), so a refusal cannot
+        // print a line break or a control byte it was handed, and escapes it once.
         if !is_workspace_id(id) {
             return Err(SubstrateError::Unreadable {
                 reason: format!(
-                    "the adopt answered the workspace id {id:?}, which is outside the published \
+                    "the adopt answered the workspace id \"{id}\", which is outside the published \
                      pattern `^ws_[A-Za-z0-9]+$`"
                 ),
             });
@@ -538,7 +530,11 @@ impl Client {
         if root != Some(root_name) {
             return Err(SubstrateError::Unreadable {
                 reason: format!(
-                    "the adopt of {root_name:?} answered a workspace for root name {root:?}"
+                    "the adopt of \"{root_name}\" answered a workspace for {}",
+                    root.map_or_else(
+                        || "no root name".to_owned(),
+                        |root| format!("root name \"{root}\"")
+                    )
                 ),
             });
         }
@@ -546,8 +542,11 @@ impl Client {
         if origin != Some("adopted") {
             return Err(SubstrateError::Unreadable {
                 reason: format!(
-                    "the adopt of {root_name:?} answered a workspace whose origin is {origin:?}, \
-                     not \"adopted\""
+                    "the adopt of \"{root_name}\" answered a workspace {}, not \"adopted\"",
+                    origin.map_or_else(
+                        || "with no origin".to_owned(),
+                        |origin| format!("whose origin is \"{origin}\"")
+                    )
                 ),
             });
         }

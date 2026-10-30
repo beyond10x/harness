@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T18:36:15Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-loop-modeled-in-ess",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo xtask specification",
+    "reference": "u4 red run (f50af47 adapter: 165 total, 29 passed, 136 errors) vs 6c7a720 (165 passed; inert 0/165)"
+  }
+}

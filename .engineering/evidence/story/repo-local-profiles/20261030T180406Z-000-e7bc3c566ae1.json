@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T18:04:06Z",
+  "actor": "human:timo",
+  "artifact": "story:repo-local-profiles",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-cli --locked --test repository_profiles --test security_repo_profiles --test adversary_repo_profiles",
+    "reference": "u1/red-base.log (f50af47: repository_profiles 1 passed 16 failed, adversary 0/4, security unresolved import) vs u1/regate.log (ec20427: 17, 4, 4 passed)"
+  }
+}

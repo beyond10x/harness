@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T18:17:50Z",
+  "actor": "human:timo",
+  "artifact": "story:bridge-mode-interrupt-cases-are-deterministic",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-cli --locked --test bridge_mode, 20 consecutive runs under a nice -n 19 4-job build; in-process probe of 20000 attempts",
+    "reference": "u2/base-pinned.log (f50af47: 2 of 8 runs red, 15 and 16 of 20) and u2/probe-before-fix.log (11, 28 of 20000 late) vs u2/runs.log (ac3e0fa: 20 of 20 green, 29 passed each) and u2/probe-after-fix.log (0 of 20000)"
+  }
+}

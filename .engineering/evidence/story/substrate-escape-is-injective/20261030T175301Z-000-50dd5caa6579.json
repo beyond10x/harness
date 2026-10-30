@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T17:53:01Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-escape-is-injective",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-substrate --locked --no-fail-fast --test adversary_d221_u1_p2 --test escaped_once --lib",
+    "reference": "u3/red1.log (base f50af47 + tests: 2+6+1 FAILED) vs u3/green-all.log (ee042db: all substrate targets ok)"
+  }
+}

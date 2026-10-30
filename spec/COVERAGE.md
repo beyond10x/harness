@@ -116,9 +116,10 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
   `crates/harness-mcp/src/lib.rs:34,48,84`. Add real MCP fixtures exercising digest-pinned profile
   intersection; an unpublished flat tool refusal does not prove MCP policy admission.
 - **UNMAPPED: CLI profiles and contracts.** Sources:
-  `crates/harness-cli/src/profile.rs`, `contract.rs`; `contracts/cli/`.
-  Native loop scenarios prove the library boundary, not CLI argument parsing, profile merge or
-  command effects.
+  `crates/harness-cli/src/profile.rs`, `trust.rs`, `contract.rs`, and `lib.rs` (`apply_profiles`,
+  `repository_profile`, `profiles_command`, `trust_command`); `contracts/cli/`. Native loop
+  scenarios prove the library boundary, not CLI argument parsing, profile merge, repository-profile
+  trust, key admission and typed-credential refusal, or command effects.
 
 No conflicting source semantics were resolved by guessing. One pre-existing prose disagreement is
 visible: `AGENTS.md` invariant 10 described cost ceilings as always unenforceable, while

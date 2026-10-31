@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T05:09:16Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-pin-0-76",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "targeted checks on ESS 0.76.0: cargo test -p b10x-harness-conformance (2 passed), its clippy, cargo xtask specification (Harness ESS 29/29, conformance/ unchanged), harness-docs generate --check, home-paths; every EXIT=0",
+    "reference": "wave/ess-pin-gate.log"
+  }
+}

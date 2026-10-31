@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T04:44:15Z",
+  "actor": "human:timo",
+  "artifact": "story:real-ports-run-under-an-awaited-loop",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "VERIFIED: cargo test -p b10x-harness-cli --locked --test awaited_ports (treatment 6 passed, both tokio flavours, exit 0); baseline b87c940 has no such test (new behaviour); implementor probe: Embedded built on the runtime thread panics 'Cannot drop a runtime' on both flavours",
+    "reference": "wave/real-ports/verify-treatment.txt; baseline: test absent at b87c940"
+  }
+}

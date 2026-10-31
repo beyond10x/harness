@@ -24,6 +24,7 @@ const sidebars: SidebarsConfig = {
         'guides/confinement',
         'guides/sessions-and-events',
         'guides/structured-runs',
+        'guides/embedding',
       ],
     },
     {

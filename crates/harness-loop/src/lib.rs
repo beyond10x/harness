@@ -69,6 +69,7 @@ mod memory;
 mod parallel;
 mod price;
 mod skill;
+mod task;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -109,6 +110,7 @@ pub use memory::{
 };
 pub use price::{ModelRates, RateCard, RateCardError, Rates, micro_usd_as_decimal};
 pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
+pub use task::{LoopPorts, LoopTask, LoopTaskError, LoopTaskFuture, Ran, RanIn};
 
 /// How many times a `stop` hook may keep one run working after the model tried to end it.
 ///
@@ -1941,6 +1943,17 @@ fn recordable(item: Item) -> Item {
     }
 }
 
+/// The loop over borrowed ports, run on the calling thread.
+///
+/// **A program with an async runtime embeds the loop through [`LoopTask`]**, the recommended
+/// embedding: it holds the ports on a thread of its own and hands back futures, so the program
+/// never blocks a runtime thread and never builds a port there. `AgentLoop` is the entry for a
+/// program without an async runtime. It borrows its model, tool and approval ports for its
+/// lifetime, and its entry points — [`run`](Self::run), [`run_in`](Self::run_in),
+/// [`resume_approval`](Self::resume_approval) and [`call`](Self::call) — block until they return.
+///
+/// `LoopTask` runs this same loop, one `AgentLoop` per command, on that thread today. A later
+/// release replaces the thread without changing `LoopTask`'s methods.
 pub struct AgentLoop<'a> {
     model: &'a mut dyn ModelPort,
     tools: &'a mut dyn ToolPort,
@@ -2241,6 +2254,9 @@ impl<'a> AgentLoop<'a> {
 
     /// Runs **one call outside any turn**, through the gate a model's call meets.
     ///
+    /// Blocks the calling thread until the call returns. An async program awaits the same call
+    /// through [`LoopTask`] ([`LoopTask::call`]).
+    ///
     /// # What this is for
     ///
     /// A program the caller names — a verifier, a validator — that is not a question for a model.
@@ -2278,6 +2294,9 @@ impl<'a> AgentLoop<'a> {
 
     /// Runs until the model answers, a budget binds, or the caller cancels.
     ///
+    /// Blocks the calling thread until the run ends. An async program awaits the same run
+    /// through [`LoopTask`] ([`LoopTask::run`]).
+    ///
     /// # Errors
     ///
     /// Returns [`LoopError::Config`] and [`LoopError::Budget`] before the first request, for a
@@ -2301,6 +2320,10 @@ impl<'a> AgentLoop<'a> {
     /// `items` is the conversation so far — empty for a first run, a resumed session's items for a
     /// following one. The new input is appended to it and the run proceeds exactly as
     /// [`run`](Self::run) does. `spend` is where this run's usage, cost and turns are written.
+    ///
+    /// Blocks the calling thread until the run ends. An async program awaits the same run
+    /// through [`LoopTask`] ([`LoopTask::run_in`]), which hands back the conversation and the
+    /// spend in a [`RanIn`] on every exit path, as this method writes them back.
     ///
     /// # Why the caller's vector and the caller's ledger, rather than the outcome
     ///
@@ -2359,6 +2382,9 @@ impl<'a> AgentLoop<'a> {
     /// and accounting state comes from `checkpoint`. The current dynamic inventory is refreshed
     /// before the approved effect and the tool port re-resolves the exact structural spec, so a
     /// revoked or changed capability fails closed even after a human approved it.
+    ///
+    /// Blocks the calling thread until the resumed run ends. An async program awaits the same
+    /// resumption through [`LoopTask`] ([`LoopTask::resume_approval`]).
     ///
     /// # Errors
     ///

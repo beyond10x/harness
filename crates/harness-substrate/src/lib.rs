@@ -299,10 +299,107 @@ pub enum SubstrateError {
         #[source]
         source: std::io::Error,
     },
-    #[error("the substrate daemon answered {status}: {body}")]
+    /// `body` is the daemon's answer byte for byte; only the display escapes it (`inert`).
+    #[error("the substrate daemon answered {status}: {}", inert(.body))]
     Refused { status: u16, body: String },
-    #[error("the substrate daemon's answer is not the document this build reads: {reason}")]
+    /// `reason` often quotes the daemon's answer (`serde_json`'s Display escapes only
+    /// U+0000..U+001F), so the display escapes it as `Refused` does its body.
+    #[error(
+        "the substrate daemon's answer is not the document this build reads: {}",
+        inert(.reason)
+    )]
     Unreadable { reason: String },
+}
+
+/// Text a daemon supplied, as a terminal may print it: every character `escape_debug` would
+/// escape, except `"` and `'`, which reach no terminal as anything but themselves.
+///
+/// A daemon outside its own contract, or another program on the socket, can answer ESC, C1
+/// controls, DEL, a line break or a bidi override, and printed raw they rewrite the operator's
+/// error line. The judgement of what is not printable is `std`'s. The quotes are left alone so a
+/// JSON body and a sentence stay readable.
+///
+/// **The backslash is escaped, so the display is injective on what it rewrites**: a raw ESC shows
+/// as `\u{1b}` and the six characters `\u{1b}` as `\\u{1b}`, and a daemon cannot print text that
+/// reads as a control character it never sent. That makes it an escape and not a filter, so it is
+/// applied once, to raw text: a reason or body holds the value as it was given, never a `{:?}`
+/// quote of it, which `inert` would show with every backslash doubled.
+///
+/// Every `SubstrateError` display applies it; a caller that prints a `Refused` body or an
+/// `Unreadable` reason itself applies it too.
+#[must_use]
+pub fn inert(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '"' | '\'' => shown.push(character),
+            other => shown.extend(other.escape_debug()),
+        }
+    }
+    shown
+}
+
+/// A `serde_json` error as a reason, holding no text the answer supplied.
+///
+/// A syntax, end-of-input or I/O error displays as one of `serde_json`'s fixed messages and its
+/// position, and is kept. A data error displays whatever the `Deserialize` impl said, and serde
+/// writes an unexpected string as `string {:?}`: a `Debug` quote of the answer's text, which the
+/// error's display would escape a second time (`inert`). So a data error is reduced to its
+/// position, and a reader that wants to say which value was wrong checks the shape itself and
+/// quotes the raw value, as [`read_facts`] does.
+pub(crate) fn unread(error: &serde_json::Error) -> String {
+    match error.classify() {
+        serde_json::error::Category::Data if error.line() == 0 => {
+            "a value is not the type this build reads".to_owned()
+        }
+        serde_json::error::Category::Data => format!(
+            "a value is not the type this build reads (line {}, column {})",
+            error.line(),
+            error.column()
+        ),
+        _ => error.to_string(),
+    }
+}
+
+/// A machine document as [`Facts`], or the member that is not the shape this build reads, quoting
+/// the value the document holds there.
+///
+/// The checks are the ones `Facts`'s `Deserialize` makes, made here first so that the reason names
+/// the raw value instead of carrying serde's `{:?}` quote of it (see [`unread`]).
+pub(crate) fn read_facts(document: &Value) -> Result<Facts, String> {
+    let Some(members) = document.as_object() else {
+        return Err(format!(
+            "the machine document is {}, not an object",
+            described(document)
+        ));
+    };
+    for name in ["driver", "driver_version"] {
+        if let Some(value) = members.get(name)
+            && !(value.is_string() || value.is_null())
+        {
+            return Err(format!(
+                "the machine document's `{name}` is {}, not a string",
+                described(value)
+            ));
+        }
+    }
+    if let Some(value) = members.get("facts")
+        && !value.is_object()
+    {
+        return Err(format!(
+            "the machine document's `facts` is {}, not a map of facts",
+            described(value)
+        ));
+    }
+    serde_json::from_value(document.clone()).map_err(|error| unread(&error))
+}
+
+/// A value a reason names: a string raw between quotes, anything else as its JSON text.
+fn described(value: &Value) -> String {
+    match value {
+        Value::String(text) => format!("the string \"{text}\""),
+        other => other.to_string(),
+    }
 }
 
 #[cfg(test)]

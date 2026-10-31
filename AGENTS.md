@@ -146,6 +146,17 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
   name the path or variable the operator passed, which is the operator's own input. **There is no ambient
   credential fallback**: the harness reads nothing it was not pointed at. Never add one, and never
   add a `Display`.
+
+  **Named exception: a trusted repository's `provider`.** A `provider` set in a trusted
+  repository's `.b10x/harness.toml` reads that provider's default credential exactly as the same
+  `provider` in the operator's own `[default]` or a `-p` profile would (a run has no flag that names
+  a provider), and nothing more: the credential stays paired with its own provider's endpoint.
+  For `codex` that includes what choosing `codex` always does: a run renews a token near expiry and
+  atomically rewrites the vendor's own login file, `~/.codex/auth.json`. A credential the operator
+  typed (`--api-key-env`, `--api-key-file`, `--api-key-secret`, `--oauth-token-env`,
+  `--oauth-token-file`) is refused rather than sent to the provider the repository chose, unless
+  `--base-url` is typed beside it. The operator's `profiles trust <PATH>` is the pointing; an
+  untrusted file is not read at all. No other key in a repository profile reaches a credential.
 - **Approvals are the review gate (invariant 12).** Adding a path that reaches a tool without
   consulting the approver removes the gate rather than tuning it. What asks is **derived, never
   declared**: the loop reads `ToolPort::invoked` — for a verb over a catalogue, the entry's own
@@ -281,7 +292,7 @@ Each is a claim that can be checked. Breaking one is a design change, not a refa
 
 ## Executable specification
 
-`spec/ess-inputs.yaml` pins ESS 0.76.0. The authored specification describes the native loop and
+`spec/ess-inputs.yaml` pins ESS 0.77.0. The authored specification describes the native loop and
 its library boundary; `conformance/` records the compiled model, selected suite, required scenario
 inventory and coverage limits. This is a retrofit of shipped behavior, not permission to invent
 new runtime semantics. Preserve source citations and report every unresolved mapping.

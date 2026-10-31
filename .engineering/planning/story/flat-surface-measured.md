@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:flat-surface-measured
 kind: story
-status: proposed
+status: implemented
 title: The flat surface's cost against a real provider is measured
 relations:
 - derived_from: epic:measured-not-emulated
@@ -13,9 +13,11 @@ scope:
   path: STATUS.md
 - confidence: inferred
   path: measurements
-revision: 4
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:30Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "active", at: "2026-10-29T11:10:47Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-29T11:11:27Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Evidence
 
@@ -39,3 +41,13 @@ them — so this measurement also decides whether keeping two surfaces is still 
 
 One live comparison of the same task under `--surface flat` and `--surface verbs`, reporting tool
 calls, tokens and provider-side argument rejections for each, retained as `vendor_live`.
+
+## Resolution
+
+Implemented on 2026-10-29 under `approval-record:wave-live-pins-d200`. Three pairs on
+`claude-haiku-4-5-20251001` (`measurements/runs/m2-live-{flat,verbs}-{1,2,3}-2026-10-29.jsonl`):
+flat completed 3 of 3 (6 calls, 0 discovery, 0 failed, 3-4 turns, 12,866-13,252 micro-USD at list
+price); verbs completed 0 of 3, each ended on turn 2 by `llm-core` refusing calls to `find` and
+`file_read` by their entry names. Provider-side argument rejections: 0 on both arms. The verbs
+arm's cost is not measured; `story:verbs-survives-a-bare-entry-call` carries the fix in `llm` and
+the re-measure.

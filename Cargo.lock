@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-app-server"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-catalogue"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-cli"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-app-server",
  "b10x-harness-catalogue",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-conformance"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-loop",
  "b10x-harness-wire",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-llm"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-wire",
  "keyring-core",
@@ -370,12 +370,13 @@ dependencies = [
  "llm-messages",
  "llm-providers",
  "llm-responses",
+ "serde_json",
  "tokio",
 ]
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-wire",
  "jsonschema",
@@ -388,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-mcp"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-wire",
  "b10x-mcp-client",
@@ -406,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-substrate"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-wire",
@@ -423,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "httpdate",
  "serde",
@@ -434,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-xtask"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-cli",
  "b10x-tool-toolchain",
@@ -1292,8 +1293,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -1304,8 +1305,8 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1319,8 +1320,8 @@ dependencies = [
 
 [[package]]
 name = "ess-domain"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-primitives",
  "ess-yaml",
@@ -1332,8 +1333,8 @@ dependencies = [
 
 [[package]]
 name = "ess-gen"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1349,8 +1350,8 @@ dependencies = [
 
 [[package]]
 name = "ess-http"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1363,8 +1364,8 @@ dependencies = [
 
 [[package]]
 name = "ess-primitives"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-yaml",
  "schemars 0.8.22",
@@ -1375,8 +1376,8 @@ dependencies = [
 
 [[package]]
 name = "ess-transport"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1387,8 +1388,8 @@ dependencies = [
 
 [[package]]
 name = "ess-yaml"
-version = "0.76.0"
-source = "git+https://github.com/beyond10x/ess?rev=d5c00e9c73e72d792a390091b8442b22702640b0#d5c00e9c73e72d792a390091b8442b22702640b0"
+version = "0.77.0"
+source = "git+https://github.com/beyond10x/ess?rev=f692aabbb0fcd321eca0a9eef86e12b25a7601f4#f692aabbb0fcd321eca0a9eef86e12b25a7601f4"
 dependencies = [
  "serde",
  "serde_norway",
@@ -2490,7 +2491,7 @@ dependencies = [
 
 [[package]]
 name = "harness-docs"
-version = "0.22.0"
+version = "0.26.0"
 dependencies = [
  "b10x-harness-cli",
  "b10x-tool-toolchain",
@@ -3068,9 +3069,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.29"
+version = "1.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
 dependencies = [
  "cc",
  "libc",
@@ -3092,8 +3093,8 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "llm-blocking"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "llm-core",
  "tokio",
@@ -3101,8 +3102,8 @@ dependencies = [
 
 [[package]]
 name = "llm-core"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "serde",
  "serde_json",
@@ -3112,8 +3113,8 @@ dependencies = [
 
 [[package]]
 name = "llm-credentials"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -3136,8 +3137,8 @@ dependencies = [
 
 [[package]]
 name = "llm-http"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3151,8 +3152,8 @@ dependencies = [
 
 [[package]]
 name = "llm-messages"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "http",
  "llm-core",
@@ -3166,8 +3167,8 @@ dependencies = [
 
 [[package]]
 name = "llm-providers"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "http",
  "llm-core",
@@ -3183,8 +3184,8 @@ dependencies = [
 
 [[package]]
 name = "llm-responses"
-version = "0.16.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.16.0#33ae9001f02ba6ab8221c6609fe2605693b2cfd3"
+version = "0.17.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.17.0#d9282efa78b160b143a05256d2553464bc02f056"
 dependencies = [
  "llm-core",
  "llm-credentials",

@@ -45,7 +45,9 @@
       "response": {
         "stop": {
           "kind": "max-turns",
-          "limit": 1
+          "value": {
+            "limit": 1
+          }
         },
         "text": "",
         "turns": 1,

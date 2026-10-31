@@ -4,7 +4,7 @@ This first retrofit holds the native agent loop to an explicit ESS contract.
 It is a library-boundary specification, **not a claim that all of Harness is modeled or tested by
 ESS**. [COVERAGE.md](COVERAGE.md) identifies the executed slice and remaining boundaries.
 
-The maintained toolchain is ESS **0.76.0**, pinned in `ess-inputs.yaml` and by exact release commit
+The maintained toolchain is ESS **0.77.0**, pinned in `ess-inputs.yaml` and by exact release commit
 in `crates/harness-conformance/Cargo.toml`. `cargo xtask specification` compiles, synthesizes,
 compares projections, runs the native target, and audits an inert target using those Rust libraries;
 it needs no installed `ess` executable. The repository gate includes this command.
@@ -19,10 +19,21 @@ cargo run --locked -p b10x-harness-conformance -- --root .
 cargo run --locked -p b10x-harness-conformance -- --root . --audit-noop
 ```
 
+`cargo run --locked -p b10x-harness-conformance -- --root . --write-projections` rewrites both
+generated projections from the pinned libraries instead of refusing drift, then runs the suite.
+
 The specification has three observation commands over existing APIs: `Budget::validate`,
 `AgentLoop::run_in` (also used by `run`) and `AgentLoop::call`. These names describe test adapters,
 not extra public commands. The target invokes the production implementation and reports its return
 values and actual port call counts. It never computes the expected stop from an input budget.
+
+The entity `harness.loop.Loop` models the run's control states (awaiting the model, an approval, a
+tool or a summary turn; suspended; stopped; failed) and their transitions, with the `RunLedger` and
+the `harness.approval-checkpoint/1` record as typed values. Its commands (`StartLoop`, `AnswerTurn`,
+`CallTool`, `FailTurn`, `CancelTurn`, `Approve`, `Deny`, `Defer`, `ResumeApproved`, `ResumeDenied`,
+`CompleteTool`, `AnswerSummary`, `FailSummary`) each answer the one port call a real `AgentLoop` is
+blocked on, and the view `harness.loop.Loops` reports the state the adapter observed
+([COVERAGE.md](COVERAGE.md)).
 
 The fixtures implement only the upstream ports: `ModelPort` supplies synthetic `TurnOutcome`
 values and `ToolPort` records real dispatch. No provider, credential, external process, deployment
@@ -30,9 +41,9 @@ or network is required. This is deterministic native library evidence; it is not
 confinement evidence.
 
 Budget and stop values have typed ESS shapes. `LoopStop` values are returned results, not persistent
-entities, so the specification invents no identity or lifecycle for them. The stop envelope admits
-all actual variants and fields; payload correlations are asserted for the executed variants, with
-the remainder recorded in the inventory. Serialized provider-neutral turn fixtures stay JSON
+entities, so the specification invents no identity or lifecycle for them. The stop is a union
+tagged by `kind` with exactly the fields of each `LoopStop` variant; its wire form is ESS's adjacent
+tagging, not serde's ([COVERAGE.md](COVERAGE.md)). Serialized provider-neutral turn fixtures stay JSON
 because the boundary being exercised is the existing port contract. No new model implementation is hand-transcribed: the adapter deserializes existing production
 `Budget` and `TurnOutcome` types and serializes existing return values.
 
@@ -43,10 +54,11 @@ fail independently of those counts. ESS report/2 and its detailed run are writte
 `.engineering/drafts/harness-native-{report,run}.json`. The exact committed suite is the evidence
 import's `--suite` input.
 
-The declared slice has **29 scenarios: 26 authored and 3 generated**. Generated scenarios
-hold the response shape; authored scenarios pin actual outcome values, effects and refusals.
-The inert target accepts commands but returns an empty response: all 29 scenarios fail, including
-all 26 authored scenarios. The audit gate rejects an authored scenario that passes this target.
+The declared slice has **183 scenarios: 44 authored and 139 generated**. Generated scenarios
+hold the response shape and, for the Loop entity, every outcome, transition and refusal; authored
+scenarios pin actual outcome values, effects and refusals.
+The inert target accepts commands but returns an empty response: all 183 scenarios fail, including
+all 44 authored scenarios. The audit gate rejects an authored scenario that passes this target.
 [Mutation evidence](../conformance/mutation-evidence.json) records temporary production changes
 that made named scenarios fail; the source was restored after each mutation. It is dated 2026-10-03,
 before 0.18.0 removed the `harness.flow` domain with the `workflow` verb, so its counts are over 42

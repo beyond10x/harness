@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T22:11:38Z",
+  "actor": "human:timo",
+  "artifact": "story:failed-run-ends-with-a-finished-line",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-loop --locked; cargo test -p b10x-harness-cli --locked --no-fail-fast",
+    "reference": "u2-final-line/red-loop.log (main: stream ended on TurnStarted { turn: 2 }, no finished) and red-cli.log (end_to_end 77 passed, 6 failed) vs round1/loop-after.log (254 passed, 0 failed) and round1/cli-after.log (end_to_end 84 passed, 0 failed) at ea60f2b"
+  }
+}

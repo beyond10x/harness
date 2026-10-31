@@ -1,0 +1,38 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-retries-exhausted
+summary: A retriable wire failure is attempted three more times within the same turn; the fourth failure ends the run failed, with nothing billed.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: true}
+    outcome: retried
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: true}
+    outcome: retried
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: true}
+    outcome: retried
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: true}
+    outcome: exhausted
+    response:
+      turn: 1
+      stop:
+        kind: failed
+        value: {cause: provider-transport, message: 'model wire refused: Transport: the connection dropped', after_compaction: false}
+      ledger: {usage: [], cost_micro_usd: null, turns: 1}
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Failed, turns: 1, retries: 3}

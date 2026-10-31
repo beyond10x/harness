@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T21:03:21Z",
+  "actor": "human:timo",
+  "artifact": "story:loop-stop-is-a-tagged-union",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-conformance --locked --test stop_union; cargo xtask specification",
+    "reference": "base (struct Stop): limit_ms case not refused (left: []); unit 95bca05: ok 2 passed, ESS-AUTHOR-001 refusal; suite 29/29 pass, inert 29/29 fail at both"
+  }
+}

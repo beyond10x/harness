@@ -43,7 +43,9 @@
       "response": {
         "stop": {
           "kind": "cancelled",
-          "reason": "the caller cancelled"
+          "value": {
+            "reason": "the caller cancelled"
+          }
         },
         "text": "",
         "turns": 0,

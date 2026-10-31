@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-29T21:06:52Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-refusal-display-escapes-daemon-bytes",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-d221-u1-pass-1",
+    "review": "review-result:adversary-d221-u1-pass-1",
+    "outcome": "fixed"
+  }
+}

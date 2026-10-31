@@ -16,7 +16,7 @@ use ess_conformance::{
     },
 };
 use ess_primitives::{node::Node, time::Timestamp};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
@@ -33,10 +33,15 @@ struct Args {
     /// Deliberately inert adapter: every authored scenario must fail.
     #[arg(long)]
     audit_noop: bool,
+    /// Rewrite conformance/model.json and conformance/suite.json from the pinned libraries instead
+    /// of refusing drift, then run as usual.
+    #[arg(long)]
+    write_projections: bool,
 }
 
 struct Target {
     noop: bool,
+    loops: boundary::Loops,
 }
 impl ConformanceTarget for Target {
     fn identity(&self) -> std::result::Result<ImplementationIdentity, TargetError> {
@@ -49,10 +54,12 @@ impl ConformanceTarget for Target {
             env!("CARGO_PKG_VERSION"),
         ))
     }
-    fn begin_scenario(&self, _: &ScenarioContext) -> std::result::Result<(), TargetError> {
+    fn begin_scenario(&self, context: &ScenarioContext) -> std::result::Result<(), TargetError> {
+        self.loops.begin(&context.correlation.to_string());
         Ok(())
     }
-    fn end_scenario(&self, _: &ScenarioContext) -> std::result::Result<(), TargetError> {
+    fn end_scenario(&self, context: &ScenarioContext) -> std::result::Result<(), TargetError> {
+        self.loops.end(&context.correlation.to_string());
         Ok(())
     }
     fn execute_command(
@@ -61,28 +68,39 @@ impl ConformanceTarget for Target {
     ) -> std::result::Result<SemanticCommandResult, TargetError> {
         let input = integer_tokens(serde_json::to_value(&request.input).map_err(unavailable)?)
             .map_err(unavailable)?;
-        let response = if self.noop {
-            json!({})
-        } else {
-            boundary::execute(&request.command.to_string(), &input).map_err(unavailable)?
-        };
-        let mut result = SemanticCommandResult::took(ess_conformance::scenario::OutcomeRef::new(
-            request.command,
-            "returned".parse().map_err(unavailable)?,
-        ));
-        let fields: BTreeMap<String, Node> =
-            serde_json::from_value(response).map_err(unavailable)?;
-        result.response = Some(fields);
-        Ok(result)
+        if self.noop {
+            let mut result =
+                SemanticCommandResult::took(ess_conformance::scenario::OutcomeRef::new(
+                    request.command,
+                    "returned".parse().map_err(unavailable)?,
+                ));
+            result.response = Some(BTreeMap::new());
+            return Ok(result);
+        }
+        let command = request.command.to_string();
+        self.loops
+            .execute(&request.correlation.to_string(), &command, &input)
+            .and_then(|answer| answer.into_result(&command))
+            .map_err(unavailable)
     }
     fn query_view(
         &self,
-        _: SemanticViewRequest,
+        request: SemanticViewRequest,
     ) -> std::result::Result<SemanticViewResult, TargetError> {
-        Err(TargetError::unsupported(
-            "view",
-            "loop values have no persistent view boundary",
-        ))
+        if self.noop || request.view.to_string() != "harness.loop.Loops" {
+            return Err(TargetError::unsupported(
+                "view",
+                "only the Loops view of the running loops is published",
+            ));
+        }
+        let rows = self
+            .loops
+            .rows(&request.correlation.to_string())
+            .into_iter()
+            .map(serde_json::from_value::<BTreeMap<String, Node>>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(unavailable)?;
+        Ok(SemanticViewResult::of(rows))
     }
     fn observe_events(
         &self,
@@ -166,12 +184,12 @@ fn strings(value: &Value) -> Result<Vec<&str>> {
         })
         .collect()
 }
-fn compile(root: &Path) -> Result<AdmittedSuite> {
+fn compile(root: &Path, write: bool) -> Result<AdmittedSuite> {
     let spec = root.join("spec");
     let manifest: Value =
         serde_yaml_ng::from_str(&fs::read_to_string(spec.join("ess-inputs.yaml"))?)?;
-    if manifest["requires"] != "ess 0.76.0" || manifest["format"] != "ess-inputs/2" {
-        return Err("ESS manifest must match the pinned 0.76.0 compiler".into());
+    if manifest["requires"] != "ess 0.77.0" || manifest["format"] != "ess-inputs/2" {
+        return Err("ESS manifest must match the pinned 0.77.0 compiler".into());
     }
     let paths = strings(&manifest["specification"])?;
     let texts: Vec<String> = paths
@@ -192,6 +210,9 @@ fn compile(root: &Path) -> Result<AdmittedSuite> {
     let model = ess_domain::spec::Specification::assemble(parsed)
         .map_err(|e| format!("ESS assembly: {e:?}"))?;
     let ir = ess_compiler::compile(&model, &sources).map_err(|e| format!("ESS compile: {e:?}"))?;
+    if write {
+        fs::write(root.join("conformance/model.json"), ir.to_canonical_json())?;
+    }
     let expected_model: Value =
         serde_json::from_str(&fs::read_to_string(root.join("conformance/model.json"))?)?;
     let actual_model: Value = serde_json::from_str(&ir.to_canonical_json())?;
@@ -221,17 +242,23 @@ fn compile(root: &Path) -> Result<AdmittedSuite> {
     {
         return Err("ESS coverage inventory incomplete".into());
     }
+    if write {
+        let mut text =
+            serde_json::to_string_pretty(&serde_json::from_str::<Value>(suite.original_json())?)?;
+        text.push('\n');
+        fs::write(root.join("conformance/suite.json"), text)?;
+    }
     let expected: Value =
         serde_json::from_str(&fs::read_to_string(root.join("conformance/suite.json"))?)?;
     let actual: Value = serde_json::from_str(suite.original_json())?;
     if actual != expected {
-        return Err("conformance/suite.json differs from native ESS synthesis; regenerate with the pinned CLI".into());
+        return Err("conformance/suite.json differs from native ESS synthesis; regenerate with --write-projections".into());
     }
     AdmittedSuite::from_json(suite.original_json()).map_err(Into::into)
 }
 fn main() -> Result<()> {
     let args = Args::parse();
-    let admitted = compile(&args.root)?;
+    let admitted = compile(&args.root, args.write_projections)?;
     let run = Runner::new(
         RunnerConfig::default(),
         WallClock,
@@ -241,6 +268,7 @@ fn main() -> Result<()> {
         &admitted,
         &Target {
             noop: args.audit_noop,
+            loops: boundary::Loops::default(),
         },
     );
     let report = CountReport::from_run(&run, &admitted)?;

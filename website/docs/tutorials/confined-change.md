@@ -51,6 +51,7 @@ the requested boundary, Harness refuses the capability instead of publishing a p
 b10x-harness run -p confined-change \
   --workspace . \
   --write-scope '.git/**=denied' \
+  --write-scope '.b10x/**=denied' \
   --write-scope '**=allowed' \
   --allow-program cargo \
   --approve prompt \
@@ -63,8 +64,10 @@ b10x-harness run -p confined-change \
 `--approve deny` for a non-interactive dry boundary. Use `--approve all` only when the invocation
 itself is your explicit declaration that nobody is watching.
 
-The first matching scope rule wins. Keeping `.git/**=denied` before `**=allowed` prevents the run
-from changing repository metadata while permitting files elsewhere in the workspace.
+The first matching scope rule wins. Keeping `.git/**=denied` and `.b10x/**=denied` before
+`**=allowed` prevents the run from changing repository metadata, or the repository profile the next
+run applies, while permitting files elsewhere in the workspace. A typed `--write-scope` replaces the
+default scope, so it denies both itself.
 
 ## Verify outside the model
 

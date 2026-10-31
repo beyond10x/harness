@@ -383,8 +383,29 @@ fn new_session() -> String {
     format!("b10x-{:x}-{:x}", std::process::id(), nanos)
 }
 
+/// An `llm` binding id, or a refusal that names `value` without handing it to the terminal.
+///
+/// `value` can be a model a trusted repository's `.b10x/harness.toml` chose, so it is the
+/// repository's text, and the id refuses exactly the values that hold a character a terminal acts
+/// on.
 fn id(value: &str) -> Result<Id, String> {
-    Id::new(value).map_err(|error| format!("`{value}`: {error}"))
+    Id::new(value).map_err(|error| format!("`{}`: {error}", inert(value)))
+}
+
+/// `value` with every character `escape_debug` escapes shown escaped, except `"` and `'`.
+///
+/// The same rule as `harness_substrate::inert`, kept here rather than imported: this crate is the
+/// one place Harness meets `llm` and depends on no other harness crate but `harness-wire`, and a
+/// dependency on the confinement client for one string function would couple the model port to it.
+fn inert(value: &str) -> String {
+    let mut shown = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' | '\'' => shown.push(character),
+            other => shown.extend(other.escape_debug()),
+        }
+    }
+    shown
 }
 
 /// A single-target binding for the endpoint the command line named.
@@ -679,9 +700,15 @@ fn to_llm_request(
                 llm_core::ToolChoice::Named(tool_name(name.as_str())?)
             }
         },
-        // Harness's turn carries no thinking, parallel-tool-call or hint control to map; the
-        // empty value is the pre-0.7.0 turn exactly.
-        controls: llm_core::Controls::default(),
+        // Harness's turn carries no thinking, parallel-tool-call or hint control to map. One
+        // control is always set: a call to a tool this turn did not publish comes back to the
+        // loop, which answers it as a failed outcome the model learns from (invariant 9) and
+        // routes a bare entry name over a catalogue. Without it `llm` refuses the whole turn and
+        // the run ends (live, 2026-10-29: every `--surface verbs` run on llm 0.16.0).
+        controls: llm_core::Controls {
+            return_unpublished_calls: true,
+            ..llm_core::Controls::default()
+        },
     })
 }
 
@@ -863,6 +890,21 @@ mod tests {
     use llm_credentials::environment::EnvironmentResolver;
 
     use super::*;
+
+    #[test]
+    fn a_refused_binding_id_is_named_with_its_control_characters_escaped() {
+        let error = id("m\u{1b}]0;retitled\u{7}\r\u{202e}x").expect_err("not an id");
+        assert!(
+            !error
+                .chars()
+                .any(|character| character.is_control() || character == '\u{202e}'),
+            "{error:?}"
+        );
+        assert!(
+            error.starts_with("`m\\u{1b}]0;retitled\\u{7}\\r\\u{202e}x`: "),
+            "{error}"
+        );
+    }
 
     fn target(protocol: Protocol) -> Target<'static> {
         Target {

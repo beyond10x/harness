@@ -22,8 +22,8 @@ foundations in `beyond10x` — [substrate](https://github.com/beyond10x/substrat
 [llm](https://github.com/beyond10x/llm) for every model call and
 [tools](https://github.com/beyond10x/tools) for the tool contracts and default implementations —
 each pinned by git tag or exact revision, never by a sibling path, and on nothing that could embed
-it.** At `0.22.0` those pins are substrate `0b9d50c6` (`crates/harness-substrate/Cargo.toml`,
-package `=0.14.0`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.16.0` (`33ae9001`)
+it.** At `0.26.0` those pins are substrate `0b9d50c6` (`crates/harness-substrate/Cargo.toml`,
+package `=0.14.0`), mcp `bf7f9415` (`Cargo.toml`, release `0.1.2`), llm tag `0.17.0` (`d9282efa`)
 and tools tag `0.5.0` (`99e36edc`), all in `Cargo.toml` except substrate's. Substrate and mcp are
 pinned by revision, each the commit a release tag points at; llm and tools by tag, which
 `Cargo.lock` resolves to that commit. The arrow points inward — something else embeds this, never
@@ -40,7 +40,7 @@ the reverse.
 
 ## Status
 
-**Pre-v1. Tagged `0.22.0` (2026-10-28).** The per-area state, with the exact next piece of evidence
+**Pre-v1. Tagged `0.26.0` (2026-10-31).** The per-area state, with the exact next piece of evidence
 each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before believing anything here.
 
 | area | state |
@@ -50,7 +50,7 @@ each area is waiting for, is [`STATUS.md`](STATUS.md) — read that before belie
 | the loop: turns, tool round trips, approvals, budgets, cancellation | implemented |
 | hosted embedding seam | `TurnEnvironmentProvider` refreshes attributable context and a fail-closed tool subset before every model turn; serializable approval checkpoints resume on fresh workers before the exact effect; service access and durable storage remain in the embedder |
 | sub-agents (`delegate`), structured output (`answer`), skills (`skill`), memories (`recall`), hooks | implemented, opt-in per run; `provider_emulated` only — see [design 0002](docs/design/0002-sub-agents-structured-output-hooks.md). `recall` is read-only and has no writing counterpart |
-| command line (`run`, `chat`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`) | implemented. Nine top-level verbs, 19 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-10-22.1/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract. `events` and `workflow` were removed for `0.18.0`: metaharness reads the `--json` record itself, and multi-step governed work is Loom's |
+| command line (`run`, `chat`, `sessions`, `tools`, `context`, `profiles`, `providers`, `toolchains`, `app-server`) | implemented. Nine top-level verbs, 21 with their nested ones, exactly as `contracts/cli/b10x-harness/2026-10-30/argv.json` pins them. Sessions are filed per run and resumable; the argv surface is pinned by contract. `events` and `workflow` were removed for `0.18.0`: metaharness reads the `--json` record itself, and multi-step governed work is Loom's |
 | bridge mode (Codex app-server JSON-RPC over stdio) | implemented; **no real external bridge has ever driven it**, and no gate compares the two method inventories. That exit has been open since 2026-08-21 (`88bbf61`, the commit that wrote Phase 2); kept, not retired — see [ROADMAP Phase 2](ROADMAP.md#phase-2-bridge-mode) |
 | substrate confinement, embedded | working, including execution, and `run` has been *exercised* against a confined process: on 2026-08-31 an embedded delegated scope built, formatted, tested and vetted a Go server through the admitted toolchain; see `STATUS.md` |
 | substrate over a socket | **working** — verified live 2026-08-29 against a daemon built from the pinned revision; see `STATUS.md` |

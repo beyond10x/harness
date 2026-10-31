@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T20:52:08Z",
+  "actor": "human:timo",
+  "artifact": "story:end-to-end-suite-leaves-no-fixture-binary",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "TMPDIR=<fresh dir> cargo test -p b10x-harness-cli --locked --test end_to_end; find $TMPDIR -mindepth 1",
+    "reference": "base 20b1a19: one .tmp*/b10x-harness-mcp-endpoint left; unit 8fb03e3: none left; 84 passed both"
+  }
+}

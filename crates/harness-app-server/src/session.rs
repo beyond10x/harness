@@ -58,11 +58,22 @@ impl Wire {
     /// all. Without it an interrupt is acknowledged only once the turn it was meant to stop has
     /// already finished — an acknowledgement that arrives after the fact is not one.
     ///
+    /// It stops once the turn has been asked to stop, and leaves the rest of the queue where it
+    /// is. Everything behind an interrupt was sent after the person stopped this turn, so it is
+    /// for whatever comes next: draining on answered the interrupt and then refused the
+    /// `turn/start` behind it with "cannot be served while a turn is running", for a turn the same
+    /// drain had just cancelled. An interrupt still owed when the drain stops is answered by
+    /// [`settle_interrupts`](Self::settle_interrupts), before the terminal frame; what is behind it
+    /// is left for the main loop.
+    ///
     /// # Errors
     ///
     /// Returns [`TransportError`] when the connection is gone.
     pub fn drain_control(&self, control: &TurnControl) -> Result<(), TransportError> {
-        while let Some(message) = self.reader.try_next()? {
+        while !control.stopping() {
+            let Some(message) = self.reader.try_next()? else {
+                break;
+            };
             self.serve_control(message, control)?;
         }
         Ok(())

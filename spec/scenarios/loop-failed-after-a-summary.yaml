@@ -1,0 +1,43 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-failed-after-a-summary
+summary: A conversation request that fails right after a summary turn folded the conversation ends the run failed, and its stop says the failure followed a compaction.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-1, tool: read, text: long}
+    outcome: called-long
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.CompleteTool
+    input: {run_id: run-a}
+    outcome: returned-then-summarise
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.AnswerSummary
+    input: {run_id: run-a}
+    outcome: folded
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.FailTurn
+    input: {run_id: run-a, retriable: false}
+    outcome: failed
+    response:
+      turn: 3
+      stop:
+        kind: failed
+        value: {cause: provider-protocol, message: 'model wire refused: Protocol: the provider refused the request', after_compaction: true}
+      ledger:
+        usage:
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+          - {model: fixture, input_tokens: 100, output_tokens: 10, cached_input_tokens: 0}
+        cost_micro_usd: null
+        turns: 3
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Failed, turns: 3, retries: 0}

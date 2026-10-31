@@ -208,10 +208,14 @@ startup** rather than leaving the model to discover it by being refused mid-run.
 Turning writing on does not turn off the approval gate. `write = true` with no `approve-up-to`
 still meets the default approver, which denies — see [Approvals](../concepts/tools-and-approvals.md).
 
-`write-scope` defaults to denying `.git/**` and allowing the rest. That default is deliberate and
-not a convenience: running against a real checkout is what these mechanisms make ordinary, and a
-model rewriting history there is the failure they make possible for the first time. It must not
-depend on a key somebody remembered to write.
+`write-scope` defaults to denying `.git/**` and `.b10x/**` and allowing the rest. That default is
+deliberate and not a convenience: running against a real checkout is what these mechanisms make
+ordinary, and a model rewriting history there is the failure they make possible for the first
+time. It must not depend on a key somebody remembered to write. `.b10x/**` is denied because a
+trusted repository's `.b10x/harness.toml` is applied by the next run. The default applies where
+Harness sets the scope, a profile with `write = true` and no `write-scope`; a `write-scope` you
+write or type replaces it, and a run switched to writing by a typed `--substrate-embedded` or
+`--substrate` gets none, so deny `.b10x/**` there yourself.
 
 ## What wins
 
@@ -220,6 +224,9 @@ depend on a key somebody remembered to write.
 3. `[default]`
 4. each `-p` in order, later winning a contested key — **whole keys, not merged**
 5. **a typed flag beats everything** — you are speaking now
+
+A trusted repository profile sits between 3 and 4, for the three keys it may set:
+`[default]` < the repository's `.b10x/harness.toml` < each `-p` < a typed flag.
 
 A profile may set `provider`, so one `-p` can move both the model and the endpoint.
 
@@ -246,6 +253,7 @@ profile write <- /home/you/.config/b10x/harness.toml (37550c38dd29)
 --oauth-token-file /home/you/.claude/.credentials.json
 --substrate-embedded
 --write-scope .git/**=denied
+--write-scope .b10x/**=denied
 --write-scope **=allowed
 --approve-up-to high
 ```
@@ -274,7 +282,19 @@ A key this build does not read refuses the file by name rather than being skippe
 reason: a rule its author wrote and the run would not have applied is worse than a run that will
 not start.
 
-## Not yet
+## A repository's own profile
 
-A repository-local `./.b10x/harness.toml` is not read. It needs a trust decision first — a profile
-is executable policy, and a repository you cloned must not silently supply one.
+A repository may ship `<workspace>/.b10x/harness.toml`, and it is read only for a workspace you
+trusted with `b10x-harness profiles trust <PATH>`; until then it is not read at all and the run
+prints one line on standard error saying so. Trust is recorded by canonical path in
+`harness-trust.toml`, beside `harness.toml`, which is never edited; a record another user owns or
+may write refuses the run. The file is one `[default]` table that may set only `provider`, `model`
+and `max-turns`; any other key or table refuses the run by name, because a profile is executable
+policy and a repository you cloned must not supply one. A `provider` holding a control, bidi or
+other unprintable character and a `max-turns` below one refuse the run too, naming the key and not
+the value. A repository's `provider` reads that provider's default credential exactly as the same
+`provider` in your own `[default]` or a `-p` profile would, and nothing more; for `codex` that
+includes renewing a token near expiry and rewriting the vendor's own login file,
+`~/.codex/auth.json`, as choosing `codex` yourself does. Where the repository's `provider` chose
+the provider, a typed credential flag refuses the run before any request.
+See [Configure a provider and profile](../guides/profiles.md#let-a-repository-choose-its-model).

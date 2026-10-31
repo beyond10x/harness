@@ -26,4 +26,5 @@ llm-responses = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 keyring-core = "1.0.0"

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:messages-cache-breakpoint-live-pin
 kind: story
-status: proposed
+status: rejected
 title: The rolling cache breakpoint is pinned from a live Anthropic run
 relations:
 - derived_from: epic:wire-pins-from-live-bytes
@@ -12,9 +12,10 @@ scope:
   path: contracts/provider-wires/anthropic-messages
 - confidence: inferred
   path: crates/harness-messages/tests/contract.rs
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-09-15T17:26:31Z", actor: "human:timo", revision: 3, imported: true}
+- {from: "proposed", to: "rejected", at: "2026-10-29T11:11:28Z", actor: "human:timo", revision: 5}
 ---
 ## Evidence
 
@@ -39,3 +40,15 @@ Same shape as the Responses story, one route along: capture, cut a new dated dir
 A new dated `contracts/provider-wires/anthropic-messages/<date>/` holds a request captured from a
 live run, showing the breakpoint where this harness places it and the provider's own cache figures
 in the response, with both halves of the contract check green against it.
+
+## Resolution
+
+Rejected on 2026-10-29 under `approval-record:wave-live-pins-d200`. A new
+`contracts/provider-wires/` version is no longer cut in this repository: invariant 14 in
+`AGENTS.md` moved what is sent and accepted to `llm` with the wire crates (atlas ADR 0097). `llm`
+covers the subject in `story:live-provider-captures` (implemented 2026-10-21, in `llm` 0.16.0, the
+tag this workspace pins): `crates/llm-messages/tests/live_capture.rs` replays a live cache-write and
+a live cache-read turn placed by `MessagesClient`'s rolling breakpoint. The harness side was
+observed live on 2026-10-29: `measurements/runs/m1-tier-b-summary-2026-10-29.jsonl` shows turn 4
+writing 5,143 tokens to the cache and turn 5 reading those 5,143 back. Gap left for `llm`: its
+capture holds the response streams, not the request bytes.

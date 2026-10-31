@@ -96,7 +96,6 @@ fn an_answer_without_an_id_is_quoted_without_raw_control_or_bidi_characters() {
 }
 
 #[test]
-#[ignore = "story:substrate-refusal-display-escapes-daemon-bytes: pre-existing on every route"]
 fn a_refusal_body_is_printed_without_raw_control_or_bidi_characters() {
     let body = format!(
         r#"{{"error":{{"code":"workspace.already-exists","message":"{}"}}}}"#,
@@ -108,6 +107,23 @@ fn a_refusal_body_is_printed_without_raw_control_or_bidi_characters() {
         "raw {:?} in {said:?}",
         raw_hostile(&said)
     );
+}
+
+/// Only the display is escaped: a caller that reads the refusal code out of the body (the CLI's
+/// `workspace.already-exists` hint) reads exactly the bytes the daemon answered.
+#[test]
+fn a_refusal_keeps_the_daemon_body_byte_for_byte() {
+    let body = format!(
+        r#"{{"error":{{"code":"workspace.already-exists","message":"{}"}}}}"#,
+        hostile_value()
+    );
+    match Client::with(Answering::with(409, body.clone())).workspace_adopt("project") {
+        Err(SubstrateError::Refused {
+            status: 409,
+            body: kept,
+        }) => assert_eq!(kept.as_bytes(), body.as_bytes()),
+        other => panic!("answered {other:?}"),
+    }
 }
 
 #[test]

@@ -43,8 +43,10 @@
       "response": {
         "stop": {
           "kind": "max-input-tokens",
-          "limit": 10,
-          "reported": 10
+          "value": {
+            "limit": 10,
+            "reported": 10
+          }
         },
         "text": "done",
         "turns": 1,

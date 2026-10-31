@@ -8,13 +8,17 @@
 //! boundary and has not been done; `STATUS.md` says so.
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use harness_app_server::ServerConfig;
+use harness_loop::Budget;
+use harness_wire::{Cancel, ModelPort, StreamSink, TurnOutcome, TurnRequest, WireError, WireId};
 use serde_json::{Value, json};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_b10x-harness");
@@ -914,58 +918,444 @@ fn an_interrupt_sent_between_turns_does_not_cancel_the_next_one() {
 // Adversarial cases. Added by the adversary pass against a4c89b1; each is red on that commit.
 // ---------------------------------------------------------------------------------------------
 
-/// Runs a pipelined-interrupt attempt many times and requires nearly all of them to be served.
-///
-/// # Why this is a rate and not a retry
-///
-/// The three cases below pipeline `turn/start` and `turn/interrupt` at a turn that ends in
-/// *microseconds* -- an unusable budget, or a model client that will not build. The client cannot
-/// make the interrupt arrive inside such a turn: both frames go out together, but on a loaded
-/// machine the reading thread can be descheduled after it queues `turn/start` and before it
-/// decodes the interrupt, by which time the turn is over. An interrupt that arrives after its turn
-/// has ended is genuinely late, and the server is right to report the turn as it ended, so one
-/// attempt that misses proves nothing in either direction.
-///
-/// **A first version of this asked for one good attempt out of six, and that was wrong.** It is
-/// true that an attempt reaching the window and served wrongly reports a miss; it does not follow
-/// that a broken server misses every attempt, only that a *totally* broken one does. One-of-six
-/// accepts a server that is wrong five times in six, and a partial regression is the historical
-/// shape of this exact defect -- the pre-fix baseline was 21 red of 50, 42% wrong, which
-/// one-of-six would have accepted about 96 times in 100. A server that is wrong half the time
-/// passed the whole suite twenty runs of twenty under that rule.
-///
-/// So the rule is a rate, and the numbers come from measurement rather than taste. On a correct
-/// server the window is reached on 596 of 600 attempts -- thirty samples of twenty, the whole
-/// suite at `--test-threads=17`, half of them under `taskset -c 0-1`, worst sample 18 -- so the
-/// per-attempt miss rate is about 0.5%. At `REQUIRED` of `ATTEMPTS` the scheduler alone fails this
-/// about once in 260,000 runs, while a server wrong 42% of the time -- the pre-fix baseline, 21
-/// red of 50 -- fails it about 994 times in 1000. `the_start_window_is_reached_on_almost_every_attempt`
-/// states the same rule as its own case for the `--max-turns 0` shape.
-///
-/// Every other interrupt case in this file uses the `slow` fixture, whose turn lasts seconds, and
-/// needs none of this.
-///
-/// `attempt` returns `None` when the invariant held, or `Some(diagnostic)` when it did not.
-fn within_the_start_window(expectation: &str, mut attempt: impl FnMut() -> Option<String>) {
-    /// Enough that the scheduler's share of the misses is not decisive, few enough to stay cheap:
-    /// each attempt is one process and one connection.
-    const ATTEMPTS: usize = 20;
-    /// Three misses tolerated: one more than the worst sample measured, which was 18.
-    const REQUIRED: usize = 17;
+// The start window, decided on the server's behaviour.
+// story:bridge-mode-interrupt-cases-are-deterministic and
+// story:bridge-interrupt-start-window-under-load.
+//
+// The cases here pipeline `turn/start` and `turn/interrupt` at a turn that fails before it streams
+// anything: an unusable budget, or a model client that will not build. Such a turn ends in
+// microseconds, so against the shipped binary the client cannot choose which side of the turn's end
+// the interrupt is decoded on. On a loaded machine the reading thread can be descheduled after it
+// queues `turn/start` and before it decodes the interrupt, and the turn is over by then.
+//
+// Until 2026-10-30 these cases asked for 17 (or 18) of 20 attempts to be served inside the window,
+// a rate taken from 596 hits in 600 attempts on a quiet machine. That rate failed correct servers:
+// 16 of 20 twice, and 17 of 20 against 18 once, on 2026-10-20 while other builds ran; 15 and 16 of
+// 20 in 2 of 8 runs on 2026-10-30 with the test pinned to one CPU (`taskset -c 0`, load average
+// about 115 on 20 CPUs). Every miss had the late shape: `turn/completed` with `failed`, the
+// interrupt answered after it.
+//
+// So the window is no longer left to the scheduler. The in-process cases drive the same
+// `harness_app_server::serve` the binary calls, with three things in the test's hands that the
+// binary takes from its process: the client's stdin, the server's stdout and the model factory.
+// Those are the seam, and they need no change to the server. The test holds the server's main
+// thread at a chosen point, hands the reading thread the interrupt, waits until the reading thread
+// has decoded and queued it, and only then lets the main thread go on. Which side of the turn's end
+// the interrupt is decoded on is then the test's choice, every attempt, under any load, and every
+// remaining difference in the frames is the server's.
+//
+// The shipped binary keeps one case, which accepts each attempt in one of the only two orders a
+// correct server produces and refuses every other, with no rate.
 
-    let mut misses = Vec::new();
-    for _ in 0..ATTEMPTS {
-        if let Some(missed) = attempt() {
-            misses.push(missed);
+/// Where the interrupt is decoded, relative to the turn it is meant to stop.
+#[derive(Debug, Clone, Copy)]
+enum Arrival {
+    /// Before the turn's control is installed. The reading thread finds no turn to cancel and
+    /// leaves a count, which `turn/start` takes over (`Interrupts::stray`).
+    BeforeInstall,
+    /// While the turn is installed and its model client is being built. The reading thread cancels
+    /// the running turn directly (`Watch::interrupted`).
+    WhileInstalled,
+}
+
+/// How the turn fails. Both fail before a single event streams, so neither reaches the drain
+/// between streamed events and only the settle after the loop can answer the interrupt.
+#[derive(Debug, Clone, Copy)]
+enum Failure {
+    /// `Budget::validate` refuses a zero `max_turns`: the binary's `--max-turns 0`.
+    BudgetRefused,
+    /// The model factory returns an error: the binary's `--base-url ftp://not-a-wire`.
+    ClientWillNotBuild,
+}
+
+/// What one in-process attempt showed.
+struct Served {
+    /// The answer to the interrupt arrived before `turn/completed`.
+    acknowledged_before_terminal: bool,
+    /// The turn was already cancelled when its model client was built.
+    cancelled_when_built: bool,
+    /// Every frame the server wrote, up to and including `turn/completed`.
+    frames: Vec<Value>,
+}
+
+impl Served {
+    fn status(&self) -> &Value {
+        &self.frames.last().expect("a terminal frame")["params"]["turn"]["status"]
+    }
+}
+
+/// The client's half of the server's stdin, handed over one chunk at a time.
+///
+/// Each time the reading thread has used up every chunk it was given and asks for more, the number
+/// of chunks it has used up goes out on `used`. The reading thread decodes a line, fires its
+/// interrupt watch and queues the frame before it reads again (`transport.rs`, `pump`), so a count
+/// that covers a chunk proves every frame in that chunk was decoded and queued.
+struct ScriptedInput {
+    chunks: Receiver<Vec<u8>>,
+    current: Vec<u8>,
+    position: usize,
+    taken: usize,
+    used: Sender<usize>,
+}
+
+impl Read for ScriptedInput {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let available = self.fill_buf()?;
+        let length = available.len().min(out.len());
+        out[..length].copy_from_slice(&available[..length]);
+        self.consume(length);
+        Ok(length)
+    }
+}
+
+impl BufRead for ScriptedInput {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        while self.position == self.current.len() {
+            let _ = self.used.send(self.taken);
+            match self.chunks.recv() {
+                Ok(chunk) => {
+                    self.current = chunk;
+                    self.position = 0;
+                    self.taken += 1;
+                }
+                // The client closed its input.
+                Err(_) => return Ok(&[]),
+            }
+        }
+        Ok(&self.current[self.position..])
+    }
+
+    fn consume(&mut self, amount: usize) {
+        self.position += amount;
+    }
+}
+
+/// The server's stdout, split into frames for the test, able to hold the server's main thread.
+///
+/// Holding is blocking the write of one named notification until the test releases it. The main
+/// thread is the only one that writes and the only one that dequeues, so while it is held it takes
+/// nothing off the queue: a `turn/start` already decoded behind it waits.
+struct HeldOutput {
+    pending: Vec<u8>,
+    frames: Sender<Value>,
+    hold: Option<(&'static str, Receiver<()>)>,
+}
+
+impl Write for HeldOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.pending.extend_from_slice(bytes);
+        while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=end).collect();
+            let frame: Value = serde_json::from_slice(&line).map_err(std::io::Error::other)?;
+            let held = self.hold.as_ref().is_some_and(|(method, _)| {
+                frame.get("method").and_then(Value::as_str) == Some(*method)
+            });
+            let _ = self.frames.send(frame);
+            if held && let Some((_, release)) = self.hold.take() {
+                let _ = release.recv_timeout(READ_TIMEOUT);
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The model of a turn whose budget is refused before the model is asked anything.
+struct Unreached(WireId);
+
+impl ModelPort for Unreached {
+    fn wire(&self) -> &WireId {
+        &self.0
+    }
+
+    fn turn(
+        &mut self,
+        _request: &TurnRequest,
+        _sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        unreachable!("a zero `max_turns` is refused before the model is asked anything")
+    }
+}
+
+/// The model factory an in-process server is handed: the seam the binary fills with `model_client`.
+type Factory = Box<dyn FnMut(Cancel) -> Result<Box<dyn ModelPort>, String> + Send>;
+
+/// The test's end of an in-process connection.
+struct InProcess {
+    chunks: Sender<Vec<u8>>,
+    sent: usize,
+    used: Receiver<usize>,
+    frames: Receiver<Value>,
+    seen: Vec<Value>,
+    server: thread::JoinHandle<Result<(), String>>,
+}
+
+impl InProcess {
+    /// Serves one connection on its own thread, as the binary serves its stdin and stdout.
+    ///
+    /// `hold` names a notification the server's main thread is held at once it writes it, until
+    /// the paired sender sends or is dropped.
+    fn serve(budget: Budget, hold: Option<(&'static str, Receiver<()>)>, factory: Factory) -> Self {
+        let (chunk_sender, chunks) = channel::<Vec<u8>>();
+        let (used_sender, used) = channel::<usize>();
+        let (frame_sender, frames) = channel::<Value>();
+        let input = ScriptedInput {
+            chunks,
+            current: Vec::new(),
+            position: 0,
+            taken: 0,
+            used: used_sender,
+        };
+        let output = HeldOutput {
+            pending: Vec::new(),
+            frames: frame_sender,
+            hold,
+        };
+        let config = ServerConfig {
+            model: "b10x-emulated".to_owned(),
+            budget,
+            context_window: None,
+            version: "test".to_owned(),
+        };
+        let server = thread::spawn(move || {
+            let mut factory = factory;
+            harness_app_server::serve(&config, &mut *factory, input, output)
+                .map_err(|error| error.to_string())
+        });
+        Self {
+            chunks: chunk_sender,
+            sent: 0,
+            used,
+            frames,
+            seen: Vec::new(),
+            server,
         }
     }
-    let hits = ATTEMPTS - misses.len();
-    assert!(
-        hits >= REQUIRED,
-        "{expectation}; {hits} of {ATTEMPTS} attempts were served correctly, under the {REQUIRED} \
-         a correct server reaches. A rate this low is a server that is sometimes wrong, not a \
-         scheduler that was sometimes slow. Misses: {misses:?}"
+
+    /// Hands the reading thread one chunk of frames and returns the chunk's number.
+    fn send(&mut self, frames: &[Value]) -> usize {
+        let mut chunk = String::new();
+        for frame in frames {
+            chunk.push_str(&frame.to_string());
+            chunk.push('\n');
+        }
+        self.chunks
+            .send(chunk.into_bytes())
+            .expect("the server's reading thread is alive");
+        self.sent += 1;
+        self.sent
+    }
+
+    /// Waits until the reading thread has decoded and queued every frame of chunk `number`.
+    fn decoded(&self, number: usize, what: &str) -> Result<(), String> {
+        loop {
+            match self.used.recv_timeout(READ_TIMEOUT) {
+                Ok(used) if used >= number => return Ok(()),
+                Ok(_) => {}
+                Err(_) => {
+                    return Err(format!(
+                        "the reading thread did not decode {what} within {READ_TIMEOUT:?}"
+                    ));
+                }
+            }
+        }
+    }
+
+    fn next(&mut self, what: &str) -> Result<Value, String> {
+        match self.frames.recv_timeout(READ_TIMEOUT) {
+            Ok(frame) => {
+                self.seen.push(frame.clone());
+                Ok(frame)
+            }
+            Err(_) => Err(format!(
+                "waiting for {what}, the server wrote nothing within {READ_TIMEOUT:?} after {:?}",
+                self.seen
+            )),
+        }
+    }
+
+    fn response(&mut self, id: i64) -> Result<Value, String> {
+        loop {
+            let frame = self.next(&format!("the answer to request {id}"))?;
+            if frame.get("id") == Some(&json!(id)) && frame.get("method").is_none() {
+                return Ok(frame);
+            }
+        }
+    }
+
+    /// The handshake and `thread/start`, in one chunk. Returns the thread's id.
+    fn open_thread(&mut self) -> Result<String, String> {
+        self.send(&[
+            json!({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "test"}}}),
+            json!({"method": "initialized", "params": {}}),
+            json!({"id": 2, "method": "thread/start", "params": {}}),
+        ]);
+        let thread = self.response(2)?;
+        thread["result"]["thread"]["id"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("thread/start answered without an id: {thread}"))
+    }
+
+    /// Reads to `turn/completed`; `true` when the answer to `id` came before it.
+    fn read_turn_watching_for(&mut self, id: i64) -> Result<bool, String> {
+        let mut answered = false;
+        loop {
+            let frame = self.next("`turn/completed`")?;
+            if frame.get("id") == Some(&json!(id)) && frame.get("method").is_none() {
+                answered = true;
+            }
+            if frame.get("method").and_then(Value::as_str) == Some("turn/completed") {
+                return Ok(answered);
+            }
+        }
+    }
+
+    /// Closes the input and requires the connection to end cleanly. Returns every frame written.
+    fn finish(self) -> Result<Vec<Value>, String> {
+        let Self {
+            chunks,
+            seen,
+            server,
+            ..
+        } = self;
+        // Closing the input ends the connection, and a connection that ends that way is no error.
+        drop(chunks);
+        let deadline = Instant::now() + READ_TIMEOUT;
+        while !server.is_finished() {
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "the server did not end within {READ_TIMEOUT:?} of its input closing: {seen:?}"
+                ));
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        match server.join() {
+            Ok(Ok(())) => Ok(seen),
+            Ok(Err(error)) => Err(format!(
+                "the connection ended with an error: {error}; {seen:?}"
+            )),
+            Err(_) => Err(format!("the server thread panicked after {seen:?}")),
+        }
+    }
+}
+
+fn turn_start(thread_id: &str) -> Value {
+    json!({"id": 50, "method": "turn/start", "params": {
+        "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
+    }})
+}
+
+fn turn_interrupt(thread_id: &str) -> Value {
+    json!({"id": 99, "method": "turn/interrupt", "params": {"threadId": thread_id}})
+}
+
+/// Pipelines `turn/start` and `turn/interrupt` at an in-process server whose turn fails as
+/// `failure` says, with the interrupt decoded at `arrival`, and reads the turn to its terminal
+/// frame.
+///
+/// `Err` names the step the server never reached, with the frames it did write.
+fn pipelined_interrupt(failure: Failure, arrival: Arrival) -> Result<Served, String> {
+    let (release_output, output_released) = channel::<()>();
+    let (entered_sender, entered) = channel::<()>();
+    let (release_factory, factory_released) = channel::<()>();
+    let (cancelled_sender, cancelled) = channel::<bool>();
+
+    let mut client = InProcess::serve(
+        match failure {
+            Failure::BudgetRefused => Budget::default().with_max_turns(0),
+            Failure::ClientWillNotBuild => Budget::default(),
+        },
+        matches!(arrival, Arrival::BeforeInstall).then_some(("thread/started", output_released)),
+        Box::new(
+            move |cancel: Cancel| -> Result<Box<dyn ModelPort>, String> {
+                let _ = entered_sender.send(());
+                let _ = factory_released.recv_timeout(READ_TIMEOUT);
+                let _ = cancelled_sender.send(cancel.is_cancelled());
+                match failure {
+                    Failure::BudgetRefused => Ok(Box::new(Unreached(
+                        WireId::new("openai-responses").expect("a valid wire id"),
+                    ))),
+                    Failure::ClientWillNotBuild => {
+                        Err("the model client will not build".to_owned())
+                    }
+                }
+            },
+        ),
     );
+    let thread_id = client.open_thread()?;
+
+    match arrival {
+        Arrival::BeforeInstall => {
+            // The main thread is held writing `thread/started`, before it can dequeue `turn/start`.
+            // Both frames are decoded behind it, in the order a pipelining client sends them.
+            let _ = release_factory.send(());
+            client.send(&[turn_start(&thread_id)]);
+            let number = client.send(&[turn_interrupt(&thread_id)]);
+            client.decoded(
+                number,
+                "the interrupt while the server was held at `thread/started`",
+            )?;
+            let _ = release_output.send(());
+        }
+        Arrival::WhileInstalled => {
+            // The main thread is held building the turn's model client, inside `drive_turn`, so the
+            // turn is installed and has not ended.
+            client.send(&[turn_start(&thread_id)]);
+            entered.recv_timeout(READ_TIMEOUT).map_err(|_| {
+                format!(
+                    "the server never built the turn's model client: {:?}",
+                    client.seen
+                )
+            })?;
+            let number = client.send(&[turn_interrupt(&thread_id)]);
+            client.decoded(
+                number,
+                "the interrupt while the turn's model client was being built",
+            )?;
+            let _ = release_factory.send(());
+        }
+    }
+
+    let cancelled_when_built = cancelled
+        .recv_timeout(READ_TIMEOUT)
+        .map_err(|_| format!("the model factory never returned: {:?}", client.seen))?;
+    let acknowledged_before_terminal = client.read_turn_watching_for(99)?;
+    let frames = client.seen.clone();
+    client.finish()?;
+
+    Ok(Served {
+        acknowledged_before_terminal,
+        cancelled_when_built,
+        frames,
+    })
+}
+
+/// Runs `failure` at both arrivals and hands each to `check`, naming the arrival in any red.
+///
+/// `check` returns `Some(cause)` when the server got that attempt wrong.
+fn at_both_arrivals(failure: Failure, check: impl Fn(&Served) -> Option<String>) {
+    for arrival in [Arrival::BeforeInstall, Arrival::WhileInstalled] {
+        let served = pipelined_interrupt(failure, arrival)
+            .unwrap_or_else(|cause| panic!("{failure:?}, interrupt decoded {arrival:?}: {cause}"));
+        assert!(
+            served.cancelled_when_built,
+            "{failure:?}, interrupt decoded {arrival:?}: the interrupt was decoded before the \
+             turn's model client was built, and the turn was still not cancelled by then \
+             (story:bridge-mode-interrupt-cases-are-deterministic). Frames: {:?}",
+            served.frames
+        );
+        if let Some(cause) = check(&served) {
+            panic!(
+                "{failure:?}, interrupt decoded {arrival:?}: {cause} \
+                 (story:bridge-mode-interrupt-cases-are-deterministic). Frames: {:?}",
+                served.frames
+            );
+        }
+    }
 }
 
 /// Reads until `turn/completed`, returning (the answer to `id` if it came first, the frames seen).
@@ -988,78 +1378,36 @@ fn read_turn_watching_for(bridge: &mut Bridge, id: i64) -> (Option<Value>, Vec<V
 
 #[test]
 fn an_interrupt_is_answered_before_the_terminal_frame_even_when_the_turn_errors() {
-    // `Wire::settle_interrupts` is called after `AgentLoop::run(..).map_err(..)?` in
-    // `crates/harness-app-server/src/lib.rs:530`. The `?` is upstream of it, so every `LoopError`
-    // skips the settle entirely and the turn writes its terminal frame owing an answer.
+    // `Wire::settle_interrupts` was once called after `AgentLoop::run(..).map_err(..)?`, so every
+    // `LoopError` skipped the settle and the turn wrote its terminal frame owing an answer.
     //
-    // `--max-turns 0` reaches that arm deterministically: `Budget::validate` rejects a zero
-    // ceiling in `drive_run`, *before* `stop_before_turn` looks at the cancel token, so a turn
-    // cancelled before it began still ends as `Err(LoopError::Budget)`. The everyday member of
-    // the same class is `LoopError::Wire` -- an expired credential or a 5xx racing a person's
-    // stop -- which is not deterministic enough to pin.
+    // A zero `max_turns` reaches that arm deterministically: `Budget::validate` rejects it in
+    // `drive_run`, before `stop_before_turn` looks at the cancel token, so a turn cancelled before
+    // it began still ends as `Err(LoopError::Budget)`. The everyday member of the same class is
+    // `LoopError::Wire`, an expired credential or a 5xx racing a person's stop.
     //
     // What the settle exists to guarantee, in its own words: "an acknowledgement read after
-    // `turn/completed` is a receipt, not an acknowledgement."
-    //
-    // Retried, for the reason `within_the_start_window` gives: the window is real and the client
-    // cannot make it certain. It fails on every attempt if the server answers after the fact.
-    let endpoint = Endpoint::start("text");
-    within_the_start_window(
-        "the interrupt must be answered before the turn's terminal frame, not after it",
-        || {
-            let mut bridge = Bridge::start(&endpoint, &["--max-turns", "0"]);
-            bridge.handshake();
-            let thread_id = bridge.start_thread(&json!({}));
-
-            bridge.write_pipelined(
-                &json!({"id": 50, "method": "turn/start", "params": {
-                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-                }}),
-                &json!({"id": 99, "method": "turn/interrupt", "params": {
-                    "threadId": thread_id,
-                }}),
-            );
-
-            let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
-            acknowledgement
-                .is_none()
-                .then(|| format!("no answer to the interrupt before {frames:?}"))
-        },
-    );
+    // `turn/completed` is a receipt, not an acknowledgement." Decided at both arrivals, every run.
+    at_both_arrivals(Failure::BudgetRefused, |served| {
+        (!served.acknowledged_before_terminal)
+            .then(|| "the interrupt was not answered before the turn's terminal frame".to_owned())
+    });
 }
 
 #[test]
 fn an_interrupt_that_cancelled_a_turn_decides_its_status_even_when_the_turn_errors() {
-    // Same arm, second consequence. `drive_turn` reads `control.requested` *after* the `?`
-    // (`crates/harness-app-server/src/lib.rs:526-541`), so a turn the reading thread cancelled is
-    // reported `failed` with the error's message, and the client is separately told its interrupt
-    // succeeded. The comment two lines below the check says the opposite: "An interrupt that was
-    // actually asked for is the reason this turn ended, even if the connection then dropped."
-    //
-    // Retried, for the reason `within_the_start_window` gives.
-    let endpoint = Endpoint::start("text");
-    within_the_start_window(
-        "a turn the reading thread cancelled must not be reported as anything else",
-        || {
-            let mut bridge = Bridge::start(&endpoint, &["--max-turns", "0"]);
-            bridge.handshake();
-            let thread_id = bridge.start_thread(&json!({}));
-
-            bridge.write_pipelined(
-                &json!({"id": 50, "method": "turn/start", "params": {
-                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-                }}),
-                &json!({"id": 99, "method": "turn/interrupt", "params": {
-                    "threadId": thread_id,
-                }}),
-            );
-
-            let (_, frames) = read_turn_watching_for(&mut bridge, 99);
-            (frames.last().expect("a terminal frame")["params"]["turn"]["status"]
-                != json!("interrupted"))
-            .then(|| format!("{frames:?}"))
-        },
-    );
+    // Same arm, second consequence. `drive_turn` once read `control.requested` after the `?`, so a
+    // turn the reading thread cancelled was reported `failed` with the error's message, and the
+    // client was separately told its interrupt succeeded. "An interrupt that was actually asked for
+    // is the reason this turn ended."
+    at_both_arrivals(Failure::BudgetRefused, |served| {
+        (served.status() != &json!("interrupted")).then(|| {
+            format!(
+                "a turn the interrupt cancelled reports {} rather than `interrupted`",
+                served.status()
+            )
+        })
+    });
 }
 
 #[test]
@@ -1214,51 +1562,49 @@ fn an_interrupted_turn_ends_without_waiting_out_the_settle_bound() {
 
 #[test]
 fn an_interrupt_is_answered_before_the_terminal_frame_when_the_model_client_will_not_build() {
-    // The adversary's two `--max-turns 0` cases name the `?` on `AgentLoop::run`. There is a
-    // second `?` one line above it, on the model factory, with the same symptom and the same
-    // cause: `crates/harness-app-server/src/lib.rs`'s `drive_turn` returned before it settled
-    // what the turn owed. Reached from the shipped binary with nothing but a flag --
-    // `llm_providers::BaseUrl::new` refuses a base URL that is not absolute http or https,
-    // and `model_client` runs per turn, so every turn on this connection fails to build a client
-    // while the handshake and `thread/start` still work.
+    // The `?` on `AgentLoop::run` had a sibling one line above it, on the model factory, with the
+    // same symptom and the same cause: `drive_turn` returned before it settled what the turn owed.
+    // The shipped binary reaches it with nothing but a flag (`llm_providers::BaseUrl::new` refuses
+    // a base URL that is not absolute http or https, and `model_client` runs per turn), and
+    // `the_shipped_binary_answers_a_pipelined_interrupt_in_one_of_two_orders` drives that path.
     //
-    // Observed on the binary before the fix, in this order: `turn/completed` with
+    // Observed on the binary before that fix, in this order: `turn/completed` with
     // `status: "failed"`, and only then `{"id":99,"result":{}}`.
-    //
-    // Retried, for the reason `within_the_start_window` gives.
-    within_the_start_window(
-        "a turn whose model client would not build still owes an answer to the interrupt that \
-         cancelled it, before its terminal frame, and is that turn's status",
-        || {
-            // No fixture: this turn never reaches a wire, so there is nothing for one to answer.
-            let mut bridge = Bridge::start_at("ftp://not-a-wire", &[]);
-            bridge.handshake();
-            let thread_id = bridge.start_thread(&json!({}));
-
-            bridge.write_pipelined(
-                &json!({"id": 50, "method": "turn/start", "params": {
-                    "threadId": thread_id, "input": [{"type": "text", "text": "go"}],
-                }}),
-                &json!({"id": 99, "method": "turn/interrupt", "params": {
-                    "threadId": thread_id,
-                }}),
-            );
-
-            let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
-            let terminal = &frames.last().expect("a terminal frame")["params"]["turn"]["status"];
-            (acknowledgement.is_none() || terminal != &json!("interrupted"))
-                .then(|| format!("{frames:?}"))
-        },
-    );
+    at_both_arrivals(Failure::ClientWillNotBuild, |served| {
+        if !served.acknowledged_before_terminal {
+            Some("the interrupt was not answered before the turn's terminal frame".to_owned())
+        } else if served.status() != &json!("interrupted") {
+            Some(format!(
+                "a turn the interrupt cancelled reports {} rather than `interrupted`",
+                served.status()
+            ))
+        } else {
+            None
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
 // Second adversarial pass, against 329e2c3.
 // ---------------------------------------------------------------------------------------------
 
-/// One `--max-turns 0` attempt at the start window. `true` when the invariant held.
-fn budget_error_attempt(endpoint: &Endpoint) -> bool {
-    let mut bridge = Bridge::start(endpoint, &["--max-turns", "0"]);
+/// How one shape of the shipped binary is started.
+type StartBridge = fn(&Endpoint) -> Bridge;
+
+/// One pipelined attempt at the shipped binary, for a turn that fails at once.
+///
+/// Returns which of the two orders a correct server produces the attempt took, or the cause when it
+/// took neither:
+///
+/// - **in window**: the interrupt was decoded before the turn ended. It is answered before
+///   `turn/completed`, and the turn reports `interrupted`.
+/// - **late**: the interrupt was decoded after the turn ended. The turn reports how it ended,
+///   `failed`, and the interrupt is still answered, after `turn/completed`.
+///
+/// Every other combination is the server's: an answer before the terminal frame with any status
+/// but `interrupted`, an `interrupted` turn whose interrupt was not answered first, or an interrupt
+/// never answered at all.
+fn binary_attempt(bridge: &mut Bridge) -> Result<&'static str, String> {
     bridge.handshake();
     let thread_id = bridge.start_thread(&json!({}));
     bridge.write_pipelined(
@@ -1269,29 +1615,164 @@ fn budget_error_attempt(endpoint: &Endpoint) -> bool {
             "threadId": thread_id,
         }}),
     );
-    let (acknowledgement, frames) = read_turn_watching_for(&mut bridge, 99);
-    acknowledgement.is_some()
-        && frames.last().expect("a terminal frame")["params"]["turn"]["status"]
-            == json!("interrupted")
+    let (acknowledgement, frames) = read_turn_watching_for(bridge, 99);
+    let status = frames.last().expect("a terminal frame")["params"]["turn"]["status"].clone();
+    match (acknowledgement, status.as_str()) {
+        (Some(answer), Some("interrupted")) if answer["error"].is_null() => Ok("in window"),
+        (Some(answer), Some("interrupted")) => {
+            Err(format!("the interrupt was refused: {answer}; {frames:?}"))
+        }
+        (Some(_), _) => Err(format!(
+            "the interrupt was answered before the terminal frame, so it was acted on, yet the \
+             turn reports {status}: {frames:?}"
+        )),
+        (None, Some("failed")) => {
+            let late = bridge.next_frame();
+            if late.get("id") == Some(&json!(99)) && late["error"].is_null() {
+                Ok("late")
+            } else {
+                Err(format!(
+                    "after a turn that ended without its interrupt, the next frame was {late} \
+                     rather than the interrupt's answer: {frames:?}"
+                ))
+            }
+        }
+        (None, _) => Err(format!(
+            "the turn reports {status} while the interrupt was still unanswered at its terminal \
+             frame: {frames:?}"
+        )),
+    }
 }
 
 #[test]
-fn the_start_window_is_reached_on_almost_every_attempt() {
-    // The rate `within_the_start_window` now applies to all three of its cases, stated once more
-    // as a case of its own: how often an attempt reaches the window, rather than whether any
-    // attempt does. It exists because the first version of that wrapper asked for one good attempt
-    // of six and so accepted a server wrong five times in six -- a guard against a partial
-    // regression, which is the historical shape of this defect, rather than only against a total
-    // one.
+fn the_shipped_binary_answers_a_pipelined_interrupt_in_one_of_two_orders() {
+    // Was `the_start_window_is_reached_on_almost_every_attempt`, which asked for 18 of 20 attempts
+    // in window and failed correct servers under load
+    // (story:bridge-mode-interrupt-cases-are-deterministic). Whether an attempt lands in window is
+    // the scheduler's; the cases above decide the window itself in process. What the binary still
+    // has to show is that both its flags reach the paths those cases drive, and that no attempt,
+    // whichever side it lands on, is answered in an order a correct server never produces. No
+    // rate: one attempt out of order is red, and the red names it.
     const ATTEMPTS: usize = 20;
-    const REQUIRED: usize = 18;
     let endpoint = Endpoint::start("text");
-    let hits = (0..ATTEMPTS)
-        .filter(|_| budget_error_attempt(&endpoint))
-        .count();
-    assert!(
-        hits >= REQUIRED,
-        "{hits} of {ATTEMPTS} attempts were served correctly; the window is reached on nearly \
-         every attempt on a correct server, so a rate this low is a server that is sometimes wrong"
+    let shapes: [(&str, StartBridge); 2] = [
+        ("--max-turns 0", |endpoint| {
+            Bridge::start(endpoint, &["--max-turns", "0"])
+        }),
+        ("--base-url ftp://not-a-wire", |_| {
+            Bridge::start_at("ftp://not-a-wire", &[])
+        }),
+    ];
+    for (shape, start) in shapes {
+        let mut orders = Vec::new();
+        for attempt in 1..=ATTEMPTS {
+            let outcome = catch_unwind(AssertUnwindSafe(|| binary_attempt(&mut start(&endpoint))))
+                .unwrap_or_else(|panic| {
+                    Err(panic
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned()))
+                        .unwrap_or_else(|| "the attempt panicked".to_owned()))
+                });
+            match outcome {
+                Ok(order) => orders.push(order),
+                Err(cause) => panic!(
+                    "{shape}, attempt {attempt} of {ATTEMPTS}: {cause} \
+                     (story:bridge-mode-interrupt-cases-are-deterministic; earlier attempts: \
+                     {orders:?})"
+                ),
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The end of the turn. Found by story:bridge-mode-interrupt-cases-are-deterministic on 2026-10-30.
+// ---------------------------------------------------------------------------------------------
+
+/// One in-process attempt at a turn whose model client will not build, with the interrupt sent
+/// `delay` after `turn/start`.
+///
+/// Returns which of the two orders a correct server produces the attempt took (see
+/// [`binary_attempt`]), or the cause when it took neither.
+fn interrupt_after(delay: Duration) -> Result<&'static str, String> {
+    let mut client = InProcess::serve(
+        Budget::default(),
+        None,
+        Box::new(|_cancel| Err("the model client will not build".to_owned())),
     );
+    let thread_id = client.open_thread()?;
+    client.send(&[turn_start(&thread_id)]);
+    let sent = Instant::now();
+    while sent.elapsed() < delay {
+        std::hint::spin_loop();
+    }
+    client.send(&[turn_interrupt(&thread_id)]);
+    let answered_first = client.read_turn_watching_for(99)?;
+    let status = client.seen.last().expect("a terminal frame")["params"]["turn"]["status"].clone();
+    let order = match (answered_first, status.as_str()) {
+        (true, Some("interrupted")) => "in window",
+        (true, _) => {
+            return Err(format!(
+                "the interrupt was answered before the terminal frame, so it was acted on, yet \
+                 the turn reports {status}: {:?}",
+                client.seen
+            ));
+        }
+        (false, Some("failed")) => {
+            let late = client.next("the late interrupt's answer")?;
+            if late.get("id") != Some(&json!(99)) || !late["error"].is_null() {
+                return Err(format!(
+                    "after a turn that ended without its interrupt, the next frame was {late} \
+                     rather than the interrupt's answer"
+                ));
+            }
+            "late"
+        }
+        (false, _) => {
+            return Err(format!(
+                "the turn reports {status} while its interrupt was still unanswered at its \
+                 terminal frame: {:?}",
+                client.seen
+            ));
+        }
+    };
+    client.finish()?;
+    Ok(order)
+}
+
+#[test]
+fn an_interrupt_decoded_as_its_turn_ends_is_answered_in_one_of_two_orders() {
+    // `drive_turn` settled what its turn owed and only then let go of the turn, so the reading
+    // thread could still count an interrupt against a turn whose settle was already over. Decoded
+    // between the settle's last look at `owed` and the read of `requested`, it made the turn
+    // `interrupted` and was answered after `turn/completed`: a receipt, on the one turn its own
+    // interrupt decided. Measured on 2026-10-30 with this attempt swept across the end of the
+    // turn: 11 and 28 of 20000 attempts in two sweeps on the server before the fix, 0 of 20000
+    // after it. The fix lets go of the turn first, under the lock the reading thread counts under,
+    // so the count the settle waits for is final before the settle starts.
+    //
+    // No rate. A correct server takes one of the two orders on every attempt, under any load, and
+    // this case asserts only that, attempt by attempt. The delay does not place the interrupt at
+    // the end of the turn: both orders occur at every delay from 25 ns to 100 µs, so where an
+    // attempt lands is the scheduler's doing, and the case does not check that it saw both orders.
+    // It is a net across the whole binary path, not the guard for the fix: a copy of it counting
+    // misses passed the server before the fix in 1 of 24 runs (up to 8 misses in the others) and
+    // 0 misses in 13 runs after it. The deterministic guard is
+    // `an_interrupt_decoded_after_the_settle_does_not_decide_the_ended_turn` in
+    // `harness-app-server`'s `lib.rs`, which holds the gap open on every run.
+    const ATTEMPTS: u32 = 4000;
+    const STEP: Duration = Duration::from_nanos(25);
+    let mut orders = std::collections::BTreeMap::<&str, u32>::new();
+    for attempt in 1..=ATTEMPTS {
+        let delay = STEP * (attempt % 4000);
+        match interrupt_after(delay) {
+            Ok(order) => *orders.entry(order).or_default() += 1,
+            Err(cause) => panic!(
+                "attempt {attempt} of {ATTEMPTS}, interrupt sent {delay:?} after `turn/start`: \
+                 {cause} (story:bridge-mode-interrupt-cases-are-deterministic; earlier attempts: \
+                 {orders:?})"
+            ),
+        }
+    }
 }

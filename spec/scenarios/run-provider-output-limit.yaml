@@ -43,7 +43,9 @@
       "response": {
         "stop": {
           "kind": "provider-incomplete",
-          "reason": "max_output_tokens"
+          "value": {
+            "reason": "max_output_tokens"
+          }
         },
         "text": "done",
         "turns": 1,

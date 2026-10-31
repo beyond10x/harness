@@ -7,15 +7,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-31
+
 ### Added
 
 - `harness_loop::LoopTask`: the loop awaited from an async program. `LoopTask::spawn(config, build)` starts one thread with no runtime context and runs `build(&LoopCancel) -> Result<LoopPorts, E>` there; the model, tool and approval ports, and optional hooks and environment, are built, used and dropped on that thread and need not be `Send`. `run`, `run_in`, `resume_approval` and `call` send one command when called and return a `LoopTaskFuture` the thread completes through a waker, so it can be awaited on any executor; harness-loop gains no runtime dependency. Commands run one at a time in the order sent; each takes its sink by value and returns it on every exit path: `run` and `resume_approval` resolve to a `Ran` holding the run's `Result<LoopOutcome, LoopError>` and the sink, `run_in` to a `RanIn` that also holds the conversation and the spend, and `call` to the `ToolOutcome` and the sink. The task's one `LoopCancel` is handed to the builder and exposed as `cancel_handle()`. Dropping a future whose command has not started skips the command, so an abandoned `call` performs no effect; dropping one whose command is running cancels the token. `spawn` and dropping the task do not block; `shutdown()` resolves once the ports have dropped. The synchronous `AgentLoop` is unchanged.
 - `harness_loop::LoopTaskError`: what a `LoopTask` future resolves to when it does not carry the command's answer: the builder's failure, a panic on the task's thread (message included), or a thread that is gone. The loop's own `LoopError` is part of the answer, in `Ran` and `RanIn`.
 - `harness_loop::Ran`: the answer of `LoopTask::run` and `LoopTask::resume_approval`, the run's result beside the sink.
 
+## [0.25.0] - 2026-10-30
+
+### Added
+
+- Repository profiles: a trusted workspace's `.b10x/harness.toml` may set `provider`, `model` and `max-turns` in a `[default]` table, and nothing else; any other table or key refuses the run and names it escaped. `profiles trust <PATH>` and `profiles untrust <PATH>` keep the trust list by canonical path in `harness-trust.toml` beside the user's profiles, under a lock, and refuse a record that is not the user's own or not mode 0600; `untrust` resolves a path the way `trust` does, including `..` after a link, a trailing slash, a symlinked parent, a dangling link (also a relative one under a symlinked directory) and a path that has since become a link. An untrusted file is not read, and the run prints one stderr line that says how to trust it. Precedence is the user's `[default]`, then the repository, then `-p`, then a typed flag; `session.started.profiles` records the repository file's path and digest. A provider that cannot be printed or a `max-turns` below 1 is refused, and so is a typed credential flag when the repository chose the provider. CLI contract cut as `2026-10-30`.
+- `profiles list`, `profiles show` and `profiles explain` include the repository profile; `explain` prints the `--model` and `--max-turns` it resolves to, escaped so the printed command can be pasted.
+- The ESS specification models the agent loop's control states as the entity `harness.loop.Loop` (7 states, 23 transitions, including turns of several calls), the run ledger and `harness.approval-checkpoint/1`, with the `harness.loop.Loops` view and 18 authored scenarios: the 80% compaction trigger at its edge, a failure after a summary or a failed summary, a second deferral and a resumed run carrying on with its turn's next call. `cargo xtask specification` runs 183 scenarios against the real loop, up from 29, and none passes on the inert target. `spec/system.yaml` moves from format `ess/22` to `ess/23`.
+
 ### Changed
 
-- ESS 0.76.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `d5c00e9c`), up from 0.75.0; the generated model and suite are byte-identical.
+- The default write scope also denies `.b10x/**`, so a run a profile switches to writing cannot change the repository profile that chose its own provider; the confined-change tutorial and the tools-and-approvals example type it too. A typed `--write-scope` or a typed `--substrate` run must deny it itself (`story:typed-substrate-run-gets-the-default-write-scope`).
+- `RunLedger` derives `Serialize` and `Deserialize` with `deny_unknown_fields`.
+
+### Fixed
+
+- A profile's `model` was dropped when the same profile set a `provider`.
+- Nothing a repository or a path controls reaches the terminal raw: repository-profile refusals, the trust and untrust lines, `profiles list` and `profiles explain`, and the model's binding-id refusal escape control characters.
+- A substrate refusal's `Display` escapes `\` again, so a raw control character and its spelled-out escape no longer print the same; each refusal is escaped exactly once. An embedded-driver refusal lists the driver error's fields, and a daemon answer of the wrong shape names the member and its value; serde's message no longer reaches the refusal.
+- Bridge mode answers an interrupt before `turn/completed` on every path, including a turn whose budget is refused or whose model client does not build. An interrupt decoded just as a turn ends no longer marks that turn `interrupted` with its answer arriving after the terminal frame; the order is held by a deterministic in-process case, and the start-window case passed 20 of 20 runs under load.
+- Bridge mode no longer refuses a `turn/start` sent right behind an interrupt while a turn streams with "cannot be served while a turn is running": the interrupted turn ends and the next turn starts. The same request is still refused between two interrupts owed to one turn and while a tool call is outstanding (`story:bridge-turn-start-after-interrupt-on-every-path`).
+
+## [0.24.0] - 2026-10-29
+
+### Changed
+
+- ESS 0.77.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `f692aabb`), up from 0.75.0; on its own the move left the generated model and suite byte-identical.
+- `libz-sys` moves from 1.1.29 to 1.1.31 in `Cargo.lock` (RUSTSEC-2026-0418).
+- The ESS specification declares the loop stop `harness.loop.Stop` as a union tagged by `kind`, one variant per `LoopStop` variant with exactly its fields, in place of the `StopKind` enum and a struct of twelve optional fields, so ESS refuses a stop no `LoopStop` can be (a `completed` stop carrying `limit_ms`). The specification moves to format `ess/22` for the unit variant `completed`; scenarios and the conformance adapter use ESS's adjacent union form (`spec/COVERAGE.md`), and `b10x-harness-conformance --write-projections` regenerates the model and suite from the pinned libraries.
+
+### Fixed
+
+- `SubstrateError::Refused` and `SubstrateError::Unreadable` escape control characters (ESC, C1, DEL, line breaks) and format characters such as U+202E in their `Display`, the way `escape_debug` does but leaving `"`, `'` and `\` as they are; the new `harness_substrate::inert` is that escaper, and `--substrate-adopt` uses it for a status-0 refusal, which a program on the socket can also produce by answering `HTTP/1.1 0`, and a withheld-tool note escapes a fact value the daemon stated. The `body` and `reason` fields still hold the original text byte for byte.
+
+## [0.23.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** `LoopStop` gains the variant `Failed { cause, message, after_compaction }` (kind `failed`); a `match` over `LoopStop` needs an arm for it. A run that had started and then ended in a `LoopError` now emits one `finished` event with that stop before `AgentLoop::run_in` returns the same error. Before, its event stream ended on `turn-started` and `run --json` printed no terminal line, so a supervisor reading the record could not tell a failed run from a lost one. `cause` is `provider-<wire error code>` (`provider-refused`, `provider-transport`, …), `environment`, `budget` or `config`; `message` is the error on one line; `after_compaction` is true when a `conversation-compacted` warning came before the failing request in its turn. The exit status stays 1, human mode prints nothing new, and `app-server` maps the stop to status `failed`. Written on 2026-10-26 for a release that was never tagged; it lands here.
+- The seven `llm-*` crates move from llm tag `0.16.0` (`33ae9001`) to `0.17.0` (`d9282efa`), the newest release, and `harness-llm` sets llm's new `Controls::return_unpublished_calls` on every turn.
+
+### Fixed
+
+- A `--surface verbs` run whose model calls a catalogue entry by its own name (`find`, `file_read`) completes: the call reaches the loop, which routes it over the catalogue or answers it as a failed outcome (invariant 9). On llm 0.16.0 llm refused the whole turn (`model output contains a duplicate call or unpublished tool`) and every live verbs run ended on turn 2; on 0.17.0 three of three completed live (`measurements/runs/m2-live-verbs-*-llm017-2026-10-29.jsonl`).
+- A tool-using `-p codex` run passes its second turn. On llm 0.16.0 the Codex stream's `response.metadata` event became an opaque item that the next request replayed, and the endpoint refused it (`400 invalid_value`); llm 0.17.0 accepts the event without keeping it. Two of two live runs completed (`measurements/runs/r2-live-codex-*-llm017-2026-10-29.jsonl`).
 
 ## [0.22.0] - 2026-10-28
 

@@ -12,7 +12,12 @@ pub fn controlled_fixture_binary() -> &'static Path {
         .get_or_init(|| {
             let source =
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_endpoint.rs");
-            let directory = tempfile::tempdir()
+            // Under the target directory, not `$TMPDIR`: a `TempDir` held by this static is never
+            // dropped, so a directory under `$TMPDIR` would outlive every run
+            // (story:end-to-end-suite-leaves-no-fixture-binary). `cargo clean` removes this one.
+            let directory = tempfile::Builder::new()
+                .prefix("end-to-end-mcp-endpoint-")
+                .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
                 .expect("a fixture build directory")
                 .keep();
             let binary = directory.join("b10x-harness-mcp-endpoint");

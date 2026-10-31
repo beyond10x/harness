@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T21:23:15Z",
+  "actor": "human:timo",
+  "artifact": "story:end-to-end-suite-leaves-no-fixture-binary",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo xtask gate at 778edbb",
+    "reference": "gate: green, EXIT=0; 1198 passed, 0 failed, 9 ignored; Harness ESS 29/29, inert 0/29"
+  }
+}

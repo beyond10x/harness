@@ -1,5 +1,5 @@
 format: ess-inputs/2
-requires: ess 0.76.0
+requires: ess 0.77.0
 specification:
   - system.yaml
   - components.yaml
@@ -31,3 +31,21 @@ scenarios:
   - scenarios/run-cancelled-before-provider.yaml
   - scenarios/run-input-budget-unobservable.yaml
   - scenarios/run-output-budget-unobservable.yaml
+  - scenarios/loop-completed-after-a-tool.yaml
+  - scenarios/loop-approval-approved.yaml
+  - scenarios/loop-approval-denied.yaml
+  - scenarios/loop-approval-deferred.yaml
+  - scenarios/loop-approval-resumed.yaml
+  - scenarios/loop-approval-resume-denied-summarises.yaml
+  - scenarios/loop-compaction-summary-turn.yaml
+  - scenarios/loop-compaction-summary-failed.yaml
+  - scenarios/loop-retried-then-answered.yaml
+  - scenarios/loop-retries-exhausted.yaml
+  - scenarios/loop-failed-not-retriable.yaml
+  - scenarios/loop-cancelled.yaml
+  - scenarios/loop-failed-after-a-summary.yaml
+  - scenarios/loop-failed-after-a-failed-summary.yaml
+  - scenarios/loop-approval-deferred-twice.yaml
+  - scenarios/loop-approval-resumed-runs-the-next-call.yaml
+  - scenarios/loop-two-calls-in-a-turn.yaml
+  - scenarios/loop-compaction-trigger-at-eighty-percent.yaml

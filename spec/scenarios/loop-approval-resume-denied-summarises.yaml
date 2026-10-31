@@ -1,0 +1,41 @@
+type: ess-scenario/4
+domain: harness.loop
+scenario: loop-approval-resume-denied-summarises
+summary: A denial resumed from a checkpoint whose conversation passed the compaction trigger opens a summary turn before the next conversation turn.
+timeline:
+  - at: 2026-10-30T00:00:00Z
+    command: harness.loop.StartLoop
+    input: {run_id: run-a}
+    outcome: requested
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:01Z
+    command: harness.loop.CallTool
+    input: {run_id: run-a, call_id: call-7, tool: write, text: long}
+    outcome: asked-long
+    response: {turn: 1}
+  - at: 2026-10-30T00:00:02Z
+    command: harness.loop.Defer
+    input: {run_id: run-a, checkpoint_id: cp-1}
+    outcome: deferred
+    response:
+      stop: {kind: awaiting-approval, value: {checkpoint_id: cp-1}}
+  - at: 2026-10-30T00:00:03Z
+    command: harness.loop.ResumeDenied
+    input: {run_id: run-a, reason: not now}
+    outcome: resumed-denied-then-summarise
+    response: {turn: 2}
+  - at: 2026-10-30T00:00:04Z
+    command: harness.loop.AnswerSummary
+    input: {run_id: run-a}
+    outcome: folded
+    response: {turn: 3}
+  - at: 2026-10-30T00:00:05Z
+    command: harness.loop.CancelTurn
+    input: {run_id: run-a}
+    outcome: cancelled
+    response:
+      stop: {kind: cancelled, value: {reason: the caller cancelled}}
+      ledger: null
+assert:
+  - view: harness.loop.Loops
+    contains: {run_id: run-a, state: Stopped, turns: 3, retries: 0}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T22:18:36Z",
+  "actor": "human:timo",
+  "artifact": "story:failed-run-ends-with-a-finished-line",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-harness-loop --locked (254 passed) and -p b10x-harness-cli end_to_end (84 passed) at ea60f2b; cargo xtask gate green at the wave head",
+    "reference": "u2-final-line/round1/loop-after.log; round1/cli-after.log; gate-release.log"
+  }
+}

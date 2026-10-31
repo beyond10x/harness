@@ -88,6 +88,7 @@ wins:
 
 ```bash
 b10x-harness run \
+  --write-scope '.b10x/**=denied' \
   --write-scope 'src/**=allowed' \
   --write-scope 'config/*.yaml=partial-only' \
   --write-scope '**/*.pem=denied' \
@@ -100,7 +101,9 @@ The values mean:
 - `partial-only`: an exact edit is admitted, but whole-file replacement is refused;
 - `denied`: no write tool may change the matching path.
 
-A path no rule mentions is unrestricted. These flags declare restrictions, not an allowlist.
+A path no rule mentions is unrestricted. These flags declare restrictions, not an allowlist. A
+typed scope replaces the default one, so it keeps `.b10x/**=denied`: a trusted repository's
+`.b10x/harness.toml` is applied by the next run.
 
 The scope judges a written path as spelled and then where it lands, so `./notes.txt` and
 `a/./b.txt` are judged as the files they name. A directory a tool writes is judged by everything it

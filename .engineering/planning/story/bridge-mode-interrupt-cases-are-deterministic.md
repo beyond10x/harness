@@ -2,12 +2,27 @@
 format: aep.planning-md/3
 id: story:bridge-mode-interrupt-cases-are-deterministic
 kind: story
-status: draft
+status: implemented
 title: bridge_mode's interrupt cases do not depend on machine load
 summary: Three bridge_mode rate-threshold cases failed under load and passed on rerun on 2026-10-20; make them deterministic or measured.
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 1
+scope:
+- confidence: cited
+  path: STATUS.md
+- confidence: cited
+  path: crates/harness-app-server/src/lib.rs
+- confidence: cited
+  path: crates/harness-app-server/src/session.rs
+- confidence: cited
+  path: crates/harness-app-server/tests/adversary_d288_u2.rs
+- confidence: cited
+  path: crates/harness-cli/tests/bridge_mode.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-30T17:39:19Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T20:19:33Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

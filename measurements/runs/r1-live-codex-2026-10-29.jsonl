@@ -1,0 +1,22 @@
+{"kind":"started","model":"gpt-5.6-sol","published_tools":["file_read","dir_list","search","find"],"operations":["file.read","dir.list","search","find"],"withheld":[],"skills":[],"agents":[],"memories":[],"profiles":[{"name":"default","source":"$XDG_CONFIG_HOME/b10x/harness.toml","sha256":"08012a3edb3228297c7f7206089db5a302b38682d5d142e43001abbcb849cad5"},{"name":"codex","source":"$XDG_CONFIG_HOME/b10x/harness.toml","sha256":"fd631ec9915ee43961f1a0a4ff6b89e2a0df2ae3dd182997dbff364616de9500"}],"context":[{"id":"harness.instructions","kind":"harness_instructions","trust":"harness","cache":"session","bytes":620,"sha256":"964b8884c8a2e27ba0d8290a3e916ebe70ed51466c99889becc3114f4cffae36"},{"id":"environment.workspace","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-10-29T11:05:05Z","bytes":161,"sha256":"ffb2dd5a2ed9f3c114d8abed7464d341bb957b6f08520103fbd23fbcdb7c38c1"},{"id":"environment.execution","kind":"environment","trust":"machine","cache":"session","captured_at":"2026-10-29T11:05:05Z","bytes":346,"sha256":"2aee8d2fda71efd2f0fe5f41fe43c30fdef4b9eccb71f96e9beb8a2925dc2fc2"}],"toolchains":[],"mcp":[],"credential_source":"provider:codex","cwd":"$SCRATCH/ws-codex"}
+{"kind":"turn-started","turn":1}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"{\""}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"glob"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\":\""}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"*"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\",\""}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"path"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\":"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\"."}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\",\""}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"max"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"_results"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"\":"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"100"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"00"}
+{"kind":"tool-arguments-delta","call_id":"call_78731608196b4deca96163c458248c4f","delta":"}"}
+{"kind":"warning","code":"unknown-stream-event","message":"a stream event outside the pinned subset was preserved, not interpreted"}
+{"kind":"usage","model":"gpt-5.6-sol","input_tokens":1221,"output_tokens":121,"cached_input_tokens":0}
+{"kind":"tool-requested","call_id":"call_78731608196b4deca96163c458248c4f","name":"find","arguments":{"glob":"*","max_results":10000,"path":"."},"operation":"find","subjects":["file:."]}
+{"kind":"tool-completed","call_id":"call_78731608196b4deca96163c458248c4f","failed":false}
+{"kind":"turn-started","turn":2}

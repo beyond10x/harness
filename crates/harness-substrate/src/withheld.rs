@@ -156,8 +156,10 @@ impl Facts {
         let resource_usage = self.get("exec.resource-usage");
         format!(
             "`exec.resource-usage` must be an object because this client requests that measurement \
-             on every run, and this machine says {}. substrate withholds the fact until every \
-             required cgroup v2 counter, including block I/O, is available.",
+             on every run, and this machine says {}. substrate withholds the fact until the \
+             `cpu`, `memory` and `pids` counters are available at the configured cgroup root; \
+             block I/O is not required, and is reported only where `io` is enabled for the \
+             execution children.",
             describe(resource_usage)
         )
     }

@@ -141,11 +141,11 @@ quotes the file's values. Nothing the repository controls reaches your terminal 
 key, the `model` in `profiles explain` and in a refusal, and a path inside the workspace (its
 name, a link target) are shown with every such character escaped.
 
-The default write scope denies `.b10x/**` as well as `.git/**`. It applies where Harness sets the
-scope: a run a profile switches to writing with `write = true` and no `write-scope` of its own. A
-`write-scope` in a profile or a typed `--write-scope` replaces it, and a run you switch to writing
-yourself with `--substrate-embedded` or `--substrate` gets no default scope; in each of those, deny
-`.b10x/**` yourself, or a run that may write can rewrite the profile the next run applies.
+The default write scope denies `.b10x/**` as well as `.git/**`. It applies to every run that may
+write and was given no scope: a run a profile switches to writing with `write = true`, and a run
+you switch to writing yourself with `--substrate-embedded` or `--substrate`. A `write-scope` in a
+profile or a typed `--write-scope` replaces it whole; in either, deny `.b10x/**` yourself, or a run
+that may write can rewrite the profile the next run applies.
 
 A repository's `provider` reads that provider's default credential exactly as the same `provider`
 in your own `[default]` or a `-p` profile would, and nothing more: your `profiles trust` is what

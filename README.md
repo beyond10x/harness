@@ -186,6 +186,18 @@ systemd-run --user --scope --property="Delegate=cpu memory pids" -- ./run.sh
 and inside, pass the scope's containing slice as `--cgroup-root`. Without it the run has six tools
 and no `run`; with it, seven. That is the toolset following the machine rather than a flag.
 
+`cpu`, `memory` and `pids` are what `run` and every toolchain tool require; the file tools require
+none of them. `io` is optional. Where it is delegated too and enabled for the execution children
+(`Delegate=cpu memory pids io`), each exec's measurement also carries block I/O counters; without
+it those counters are absent from the measurement, never reported as zero.
+
+**A user scope cannot add a controller the user manager does not delegate.** A scope asks the
+systemd user manager, and the user manager can pass on only what it was given:
+`systemctl show "user@$(id -u).service" -p DelegateControllers` says what that is. A machine that
+answers `cpu memory pids` gives every scope under it those three and no `io`, whatever the scope
+asks for. Adding `io` there is an administrator's step — a drop-in setting `Delegate=` on
+`user@.service` — and it is outside this client.
+
 **And the run says which one it got.** The toolset is silent to the model on purpose — a tool it
 cannot have is one it never plans around — but that silence used to reach everybody else too: six
 entries where seven were asked for read exactly like six that were asked for, and a session whose

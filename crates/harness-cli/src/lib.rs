@@ -2308,6 +2308,7 @@ fn prepare(
         tools,
         &options.mcp_profiles,
         options.mcp_registry.as_deref(),
+        &cancel,
     )?;
     let approvals = approver(options, &cancel)?;
     let session_dir = session_dir(options)?;
@@ -3676,10 +3677,13 @@ fn refusal_code(body: &str) -> Option<String> {
 }
 
 /// Add only MCP tools whose local profile and live frozen snapshot agree byte-for-byte.
+///
+/// Each holds `cancel`, the run's token, so Ctrl-C stops an MCP call in flight.
 fn with_mcp(
     local: Published,
     profiles: &[PathBuf],
     registry: Option<&Path>,
+    cancel: &LoopCancel,
 ) -> Result<Published, String> {
     if profiles.is_empty() {
         return Ok(local);
@@ -3696,7 +3700,7 @@ fn with_mcp(
             let path = path
                 .canonicalize()
                 .map_err(|error| format!("MCP profile `{}`: {error}", path.display()))?;
-            harness_mcp::McpTools::prepare(&path, registry.as_deref())
+            harness_mcp::McpTools::prepare_with_cancel(&path, registry.as_deref(), cancel)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Published::Augmented(Box::new(Augmented::new(
@@ -4198,10 +4202,12 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             toolchain_origin: None,
         },
     )?;
+    // Listing makes no call, so nothing holds a token to cancel.
     let tools = with_mcp(
         tools,
         &options.mcp_profiles,
         options.mcp_registry.as_deref(),
+        &LoopCancel::new(),
     )?;
     // On stderr, where it cannot be mistaken for part of the document and cannot be missed by a
     // person reading a screen of JSON — the same line the run's own renderer prints, so the

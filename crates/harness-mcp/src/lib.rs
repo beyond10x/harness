@@ -8,7 +8,7 @@ use b10x_mcp_command::connect_named;
 use b10x_mcp_config::{LocalPaths, Registry};
 use b10x_mcp_types::{ConnectionId, Limits, ToolCall as McpCall};
 use harness_wire::{
-    Approval, Envelope, Subject, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec,
+    Approval, Cancel, Envelope, Subject, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -87,6 +87,7 @@ pub struct McpTools {
     specs: Vec<ToolSpec>,
     policies: Vec<ToolPolicy>,
     evidence: Evidence,
+    cancel: Cancel,
 }
 
 impl McpTools {
@@ -96,7 +97,28 @@ impl McpTools {
     ///
     /// Refuses malformed policy, changed registry or discovery bytes, unpublishable names,
     /// duplicate grants, and any connection or protocol failure before a model request is sent.
+    ///
+    /// The tools hold a token of their own that nobody cancels, so a call runs to its answer or
+    /// to the MCP request timeout. A loop that can be cancelled builds them with
+    /// [`prepare_with_cancel`](Self::prepare_with_cancel).
     pub fn prepare(profile_path: &Path, registry_path: Option<&Path>) -> Result<Self, String> {
+        Self::prepare_with_cancel(profile_path, registry_path, &Cancel::new())
+    }
+
+    /// [`prepare`](Self::prepare), holding the loop's cancel token.
+    ///
+    /// A call in flight when the token is cancelled stops waiting at once and comes back as a
+    /// failed outcome, and a call made after it is never sent. The server is not told: the MCP
+    /// client offers no cancellation of its own, so a server may still finish work it started.
+    ///
+    /// # Errors
+    ///
+    /// As [`prepare`](Self::prepare).
+    pub fn prepare_with_cancel(
+        profile_path: &Path,
+        registry_path: Option<&Path>,
+        cancel: &Cancel,
+    ) -> Result<Self, String> {
         if !profile_path.is_absolute() {
             return Err("MCP profile path must be absolute".to_owned());
         }
@@ -150,6 +172,7 @@ impl McpTools {
             specs,
             policies: profile.tools,
             evidence,
+            cancel: cancel.clone(),
         })
     }
 
@@ -193,22 +216,54 @@ impl ToolPort for McpTools {
             ));
         };
         let remote = policy.remote.clone();
+        if self.cancel.is_cancelled() {
+            return cancelled_outcome(&remote, false);
+        }
         let request = McpCall {
             name: remote,
             arguments: call.arguments.clone(),
         };
-        match self
-            .runtime
-            .block_on(self.connection.call(&request, remaining))
-        {
-            Ok(result) => ToolOutcome {
+        let (connection, cancel) = (&self.connection, &self.cancel);
+        // Dropping the client's call future is how it is cancelled: the connection stays usable
+        // and a late answer for the abandoned request is discarded by the client.
+        let answered = self.runtime.block_on(async {
+            tokio::select! {
+                biased;
+                () = until_cancelled(cancel) => None,
+                result = connection.call(&request, remaining) => Some(result),
+            }
+        });
+        match answered {
+            Some(Ok(result)) => ToolOutcome {
                 output: result.raw,
                 failed: result.is_error,
                 refusal: None,
             },
-            Err(error) => ToolOutcome::failed(format!("MCP call failed: {error}")),
+            Some(Err(error)) => ToolOutcome::failed(format!("MCP call failed: {error}")),
+            None => cancelled_outcome(&request.name, true),
         }
     }
+}
+
+/// How often a call in flight reads the loop's token, which is a flag and wakes nobody.
+const CANCEL_POLL: Duration = Duration::from_millis(10);
+
+async fn until_cancelled(cancel: &Cancel) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(CANCEL_POLL).await;
+    }
+}
+
+/// A failed outcome, so the conversation still answers the call the model made.
+fn cancelled_outcome(remote: &str, sent: bool) -> ToolOutcome {
+    ToolOutcome::failed(if sent {
+        format!(
+            "MCP call `{remote}` was cancelled with the run before it answered; the server was \
+             not told and may still complete it"
+        )
+    } else {
+        format!("MCP call `{remote}` was not sent: the run was cancelled")
+    })
 }
 
 fn project_specs(
@@ -313,6 +368,31 @@ mod tests {
         let specs = project_specs(&snapshot, &profile).unwrap();
         assert_eq!(specs[0].envelope, Envelope::read_only());
         assert_eq!(snapshot.tools[1].raw["annotations"]["readOnlyHint"], true);
+    }
+
+    #[test]
+    fn a_token_cancelled_on_another_thread_ends_the_wait_for_a_call() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let cancel = Cancel::new();
+        let elsewhere = cancel.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            elsewhere.cancel();
+        });
+        let ended = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), until_cancelled(&cancel)).await
+        });
+        canceller.join().unwrap();
+        assert!(
+            ended.is_ok(),
+            "a call's wait ends once the loop's token is cancelled; \
+             story:mcp-call-stops-when-the-loop-is-cancelled"
+        );
+        assert!(cancelled_outcome("read_issue", true).failed);
+        assert!(cancelled_outcome("read_issue", false).failed);
     }
 
     #[test]

@@ -20,7 +20,9 @@ use std::time::{Duration, Instant};
 
 use harness_catalogue::{Catalogue, Flat};
 use harness_llm::{Protocol, Target};
-use harness_loop::{ApproveAll, LoopCancel, LoopConfig, LoopPorts, LoopTask, VecLoopSink};
+use harness_loop::{
+    AgentLoop, ApproveAll, LoopCancel, LoopConfig, LoopPorts, LoopStop, LoopTask, VecLoopSink,
+};
 use harness_mcp::McpTools;
 use harness_substrate::{Backend as _, ConfinedOperations, Embedded};
 use harness_wire::{
@@ -197,8 +199,8 @@ access = []
 
     fn spawn(&self) -> LoopTask {
         let (profile, registry) = (self.profile.clone(), self.registry.clone());
-        LoopTask::spawn(config(), move |_: &LoopCancel| {
-            let tools = McpTools::prepare(&profile, Some(&registry))?;
+        LoopTask::spawn(config(), move |cancel: &LoopCancel| {
+            let tools = McpTools::prepare_with_cancel(&profile, Some(&registry), cancel)?;
             Ok::<_, String>(LoopPorts::new(
                 Scripted::calling(call(
                     "call_mcp_1",
@@ -252,15 +254,10 @@ fn silent_responses_endpoint() -> (String, mpsc::Receiver<()>) {
 // A run's future dropped while the MCP tool call is in flight.
 // ---------------------------------------------------------------------------------------------
 
-/// The MCP client's default request timeout (`b10x-mcp-types`), which today bounds how long a
-/// cancelled task stays blocked in an MCP call, plus a margin for a loaded host.
-const MCP_REQUEST_TIMEOUT_AND_MARGIN: Duration = Duration::from_secs(45);
-
-/// Asserts today's state of an open defect: `McpTools` never sees the task's cancel token, so a
-/// run dropped mid-MCP-call keeps the task thread blocked until the MCP request timeout (30 s).
-/// When `story:mcp-call-stops-when-the-loop-is-cancelled` lands, replace both assertions with
-/// `shutdown()` resolving `Ok` within `PROMPT`.
-async fn mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call() {
+/// `McpTools` holds the task's cancel token, so a run dropped mid-MCP-call stops waiting on the
+/// silent tool at once instead of at the MCP client's 30 s request timeout, and `shutdown()`
+/// resolves within `PROMPT` (`story:mcp-call-stops-when-the-loop-is-cancelled`).
+async fn mcp_shutdown_is_prompt_after_a_dropped_call() {
     let mcp = SilentMcp::new();
     let task = mcp.spawn();
     let mut run = task.run_in(Vec::new(), "Read ISSUE-7.", VecLoopSink::new());
@@ -274,32 +271,80 @@ async fn mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call() {
     drop(run);
 
     let started = Instant::now();
-    let mut shutdown = task.shutdown();
-    assert!(
-        tokio::time::timeout(PROMPT, &mut shutdown).await.is_err(),
-        "shutdown resolved within {PROMPT:?} of a run dropped mid-MCP-call: the open defect of \
-         story:mcp-call-stops-when-the-loop-is-cancelled looks fixed; make this case assert the \
-         prompt shutdown that story asks for"
-    );
-    let shut = tokio::time::timeout(MCP_REQUEST_TIMEOUT_AND_MARGIN, shutdown).await;
+    let shut = tokio::time::timeout(PROMPT, task.shutdown()).await;
     assert_eq!(
         shut,
         Ok(Ok(())),
-        "the task shut down within {MCP_REQUEST_TIMEOUT_AND_MARGIN:?} of the run's future being \
-         dropped mid-MCP-call (waited {:?}); story:mcp-call-stops-when-the-loop-is-cancelled",
+        "the task shut down within {PROMPT:?} of the run's future being dropped mid-MCP-call \
+         (waited {:?}); story:mcp-call-stops-when-the-loop-is-cancelled",
         started.elapsed()
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn adversary_mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call_current_thread()
-{
-    mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call().await;
+async fn adversary_mcp_shutdown_is_prompt_after_a_dropped_call_current_thread() {
+    mcp_shutdown_is_prompt_after_a_dropped_call().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn adversary_mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call_multi_thread() {
-    mcp_shutdown_waits_for_the_request_timeout_after_a_dropped_call().await;
+async fn adversary_mcp_shutdown_is_prompt_after_a_dropped_call_multi_thread() {
+    mcp_shutdown_is_prompt_after_a_dropped_call().await;
+}
+
+/// The synchronous loop over `McpTools` holding its token: cancelled while the silent tool is in
+/// flight, the run returns `Ok` with stop `cancelled` within `PROMPT` of the cancel, as Ctrl-C in
+/// the CLI does (`story:mcp-call-stops-when-the-loop-is-cancelled`).
+#[test]
+fn adversary_mcp_synchronous_run_cancelled_mid_call_stops_promptly() {
+    let mcp = SilentMcp::new();
+    let cancel = LoopCancel::new();
+    let mut tools = McpTools::prepare_with_cancel(&mcp.profile, Some(&mcp.registry), &cancel)
+        .expect("the silent endpoint is prepared");
+    let mut model = Scripted::calling(call(
+        "call_mcp_1",
+        "mcp_fixture_read_issue",
+        json!({"id": "ISSUE-7"}),
+    ));
+    let mut approvals = ApproveAll;
+    let (ran, ended, cancelled_at) = thread::scope(|scope| {
+        let watcher = scope.spawn(|| {
+            let start = Instant::now();
+            while !mcp.marker.exists() {
+                assert!(
+                    start.elapsed() < SETUP,
+                    "the MCP call reached the endpoint within {SETUP:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            cancel.cancel();
+            Instant::now()
+        });
+        let mut sink = VecLoopSink::new();
+        let ran = AgentLoop::new(&mut model, &mut tools, &mut approvals, config())
+            .with_cancel(cancel.clone())
+            .run("Read ISSUE-7.", &mut sink);
+        let ended = Instant::now();
+        let cancelled_at = watcher.join().expect("the watcher cancelled the run");
+        (ran, ended, cancelled_at)
+    });
+    let waited = ended.saturating_duration_since(cancelled_at);
+    let outcome = ran.unwrap_or_else(|error| {
+        panic!(
+            "a run cancelled mid-MCP-call returns Ok, not {error:?}; \
+             story:mcp-call-stops-when-the-loop-is-cancelled"
+        )
+    });
+    assert!(
+        matches!(outcome.stop, LoopStop::Cancelled { .. }),
+        "a run cancelled mid-MCP-call stops `cancelled`, not {:?}; \
+         story:mcp-call-stops-when-the-loop-is-cancelled",
+        outcome.stop
+    );
+    assert!(
+        waited < PROMPT,
+        "the run returned {waited:?} after its token was cancelled mid-MCP-call, not within \
+         {PROMPT:?}; story:mcp-call-stops-when-the-loop-is-cancelled"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

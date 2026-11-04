@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-04T09:56:30Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-shrinks-a-reasoning-heavy-conversation",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-loop --lib",
+    "reference": "base 2e37e2e with the new cases: 254 passed, 2 failed; unit f0997a4: 256 passed (VERIFIED)"
+  }
+}

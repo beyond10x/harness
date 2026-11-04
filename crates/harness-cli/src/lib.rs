@@ -721,7 +721,12 @@ struct RunOptions {
     /// is correct and is also why a test-first task cannot be attempted: a run that may not execute
     /// its suite cannot see a test fail before writing the code, so it will not write the code. The
     /// subtree must be delegated to this user, hold `cpu`, `memory` and `pids`, and be free of
-    /// processes.
+    /// processes; `run` and every toolchain tool require those three, the file tools none.
+    ///
+    /// `io` is optional: delegated and enabled for the execution children, it adds block I/O
+    /// counters to each exec's measurement, and without it they are absent, never zero. A user
+    /// scope cannot add a controller the systemd user manager does not delegate
+    /// (`DelegateControllers`); changing that is an administrator's step outside this binary.
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
     /// Admit one or more declarative toolchain providers read-only inside the confined workspace.
@@ -846,7 +851,12 @@ struct RunOptions {
     /// Where this run may write, as `<glob>=<allowed|partial-only|denied>`. Repeatable, ordered.
     ///
     /// First match wins; a path no rule mentions is allowed, because this declares where writing is
-    /// **restricted** and a scope nobody wrote restricts nothing.
+    /// **restricted**.
+    ///
+    /// Typed, it replaces the default whole. Not typed, a run that may write — a profile's
+    /// `write = true`, or a typed `--substrate-embedded` or `--substrate` — starts from the
+    /// profile's `write-scope`, else from `.git/**=denied .b10x/**=denied **=allowed`, so no run
+    /// rewrites its repository's history or the profile the next run applies unless told it may.
     ///
     /// `partial-only` is the one worth knowing: the path may be changed in part and never replaced
     /// whole. It is what a store whose frontmatter is owned by a CLI needs, and it is a distinction
@@ -1176,7 +1186,12 @@ struct ToolsOptions {
     /// is correct and is also why a test-first task cannot be attempted: a run that may not execute
     /// its suite cannot see a test fail before writing the code, so it will not write the code. The
     /// subtree must be delegated to this user, hold `cpu`, `memory` and `pids`, and be free of
-    /// processes.
+    /// processes; `run` and every toolchain tool require those three, the file tools none.
+    ///
+    /// `io` is optional: delegated and enabled for the execution children, it adds block I/O
+    /// counters to each exec's measurement, and without it they are absent, never zero. A user
+    /// scope cannot add a controller the systemd user manager does not delegate
+    /// (`DelegateControllers`); changing that is an administrator's step outside this binary.
     #[arg(long)]
     cgroup_root: Option<PathBuf>,
     /// A program `run` may start. Repeatable, and an empty set publishes no `run` at all.
@@ -1438,6 +1453,8 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         // the caller the same refusal. Returning early past the check below is what made a
         // machine without either variable *panic* at `RunOptions::model` — which asserts that
         // this function fills the model or refuses — instead of being told what to type.
+        // And the write scope for the same reason: a machine with no config still writes.
+        fill_write_scope(options, None);
         require_endpoint_and_model(options, None)?;
         return Ok(Vec::new());
     };
@@ -1477,11 +1494,6 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         if options.substrate.is_none() {
             options.substrate_embedded = true;
         }
-        if options.write_scope.is_empty() {
-            options.write_scope = wanted
-                .write_scope
-                .unwrap_or_else(profile::default_write_scope);
-        }
         if options.allow_program.is_empty() {
             options.allow_program = wanted.allow_program.unwrap_or_default();
         }
@@ -1514,6 +1526,7 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
             options.toolchain_profile_source = Some(source.clone());
         }
     }
+    fill_write_scope(options, wanted.write_scope);
     if options.approve_up_to.is_none()
         && let Some(ceiling) = wanted.approve_up_to
     {
@@ -1540,6 +1553,23 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
 
     require_endpoint_and_model(options, Some(&source))?;
     Ok(resolved.used)
+}
+
+/// The write scope a run that may write starts from, when the operator typed none.
+///
+/// **Whatever switched writing on.** A profile's `write = true` and a typed
+/// `--substrate-embedded` or `--substrate` reach the same confined tools, so they get the same
+/// scope: the configured `write-scope` if a profile names one, else
+/// [`profile::default_write_scope`]. Applying it only to a profile run left a typed run with no
+/// scope at all, free to rewrite the `.b10x/harness.toml` the next run applies. A typed
+/// `--write-scope` is never touched: it replaces the default whole, as it does for a profile run.
+///
+/// A run with no confinement is read-only and gets nothing, so its scope stays as typed.
+fn fill_write_scope(options: &mut RunOptions, configured: Option<Vec<String>>) {
+    let writes = options.substrate_embedded || options.substrate.is_some();
+    if writes && options.write_scope.is_empty() {
+        options.write_scope = configured.unwrap_or_else(profile::default_write_scope);
+    }
 }
 
 /// Refuses a credential the operator typed when a trusted repository profile chose the provider.
@@ -3954,19 +3984,7 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
             if let Some(turns) = resolved.profile.max_turns {
                 println!("--max-turns {turns}");
             }
-            if resolved.profile.write == Some(true) {
-                println!("--substrate-embedded");
-                for rule in resolved
-                    .profile
-                    .write_scope
-                    .clone()
-                    .unwrap_or_else(profile::default_write_scope)
-                {
-                    println!("--write-scope {rule}");
-                }
-            } else {
-                println!("(no --substrate-embedded: `write` is not true, so four read-only tools)");
-            }
+            explain_writing(&resolved.profile);
             if let Some(ceiling) = &resolved.profile.approve_up_to {
                 println!("--approve-up-to {ceiling}");
             }
@@ -3990,6 +4008,34 @@ fn profiles_command(verb: &ProfilesCommand) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The writing lines of `profiles explain`: the scope a run applies, as `fill_write_scope` fills it.
+///
+/// A profile that sets `write` is a run on `--substrate-embedded` with its scope. One that does
+/// not is read-only, and still names the scope a run starts from when the operator types the
+/// confinement, because that run gets one too.
+fn explain_writing(wanted: &profile::Profile) {
+    let rules = wanted
+        .write_scope
+        .clone()
+        .unwrap_or_else(profile::default_write_scope);
+    if wanted.write == Some(true) {
+        println!("--substrate-embedded");
+        for rule in rules {
+            println!("--write-scope {rule}");
+        }
+    } else {
+        println!("(no --substrate-embedded: `write` is not true, so four read-only tools)");
+        println!(
+            "(a typed --substrate-embedded or --substrate without --write-scope applies: {})",
+            rules
+                .iter()
+                .map(|rule| format!("--write-scope {rule}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
 }
 
 /// `providers list|show`.

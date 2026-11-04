@@ -86,8 +86,12 @@ fn a_machine_without_the_measurement_every_run_requests_withholds_run() {
     assert_eq!(
         withheld[0].reason,
         "`exec.resource-usage` must be an object because this client requests that measurement on \
-         every run, and this machine says nothing. substrate withholds the fact until every \
-         required cgroup v2 counter, including block I/O, is available."
+         every run, and this machine says nothing. substrate withholds the fact until the `cpu`, \
+         `memory` and `pids` counters are available at the configured cgroup root; block I/O is \
+         not required, and is reported only where `io` is enabled for the execution children.",
+        "story:measured-exec-documents-the-io-controller — the pinned substrate serves the \
+         measurement without the `io` controller, so the refusal must not name block I/O as \
+         required"
     );
 }
 

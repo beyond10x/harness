@@ -2100,10 +2100,17 @@ fn assert_replayable(items: &[Item], what: &str) {
                 "{what}: `{call_id}` is a result with no call before it, and nothing says what it \
                  answers"
             ),
+            // The item a reasoning item precedes is the call or the text its turn produced. Another
+            // reasoning item or a user item in that place means the item it preceded is gone, which
+            // is what re-inserting a fold's reasoning items after the summary did.
             Item::Opaque { .. } => assert!(
-                index + 1 < items.len(),
-                "{what}: the record ends on a reasoning item, and the Responses route requires \
-                 the item one precedes"
+                matches!(
+                    items.get(index + 1),
+                    Some(Item::ToolCall(_) | Item::AssistantText { .. })
+                ),
+                "{what}: the reasoning item at {index} is followed by {:?}, not by the call or \
+                 text it preceded, and the Responses route requires the item one precedes",
+                items.get(index + 1)
             ),
             Item::UserText { .. } | Item::AssistantText { .. } => {}
         }
@@ -3049,6 +3056,154 @@ fn a_conversation_whose_tail_is_one_unbreakable_group_folds_nothing_rather_than_
         super::fold_end(&items, 100).is_none(),
         "a summary that cannot be taken without breaking the record is not taken"
     );
+}
+
+// --- compaction when the weight is reasoning ----------------------------------------------------
+
+/// A turn that reasons and then asks for one call: the shape a reasoning model on the Responses
+/// route produces on every round trip.
+fn reasons_and_asks(bytes: usize, id: &str) -> TurnOutcome {
+    let mut turn = asks_for(&[(id, "a", json!({}))]);
+    turn.items.insert(0, reasoning(bytes));
+    turn
+}
+
+/// The requests the run made after its summary turn.
+fn after_the_summary(seen: &[TurnRequest]) -> &[TurnRequest] {
+    let at = seen
+        .iter()
+        .position(|request| request.instructions == super::SUMMARY_INSTRUCTION)
+        .expect("a summary turn was spent");
+    &seen[at + 1..]
+}
+
+/// Every reasoning item whose next item is another reasoning item or a user item, by index.
+fn reasoning_apart_from_its_item(items: &[Item]) -> Vec<usize> {
+    items
+        .windows(2)
+        .enumerate()
+        .filter(|(_, pair)| {
+            matches!(pair[0], Item::Opaque { .. })
+                && matches!(pair[1], Item::Opaque { .. } | Item::UserText { .. })
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+#[test]
+fn a_summary_fold_takes_the_reasoning_items_of_the_round_trips_it_folds() {
+    // story:summary-fold-keeps-reasoning-with-its-call. Measured with the scripted model: the next
+    // request after a fold was `[user, summary, opaque, opaque, call, result]`. The fold re-inserted
+    // every reasoning item of the folded range after the summary, while the calls they preceded
+    // went into it, so the first was followed by the second instead of by its call.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(10_000, "c1")),
+            Ok(reasons_and_asks(10_000, "c2")),
+            Ok(reporting(reasons_and_asks(300, "c3"), 8_500)),
+            Ok(answer("a dense summary of the first round trips")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(10_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert_eq!(compacted(&sink).len(), 1, "{:?}", compacted(&sink));
+    let after = after_the_summary(&harness.model.seen);
+    assert!(!after.is_empty(), "the run turned again after the fold");
+    for request in after {
+        assert_eq!(
+            reasoning_apart_from_its_item(&request.items),
+            Vec::<usize>::new(),
+            "a request after the fold holds a reasoning item apart from the item it preceded: {:?}",
+            request.items
+        );
+        assert_replayable(&request.items, "a request after the fold");
+    }
+
+    let next = &after[0].items;
+    let c3 = next
+        .iter()
+        .position(|item| matches!(item, Item::ToolCall(call) if call.call_id.as_str() == "c3"))
+        .expect("the newest round trip is never folded");
+    assert!(
+        matches!(next[c3 - 1], Item::Opaque { .. }),
+        "the newest round trip keeps the reasoning that preceded its call: {next:?}"
+    );
+    assert!(
+        !next
+            .iter()
+            .any(|item| matches!(item, Item::ToolCall(call) if call.call_id.as_str() == "c1")),
+        "the first round trip went into the summary, and its reasoning with it"
+    );
+}
+
+#[test]
+fn a_conversation_whose_weight_is_reasoning_reaches_its_target_in_one_compaction() {
+    // story:compaction-shrinks-a-reasoning-heavy-conversation, probe P2: three 20 kB reasoning
+    // items, a declared window of 40,000 tokens and a reported input of 34,000. Compaction had to
+    // free 56,000 bytes and freed 153, because elision never touches reasoning and the summary
+    // re-inserted all of it.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(20_000, "c1")),
+            Ok(reasons_and_asks(20_000, "c2")),
+            Ok(reporting(reasons_and_asks(20_000, "c3"), 34_000)),
+            Ok(answer("a dense summary of what was asked and done")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(40_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    let sizes: Vec<(usize, usize)> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::Compacted {
+                bytes_before,
+                bytes_after,
+                ..
+            } => Some((*bytes_before, *bytes_after)),
+            _ => None,
+        })
+        .collect();
+    let [(before, after)] = sizes[..] else {
+        panic!("one compaction, not {sizes:?}");
+    };
+    // What `compact_run` was asked to free: the reported count down to half the window, in bytes.
+    let free = usize::try_from(
+        (34_000 - 40_000 * super::COMPACTION_TARGET_PERCENT / 100)
+            * super::ESTIMATED_BYTES_PER_TOKEN,
+    )
+    .expect("fits");
+    let target = before - free;
+    assert!(
+        after <= target,
+        "one compaction left {after} of {before} bytes, above its {target} byte target"
+    );
+
+    let warnings: Vec<String> = sink
+        .warnings()
+        .filter(|(code, _)| *code == "conversation-compacted")
+        .map(|(_, message)| message.to_owned())
+        .collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("3 provider reasoning item(s)"),
+        "the warning names how many reasoning items went: {}",
+        warnings[0]
+    );
+
+    let later = after_the_summary(&harness.model.seen);
+    assert!(!later.is_empty(), "the run turned again after compacting");
+    for request in later {
+        assert_replayable(&request.items, "a request after the compaction");
+    }
 }
 
 // --- a run that failed ends with a finished line ------------------------------------------------

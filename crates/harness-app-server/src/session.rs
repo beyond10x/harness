@@ -41,6 +41,15 @@ pub struct Wire {
     pub reader: Rc<Reader>,
     /// Frames pulled off the wire early, held for whoever was actually waiting for them.
     stash: Rc<RefCell<VecDeque<Incoming>>>,
+    /// Requests a turn met after one of its interrupts left the queue, held for the main loop.
+    ///
+    /// Sent after the person stopped that turn, so they are for whatever comes next — a
+    /// `turn/start` here is the next turn — and only the main loop can serve that. Every one was
+    /// dequeued after an interrupt and before anything still on the channel, so it is older than
+    /// every frame on the channel, and the queue keeps the order they came off it in. Each reader
+    /// that serves requests in order takes this queue before the channel; see
+    /// [`serve_control`](Self::serve_control), fact 3.
+    deferred: Rc<RefCell<VecDeque<Incoming>>>,
 }
 
 impl Wire {
@@ -49,7 +58,19 @@ impl Wire {
             writer: Rc::new(RefCell::new(writer)),
             reader: Rc::new(reader),
             stash: Rc::new(RefCell::new(VecDeque::new())),
+            deferred: Rc::new(RefCell::new(VecDeque::new())),
         }
+    }
+
+    /// The oldest held request, when `control`'s turn may still be sent one.
+    ///
+    /// A turn that has heard an interrupt takes none: what it held is for after it, and taking it
+    /// back would only hold it again.
+    fn take_deferred(&self, control: &TurnControl) -> Option<Incoming> {
+        if control.heard() {
+            return None;
+        }
+        self.deferred.borrow_mut().pop_front()
     }
 
     /// Answers control frames that arrived while a turn was in flight, and acts on them.
@@ -66,13 +87,20 @@ impl Wire {
     /// [`settle_interrupts`](Self::settle_interrupts), before the terminal frame; what is behind it
     /// is left for the main loop.
     ///
+    /// A request an earlier turn held is older than anything on the channel, so it is served
+    /// first: this turn was started by an earlier one of them, and the rest reached it running.
+    ///
     /// # Errors
     ///
     /// Returns [`TransportError`] when the connection is gone.
     pub fn drain_control(&self, control: &TurnControl) -> Result<(), TransportError> {
         while !control.stopping() {
-            let Some(message) = self.reader.try_next()? else {
-                break;
+            let message = match self.take_deferred(control) {
+                Some(message) => message,
+                None => match self.reader.try_next()? {
+                    Some(message) => message,
+                    None => break,
+                },
             };
             self.serve_control(message, control)?;
         }
@@ -94,6 +122,11 @@ impl Wire {
     /// The wait terminates because every count came from the reading thread, in the statement
     /// before it queued that very frame — whether it raised the turn's own count or the connection
     /// one this turn took over at its start. A frame counted is a frame already on its way.
+    ///
+    /// The wait reads the queue in order up to the last owed interrupt, so it can meet a request
+    /// sent between two of them — interrupt, `turn/start`, interrupt, all while one turn streamed.
+    /// That request was sent after the first interrupt, so it is held for the main loop and served
+    /// once this turn's terminal frame is out, rather than refused for a turn that is ending.
     ///
     /// # Errors
     ///
@@ -133,13 +166,21 @@ impl Wire {
     ///    and *then* `sender.send` (`transport.rs`). So a frame that was counted is a frame
     ///    already on its way, which is what lets [`settle_interrupts`](Self::settle_interrupts)
     ///    wait for one instead of guessing.
-    /// 3. **Nothing may put a `Request` in the stash.** The `other =>` arm below is reachable only
-    ///    for a response, a notification or a malformed frame, because both arms above it match
-    ///    every [`Incoming::Request`]. [`next_frame`](Self::next_frame) prefers the stash, so a
-    ///    stashed request would be dequeued ahead of frames the client sent earlier — and an
-    ///    interrupt that jumped a `turn/start` that way would be counted against the wrong turn
-    ///    and cancel a turn nobody asked to stop. That is the trap [`Watch`](crate::Watch)'s own
-    ///    comment warns about, and no test in this repository would notice it.
+    /// 3. **Nothing may put a `Request` in the stash, and only [`hold_or_refuse`](Self::hold_or_refuse)
+    ///    may put one in `deferred`.** The `other =>` arm below is reachable only for a response, a
+    ///    notification or a malformed frame, because both arms above it match every
+    ///    [`Incoming::Request`]. [`next_frame`](Self::next_frame) prefers the stash, so a stashed
+    ///    request would be dequeued ahead of frames the client sent earlier — and an interrupt that
+    ///    jumped a `turn/start` that way would be counted against the wrong turn and cancel a turn
+    ///    nobody asked to stop. That is the trap [`Watch`](crate::Watch)'s own comment warns
+    ///    about, and no test in this repository would notice it. `deferred` is safe where the
+    ///    stash would not be because of what may enter it and who reads it: a request is held
+    ///    only once an interrupt of its turn has left the queue, so it was dequeued — and sent —
+    ///    after every interrupt that turn answered and before every frame still on the channel;
+    ///    it is appended behind the requests held before it; and every reader that serves
+    ///    requests in order ([`next_frame`](Self::next_frame), [`drain_control`](Self::drain_control),
+    ///    [`next_frame_within`](Self::next_frame_within)) takes `deferred` before the channel. So
+    ///    a held request never leaves the queue ahead of a frame the client sent earlier.
     ///
     /// Fact 1 is about requests only, and deliberately: [`drain_control`](Self::drain_control)
     /// reads the channel directly and does *not* look at the stash, so a frame off the channel can
@@ -156,12 +197,8 @@ impl Wire {
                 control.answered();
                 self.writer.borrow_mut().respond(&id, &json!({}))?;
             }
-            Incoming::Request { id, method, .. } => {
-                self.writer.borrow_mut().respond_error(
-                    &id,
-                    METHOD_NOT_FOUND,
-                    format!("`{method}` cannot be served while a turn is running"),
-                )?;
+            request @ Incoming::Request { .. } => {
+                self.hold_or_refuse(request, control, "a turn is running")?;
             }
             // Not ours to answer. Hand it back rather than swallowing it, or whoever is
             // waiting for it waits forever.
@@ -170,7 +207,39 @@ impl Wire {
         Ok(())
     }
 
-    /// Returns the next frame, preferring one already pulled off the wire.
+    /// A request other than `turn/interrupt`, met by a reader of the queue while a turn runs.
+    ///
+    /// Sent after one of this turn's interrupts — which the queue's order says, because that
+    /// interrupt has already left it — it is for whatever comes next, and is held for the main
+    /// loop: a `turn/start` there is the next turn. Sent before any, it reached a running turn,
+    /// and is refused `while {during}`. Not decided by whether the reading thread has decoded an
+    /// interrupt yet: that interrupt may be queued behind this request, sent after it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError`] when a refusal cannot be written.
+    pub fn hold_or_refuse(
+        &self,
+        request: Incoming,
+        control: &TurnControl,
+        during: &str,
+    ) -> Result<(), TransportError> {
+        if control.heard() {
+            self.deferred.borrow_mut().push_back(request);
+            return Ok(());
+        }
+        if let Incoming::Request { id, method, .. } = request {
+            self.writer.borrow_mut().respond_error(
+                &id,
+                METHOD_NOT_FOUND,
+                format!("`{method}` cannot be served while {during}"),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Returns the next frame for the main loop, preferring one already pulled off the wire: a
+    /// stashed one, then a request a turn held for after it.
     ///
     /// # Errors
     ///
@@ -179,16 +248,30 @@ impl Wire {
         if let Some(message) = self.stash.borrow_mut().pop_front() {
             return Ok(message);
         }
+        if let Some(message) = self.deferred.borrow_mut().pop_front() {
+            return Ok(message);
+        }
         self.reader.next()
     }
 
-    /// Returns the next frame within `timeout`, preferring one already pulled off the wire.
+    /// Returns the next frame for `control`'s turn within `timeout`, preferring one already
+    /// pulled off the wire.
+    ///
+    /// A request an earlier turn held is taken only while this turn has heard no interrupt: once
+    /// it has, held requests are for after it.
     ///
     /// # Errors
     ///
     /// Returns [`TransportError::TimedOut`] or [`TransportError::Closed`].
-    pub fn next_frame_within(&self, timeout: Duration) -> Result<Incoming, TransportError> {
+    pub fn next_frame_within(
+        &self,
+        timeout: Duration,
+        control: &TurnControl,
+    ) -> Result<Incoming, TransportError> {
         if let Some(message) = self.stash.borrow_mut().pop_front() {
+            return Ok(message);
+        }
+        if let Some(message) = self.take_deferred(control) {
             return Ok(message);
         }
         self.reader.next_within(timeout)
@@ -427,7 +510,10 @@ impl BridgeTools {
     /// Waits for the answer to `request_id`, staying responsive to an interrupt meanwhile.
     ///
     /// An interrupt arriving here is answered and recorded, but the wait continues: the client owes
-    /// this call an answer, and abandoning it would leave both sides waiting on each other.
+    /// this call an answer, and abandoning it would leave both sides waiting on each other. A
+    /// request sent after that interrupt — a person who stopped the turn and asked again — is held
+    /// for the main loop and served as the next turn once this one has ended, rather than refused
+    /// for a turn that is already stopping ([`Wire::hold_or_refuse`]).
     fn await_response(&mut self, request_id: i64) -> Result<ToolOutcome, TransportError> {
         let deadline = Instant::now() + TOOL_RESPONSE_TIMEOUT;
         loop {
@@ -435,7 +521,7 @@ impl BridgeTools {
             if remaining.is_zero() {
                 return Err(TransportError::TimedOut(TOOL_RESPONSE_TIMEOUT));
             }
-            match self.wire.next_frame_within(remaining)? {
+            match self.wire.next_frame_within(remaining, &self.control)? {
                 Incoming::Response { id, result, error } if id == json!(request_id) => {
                     if let Some(error) = error {
                         return Ok(ToolOutcome::failed(format!(
@@ -450,11 +536,11 @@ impl BridgeTools {
                     self.control.answered();
                     self.wire.writer.borrow_mut().respond(&id, &json!({}))?;
                 }
-                Incoming::Request { id, method, .. } => {
-                    self.wire.writer.borrow_mut().respond_error(
-                        &id,
-                        METHOD_NOT_FOUND,
-                        format!("`{method}` cannot be served while a tool call is outstanding"),
+                request @ Incoming::Request { .. } => {
+                    self.wire.hold_or_refuse(
+                        request,
+                        &self.control,
+                        "a tool call is outstanding",
                     )?;
                 }
                 Incoming::Response { id, .. } => {

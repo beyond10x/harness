@@ -148,6 +148,14 @@ pub(crate) struct TurnControl {
     requested: Arc<AtomicBool>,
     /// Interrupt frames this turn was cancelled by that the client has not been answered yet.
     owed: Arc<AtomicUsize>,
+    /// Whether the main thread has dequeued and answered an interrupt for this turn.
+    ///
+    /// Not the same fact as `requested`, which the reading thread sets the instant a frame is
+    /// decoded — possibly while frames the client sent *before* it are still queued. This one is
+    /// set only as an interrupt leaves the queue, so every request dequeued after it was sent
+    /// after that interrupt, by the queue's order. That is what decides whether a request met
+    /// during a turn is for the next turn or is refused as one sent to a running turn.
+    heard: Arc<AtomicBool>,
 }
 
 impl TurnControl {
@@ -159,6 +167,7 @@ impl TurnControl {
             cancel: LoopCancel::new(),
             requested: Arc::new(AtomicBool::new(false)),
             owed: Arc::new(AtomicUsize::new(0)),
+            heard: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -190,6 +199,7 @@ impl TurnControl {
     /// succeeded, and handed the answer it cancelled.
     pub(crate) fn answered(&self) {
         self.requested.store(true, Ordering::SeqCst);
+        self.heard.store(true, Ordering::SeqCst);
         // Saturating: an interrupt the reading thread never counted — one it could not attribute
         // to any turn — must still be answerable without taking the count below zero.
         // Rust 1.97 is supported; try_update only replaces this API in Rust 1.99.
@@ -205,6 +215,12 @@ impl TurnControl {
     /// Whether an interrupt has asked this turn to stop, answered yet or not.
     pub(crate) fn stopping(&self) -> bool {
         self.requested.load(Ordering::SeqCst)
+    }
+
+    /// Whether an interrupt for this turn has left the queue, so that everything still queued was
+    /// sent after it.
+    pub(crate) fn heard(&self) -> bool {
+        self.heard.load(Ordering::SeqCst)
     }
 
     /// Whether a frame this turn was cancelled by is still unanswered.

@@ -1449,20 +1449,45 @@ fn elide(items: &mut [Item], target: usize, protect: usize) -> Elided {
 ///
 /// Oldest first, because the newest reasoning is the one the next turn builds on. Stops as soon as
 /// the target is met, and does nothing when it already is.
+///
+/// # Only where it reaches the target
+///
+/// Reasoning is dropped only when dropping it, oldest first, takes the conversation to `target`.
+/// Where the weight is in something nothing may touch — the task, or a protected tail of text —
+/// no amount of dropping gets there, and dropping anyway would strip the newest round trip's
+/// reasoning before every turn for no gain at all. Then nothing goes and the conversation is
+/// merely larger than wanted, as it was before this pass existed.
 fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
     let mut size = measure(items);
-    let mut dropped = 0_usize;
-    while size > target {
-        let Some(index) = items
-            .iter()
-            .position(|item| matches!(item, Item::Opaque { .. }))
-        else {
-            break;
-        };
-        size = size.saturating_sub(measure_one(&items.remove(index)));
-        dropped += 1;
+    if size <= target {
+        return 0;
     }
-    dropped
+    // Decided before anything is removed: how many of the oldest reasoning items it takes.
+    let mut needed = None;
+    let mut count = 0_usize;
+    for item in items
+        .iter()
+        .filter(|item| matches!(item, Item::Opaque { .. }))
+    {
+        size = size.saturating_sub(measure_one(item));
+        count += 1;
+        if size <= target {
+            needed = Some(count);
+            break;
+        }
+    }
+    let Some(needed) = needed else {
+        return 0;
+    };
+    let mut left = needed;
+    items.retain(|item| {
+        if left > 0 && matches!(item, Item::Opaque { .. }) {
+            left -= 1;
+            return false;
+        }
+        true
+    });
+    needed
 }
 
 /// Where the **turn group** starting at `start` ends, exclusive.
@@ -3154,8 +3179,10 @@ impl<'a> AgentLoop<'a> {
     /// A summary takes the reasoning items of the round trips it folds. Where the conversation is
     /// still over the target after it, the oldest remaining reasoning items go, one at a time, until
     /// it is not ([`drop_reasoning`]): their weight is opaque, nothing else can make it smaller, and
-    /// a conversation left over the target meets the provider's window on the next request. The
-    /// warning counts every reasoning item that went, as it counts elided results.
+    /// a conversation left over the target meets the provider's window on the next request. They
+    /// go only where dropping them reaches the target; where the weight is in something nothing may
+    /// touch, none go. The warning counts every reasoning item that went, as it counts elided
+    /// results.
     ///
     /// Returns a stop only when the run ended inside the summary turn — a cancel, or no turn or
     /// time left to spend on one. A summary that fails on the wire is a warning: the conversation
@@ -3217,7 +3244,8 @@ impl<'a> AgentLoop<'a> {
         }
         // What the summary could not reach because it is in the protected tail: a reasoning model
         // carries one opaque item per round trip, and the newest of them alone can outweigh the
-        // whole target. Dropped oldest first and never with anything else.
+        // whole target. Dropped oldest first, never with anything else, and only where that
+        // reaches the target.
         reasoning += drop_reasoning(&mut state.items, target);
         if elided.count == 0 && summarised == 0 && reasoning == 0 && !summary_turn {
             return Compaction::Unchanged;

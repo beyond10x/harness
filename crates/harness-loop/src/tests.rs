@@ -8390,3 +8390,245 @@ fn a_failure_whose_words_break_on_any_unicode_line_terminator_is_still_one_line(
         );
     }
 }
+
+// --- adversary pass 1: story:summary-fold-keeps-reasoning-with-its-call and
+// story:compaction-shrinks-a-reasoning-heavy-conversation ------------------------------------------
+
+/// A turn that reasons, says something long and then asks for one call: the shape whose weight is
+/// text, so the fold is worth a turn while its reasoning items stay small.
+fn adversary_u3_reasons_says_and_asks(text_bytes: usize, id: &str) -> TurnOutcome {
+    let mut turn = says_and_asks(&"t".repeat(text_bytes), &[(id, "a", json!({}))]);
+    turn.items.insert(0, reasoning(300));
+    turn
+}
+
+#[test]
+fn adversary_u3_a_fold_whose_weight_is_text_keeps_no_folded_reasoning_after_the_summary() {
+    // story:summary-fold-keeps-reasoning-with-its-call, acceptance 1, on a conversation that is
+    // under its target once folded. The unit's own fold test folds 20 kB of reasoning, so with the
+    // old re-insertion restored `drop_reasoning` removes the re-inserted items in the same pass and
+    // the test stays green. Here the folded reasoning is 600 bytes and the weight is text: nothing
+    // after the fold is over the target, so only the fold itself can keep the two folded reasoning
+    // items out of the next request.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(adversary_u3_reasons_says_and_asks(10_000, "c1")),
+            Ok(adversary_u3_reasons_says_and_asks(10_000, "c2")),
+            Ok(reporting(reasons_and_asks(300, "c3"), 8_500)),
+            Ok(answer("a dense summary of the first round trips")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(10_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert_eq!(compacted(&sink).len(), 1, "{:?}", compacted(&sink));
+    let after = after_the_summary(&harness.model.seen);
+    assert!(!after.is_empty(), "the run turned again after the fold");
+    let next = &after[0].items;
+    let opaque: Vec<usize> = next
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| matches!(item, Item::Opaque { .. }))
+        .map(|(index, _)| index)
+        .collect();
+    let c3 = next
+        .iter()
+        .position(|item| matches!(item, Item::ToolCall(call) if call.call_id.as_str() == "c3"))
+        .expect("the newest round trip is never folded");
+    assert_eq!(
+        opaque,
+        vec![c3 - 1],
+        "only the newest round trip's reasoning survives the fold, right before its call: {next:?}"
+    );
+    assert_replayable(next, "the request after the fold");
+    let warning = sink
+        .warnings()
+        .find(|(code, _)| *code == "conversation-compacted")
+        .map(|(_, message)| message.to_owned())
+        .expect("the compaction warned");
+    assert!(
+        warning.contains("2 provider reasoning item(s)"),
+        "the two folded reasoning items are counted: {warning}"
+    );
+}
+
+#[test]
+fn adversary_u3_a_compaction_that_drops_only_reasoning_says_so_in_its_figures() {
+    // story:compaction-shrinks-a-reasoning-heavy-conversation: "the drop is announced like
+    // elision". Elision is counted in `LoopEvent::Compacted`, whose own documentation says the
+    // figures are what a machine reading the record needs. One reasoning-heavy round trip, too
+    // small to fold: the only thing compaction can do is drop the reasoning item, and the event
+    // then reports nothing elided, nothing summarised and no summary turn while the conversation
+    // shrank.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![Ok(reasons_and_asks(20_000, "c1")), Ok(answer("done"))]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(6_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    let events: Vec<(usize, usize, bool, usize, usize)> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::Compacted {
+                elided_results,
+                summarised_items,
+                summary_turn,
+                bytes_before,
+                bytes_after,
+                ..
+            } => Some((
+                *elided_results,
+                *summarised_items,
+                *summary_turn,
+                *bytes_before,
+                *bytes_after,
+            )),
+            _ => None,
+        })
+        .collect();
+    let [(elided, summarised, summary_turn, before, after)] = events[..] else {
+        panic!("one compaction, not {events:?}");
+    };
+    // Today's state, pinned until story:compacted-event-counts-dropped-reasoning lands: the event
+    // carries no reasoning count, so what went shows only as its byte figures, and the warning is
+    // where the count is said. When that story lands, assert the event's own count here instead.
+    let dropped = serde_json::to_string(&reasoning(20_000))
+        .expect("a reasoning item serializes")
+        .len();
+    assert_eq!(
+        before - after,
+        dropped,
+        "story:compacted-event-counts-dropped-reasoning: the event's byte figures are the one \
+         reasoning item that went ({before} bytes became {after}); assert the event's own \
+         reasoning count once that story lands"
+    );
+    assert_eq!(
+        (elided, summarised, summary_turn),
+        (0, 0, false),
+        "story:compacted-event-counts-dropped-reasoning: nothing was elided or summarised, so the \
+         event's existing counts stay zero; assert the event's own reasoning count once that \
+         story lands"
+    );
+    let warning = sink
+        .warnings()
+        .find(|(code, _)| *code == "conversation-compacted")
+        .map(|(_, message)| message.to_owned())
+        .expect("the compaction warned");
+    assert!(
+        warning.contains("1 provider reasoning item(s)"),
+        "story:compacted-event-counts-dropped-reasoning: until the event counts it, the warning \
+         names the dropped reasoning item: {warning}"
+    );
+}
+
+#[test]
+fn adversary_u3_a_compaction_that_cannot_reach_its_target_keeps_the_reasoning_of_the_newest_call() {
+    // `drop_reasoning` drops reasoning until the target is met or none is left. Where the weight
+    // is something nothing may touch (here the first item, the task), no amount of dropping meets
+    // the target, so every compaction strips the reasoning of the round trip that just happened —
+    // the one `drop_reasoning`'s own documentation calls "the one the next turn builds on" — and
+    // warns `conversation-compacted` again before every turn. On the base this run compacted
+    // nothing.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(2_000, "c1")),
+            Ok(reasons_and_asks(2_000, "c2")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(30_000);
+    let mut items = vec![Item::user("x".repeat(100_000))];
+    let (outcome, _, sink) = harness.run_in(&mut items);
+    outcome.expect("the run completes");
+
+    let compactions = compacted(&sink);
+    for (turn, request) in harness.model.seen.iter().enumerate().skip(1) {
+        let newest_call = request
+            .items
+            .iter()
+            .rposition(|item| matches!(item, Item::ToolCall(_)))
+            .expect("every request after the first follows a round trip");
+        assert!(
+            matches!(request.items[newest_call - 1], Item::Opaque { .. }),
+            "request {} lost the reasoning of its newest call to a compaction that could not \
+             reach its target ({} compaction(s) so far: {compactions:?})",
+            turn + 1,
+            compactions.len()
+        );
+    }
+}
+
+#[test]
+fn adversary_u3_a_failed_summary_still_reaches_the_target_by_dropping_reasoning() {
+    // Boundary: the P2 fixture with a summary turn that fails on the wire. Nothing is folded, so
+    // `drop_reasoning` alone has to take the conversation to its target, and what it leaves must
+    // still be a record the provider accepts.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(20_000, "c1")),
+            Ok(reasons_and_asks(20_000, "c2")),
+            Ok(reporting(reasons_and_asks(20_000, "c3"), 34_000)),
+            Err(WireError::new(WireErrorCode::Transport, "reset", false)),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(40_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert!(
+        sink.warnings().any(|(code, _)| code == "summary-failed"),
+        "the summary turn failed: {:?}",
+        sink.events()
+    );
+    let sizes: Vec<(usize, usize, bool)> = sink
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::Compacted {
+                bytes_before,
+                bytes_after,
+                summary_turn,
+                ..
+            } => Some((*bytes_before, *bytes_after, *summary_turn)),
+            _ => None,
+        })
+        .collect();
+    let [(before, after, true)] = sizes[..] else {
+        panic!("one compaction with a summary turn, not {sizes:?}");
+    };
+    let free = usize::try_from(
+        (34_000 - 40_000 * super::COMPACTION_TARGET_PERCENT / 100)
+            * super::ESTIMATED_BYTES_PER_TOKEN,
+    )
+    .expect("fits");
+    assert!(
+        after <= before - free,
+        "a failed summary left {after} of {before} bytes, above the {} byte target",
+        before - free
+    );
+    let last = harness
+        .model
+        .seen
+        .last()
+        .expect("a request after compacting");
+    assert_ne!(last.instructions, super::SUMMARY_INSTRUCTION);
+    assert_replayable(&last.items, "the request after a failed summary");
+    assert_eq!(
+        last.items
+            .iter()
+            .filter(|item| matches!(item, Item::ToolCall(_)))
+            .count(),
+        3,
+        "every call stays beside its result: {:?}",
+        last.items
+    );
+}

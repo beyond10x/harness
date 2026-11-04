@@ -2,12 +2,21 @@
 format: aep.planning-md/3
 id: story:compaction-shrinks-a-reasoning-heavy-conversation
 kind: story
-status: draft
+status: active
 title: Compaction reaches its target when the weight is reasoning
 summary: Freed 153 of 56,000 bytes when the weight was opaque reasoning items (measured on the scripted model)
 relations:
 - decomposes: epic:embedded-by-a-consumer
-revision: 1
+- serves: vision:b10x-owns-its-loop
+scope:
+- confidence: inferred
+  path: crates/harness-loop/src/lib.rs
+- confidence: inferred
+  path: crates/harness-loop/src/tests.rs
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 4}
 ---
 ## Context
 

@@ -2,14 +2,17 @@
 format: aep.planning-md/3
 id: story:typed-substrate-run-gets-the-default-write-scope
 kind: story
-status: draft
+status: active
 title: A typed substrate run starts from the default write scope
 relations:
 - serves: vision:b10x-owns-its-loop
 scope:
 - confidence: inferred
   path: crates/harness-cli/src/lib.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:51Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:51Z", actor: "human:timo", revision: 4}
 ---
 ## Context
 

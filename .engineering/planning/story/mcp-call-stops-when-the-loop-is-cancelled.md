@@ -2,11 +2,12 @@
 format: aep.planning-md/3
 id: story:mcp-call-stops-when-the-loop-is-cancelled
 kind: story
-status: draft
+status: active
 title: An MCP tool call stops when the loop is cancelled
 summary: McpTools takes the loop's cancel token, so a dropped LoopTask run or Ctrl-C ends an MCP call at once instead of after the 30 s request timeout.
 relations:
 - decomposes: epic:async-native-loop
+- serves: vision:b10x-owns-its-loop
 scope:
 - confidence: inferred
   path: crates/harness-cli/tests/adversary_awaited_ports.rs
@@ -14,7 +15,10 @@ scope:
   path: crates/harness-cli/tests/awaited_ports.rs
 - confidence: inferred
   path: crates/harness-mcp/src/lib.rs
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:55Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:55Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 

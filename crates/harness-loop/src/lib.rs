@@ -1498,6 +1498,22 @@ fn is_reasoning(item: &Item) -> bool {
         .any(|(named, types)| wire.as_str() == *named && types.contains(&kind))
 }
 
+/// The wires whose provider reasoning compaction may drop, by the identifier each tags its opaque
+/// items with.
+///
+/// An opaque item from any other wire is never taken for reasoning, so a wire missing here keeps
+/// every opaque item it produces through every compaction. Public so the crate that names the
+/// wires (`harness-llm`'s `RESPONSES_WIRE` and `MESSAGES_WIRE`) can be checked against it.
+pub fn reasoning_wires() -> impl Iterator<Item = &'static str> {
+    REASONING_ITEM_TYPES.iter().map(|(wire, _)| *wire)
+}
+
+/// Whether a summary fold keeps `item` rather than taking it: an opaque item that is not
+/// reasoning ([`is_reasoning`]), which nothing renders and nothing says may be dropped.
+fn kept_by_fold(item: &Item) -> bool {
+    matches!(item, Item::Opaque { .. }) && !is_reasoning(item)
+}
+
 /// [`drop_reasoning_within`] with the target as its only threshold, as the tests drive it.
 #[cfg(test)]
 fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
@@ -3410,7 +3426,17 @@ impl<'a> AgentLoop<'a> {
             return Summarised::Skipped;
         };
         let folded: Vec<Item> = state.items[FIRST_KEPT_ITEM..end].to_vec();
-        if measure(&folded) < SUMMARY_MIN_FOLD_BYTES {
+        // Worth a turn by what the fold removes, not by what it spans: an item it keeps stays in
+        // the conversation, so counting it bought a summary turn that removed nothing, and again
+        // before every later request while that item stayed in the fold range. A fold that
+        // removes nothing is under the minimum too.
+        const { assert!(SUMMARY_MIN_FOLD_BYTES > 0) };
+        let removed: usize = folded
+            .iter()
+            .filter(|item| !kept_by_fold(item))
+            .map(measure_one)
+            .sum();
+        if removed < SUMMARY_MIN_FOLD_BYTES {
             return Summarised::Skipped;
         }
         if self.cancel.is_cancelled() {
@@ -3495,7 +3521,7 @@ impl<'a> AgentLoop<'a> {
         let kept: Vec<Item> = state
             .items
             .drain(FIRST_KEPT_ITEM..)
-            .filter(|item| matches!(item, Item::Opaque { .. }) && !is_reasoning(item))
+            .filter(kept_by_fold)
             .collect();
         let folded = end - FIRST_KEPT_ITEM - kept.len();
         state

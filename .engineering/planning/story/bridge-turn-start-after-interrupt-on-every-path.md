@@ -2,19 +2,24 @@
 format: aep.planning-md/3
 id: story:bridge-turn-start-after-interrupt-on-every-path
 kind: story
-status: active
+status: implemented
 title: Bridge mode serves a turn/start sent after an interrupt on every path
 relations:
 - serves: vision:b10x-owns-its-loop
 scope:
-- confidence: inferred
+- confidence: cited
   path: crates/harness-app-server/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/harness-app-server/src/session.rs
-revision: 4
+- confidence: cited
+  path: crates/harness-app-server/tests/adversary_1104_u4.rs
+- confidence: cited
+  path: crates/harness-app-server/tests/turn_start_after_interrupt.rs
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:41:01Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

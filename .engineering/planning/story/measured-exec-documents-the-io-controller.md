@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:measured-exec-documents-the-io-controller
 kind: story
-status: active
+status: implemented
 title: Measured execution documents the io controller it requires
 summary: README and both --cgroup-root help texts name cpu, memory and pids but not io, which run requires (GitHub issue 21)
 refs:
@@ -21,10 +21,11 @@ scope:
   path: crates/harness-substrate/src/withheld.rs
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-04T07:29:45Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-11-04T07:29:51Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:41:02Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

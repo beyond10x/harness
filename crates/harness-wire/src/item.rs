@@ -148,8 +148,13 @@ pub enum Item {
     /// Reasoning items are the reason it exists. Under stateless turns the provider keeps nothing,
     /// so dropping them costs the model its own chain of thought across a tool round trip and it
     /// re-derives the plan every call. Carrying them verbatim is what makes a stateless loop as
-    /// capable as a provider-threaded one. The payload is never read, and `wire` is what stops it
-    /// being handed to a provider that never produced it.
+    /// capable as a provider-threaded one. `wire` is what stops it being handed to a provider that
+    /// never produced it.
+    ///
+    /// The payload is never reinterpreted and is replayed verbatim. It is read in one place, for
+    /// one field: compaction in `harness-loop` reads its `type`, with `wire`, to tell a provider's
+    /// reasoning, which it may drop, from any other item a wire kept as opaque because it lies
+    /// outside the wire's pinned subset, which it keeps.
     Opaque {
         wire: WireId,
         payload: Value,

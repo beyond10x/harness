@@ -1436,8 +1436,36 @@ fn elide(items: &mut [Item], target: usize, protect: usize) -> Elided {
     }
 }
 
-/// Drops the oldest [`Item::Opaque`] reasoning items until the conversation is at or under
-/// `target`, and returns how many went.
+/// The largest conversation, in bytes, whose next request still fits a declared window of
+/// `window` tokens.
+///
+/// The provider counts more than `items` — the instruction and the tool schemas — and how much
+/// more is its last reported input less the loop's estimate ([`ESTIMATED_BYTES_PER_TOKEN`]) of the
+/// items that request carried. What is left of the window after that, in the same estimate, is
+/// what the items may take. With no report to read, nothing beyond the items is counted.
+///
+/// `reported` is the last conversation request's input count and `carried` the measured size of
+/// the items that request carried.
+fn fits_window(reported: Option<u64>, carried: Option<usize>, window: u64) -> usize {
+    let beyond_items = reported.zip(carried).map_or(0, |(reported, bytes)| {
+        reported.saturating_sub(estimated_tokens(bytes))
+    });
+    usize::try_from(
+        window
+            .saturating_sub(beyond_items)
+            .saturating_mul(ESTIMATED_BYTES_PER_TOKEN),
+    )
+    .unwrap_or(usize::MAX)
+}
+
+/// [`drop_reasoning_within`] with the target as its only threshold, as the tests drive it.
+#[cfg(test)]
+fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
+    drop_reasoning_within(items, target, target)
+}
+
+/// Drops the fewest oldest [`Item::Opaque`] reasoning items that take the conversation to one of
+/// two thresholds, in bytes, and returns how many went.
 ///
 /// # Why a reasoning item may go alone
 ///
@@ -1447,23 +1475,33 @@ fn elide(items: &mut [Item], target: usize, protect: usize) -> Elided {
 /// result. The call and its result therefore stay, and the model keeps the record of what it did
 /// while losing the chain of thought that led there.
 ///
-/// Oldest first, because the newest reasoning is the one the next turn builds on. Stops as soon as
-/// the target is met, and does nothing when it already is.
+/// Oldest first, because the newest reasoning is the one the next turn builds on. Does nothing
+/// when the conversation is already at the target.
 ///
-/// # Only where it reaches the target
+/// # Two thresholds, in order
 ///
-/// Reasoning is dropped only when dropping it, oldest first, takes the conversation to `target`.
-/// Where the weight is in something nothing may touch — the task, or a protected tail of text —
-/// no amount of dropping gets there, and dropping anyway would strip the newest round trip's
-/// reasoning before every turn for no gain at all. Then nothing goes and the conversation is
-/// merely larger than wanted, as it was before this pass existed.
-fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
+/// 1. **`target`**, the size the compaction is aiming for. Where dropping the oldest reasoning
+///    items reaches it, the fewest that do are dropped, and that is all.
+/// 2. **`window`**, the size at which the next request still fits the declared context window.
+///    Where no number of drops reaches the target — the weight is in something nothing may
+///    touch: the task, the summary, the newest result — the fewest oldest drops that bring the
+///    conversation to `window` are made instead. A conversation left over the window is a request
+///    the provider refuses, and that is worth the reasoning; one merely over the target is not.
+///
+/// Where neither is reachable, or the conversation is already at `window` when the target is out
+/// of reach, nothing goes: dropping anyway would strip the newest round trip's reasoning before
+/// every turn for no gain at all, and the conversation is merely larger than wanted, as it was
+/// before this pass existed. Both thresholds are met at or under (`<=`), the way the trigger and
+/// the target are measured everywhere else here.
+fn drop_reasoning_within(items: &mut Vec<Item>, target: usize, window: usize) -> usize {
     let mut size = measure(items);
     if size <= target {
         return 0;
     }
-    // Decided before anything is removed: how many of the oldest reasoning items it takes.
-    let mut needed = None;
+    // Decided before anything is removed: how many of the oldest reasoning items each threshold
+    // takes, the window's counted from zero because the conversation may already be under it.
+    let mut under_window = (size <= window).then_some(0_usize);
+    let mut at_target = None;
     let mut count = 0_usize;
     for item in items
         .iter()
@@ -1471,13 +1509,17 @@ fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
     {
         size = size.saturating_sub(measure_one(item));
         count += 1;
+        if under_window.is_none() && size <= window {
+            under_window = Some(count);
+        }
         if size <= target {
-            needed = Some(count);
+            at_target = Some(count);
             break;
         }
     }
-    let Some(needed) = needed else {
-        return 0;
+    let needed = match at_target.or(under_window) {
+        Some(needed) if needed > 0 => needed,
+        _ => return 0,
     };
     let mut left = needed;
     items.retain(|item| {
@@ -2036,6 +2078,15 @@ pub struct AgentLoop<'a> {
     refreshed_for_turn: Option<u64>,
     deferred: Option<DeferredApproval>,
     resumed_decision: Option<(CallId, ToolSpec, ApprovalDecision)>,
+    /// The measured size of the items carried by the conversation request whose input count is
+    /// [`RunState::reported_input`].
+    ///
+    /// What the provider counted beyond them — the instruction and the tool schemas — is the
+    /// reported figure less the estimate of these bytes, and that is what decides whether a
+    /// compacted conversation fits the declared window ([`fits_window`]). Held here rather than
+    /// in [`RunState`] so the checkpoint format does not change, and cleared each time a state is
+    /// driven: a resumed run counts nothing beyond its items until its next report.
+    reported_bytes: Option<usize>,
 }
 
 struct DeferredApproval {
@@ -2277,6 +2328,7 @@ impl<'a> AgentLoop<'a> {
             refreshed_for_turn: None,
             deferred: None,
             resumed_decision: None,
+            reported_bytes: None,
         }
     }
 
@@ -2790,6 +2842,9 @@ impl<'a> AgentLoop<'a> {
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopStop, LoopError> {
+        // Measured for this conversation's own requests only: a loop driven again, over a state
+        // it did not just report on, has no figure for what that state's last request carried.
+        self.reported_bytes = None;
         loop {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
                 return Ok(stop);
@@ -2830,6 +2885,10 @@ impl<'a> AgentLoop<'a> {
                 }
             };
 
+            if outcome.usage.is_some() {
+                // Before this turn's items join: these are the items the request carried.
+                self.reported_bytes = Some(measure(&state.items));
+            }
             let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
             // The request itself may have exhausted a ceiling or made its accounting
             // unobservable. Do not execute effects from that request before honoring the bound.
@@ -3179,9 +3238,11 @@ impl<'a> AgentLoop<'a> {
     /// A summary takes the reasoning items of the round trips it folds. Where the conversation is
     /// still over the target after it, the oldest remaining reasoning items go, one at a time, until
     /// it is not ([`drop_reasoning`]): their weight is opaque, nothing else can make it smaller, and
-    /// a conversation left over the target meets the provider's window on the next request. They
-    /// go only where dropping them reaches the target; where the weight is in something nothing may
-    /// touch, none go. The warning counts every reasoning item that went, as it counts elided
+    /// a conversation left over the target meets the provider's window on the next request. Two
+    /// thresholds decide how many go ([`drop_reasoning_within`]): the fewest that reach the target;
+    /// where no number does, because the weight is in something nothing may touch, the fewest that
+    /// bring the next request inside the declared window ([`fits_window`]); and where even that is
+    /// out of reach, none. The warning counts every reasoning item that went, as it counts elided
     /// results.
     ///
     /// Returns a stop only when the run ended inside the summary turn — a cancel, or no turn or
@@ -3245,8 +3306,9 @@ impl<'a> AgentLoop<'a> {
         // What the summary could not reach because it is in the protected tail: a reasoning model
         // carries one opaque item per round trip, and the newest of them alone can outweigh the
         // whole target. Dropped oldest first, never with anything else, and only where that
-        // reaches the target.
-        reasoning += drop_reasoning(&mut state.items, target);
+        // reaches the target or, failing that, brings the next request inside the window.
+        let inside_window = fits_window(state.reported_input, self.reported_bytes, window);
+        reasoning += drop_reasoning_within(&mut state.items, target, inside_window);
         if elided.count == 0 && summarised == 0 && reasoning == 0 && !summary_turn {
             return Compaction::Unchanged;
         }

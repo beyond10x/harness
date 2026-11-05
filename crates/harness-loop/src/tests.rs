@@ -8632,3 +8632,147 @@ fn adversary_u3_a_failed_summary_still_reaches_the_target_by_dropping_reasoning(
         last.items
     );
 }
+
+// --- adversary pass 2: story:summary-fold-keeps-reasoning-with-its-call and
+// story:compaction-shrinks-a-reasoning-heavy-conversation ------------------------------------------
+
+/// Two round trips, each a reasoning item of `first` and `second` bytes before its call.
+fn adversary_u3b_two_reasoned_round_trips(first: usize, second: usize) -> Vec<Item> {
+    vec![
+        Item::user("do the thing"),
+        reasoning(first),
+        a_call("c1", json!({})),
+        an_answer("c1", 10),
+        reasoning(second),
+        a_call("c2", json!({})),
+        an_answer("c2", 10),
+    ]
+}
+
+#[test]
+fn adversary_u3b_a_target_met_exactly_by_one_drop_drops_one() {
+    // Boundary: `drop_reasoning` stops "as soon as the target is met", and met is `<=`. A target
+    // equal to the size after the oldest reasoning item goes is met by that one drop; a second
+    // drop would strip the reasoning of the round trip the next turn builds on for nothing.
+    let mut items = adversary_u3b_two_reasoned_round_trips(1_000, 1_000);
+    let target = measure(&items) - measure_one(&items[1]);
+    let dropped = drop_reasoning(&mut items, target);
+    assert_eq!(
+        (dropped, measure(&items)),
+        (1, target),
+        "a target met exactly by one drop takes one reasoning item: {items:?}"
+    );
+    assert!(
+        matches!(items[3], Item::Opaque { .. }),
+        "the newest round trip keeps its reasoning: {items:?}"
+    );
+}
+
+#[test]
+fn adversary_u3b_a_conversation_already_at_its_target_drops_nothing() {
+    // Boundary: a conversation exactly at its target is not over it.
+    let mut items = adversary_u3b_two_reasoned_round_trips(1_000, 1_000);
+    let target = measure(&items);
+    let dropped = drop_reasoning(&mut items, target);
+    assert_eq!(
+        (dropped, items.len()),
+        (0, 7),
+        "a conversation at its target loses nothing: {items:?}"
+    );
+}
+
+#[test]
+fn adversary_u3b_the_reasoning_that_goes_is_the_oldest() {
+    // `drop_reasoning`: "Oldest first, because the newest reasoning is the one the next turn builds
+    // on." Two round trips whose reasoning sits in the protected tail, too little before them to
+    // be worth a summary turn, and a target one drop of either reaches: the one that goes must be
+    // the first round trip's, on a run that spends no summary turn.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(7_000, "c1")),
+            Ok(reasons_and_asks(6_000, "c2")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(4_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert_eq!(
+        compacted(&sink),
+        vec![(0, 0, false)],
+        "one compaction, by dropping reasoning alone"
+    );
+    let third = &harness.model.seen[2].items;
+    let reasoned: Vec<&str> = third
+        .windows(2)
+        .filter_map(|pair| match (&pair[0], &pair[1]) {
+            (Item::Opaque { .. }, Item::ToolCall(call)) => Some(call.call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reasoned,
+        vec!["c2"],
+        "the oldest reasoning item went and the newest stayed: {third:?}"
+    );
+    assert_replayable(third, "the request after dropping one reasoning item");
+}
+
+#[test]
+fn adversary_u3b_reasoning_kept_over_an_unreachable_target_does_not_carry_the_next_request_past_the_window()
+ {
+    // story:compaction-shrinks-a-reasoning-heavy-conversation, the P2 parameters (three 20 kB
+    // reasoning items, a declared window of 40,000 tokens, a reported input of 34,000), with the
+    // newest call answered at 40 kB and an 8 kB summary. The target is now out of reach: what
+    // nothing may touch (task, summary, the newest result) is over it. Correction 1 then drops no
+    // reasoning at all, and `compact_run`'s own documentation says what a conversation left like
+    // that meets: "the provider's window on the next request". Dropping the two reasoning items
+    // the protected tail still holds would have left the request under the window.
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(reasons_and_asks(20_000, "c1")),
+            Ok(reasons_and_asks(20_000, "c2")),
+            Ok(reporting(
+                {
+                    let mut turn = asks_for(&[("c3", "b", json!({}))]);
+                    turn.items.insert(0, reasoning(20_000));
+                    turn
+                },
+                34_000,
+            )),
+            Ok(answer(&"s".repeat(8_000))),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![
+            spec("a", Approval::NotRequired),
+            spec("b", Approval::NotRequired),
+        ])
+        .answering("b", ToolOutcome::ok(json!({ "text": "y".repeat(40_000) }))),
+    )
+    .windowed(40_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert_eq!(compacted(&sink).len(), 1, "{:?}", compacted(&sink));
+    let seen = &harness.model.seen;
+    // What the provider counts beyond `items` (the instruction and the tool schemas), as the P2
+    // fixture's reported figure implies it, by the loop's own estimate of the items it was sent.
+    let reported_on = &seen[2].items;
+    let overhead = 34_000 - estimated_tokens(measure(reported_on));
+    let next = &after_the_summary(seen)[0].items;
+    let estimated = overhead + estimated_tokens(measure(next));
+    let kept: usize = next
+        .iter()
+        .filter(|item| matches!(item, Item::Opaque { .. }))
+        .map(measure_one)
+        .sum();
+    assert!(
+        estimated <= 40_000,
+        "the request after compacting is an estimated {estimated} tokens of the 40000 declared \
+         ({overhead} beyond its items), while it still carries {kept} bytes of reasoning whose \
+         drop would have left {} tokens",
+        overhead + estimated_tokens(measure(next) - kept)
+    );
+}

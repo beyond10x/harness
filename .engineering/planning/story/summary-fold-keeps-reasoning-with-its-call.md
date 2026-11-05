@@ -2,12 +2,22 @@
 format: aep.planning-md/3
 id: story:summary-fold-keeps-reasoning-with-its-call
 kind: story
-status: draft
+status: implemented
 title: A summary fold keeps no reasoning item apart from the item it preceded
 summary: summarise re-inserts folded reasoning items after the summary, detached from their folded calls (measured)
 relations:
 - decomposes: epic:embedded-by-a-consumer
-revision: 1
+- serves: vision:b10x-owns-its-loop
+scope:
+- confidence: cited
+  path: crates/harness-loop/src/lib.rs
+- confidence: cited
+  path: crates/harness-loop/src/tests.rs
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:55Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:55Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:41:00Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Context
 

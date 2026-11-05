@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-04T21:39:23Z",
+  "actor": "human:timo",
+  "artifact": "story:measured-exec-documents-the-io-controller",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-substrate --lib",
+    "reference": "base message: 63 passed, 1 failed; unit ee38176: 64 passed; docs check exit 0 (VERIFIED, documentation and message only)"
+  }
+}

@@ -2,12 +2,22 @@
 format: aep.planning-md/3
 id: story:compaction-shrinks-a-reasoning-heavy-conversation
 kind: story
-status: draft
+status: implemented
 title: Compaction reaches its target when the weight is reasoning
 summary: Freed 153 of 56,000 bytes when the weight was opaque reasoning items (measured on the scripted model)
 relations:
 - decomposes: epic:embedded-by-a-consumer
-revision: 1
+- serves: vision:b10x-owns-its-loop
+scope:
+- confidence: cited
+  path: crates/harness-loop/src/lib.rs
+- confidence: cited
+  path: crates/harness-loop/src/tests.rs
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:56Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:41:02Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Context
 
@@ -34,3 +44,14 @@ dropped together with the round trips they belong to, and the drop is announced 
    conversation at or under the target after one compaction.
 2. A `conversation-compacted` warning names how many opaque items went.
 3. No request after it carries an opaque item without the item it preceded.
+
+## How the Outcome was met (wave 2026-11-04)
+
+Recorded by the wave coordinator from `review-result:adversary-1104-u3-pass-1` (finding at
+`crates/harness-loop/src/lib.rs:1452`). The Outcome above says opaque items are dropped "together
+with the round trips they belong to". The implementation drops a reasoning item alone and keeps
+the call and result it preceded: a provider requires a reasoning item to be followed by its item,
+not the reverse, and dropping the call would hide a result the model just asked for. Acceptance 3
+holds as written. Reasoning is dropped only where dropping it reaches the target (correction 1);
+the count is in the `conversation-compacted` warning, and in the event only once
+`story:compacted-event-counts-dropped-reasoning` lands.

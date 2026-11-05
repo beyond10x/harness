@@ -346,9 +346,10 @@ async fn mcp_tools_run_under_loop_task() {
     // Outside the bound: compiling the fixture is the test's set-up, not the task's answer.
     let files = McpFiles::stdio();
     let (profile, registry) = (files.profile.clone(), files.registry.clone());
-    let task = LoopTask::spawn(config(), move |_: &LoopCancel| {
+    let task = LoopTask::spawn(config(), move |cancel: &LoopCancel| {
         outside_any_runtime()?;
-        let tools = McpTools::prepare(&profile, Some(&registry))?;
+        // The task's token, so a dropped run stops the call in flight rather than waiting it out.
+        let tools = McpTools::prepare_with_cancel(&profile, Some(&registry), cancel)?;
         Ok::<_, String>(LoopPorts::new(
             Scripted::calling(call(
                 "call_mcp_1",

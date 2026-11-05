@@ -1436,6 +1436,102 @@ fn elide(items: &mut [Item], target: usize, protect: usize) -> Elided {
     }
 }
 
+/// The largest conversation, in bytes, whose next request still fits a declared window of
+/// `window` tokens.
+///
+/// The provider counts more than `items` — the instruction and the tool schemas — and how much
+/// more is its last reported input less the loop's estimate ([`ESTIMATED_BYTES_PER_TOKEN`]) of the
+/// items that request carried. What is left of the window after that, in the same estimate, is
+/// what the items may take. With no report to read, nothing beyond the items is counted.
+///
+/// `reported` is the last conversation request's input count and `carried` the measured size of
+/// the items that request carried.
+fn fits_window(reported: Option<u64>, carried: Option<usize>, window: u64) -> usize {
+    let beyond_items = reported.zip(carried).map_or(0, |(reported, bytes)| {
+        reported.saturating_sub(estimated_tokens(bytes))
+    });
+    usize::try_from(
+        window
+            .saturating_sub(beyond_items)
+            .saturating_mul(ESTIMATED_BYTES_PER_TOKEN),
+    )
+    .unwrap_or(usize::MAX)
+}
+
+/// [`drop_reasoning_within`] with the target as its only threshold, as the tests drive it.
+#[cfg(test)]
+fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
+    drop_reasoning_within(items, target, target)
+}
+
+/// Drops the fewest oldest [`Item::Opaque`] reasoning items that take the conversation to one of
+/// two thresholds, in bytes, and returns how many went.
+///
+/// # Why a reasoning item may go alone
+///
+/// The rule a provider holds the record to runs one way: a reasoning item must be followed by the
+/// item it preceded. Removing the reasoning item leaves that item where it was, now preceded by
+/// whatever came before, so nothing is left unpaired — whereas removing a call would strand its
+/// result. The call and its result therefore stay, and the model keeps the record of what it did
+/// while losing the chain of thought that led there.
+///
+/// Oldest first, because the newest reasoning is the one the next turn builds on. Does nothing
+/// when the conversation is already at the target.
+///
+/// # Two thresholds, in order
+///
+/// 1. **`target`**, the size the compaction is aiming for. Where dropping the oldest reasoning
+///    items reaches it, the fewest that do are dropped, and that is all.
+/// 2. **`window`**, the size at which the next request still fits the declared context window.
+///    Where no number of drops reaches the target — the weight is in something nothing may
+///    touch: the task, the summary, the newest result — the fewest oldest drops that bring the
+///    conversation to `window` are made instead. A conversation left over the window is a request
+///    the provider refuses, and that is worth the reasoning; one merely over the target is not.
+///
+/// Where neither is reachable, or the conversation is already at `window` when the target is out
+/// of reach, nothing goes: dropping anyway would strip the newest round trip's reasoning before
+/// every turn for no gain at all, and the conversation is merely larger than wanted, as it was
+/// before this pass existed. Both thresholds are met at or under (`<=`), the way the trigger and
+/// the target are measured everywhere else here.
+fn drop_reasoning_within(items: &mut Vec<Item>, target: usize, window: usize) -> usize {
+    let mut size = measure(items);
+    if size <= target {
+        return 0;
+    }
+    // Decided before anything is removed: how many of the oldest reasoning items each threshold
+    // takes, the window's counted from zero because the conversation may already be under it.
+    let mut under_window = (size <= window).then_some(0_usize);
+    let mut at_target = None;
+    let mut count = 0_usize;
+    for item in items
+        .iter()
+        .filter(|item| matches!(item, Item::Opaque { .. }))
+    {
+        size = size.saturating_sub(measure_one(item));
+        count += 1;
+        if under_window.is_none() && size <= window {
+            under_window = Some(count);
+        }
+        if size <= target {
+            at_target = Some(count);
+            break;
+        }
+    }
+    let needed = match at_target.or(under_window) {
+        Some(needed) if needed > 0 => needed,
+        _ => return 0,
+    };
+    let mut left = needed;
+    items.retain(|item| {
+        if left > 0 && matches!(item, Item::Opaque { .. }) {
+            left -= 1;
+            return false;
+        }
+        true
+    });
+    needed
+}
+
 /// Where the **turn group** starting at `start` ends, exclusive.
 ///
 /// A turn group is the smallest run of items that is still replayable on its own: the
@@ -1533,8 +1629,9 @@ fn fold_end(items: &[Item], protect: usize) -> Option<usize> {
 enum Summarised {
     /// Nothing was folded: too little to be worth a turn, or all of it protected.
     Skipped,
-    /// The prefix is now one summary item, in place of this many.
-    Folded(usize),
+    /// The prefix is now one summary item, in place of `items`, of which `reasoning` were opaque
+    /// reasoning items that went with the round trips they preceded.
+    Folded { items: usize, reasoning: usize },
     /// A turn was spent and produced nothing usable. The elided conversation stands.
     Failed,
     /// The caller cancelled. The run is over.
@@ -1981,6 +2078,15 @@ pub struct AgentLoop<'a> {
     refreshed_for_turn: Option<u64>,
     deferred: Option<DeferredApproval>,
     resumed_decision: Option<(CallId, ToolSpec, ApprovalDecision)>,
+    /// The measured size of the items carried by the conversation request whose input count is
+    /// [`RunState::reported_input`].
+    ///
+    /// What the provider counted beyond them — the instruction and the tool schemas — is the
+    /// reported figure less the estimate of these bytes, and that is what decides whether a
+    /// compacted conversation fits the declared window ([`fits_window`]). Held here rather than
+    /// in [`RunState`] so the checkpoint format does not change, and cleared each time a state is
+    /// driven: a resumed run counts nothing beyond its items until its next report.
+    reported_bytes: Option<usize>,
 }
 
 struct DeferredApproval {
@@ -2222,6 +2328,7 @@ impl<'a> AgentLoop<'a> {
             refreshed_for_turn: None,
             deferred: None,
             resumed_decision: None,
+            reported_bytes: None,
         }
     }
 
@@ -2735,6 +2842,9 @@ impl<'a> AgentLoop<'a> {
         deadline: Option<Instant>,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopStop, LoopError> {
+        // Measured for this conversation's own requests only: a loop driven again, over a state
+        // it did not just report on, has no figure for what that state's last request carried.
+        self.reported_bytes = None;
         loop {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
                 return Ok(stop);
@@ -2775,6 +2885,10 @@ impl<'a> AgentLoop<'a> {
                 }
             };
 
+            if outcome.usage.is_some() {
+                // Before this turn's items join: these are the items the request carried.
+                self.reported_bytes = Some(measure(&state.items));
+            }
             let (calls, stop_reason) = state.absorb(outcome, self.config.prices.as_ref(), sink);
             // The request itself may have exhausted a ceiling or made its accounting
             // unobservable. Do not execute effects from that request before honoring the bound.
@@ -3121,6 +3235,16 @@ impl<'a> AgentLoop<'a> {
     /// is in things elision may not touch — user and assistant text, and the opaque reasoning items
     /// this loop carries verbatim across every tool round trip.
     ///
+    /// A summary takes the reasoning items of the round trips it folds. Where the conversation is
+    /// still over the target after it, the oldest remaining reasoning items go, one at a time, until
+    /// it is not ([`drop_reasoning`]): their weight is opaque, nothing else can make it smaller, and
+    /// a conversation left over the target meets the provider's window on the next request. Two
+    /// thresholds decide how many go ([`drop_reasoning_within`]): the fewest that reach the target;
+    /// where no number does, because the weight is in something nothing may touch, the fewest that
+    /// bring the next request inside the declared window ([`fits_window`]); and where even that is
+    /// out of reach, none. The warning counts every reasoning item that went, as it counts elided
+    /// results.
+    ///
     /// Returns a stop only when the run ended inside the summary turn — a cancel, or no turn or
     /// time left to spend on one. A summary that fails on the wire is a warning: the conversation
     /// is merely larger than wanted, and ending the run over that would reintroduce the defect
@@ -3159,6 +3283,7 @@ impl<'a> AgentLoop<'a> {
         let elided = elide(&mut state.items, target, protected_bytes(target));
 
         let mut summarised = 0_usize;
+        let mut reasoning = 0_usize;
         let mut summary_turn = false;
         if measure(&state.items) > target {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
@@ -3166,27 +3291,38 @@ impl<'a> AgentLoop<'a> {
             }
             match self.summarise(state, target, sink) {
                 Summarised::Cancelled => return Compaction::Stopped(cancelled()),
-                Summarised::Folded(count) => {
-                    summarised = count;
+                Summarised::Folded {
+                    items,
+                    reasoning: folded,
+                } => {
+                    summarised = items;
+                    reasoning = folded;
                     summary_turn = true;
                 }
                 Summarised::Failed => summary_turn = true,
                 Summarised::Skipped => {}
             }
         }
-        if elided.count == 0 && summarised == 0 && !summary_turn {
+        // What the summary could not reach because it is in the protected tail: a reasoning model
+        // carries one opaque item per round trip, and the newest of them alone can outweigh the
+        // whole target. Dropped oldest first, never with anything else, and only where that
+        // reaches the target or, failing that, brings the next request inside the window.
+        let inside_window = fits_window(state.reported_input, self.reported_bytes, window);
+        reasoning += drop_reasoning_within(&mut state.items, target, inside_window);
+        if elided.count == 0 && summarised == 0 && reasoning == 0 && !summary_turn {
             return Compaction::Unchanged;
         }
 
         let after = measure(&state.items);
         // Said out loud, for the same reason the byte rule says it: a model that suddenly cannot
-        // see a file it read has a right to a reason, and so does anyone reading the record.
+        // see a file it read has a right to a reason, and so does anyone reading the record. A
+        // dropped reasoning item is the model's own chain of thought, so it is counted here too.
         sink.emit(LoopEvent::Warning {
             code: "conversation-compacted".to_owned(),
             message: format!(
                 "the conversation reached {occupied} tokens of the {window} declared, so {count} \
-                 old tool result(s) were elided and {summarised} item(s) folded into a summary; \
-                 {before} bytes became {after}.",
+                 old tool result(s) were elided, {summarised} item(s) folded into a summary and \
+                 {reasoning} provider reasoning item(s) dropped; {before} bytes became {after}.",
                 count = elided.count,
             ),
         });
@@ -3215,7 +3351,10 @@ impl<'a> AgentLoop<'a> {
     /// What survives, always: the task ([`FIRST_KEPT_ITEM`]), the newest [`protected_bytes`] of
     /// conversation, and every [`Item::ToolCall`] beside its result. What replaces the rest is one
     /// [`Item::user`] beginning with [`SUMMARY_MARKER`], so nothing downstream mistakes the
-    /// harness's own words for a person's.
+    /// harness's own words for a person's. The folded range's [`Item::Opaque`] reasoning items go
+    /// with it: each preceded a call or a text that is now inside the summary, and one kept after
+    /// the summary would precede something else. How many went is returned, so the
+    /// `conversation-compacted` warning can say so.
     ///
     /// The turn is counted against the run's turn, token and spend ceilings like any other,
     /// because every model request consumes the same finite budget regardless of why the loop
@@ -3298,19 +3437,25 @@ impl<'a> AgentLoop<'a> {
             return Summarised::Failed;
         }
 
-        let opaque: Vec<Item> = state.items[FIRST_KEPT_ITEM..end]
+        // The folded range's reasoning items go with the round trips they belong to. `fold_end`
+        // stops only between turn groups, so every one of them preceded a call or a text that is
+        // now inside the summary; re-inserting them after it left each followed by the next
+        // reasoning item or by the tail instead of by its own item, which the Responses route
+        // refuses.
+        let reasoning = state.items[FIRST_KEPT_ITEM..end]
             .iter()
             .filter(|item| matches!(item, Item::Opaque { .. }))
-            .cloned()
-            .collect();
+            .count();
         let tail = state.items.split_off(end);
         state.items.truncate(FIRST_KEPT_ITEM);
         state
             .items
             .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
-        state.items.extend(opaque);
         state.items.extend(tail);
-        Summarised::Folded(end - FIRST_KEPT_ITEM)
+        Summarised::Folded {
+            items: end - FIRST_KEPT_ITEM,
+            reasoning,
+        }
     }
 
     /// What a run that would stop with `stop` actually does: ends with it, or turns again.

@@ -2,14 +2,28 @@
 format: aep.planning-md/3
 id: story:typed-substrate-run-gets-the-default-write-scope
 kind: story
-status: draft
+status: implemented
 title: A typed substrate run starts from the default write scope
 relations:
 - serves: vision:b10x-owns-its-loop
 scope:
-- confidence: inferred
+- confidence: cited
+  path: README.md
+- confidence: cited
   path: crates/harness-cli/src/lib.rs
-revision: 2
+- confidence: cited
+  path: crates/harness-cli/tests/security_1104_u1.rs
+- confidence: cited
+  path: crates/harness-cli/tests/typed_write_scope.rs
+- confidence: cited
+  path: website/docs/guides/profiles.md
+- confidence: cited
+  path: website/docs/reference/cli.md
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-04T07:29:51Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-11-04T07:29:51Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:41:01Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Context
 

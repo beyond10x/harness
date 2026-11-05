@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-04T21:39:23Z",
+  "actor": "human:timo",
+  "artifact": "story:bridge-turn-start-after-interrupt-on-every-path",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-app-server --test turn_start_after_interrupt",
+    "reference": "base src: 1 passed, 2 failed (-32601 on both paths); unit a158f03: 3 passed (VERIFIED)"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-04T21:39:23Z",
+  "actor": "human:timo",
+  "artifact": "story:typed-substrate-run-gets-the-default-write-scope",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-cli --test typed_write_scope",
+    "reference": "base implementation: 0 passed, 6 failed (.b10x/harness.toml rewritten); unit ee38176: 6 passed (VERIFIED)"
+  }
+}

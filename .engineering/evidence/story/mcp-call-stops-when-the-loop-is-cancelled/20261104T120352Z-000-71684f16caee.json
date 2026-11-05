@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-04T12:03:52Z",
+  "actor": "human:timo",
+  "artifact": "story:mcp-call-stops-when-the-loop-is-cancelled",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-harness-cli --test adversary_awaited_ports",
+    "reference": "token unread: 29.99 s and two 5 s timeouts, 6 passed 3 failed; unit c6030cb: 9 passed in 1.18 s (VERIFIED)"
+  }
+}

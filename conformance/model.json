@@ -2161,7 +2161,12 @@
           "name": "returned-then-ask",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == write"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == write"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -2208,7 +2213,12 @@
           "name": "returned-then-call",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == read"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == read"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -2570,7 +2580,12 @@
           "name": "denied-then-ask",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == write"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == write"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -2617,7 +2632,12 @@
           "name": "denied-then-call",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == read"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == read"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -3294,7 +3314,12 @@
           "name": "resumed-denied-then-ask",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == write"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == write"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",
@@ -3341,7 +3366,12 @@
           "name": "resumed-denied-then-call",
           "condition": {
             "kind": "subject_predicate",
-            "predicate": "next == read"
+            "predicate": {
+              "all": [
+                "defined(next)",
+                "next == read"
+              ]
+            }
           },
           "subject": {
             "entity": "harness.loop.Loop",

@@ -407,13 +407,13 @@ commands:
       - {name: turn, type: Integer}
     outcomes:
       - name: denied-then-ask
-        when_subject: {predicate: next == write}
+        when_subject: {predicate: {all: [defined(next), next == write]}}
         moves: harness.loop.Loop.deny-then-ask
         instance: run_id
         sets: {next: {cleared: true}}
         returns: true
       - name: denied-then-call
-        when_subject: {predicate: next == read}
+        when_subject: {predicate: {all: [defined(next), next == read]}}
         moves: harness.loop.Loop.deny-then-call
         instance: run_id
         sets: {next: {cleared: true}}
@@ -493,13 +493,13 @@ commands:
       - {name: turn, type: Integer}
     outcomes:
       - name: resumed-denied-then-ask
-        when_subject: {predicate: next == write}
+        when_subject: {predicate: {all: [defined(next), next == write]}}
         moves: harness.loop.Loop.resume-denied-then-ask
         instance: run_id
         sets: {next: {cleared: true}}
         returns: true
       - name: resumed-denied-then-call
-        when_subject: {predicate: next == read}
+        when_subject: {predicate: {all: [defined(next), next == read]}}
         moves: harness.loop.Loop.resume-denied-then-call
         instance: run_id
         sets: {next: {cleared: true}}
@@ -533,13 +533,13 @@ commands:
       - {name: turn, type: Integer}
     outcomes:
       - name: returned-then-ask
-        when_subject: {predicate: next == write}
+        when_subject: {predicate: {all: [defined(next), next == write]}}
         moves: harness.loop.Loop.ask-next
         instance: run_id
         sets: {next: {cleared: true}}
         returns: true
       - name: returned-then-call
-        when_subject: {predicate: next == read}
+        when_subject: {predicate: {all: [defined(next), next == read]}}
         moves: harness.loop.Loop.call-next
         instance: run_id
         sets: {next: {cleared: true}}

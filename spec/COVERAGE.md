@@ -64,20 +64,29 @@ serializes the production value instead of copying its fields by hand, so a fiel
 ledger fails the declared schema rather than vanishing from the evidence. The derive changes no
 behaviour: nothing in the loop serializes the ledger.
 
-**ESS 0.77.0 workarounds.**
+**ESS 0.86.0 workarounds.** The first four were written against ESS 0.77.0; the first two were
+re-checked against 0.86.0 with an `ess` run, the next two were not.
 
-- ESS 0.77.0 accepts `summary:` on fields and enum variants, and on an enum type under `naming:`,
-  but takes none on a transition or a state; their source citations are YAML comments in
-  `spec/domains/loop.yaml`.
-- The view is `read_your_writes`, which ESS 0.77.0 reads only behind a consistency token, so the
+- At specification format `ess/23`, which `spec/system.yaml` declares, a transition and a state
+  take no `summary:`; their source citations are YAML comments in `spec/domains/loop.yaml`. ESS
+  0.86.0 takes both from format `ess/33` (`ESS-ENTITY-009` below it).
+- In an `ess-scenario/4` document an authored response literal must give every field of a struct
+  (`ESS-AUTHOR-014` in 0.86.0, `ESS-AUTHOR-001` in 0.77.0). Pinning the whole checkpoint would pin
+  `LoopConfig`, declared `Json`, so the scenarios pin the deferred `stop` and the ledger, and the
+  declared schema (one-variant `format`, every field typed) holds the checkpoint. ESS 0.86.0
+  accepts a claim on one member by its path (`checkpoint.checkpoint_id: cp-1`) from
+  `ess-scenario/6`.
+- The view is `read_your_writes`, which ESS 0.77.0 read only behind a consistency token, so the
   adapter returns a write counter as the `ConsistencyToken` on every Loop answer, refusals
-  included. The view is read from the same observations that decided the answer.
-- ESS 0.77.0 refuses an authored response literal that gives some of a struct's fields
-  (`ESS-AUTHOR-001`, `response literal checkpoint: invalid_input`). Pinning the whole checkpoint
-  would pin `LoopConfig`, declared `Json`, so the scenarios pin the deferred `stop` and the ledger,
-  and the declared schema (one-variant `format`, every field typed) holds the checkpoint.
-- ESS 0.77.0 admits a command into a multi-`from` transition from any of its states, so each
-  command edge is its own transition.
+  included. The view is read from the same observations that decided the answer. Not re-checked
+  against 0.86.0.
+- ESS 0.77.0 admitted a command into a multi-`from` transition from any of its states, so each
+  command edge is its own transition. Not re-checked against 0.86.0.
+- From ESS 0.81.0 an unknown guard on the absent `Optional` field `next` stops selection before
+  the wrong-state branch, so the guards on `next` of `CompleteTool`, `Deny` and `ResumeDenied` read
+  `{all: [defined(next), next == ...]}`; without `defined(next)` the twelve wrong-state scenarios
+  of those commands in `AwaitingModel`, `AwaitingSummary`, `Failed` and `Stopped` are refused
+  (`ESS-SYNTH-003`).
 
 The stop `harness.loop.Stop` is a tagged union on `kind`: one variant per `LoopStop` variant
 (`crates/harness-loop/src/lib.rs:127-197`), each carrying exactly that variant's fields, required,
@@ -88,10 +97,10 @@ not executing those paths. The Loop scenarios execute `awaiting-approval` (the d
 returned stop) and `failed`, which `run_in` never returns: the Loop adapter reads it from the
 `LoopEvent::Finished` a failed run emits (`lib.rs:123-124`).
 
-ESS 0.77.0 writes a union value adjacently tagged: the tag, and a payload variant's fields under
-`value` (`{"kind": "max-turns", "value": {"limit": 1}}`); a unit variant such as `completed` is the
-tag alone. `LoopStop` serializes internally tagged, its fields beside `kind`, and ESS has no form
-for that. The scenarios therefore write the adjacent form, and the adapter
+ESS 0.86.0 writes a union value adjacently tagged, as 0.77.0 did: the tag, and a payload variant's
+fields under `value` (`{"kind": "max-turns", "value": {"limit": 1}}`); a unit variant such as
+`completed` is the tag alone. `LoopStop` serializes internally tagged, its fields beside `kind`, and
+ESS has no form for that. The scenarios therefore write the adjacent form, and the adapter
 (`crates/harness-conformance/src/boundary.rs`, `tagged`) moves the production serialization's
 fields under `value` without computing any. The unit variant needs specification format `ess/22`;
 the Loop refusals' `{subject: state}` error field needs `ess/23`, which `spec/system.yaml` declares.
@@ -122,7 +131,8 @@ boundary; no owner decision or invented ownership/cardinality is needed merely t
   None is a Loop scenario. The checkpoint's `config` (`LoopConfig`), `invoked` (`ToolSpec`) and
   `state.items` (`Item`) are declared `Json`, their structure unmodelled.
 - **UNMAPPED: `unfolded` in the Loops view.** The view does not publish whether a summary turn is
-  due, so ESS 0.77.0 notes that refusals guarded by it cannot be checked through the view.
+  due, so ESS 0.77.0 noted that refusals guarded by it cannot be checked through the view (0.86.0
+  prints no such note).
 - **UNMAPPED: the `--json` LoopEvent record.** The events are observed by the adapter, not declared
   as ESS events.
 - **UNMAPPED: dynamic context and inventory narrowing.** Sources:

@@ -212,7 +212,7 @@ fn run_loop(input: &Value) -> Result<Value> {
 }
 /// The production serialization of `stop`, in the wire form ESS gives a tagged union.
 ///
-/// serde writes a variant's fields beside `kind` (`#[serde(tag = "kind")]`); ESS 0.77.0 writes them
+/// serde writes a variant's fields beside `kind` (`#[serde(tag = "kind")]`); ESS 0.86.0 writes them
 /// under `value`, and a unit variant as the tag alone (`spec/COVERAGE.md`). Members are moved, none
 /// is computed.
 fn tagged(stop: &LoopStop) -> Result<Value> {

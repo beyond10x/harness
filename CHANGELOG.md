@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-05
+
+### Added
+
+- `McpTools::prepare_with_cancel(profile, registry, &Cancel)`: MCP tools that hold the loop's cancel token. `prepare` keeps working with a token nobody cancels.
+
+### Changed
+
+- A run switched to writing by a typed `--substrate-embedded` or `--substrate`, with no `--write-scope`, now starts from the profile's `write-scope` or the default scope (`.git/**=denied .b10x/**=denied **=allowed`), as a `write = true` profile run already did; before, it had no scope and could rewrite the repository profile the next run applies (`story:typed-substrate-run-gets-the-default-write-scope`). `profiles explain` names the scope a typed confined run applies.
+- ESS moves from 0.77.0 to 0.86.0: `spec/ess-inputs.yaml` and the `ess-*` crates of `b10x-harness-conformance` (rev `8d26c81f`, the 0.86.0 tag commit).
+- A summary fold drops the reasoning items of the round trips it folds instead of re-inserting them apart from their calls, and a windowed compaction still over its target drops the fewest oldest remaining reasoning items that reach the target, or, where none can, that bring the next request inside the declared context window; the `conversation-compacted` warning names how many went (`story:summary-fold-keeps-reasoning-with-its-call`, `story:compaction-shrinks-a-reasoning-heavy-conversation`).
+
+### Fixed
+
+- An MCP tool call stops when the loop is cancelled: a dropped `LoopTask` run or Ctrl-C ends the call in flight at once, as a failed outcome, instead of after the 30 s MCP request timeout; the CLI passes the run's token (`story:mcp-call-stops-when-the-loop-is-cancelled`).
+- Bridge mode serves a `turn/start` sent after an interrupt as the next turn on every path: queued between two interrupts owed to one streaming turn, and while a tool call of the interrupted turn is outstanding; both were refused with -32601. Every request is served in the order it was sent (`story:bridge-turn-start-after-interrupt-on-every-path`).
+- Documentation: the README, both `--cgroup-root` help texts and the withheld-`run` message state what the pinned substrate requires for measured execution: `cpu`, `memory` and `pids`, with `io` optional (it adds block I/O counters, which are otherwise absent, never zero); a user scope cannot add a controller the user manager does not delegate (`story:measured-exec-documents-the-io-controller`, [issue 21](https://github.com/beyond10x/harness/issues/21)).
+
 ## [0.26.0] - 2026-10-31
 
 ### Added

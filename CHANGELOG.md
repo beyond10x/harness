@@ -16,7 +16,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - A run switched to writing by a typed `--substrate-embedded` or `--substrate`, with no `--write-scope`, now starts from the profile's `write-scope` or the default scope (`.git/**=denied .b10x/**=denied **=allowed`), as a `write = true` profile run already did; before, it had no scope and could rewrite the repository profile the next run applies (`story:typed-substrate-run-gets-the-default-write-scope`). `profiles explain` names the scope a typed confined run applies.
-- ESS moves from 0.77.0 to 0.86.0: `spec/ess-inputs.yaml` and the `ess-*` crates of `b10x-harness-conformance` (rev `8d26c81f`, the 0.86.0 tag commit).
 - A summary fold drops the reasoning items of the round trips it folds instead of re-inserting them apart from their calls, and a windowed compaction still over its target drops the fewest oldest remaining reasoning items that reach the target, or, where none can, that bring the next request inside the declared context window; the `conversation-compacted` warning names how many went (`story:summary-fold-keeps-reasoning-with-its-call`, `story:compaction-shrinks-a-reasoning-heavy-conversation`).
 
 ### Fixed

@@ -6,7 +6,7 @@ status: approved
 title: 'Wave 2026-11-04: staged gate terms and the ESS 0.86.0 pin'
 relations:
 - decides: approval-record:wave-2026-11-04
-revision: 2
+revision: 3
 transitions:
 - {from: "draft", to: "approved", at: "2026-11-05T00:40:41Z", actor: "human:timo", revision: 2}
 ---
@@ -33,3 +33,10 @@ The ESS pin moves from 0.77.0 to 0.86.0 in G0, superseding the opening record's 
 `crates/harness-conformance/src/main.rs`, `AGENTS.md` and `spec/README.md`.
 `ess specify validate --path spec --strict-requires` with ess 0.86.0: "harness v1 — 3 file(s), 44
 scenario(s), valid".
+
+## Deviation at G1 (2026-11-05)
+
+The ESS move to 0.86.0 was made in G0 and taken back after G1: under 0.86.0, synthesis refuses 12
+of the specification's generated wrong-state scenarios as ESS-SYNTH-003, so the conformance crate's
+complete-coverage check fails. 0.27.0 keeps ESS 0.77.0; the move, with what restoring those
+scenarios needs, is `story:harness-spec-runs-on-the-newest-ess` (draft).

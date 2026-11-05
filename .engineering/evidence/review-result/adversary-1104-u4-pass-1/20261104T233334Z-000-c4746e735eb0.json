@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-04T23:33:34Z",
+  "actor": "human:timo",
+  "artifact": "review-result:adversary-1104-u4-pass-1",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "acf1fc6b0b318f553bcfed2d79a2c9ac9ebefe9a78fcf4bbb4221c8d0cf45ab7",
+    "literal_chars": 11,
+    "replacement": "~/",
+    "count": 4,
+    "reason": "a home directory path may not enter the repository (personal-paths and home-paths checks)"
+  }
+}

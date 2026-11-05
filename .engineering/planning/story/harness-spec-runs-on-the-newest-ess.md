@@ -2,16 +2,38 @@
 format: aep.planning-md/3
 id: story:harness-spec-runs-on-the-newest-ess
 kind: story
-status: active
+status: implemented
 title: The harness specification runs on the newest ESS release with its full coverage
 tags:
 - from-finding
 relations:
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: cited
+  path: conformance/baseline.json
+- confidence: cited
+  path: conformance/model.json
+- confidence: cited
+  path: conformance/suite.json
+- confidence: cited
+  path: crates/harness-conformance/Cargo.toml
+- confidence: cited
+  path: crates/harness-conformance/src/boundary.rs
+- confidence: cited
+  path: crates/harness-conformance/src/main.rs
+- confidence: cited
+  path: crates/harness-conformance/tests/adversary_1105b_u1.rs
+- confidence: cited
+  path: crates/harness-conformance/tests/stop_union.rs
+- confidence: cited
+  path: spec/domains/loop.yaml
+- confidence: cited
+  path: spec/ess-inputs.yaml
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T01:35:31Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-05T01:35:31Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-05T08:33:43Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

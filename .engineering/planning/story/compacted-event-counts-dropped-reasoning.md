@@ -2,14 +2,17 @@
 format: aep.planning-md/3
 id: story:compacted-event-counts-dropped-reasoning
 kind: story
-status: draft
+status: active
 title: The Compacted event counts the reasoning items a compaction dropped
 tags:
 - from-finding
 relations:
 - informed_by: review-result:adversary-1104-u3-pass-1
 - serves: vision:b10x-owns-its-loop
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T02:19:07Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-05T02:19:07Z", actor: "human:timo", revision: 3}
 ---
 ## Context
 

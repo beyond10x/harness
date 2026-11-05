@@ -126,7 +126,7 @@ than on the words, which are written for a person.
 | `unpublished-tool` | The model called a tool this run never published. Nothing ran. |
 | `unpublished-tool-routed` | Under `--surface verbs`, the model called a catalogue entry by its bare name. The call was routed to that entry under the same gate; the wasted spelling is recorded. |
 | `program-refused` | `run` was asked for a program outside the set this run declared. Nothing ran. The message names the program and the declared set. |
-| `conversation-compacted` | The conversation passed its bound and old tool results were elided. A `compacted` event beside it carries the figures. |
+| `conversation-compacted` | The conversation passed its bound and was made smaller. A `compacted` event beside it carries the figures: `elided_results` and `elided_bytes` for tool results whose payload went, `summarised_items` for items folded into a summary, `dropped_reasoning` for provider reasoning items that went, `bytes_before`, `bytes_after`, and `summary_turn`. A recorded `compacted` line without `dropped_reasoning` reads as zero. Other provider items the harness does not model are kept. |
 | `summary-failed` | A compaction's summary turn failed or answered with no text. The conversation keeps its elided form and the run goes on. |
 | `answer-nudged` | Under `--output-schema` the model ended in prose, so it was told once more to call the answer tool — and the turn that follows is held to it at the provider. |
 | `batch-miscounted` | A tool port answered a batch with the wrong number of outcomes, so the loop re-ran the calls one at a time. |

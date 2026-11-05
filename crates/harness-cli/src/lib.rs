@@ -1445,10 +1445,14 @@ fn apply_provider(
 /// does not exist, a configuration that declares programs without `write`, and a trusted
 /// repository profile that carries a key or table it may not.
 fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, String> {
-    // Before the operator's config, so an untrusted file is announced however the run then ends.
-    // Nothing can be trusted without a config directory, so there is nothing to apply below.
-    let repository = repository_profile(&options.workspace)?;
-    let Some(path) = profile::config_path() else {
+    let Some(ResolvedProfiles {
+        resolved,
+        config,
+        path,
+        source,
+        repository,
+    }) = resolve_profiles(&options.workspace, &options.profile)?
+    else {
         // No `HOME` and no `XDG_CONFIG_HOME`: there is no file to read, but the run still owes
         // the caller the same refusal. Returning early past the check below is what made a
         // machine without either variable *panic* at `RunOptions::model` — which asserts that
@@ -1458,13 +1462,10 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
         require_endpoint_and_model(options, None)?;
         return Ok(Vec::new());
     };
-    let source = path.display().to_string();
-    let config = profile::load(&path)?;
-    let resolved = profile::resolve(&config, repository.as_ref(), &options.profile, &source)?;
     if let (Some(chosen), Some(repository)) = (&resolved.repository_provider, &repository) {
         refuse_a_typed_credential_for_a_repository_provider(options, chosen, &repository.source)?;
     }
-    let wanted = resolved.profile;
+    let mut wanted = resolved.profile;
 
     // **A typed `--base-url` means the provider is not consulted at all.**
     //
@@ -1482,14 +1483,14 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
     // and keeps it. Filled after, it arrived to find the provider's own default already in place
     // and was dropped — a `[default] model`, a `-p` model and a repository's all lost to
     // `provider.model`, while `profiles explain` printed the one the profile named.
-    if let Some(model) = wanted.model
+    if let Some(model) = wanted.model.take()
         && options.model.is_none()
     {
         options.model = Some(model);
     }
     apply_provider(options, wanted.provider.as_deref(), &config.providers)?;
 
-    if wanted.write == Some(true) {
+    if profile_writes(&wanted) {
         // A typed socket wins; see the doc above.
         if options.substrate.is_none() {
             options.substrate_embedded = true;
@@ -1555,6 +1556,56 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
     Ok(resolved.used)
 }
 
+/// The profiles a run applies, read once: the operator's config, a trusted repository's profile,
+/// and each `-p` named in `wanted`.
+struct ResolvedProfiles {
+    resolved: profile::Resolved,
+    config: profile::Config,
+    path: PathBuf,
+    source: String,
+    repository: Option<profile::Repository>,
+}
+
+/// Resolves the profiles a run in `workspace` applies with `wanted` named by `-p`.
+///
+/// `run` and `chat` apply the result ([`apply_profiles`]); `tools`, which takes no `-p`, reads
+/// its write scope from the same resolution with none, so the scope it names is the one a run
+/// with the same flags enforces.
+///
+/// The repository profile is read before the operator's config, so an untrusted file is announced
+/// however the command then ends. `None` when there is no config directory (no `HOME` and no
+/// `XDG_CONFIG_HOME`): nothing can be trusted without one, so there is nothing to apply.
+///
+/// # Errors
+///
+/// Names the config that cannot be read, the profile that is not in it, and a trusted
+/// repository profile that carries a key or table it may not.
+fn resolve_profiles(
+    workspace: &Path,
+    wanted: &[String],
+) -> Result<Option<ResolvedProfiles>, String> {
+    let repository = repository_profile(workspace)?;
+    let Some(path) = profile::config_path() else {
+        return Ok(None);
+    };
+    let source = path.display().to_string();
+    let config = profile::load(&path)?;
+    let resolved = profile::resolve(&config, repository.as_ref(), wanted, &source)?;
+    Ok(Some(ResolvedProfiles {
+        resolved,
+        config,
+        path,
+        source,
+        repository,
+    }))
+}
+
+/// Whether a resolved profile switches writing on: `write = true`, which a run applies as
+/// `--substrate-embedded` unless a socket was typed.
+fn profile_writes(wanted: &profile::Profile) -> bool {
+    wanted.write == Some(true)
+}
+
 /// The write scope a run that may write starts from, when the operator typed none.
 ///
 /// **Whatever switched writing on.** A profile's `write = true` and a typed
@@ -1565,10 +1616,33 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
 /// `--write-scope` is never touched: it replaces the default whole, as it does for a profile run.
 ///
 /// A run with no confinement is read-only and gets nothing, so its scope stays as typed.
+///
+/// The rule itself is [`applied_write_scope`], which `tools` applies too, so the scope `tools`
+/// names and the scope `run` and `chat` apply cannot drift.
 fn fill_write_scope(options: &mut RunOptions, configured: Option<Vec<String>>) {
-    let writes = options.substrate_embedded || options.substrate.is_some();
-    if writes && options.write_scope.is_empty() {
-        options.write_scope = configured.unwrap_or_else(profile::default_write_scope);
+    options.write_scope = applied_write_scope(
+        writes_through_substrate(options.substrate_embedded, options.substrate.as_deref()),
+        std::mem::take(&mut options.write_scope),
+        configured,
+    );
+}
+
+/// Whether a run with this confinement may write: the embedded driver or a substrate socket.
+fn writes_through_substrate(embedded: bool, substrate: Option<&std::path::Path>) -> bool {
+    embedded || substrate.is_some()
+}
+
+/// The scope declarations a run applies, as [`fill_write_scope`] explains: `typed` when the
+/// operator typed any or the run does not write, else `configured`, else the default.
+fn applied_write_scope(
+    writes: bool,
+    typed: Vec<String>,
+    configured: Option<Vec<String>>,
+) -> Vec<String> {
+    if writes && typed.is_empty() {
+        configured.unwrap_or_else(profile::default_write_scope)
+    } else {
+        typed
     }
 }
 
@@ -4024,7 +4098,7 @@ fn explain_writing(wanted: &profile::Profile) {
         .write_scope
         .clone()
         .unwrap_or_else(profile::default_write_scope);
-    if wanted.write == Some(true) {
+    if profile_writes(wanted) {
         println!("--substrate-embedded");
         for rule in rules {
             println!("--write-scope {rule}");
@@ -4231,6 +4305,25 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let process_workspace_access =
         harness_substrate::process_workspace_access(&options.process_write_subtree)?;
+    // The scope `run` enforces with the same flags, by the same rule over the same profiles: a run
+    // with no `-p` applies the operator's `[default]` (and a trusted repository's profile, which
+    // cannot name a scope), so `write = true` there makes it write and its `write-scope` is what it
+    // starts from. Only the scope follows the profile here; the listed tools do not.
+    let wanted = resolve_profiles(&options.workspace, &[])?.map(|found| found.resolved.profile);
+    let writes = writes_through_substrate(
+        options.substrate_embedded || wanted.as_ref().is_some_and(profile_writes),
+        options.substrate.as_deref(),
+    );
+    let scope = write_scope(&applied_write_scope(
+        writes,
+        options.write_scope.clone(),
+        wanted.and_then(|wanted| wanted.write_scope),
+    ))?;
+    let applied_scope = if writes {
+        scope.rules().to_vec()
+    } else {
+        Vec::new()
+    };
     let Publication { tools, withheld } = published(
         harness_catalogue::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -4244,7 +4337,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             programs: &confined_programs,
             toolchain: &confined_toolchain,
             process_workspace_access,
-            scope: write_scope(&options.write_scope)?,
+            scope,
             toolchain_origin: None,
         },
     )?;
@@ -4287,6 +4380,14 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // difference between a six-entry catalogue nobody wanted a seventh entry in and one
             // that was refused it.
             "withheld": withheld,
+            // And where it may write: each rule's glob and scope, in the order the run applies
+            // them, first match winning — the scope `run` enforces with these flags and the
+            // profiles it applies without `-p` (the operator's `[default]`, a trusted repository's
+            // profile). Always a list, empty when that run would not write, for the reason
+            // `withheld` is: a reader cannot otherwise tell *this run writes nowhere* from *this
+            // build does not say*. A list of tools alone does not answer the question once some
+            // paths refuse some of them.
+            "write_scope": applied_scope,
             // And what the run is given beyond its tools. Always a list, empty included, for the
             // reason `withheld` is: a reader cannot otherwise tell *none were declared* from
             // *this build does not say*.

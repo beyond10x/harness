@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 
 use super::*;
 
-const WIRE: &str = "scripted";
+/// The wire the scripted model speaks, and the wire every opaque fixture is tagged with. A real one,
+/// because compaction tells reasoning from other opaque items by the wire that produced them.
+const WIRE: &str = "openai-responses";
 
 /// The verb a call names when the entry it wants is an argument.
 ///
@@ -2103,6 +2105,8 @@ fn assert_replayable(items: &[Item], what: &str) {
             // The item a reasoning item precedes is the call or the text its turn produced. Another
             // reasoning item or a user item in that place means the item it preceded is gone, which
             // is what re-inserting a fold's reasoning items after the summary did.
+            // An opaque item that is not reasoning carries no such rule this harness knows of.
+            Item::Opaque { .. } if !is_reasoning_fixture(item) => {}
             Item::Opaque { .. } => assert!(
                 matches!(
                     items.get(index + 1),
@@ -2138,8 +2142,22 @@ fn an_answer(id: &str, bytes: usize) -> Item {
 fn reasoning(bytes: usize) -> Item {
     Item::Opaque {
         wire: wire(),
-        payload: json!({ "encrypted": "r".repeat(bytes) }),
+        payload: json!({ "type": "reasoning", "encrypted": "r".repeat(bytes) }),
     }
+}
+
+/// An output item outside the pinned subset, which the Responses wire keeps as an opaque item
+/// beside a warning rather than dropping (`llm-responses`, `output_item`). Not reasoning.
+fn unmodelled(bytes: usize) -> Item {
+    Item::Opaque {
+        wire: wire(),
+        payload: json!({ "type": "web_search_call", "status": "u".repeat(bytes) }),
+    }
+}
+
+/// Whether an opaque fixture is one of [`reasoning`]'s, read off its payload as a test reads it.
+fn is_reasoning_fixture(item: &Item) -> bool {
+    matches!(item, Item::Opaque { payload, .. } if payload["type"] == "reasoning")
 }
 
 /// A conversation with `n` big tool results, in call order.
@@ -8462,7 +8480,7 @@ fn adversary_u3_a_compaction_that_drops_only_reasoning_says_so_in_its_figures() 
     // figures are what a machine reading the record needs. One reasoning-heavy round trip, too
     // small to fold: the only thing compaction can do is drop the reasoning item, and the event
     // then reports nothing elided, nothing summarised and no summary turn while the conversation
-    // shrank.
+    // shrank. story:compacted-event-counts-dropped-reasoning gives the event its own count.
     let mut harness = Harness::new(
         ScriptedModel::new(vec![Ok(reasons_and_asks(20_000, "c1")), Ok(answer("done"))]),
         ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
@@ -8471,49 +8489,41 @@ fn adversary_u3_a_compaction_that_drops_only_reasoning_says_so_in_its_figures() 
     let (outcome, sink) = harness.run();
     outcome.expect("the run completes");
 
-    let events: Vec<(usize, usize, bool, usize, usize)> = sink
+    // Read from the record's own form, the figures a machine reading the event log gets.
+    let events: Vec<Value> = sink
         .events()
         .iter()
-        .filter_map(|event| match event {
-            LoopEvent::Compacted {
-                elided_results,
-                summarised_items,
-                summary_turn,
-                bytes_before,
-                bytes_after,
-                ..
-            } => Some((
-                *elided_results,
-                *summarised_items,
-                *summary_turn,
-                *bytes_before,
-                *bytes_after,
-            )),
-            _ => None,
-        })
+        .filter(|event| matches!(event, LoopEvent::Compacted { .. }))
+        .map(|event| serde_json::to_value(event).expect("an event serializes"))
         .collect();
-    let [(elided, summarised, summary_turn, before, after)] = events[..] else {
+    let [event] = &events[..] else {
         panic!("one compaction, not {events:?}");
     };
-    // Today's state, pinned until story:compacted-event-counts-dropped-reasoning lands: the event
-    // carries no reasoning count, so what went shows only as its byte figures, and the warning is
-    // where the count is said. When that story lands, assert the event's own count here instead.
+    let figure = |name: &str| event[name].clone();
     let dropped = serde_json::to_string(&reasoning(20_000))
         .expect("a reasoning item serializes")
         .len();
-    assert_eq!(
-        before - after,
-        dropped,
-        "story:compacted-event-counts-dropped-reasoning: the event's byte figures are the one \
-         reasoning item that went ({before} bytes became {after}); assert the event's own \
-         reasoning count once that story lands"
+    let (before, after) = (
+        figure("bytes_before").as_u64().expect("a byte count"),
+        figure("bytes_after").as_u64().expect("a byte count"),
     );
     assert_eq!(
-        (elided, summarised, summary_turn),
-        (0, 0, false),
-        "story:compacted-event-counts-dropped-reasoning: nothing was elided or summarised, so the \
-         event's existing counts stay zero; assert the event's own reasoning count once that \
-         story lands"
+        before - after,
+        u64::try_from(dropped).expect("fits"),
+        "story:compacted-event-counts-dropped-reasoning: the bytes that went are the one \
+         reasoning item ({before} bytes became {after}): {event}"
+    );
+    assert_eq!(
+        (
+            figure("elided_results"),
+            figure("summarised_items"),
+            figure("summary_turn"),
+            figure("dropped_reasoning"),
+        ),
+        (json!(0), json!(0), json!(false), json!(1)),
+        "story:compacted-event-counts-dropped-reasoning: nothing was elided or summarised, and \
+         the event itself counts the one reasoning item that went, so every byte it reports gone \
+         is attributed: {event}"
     );
     let warning = sink
         .warnings()
@@ -8522,8 +8532,8 @@ fn adversary_u3_a_compaction_that_drops_only_reasoning_says_so_in_its_figures() 
         .expect("the compaction warned");
     assert!(
         warning.contains("1 provider reasoning item(s)"),
-        "story:compacted-event-counts-dropped-reasoning: until the event counts it, the warning \
-         names the dropped reasoning item: {warning}"
+        "story:compacted-event-counts-dropped-reasoning: the warning names the same count as the \
+         event, for a person: {warning}"
     );
 }
 
@@ -8774,5 +8784,375 @@ fn adversary_u3b_reasoning_kept_over_an_unreachable_target_does_not_carry_the_ne
          ({overhead} beyond its items), while it still carries {kept} bytes of reasoning whose \
          drop would have left {} tokens",
         overhead + estimated_tokens(measure(next) - kept)
+    );
+}
+
+// --- story:compaction-keeps-unknown-opaque-items -----------------------------------------------
+
+/// An opaque item of `wire` whose payload names `kind` as its type.
+fn opaque_of(wire: &str, kind: &str, bytes: usize) -> Item {
+    Item::Opaque {
+        wire: WireId::new(wire).expect("a valid wire id"),
+        payload: json!({ "type": kind, "data": "o".repeat(bytes) }),
+    }
+}
+
+#[test]
+fn dropping_reasoning_keeps_an_opaque_item_that_is_not_reasoning() {
+    // The oldest opaque item is an unmodelled output item, five times the reasoning item after
+    // it. Taken for reasoning, it is the one that goes, and the conversation loses an item the
+    // wire kept precisely so that it would not be lost (AGENTS.md invariant 7).
+    let other = unmodelled(5_000);
+    let mut items = vec![
+        Item::user("do the thing"),
+        other.clone(),
+        reasoning(1_000),
+        a_call("c1", json!({})),
+        an_answer("c1", 10),
+        reasoning(1_000),
+        a_call("c2", json!({})),
+        an_answer("c2", 10),
+    ];
+    let target = measure(&items) - measure_one(&items[2]);
+    let dropped = drop_reasoning(&mut items, target);
+    assert_eq!(
+        (dropped, measure(&items)),
+        (1, target),
+        "one reasoning item reaches the target: {items:?}"
+    );
+    assert_eq!(
+        items.iter().filter(|item| **item == other).count(),
+        1,
+        "story:compaction-keeps-unknown-opaque-items: the unmodelled item stays: {items:?}"
+    );
+    assert!(
+        is_reasoning_fixture(&items[4]),
+        "the newest round trip keeps its reasoning: {items:?}"
+    );
+}
+
+#[test]
+fn a_conversation_whose_only_opaque_weight_is_not_reasoning_drops_nothing() {
+    let mut items = vec![
+        Item::user("do the thing"),
+        unmodelled(5_000),
+        a_call("c1", json!({})),
+        an_answer("c1", 10),
+    ];
+    let before = items.clone();
+    // A target dropping that one item would meet exactly: taken for reasoning, it goes.
+    let target = measure(&items) - measure_one(&items[1]);
+    let dropped = drop_reasoning(&mut items, target);
+    assert_eq!(
+        (dropped, &items),
+        (0, &before),
+        "story:compaction-keeps-unknown-opaque-items: nothing here is reasoning, so nothing goes"
+    );
+}
+
+#[test]
+fn reasoning_is_what_its_own_wire_calls_reasoning() {
+    // Each wire names its reasoning its own way: a Responses `reasoning` output item, a Messages
+    // `thinking` or `redacted_thinking` block. The same type on the other wire is some other item.
+    let mut items = vec![
+        Item::user("do the thing"),
+        opaque_of("anthropic-messages", "thinking", 1_000),
+        opaque_of("anthropic-messages", "redacted_thinking", 1_000),
+        opaque_of("anthropic-messages", "reasoning", 1_000),
+        opaque_of("openai-responses", "thinking", 1_000),
+        opaque_of("openai-responses", "reasoning", 1_000),
+        opaque_of("a-wire-of-its-own", "reasoning", 1_000),
+    ];
+    // Met exactly by dropping the three that are reasoning, and by nothing short of all three.
+    let target = measure(&items)
+        - [1, 2, 5]
+            .map(|at| measure_one(&items[at]))
+            .iter()
+            .sum::<usize>();
+    let dropped = drop_reasoning(&mut items, target);
+    assert_eq!(
+        (dropped, items),
+        (
+            3,
+            vec![
+                Item::user("do the thing"),
+                opaque_of("anthropic-messages", "reasoning", 1_000),
+                opaque_of("openai-responses", "thinking", 1_000),
+                opaque_of("a-wire-of-its-own", "reasoning", 1_000),
+            ]
+        ),
+        "story:compaction-keeps-unknown-opaque-items: only each wire's own reasoning goes"
+    );
+}
+
+#[test]
+fn a_summary_request_counts_reasoning_and_other_opaque_items_apart() {
+    let folded = vec![
+        Item::assistant("the plan"),
+        reasoning(20),
+        unmodelled(20),
+        a_call("c-a", json!({})),
+        an_answer("c-a", 20),
+    ];
+    let text = summary_text(&folded);
+    assert!(
+        text.contains("1 provider reasoning item(s) are not shown"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 other provider item(s) are not shown"),
+        "story:compaction-keeps-unknown-opaque-items: an item that is not reasoning is not called \
+         reasoning: {text}"
+    );
+    assert!(
+        !text.contains("uuuuuuuuuuuuuuuuuuuu"),
+        "its payload is never rendered: {text}"
+    );
+}
+
+#[test]
+fn a_summary_fold_keeps_an_opaque_item_that_is_not_reasoning() {
+    // The fold of `adversary_u3_a_fold_whose_weight_is_text_keeps_no_folded_reasoning_after_the_summary`,
+    // over target, with an unmodelled output item in the first, folded, round trip. The two folded
+    // reasoning items still go with their round trips; the unmodelled item is not theirs to take.
+    let other = unmodelled(200);
+    let mut first = adversary_u3_reasons_says_and_asks(10_000, "c1");
+    first.items.insert(0, other.clone());
+    let mut harness = Harness::new(
+        ScriptedModel::new(vec![
+            Ok(first),
+            Ok(adversary_u3_reasons_says_and_asks(10_000, "c2")),
+            Ok(reporting(reasons_and_asks(300, "c3"), 8_500)),
+            Ok(answer("a dense summary of the first round trips")),
+            Ok(answer("done")),
+        ]),
+        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]),
+    )
+    .windowed(10_000);
+    let (outcome, sink) = harness.run();
+    outcome.expect("the run completes");
+
+    assert_eq!(compacted(&sink).len(), 1, "{:?}", compacted(&sink));
+    let summarised = compacted(&sink)[0].1;
+    assert!(summarised > 0, "the first round trips were folded");
+    let after = after_the_summary(&harness.model.seen);
+    assert!(!after.is_empty(), "the run turned again after the fold");
+    let next = &after[0].items;
+    assert_eq!(
+        next.iter().filter(|item| **item == other).count(),
+        1,
+        "story:compaction-keeps-unknown-opaque-items: the unmodelled item of a folded round trip \
+         is kept, not taken for reasoning: {next:?}"
+    );
+    let c3 = next
+        .iter()
+        .position(|item| matches!(item, Item::ToolCall(call) if call.call_id.as_str() == "c3"))
+        .expect("the newest round trip is never folded");
+    let reasoned: Vec<usize> = next
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| is_reasoning_fixture(item))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(
+        reasoned,
+        vec![c3 - 1],
+        "the reasoning beside the unmodelled item still goes with its round trip: {next:?}"
+    );
+    assert_replayable(next, "the request after the fold");
+    let event = sink
+        .events()
+        .iter()
+        .find(|event| matches!(event, LoopEvent::Compacted { .. }))
+        .map(|event| serde_json::to_value(event).expect("an event serializes"))
+        .expect("a compaction");
+    assert_eq!(
+        event["dropped_reasoning"],
+        json!(2),
+        "the two folded reasoning items are counted, and the kept item is not: {event}"
+    );
+    let warning = sink
+        .warnings()
+        .find(|(code, _)| *code == "conversation-compacted")
+        .map(|(_, message)| message.to_owned())
+        .expect("the compaction warned");
+    assert!(
+        warning.contains("2 provider reasoning item(s)"),
+        "the warning counts the same two: {warning}"
+    );
+}
+
+// --- adversary pass 1, wave 2026-11-05 U2: story:compaction-keeps-unknown-opaque-items and
+// story:compacted-event-counts-dropped-reasoning ----------------------------------------------------
+
+/// A model that answers every summary turn with one fixed summary and every other turn from its
+/// script, so a test can count the summary turns a run spent without the script's order deciding
+/// which request receives which answer.
+struct Adversary1105Model {
+    wire: WireId,
+    script: VecDeque<TurnOutcome>,
+    seen: Vec<TurnRequest>,
+    summaries: usize,
+}
+
+impl Adversary1105Model {
+    fn new(script: Vec<TurnOutcome>) -> Self {
+        Self {
+            wire: wire(),
+            script: script.into(),
+            seen: Vec::new(),
+            summaries: 0,
+        }
+    }
+}
+
+impl ModelPort for Adversary1105Model {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        _sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        request.validate()?;
+        request.check_opaque_items(&self.wire)?;
+        self.seen.push(request.clone());
+        if request.instructions == super::SUMMARY_INSTRUCTION {
+            self.summaries += 1;
+            return Ok(answer("a summary of what came before"));
+        }
+        self.script
+            .pop_front()
+            .ok_or_else(|| WireError::protocol("the script ran out of turns"))
+    }
+}
+
+/// One run of `model` against a declared window of `window` tokens, with the one tool `a`.
+fn adversary_1105_u2_run(
+    model: &mut Adversary1105Model,
+    window: u64,
+) -> (Result<LoopOutcome, LoopError>, VecLoopSink) {
+    let mut tools = ScriptedTools::new(vec![spec("a", Approval::NotRequired)]);
+    let mut approvals = DenyAll;
+    let config = LoopConfig::new("scripted-model", "be useful").with_context_window(Some(window));
+    let mut sink = VecLoopSink::new();
+    let outcome =
+        AgentLoop::new(model, &mut tools, &mut approvals, config).run("do the thing", &mut sink);
+    (outcome, sink)
+}
+
+/// A turn that emits `kept` (an opaque item that is not reasoning), says one short line and asks
+/// for one call: `kept` is then a turn group of its own, so a fold may end right after it.
+fn adversary_1105_u2_keeps_and_asks(kept: Item, id: &str) -> TurnOutcome {
+    let mut turn = says_and_asks("I looked it up", &[(id, "a", json!({}))]);
+    turn.items.insert(0, kept);
+    turn
+}
+
+#[test]
+fn adversary_1105_u2_a_summary_turn_is_not_spent_on_a_fold_that_can_remove_nothing() {
+    // story:compaction-keeps-unknown-opaque-items. The fold's weight is one opaque item that is
+    // not reasoning, which the fold now keeps. `summarise` still decides the fold is worth a turn
+    // on `measure(&folded)`, which counts that kept item, so it spends a model turn whose summary
+    // replaces no item at all and leaves the conversation larger than before.
+    let mut model = Adversary1105Model::new(vec![
+        adversary_1105_u2_keeps_and_asks(unmodelled(34_000), "c1"),
+        answer("done"),
+    ]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    let folds = compacted(&sink);
+    assert_eq!(
+        model.summaries, 0,
+        "story:compaction-keeps-unknown-opaque-items: the only item in the fold is one the fold \
+         keeps, so a summary turn removes nothing and is spent for nothing; compactions as \
+         (elided, summarised, summary turn): {folds:?}"
+    );
+}
+
+#[test]
+fn adversary_1105_u2_an_item_the_fold_keeps_does_not_buy_a_summary_turn_before_every_request() {
+    // The same kept item over four real turns. It never leaves the fold range and never leaves
+    // the conversation, so the conversation stays over the trigger and every compaction folds the
+    // previous summary plus that item again: one extra model turn before every request, each
+    // charged to the run's turn, token and spend ceilings. Before the unit the first fold took the
+    // item with it, so at most one summary turn was spent.
+    let mut model = Adversary1105Model::new(vec![
+        adversary_1105_u2_keeps_and_asks(unmodelled(34_000), "c1"),
+        asks_for(&[("c2", "a", json!({}))]),
+        asks_for(&[("c3", "a", json!({}))]),
+        answer("done"),
+    ]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    let folds = compacted(&sink);
+    assert!(
+        model.summaries <= 1,
+        "story:compaction-keeps-unknown-opaque-items: {} summary turns over 4 conversation \
+         turns, each folding nothing but the previous summary; compactions as (elided, \
+         summarised, summary turn): {folds:?}",
+        model.summaries
+    );
+}
+
+#[test]
+fn adversary_1105_u2_a_kept_item_stands_right_after_the_summary_and_is_not_counted_as_folded() {
+    // Pins what `a_summary_fold_keeps_an_opaque_item_that_is_not_reasoning` leaves open: where the
+    // kept item lands, and the exact figures. The fold takes [kept, reasoning, text]; the
+    // reasoning goes with its text, the text into the summary, and the kept item stays in order
+    // between the summary and the round trip after it. `summarised_items` is the two items that
+    // went into the summary, not three, and `dropped_reasoning` is the one reasoning item.
+    let kept = unmodelled(200);
+    let mut first = says_and_asks(&"t".repeat(33_000), &[("c1", "a", json!({}))]);
+    first.items.insert(0, reasoning(300));
+    first.items.insert(0, kept.clone());
+    let mut model = Adversary1105Model::new(vec![first, answer("done")]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    assert_eq!(model.summaries, 1, "the text was worth one summary turn");
+
+    let after = after_the_summary(&model.seen);
+    let next = &after
+        .first()
+        .expect("the run turned again after the fold")
+        .items;
+    assert_eq!(
+        next[..4],
+        [
+            Item::user("do the thing"),
+            Item::user(format!("{SUMMARY_MARKER}\na summary of what came before")),
+            kept,
+            a_call("c1", json!({})),
+        ],
+        "story:compaction-keeps-unknown-opaque-items: the kept item stays in order, right after \
+         the summary and before the round trip that followed it: {next:?}"
+    );
+    assert!(
+        matches!(next.get(4), Some(Item::ToolResult { call_id, .. }) if call_id.as_str() == "c1")
+            && next.len() == 5,
+        "the round trip after the fold is whole and nothing follows it: {next:?}"
+    );
+    assert_replayable(next, "the request after the fold");
+
+    let events: Vec<Value> = sink
+        .events()
+        .iter()
+        .filter(|event| matches!(event, LoopEvent::Compacted { .. }))
+        .map(|event| serde_json::to_value(event).expect("an event serializes"))
+        .collect();
+    let [event] = &events[..] else {
+        panic!("one compaction, not {events:?}");
+    };
+    assert_eq!(
+        (
+            event["summarised_items"].clone(),
+            event["dropped_reasoning"].clone(),
+            event["summary_turn"].clone(),
+        ),
+        (json!(2), json!(1), json!(true)),
+        "story:compacted-event-counts-dropped-reasoning: two items folded (the reasoning item and \
+         the text), one of them reasoning, and the kept item in neither figure: {event}"
     );
 }

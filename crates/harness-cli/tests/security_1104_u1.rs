@@ -444,8 +444,9 @@ fn profiles_explain_names_a_configured_scope_for_a_typed_confined_run() {
 }
 
 /// `tools` answers "what can this run do?" for the same flags `run` takes. A typed
-/// `--substrate-embedded` listing with no `--write-scope` must describe the scope a run with those
-/// flags applies, which is now the default; so it must equal the listing with the default typed.
+/// `--substrate-embedded` listing with no `--write-scope` must name the scope a run with those
+/// flags applies, which is the default; and it must equal the listing with the default typed.
+/// Comparing the two listings alone passed while neither named any scope, so each names it here.
 #[test]
 fn tools_describes_the_scope_a_typed_confined_run_applies() {
     let machine = Machine::new();
@@ -459,8 +460,14 @@ fn tools_describes_the_scope_a_typed_confined_run_applies() {
             .output()
             .expect("tools runs");
         assert_eq!(output.status.code(), Some(0), "tools: {}", stderr(&output));
-        String::from_utf8_lossy(&output.stdout).into_owned()
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .expect("`tools` prints one JSON document")
     };
+    let default = json!([
+        {"paths": ".git/**", "write": "denied"},
+        {"paths": ".b10x/**", "write": "denied"},
+        {"paths": "**", "write": "allowed"},
+    ]);
     let untyped = listing(&[]);
     let typed = listing(&[
         "--write-scope",
@@ -470,10 +477,16 @@ fn tools_describes_the_scope_a_typed_confined_run_applies() {
         "--write-scope",
         "**=allowed",
     ]);
+    for (which, described) in [("untyped", &untyped), ("typed", &typed)] {
+        assert_eq!(
+            described["write_scope"], default,
+            "story:tools-help-matches-its-output — the {which} `tools --substrate-embedded` \
+             listing does not name the scope `run` applies with the same flags:\n{described:#}"
+        );
+    }
     assert_eq!(
         untyped, typed,
-        "story:typed-substrate-run-gets-the-default-write-scope — `tools --substrate-embedded` \
-         without `--write-scope` describes a different scope from the one `run` applies with the \
-         same flags"
+        "story:tools-help-matches-its-output — `tools --substrate-embedded` without \
+         `--write-scope` describes a different run from the one with the default typed"
     );
 }

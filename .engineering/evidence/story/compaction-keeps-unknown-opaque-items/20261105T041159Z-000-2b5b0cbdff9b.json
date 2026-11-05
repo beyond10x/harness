@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-05T04:11:59Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-keeps-unknown-opaque-items",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/harness-1105/gate at ca845ae",
+    "reference": "staged local gate G0-G6 at ca845ae (ESS 0.77.0): EXIT=0 in every stage; 1396 passed, 0 failed, 7 ignored; fmt and clippy -D warnings clean; provider, cli and toolchain contracts, docs current, Harness ESS 183/183, home paths clean; strict rustdoc"
+  }
+}

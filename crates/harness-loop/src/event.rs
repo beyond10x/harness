@@ -279,6 +279,11 @@ pub enum LoopEvent {
         elided_bytes: usize,
         /// Items folded into one summary item. Zero when no summary was made.
         summarised_items: usize,
+        /// Provider reasoning items that went: those of the round trips a summary folded, and the
+        /// oldest ones dropped to reach the target. Zero in a record written before this figure
+        /// existed, which is why it defaults.
+        #[serde(default)]
+        dropped_reasoning: usize,
         bytes_before: usize,
         bytes_after: usize,
         /// Whether a model turn was spent on a summary. True even when that turn failed, because
@@ -455,6 +460,26 @@ impl LoopSink for NullLoopSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compacted_line_recorded_before_the_reasoning_count_reads_as_none_dropped() {
+        // story:compacted-event-counts-dropped-reasoning: the figure is additive. This is the
+        // `compacted` line of a recorded run (`measurements/runs/m1-dry-compaction-2500.jsonl`),
+        // written before the field existed.
+        let line = r#"{"kind":"compacted","elided_results":1,"elided_bytes":7847,"summarised_items":0,"bytes_before":16833,"bytes_after":9147,"summary_turn":false}"#;
+        let event: LoopEvent = serde_json::from_str(line).expect("an older line still reads");
+        let encoded = serde_json::to_value(&event).expect("serializes");
+        assert_eq!(
+            encoded["dropped_reasoning"],
+            serde_json::json!(0),
+            "an older line dropped no reasoning it could count: {encoded}"
+        );
+        assert_eq!(
+            encoded["elided_bytes"],
+            serde_json::json!(7847),
+            "{encoded}"
+        );
+    }
 
     #[test]
     fn a_vec_sink_reassembles_text_and_lists_warnings() {

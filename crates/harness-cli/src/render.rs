@@ -410,14 +410,20 @@ fn owned_line(event: &LoopEvent) -> String {
             elided_results,
             elided_bytes,
             summarised_items,
+            dropped_reasoning,
             bytes_before,
             bytes_after,
             summary_turn,
         } => format!(
             "  compacted {bytes_before} → {bytes_after} bytes: {elided_results} result(s) \
-             elided ({elided_bytes} bytes){}",
+             elided ({elided_bytes} bytes){}{}",
             if *summary_turn {
                 format!(", {summarised_items} item(s) summarised in one extra turn")
+            } else {
+                String::new()
+            },
+            if *dropped_reasoning > 0 {
+                format!(", {dropped_reasoning} reasoning item(s) dropped")
             } else {
                 String::new()
             }
@@ -963,5 +969,40 @@ mod tests {
             false,
         );
         assert!(!err.contains("note:"), "absence stays absence: {err}");
+    }
+
+    /// Read from the record's own form, the way a replayed event log reaches this renderer.
+    fn a_compaction(dropped_reasoning: usize) -> LoopEvent {
+        serde_json::from_value(serde_json::json!({
+            "kind": "compacted",
+            "elided_results": 0,
+            "elided_bytes": 0,
+            "summarised_items": 0,
+            "dropped_reasoning": dropped_reasoning,
+            "bytes_before": 30_000,
+            "bytes_after": 9_000,
+            "summary_turn": false,
+        }))
+        .expect("a compacted event deserializes")
+    }
+
+    #[test]
+    fn a_compaction_that_dropped_reasoning_says_how_many_items_went() {
+        // story:compacted-event-counts-dropped-reasoning: 21,000 bytes went and nothing was elided
+        // or summarised, so without the count the line explains none of them.
+        let (out, err) = render(vec![a_compaction(3)], false);
+        assert_eq!(out, "", "stdout is the run's answer and nothing else");
+        assert!(
+            err.contains("compacted 30000 → 9000 bytes")
+                && err.contains(", 3 reasoning item(s) dropped"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_compaction_that_dropped_no_reasoning_does_not_mention_it() {
+        let (_, err) = render(vec![a_compaction(0)], false);
+        assert!(err.contains("compacted 30000 → 9000 bytes"), "{err}");
+        assert!(!err.contains("reasoning"), "a zero is not news: {err}");
     }
 }

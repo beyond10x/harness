@@ -430,3 +430,88 @@ fn a_profile_write_scope_applies_to_a_typed_embedded_run() {
     machine.assert_the_ordinary_write_was_admitted(status, &stderr);
     machine.assert_protected_files_untouched(&stderr);
 }
+
+/// `tools` with `extra` typed after `--workspace`, on this machine with no configuration, and the
+/// JSON document it prints.
+fn tools(machine: &Machine, extra: &[&str]) -> serde_json::Value {
+    let output = Command::new(BINARY)
+        .stdin(Stdio::null())
+        .arg("tools")
+        .arg("--workspace")
+        .arg(machine.workspace())
+        .args(extra)
+        .env("HOME", machine.home())
+        .env("XDG_CONFIG_HOME", machine.home().join("config"))
+        .env("XDG_STATE_HOME", machine.home().join("state"))
+        .output()
+        .expect("the binary runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "tools: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("`tools` prints one JSON document")
+}
+
+/// `tools --substrate-embedded` with no `--write-scope` names the default scope, rule by rule in
+/// the order a run applies it, because that is the scope `run` applies with the same flags.
+#[test]
+fn tools_names_the_default_scope_a_typed_embedded_run_applies() {
+    let machine = Machine::new();
+    let described = tools(&machine, &["--substrate-embedded"]);
+    assert_eq!(
+        described["write_scope"],
+        json!([
+            {"paths": ".git/**", "write": "denied"},
+            {"paths": ".b10x/**", "write": "denied"},
+            {"paths": "**", "write": "allowed"},
+        ]),
+        "story:tools-help-matches-its-output — `tools --substrate-embedded` without \
+         `--write-scope` does not name the default scope a run with the same flags applies:\n\
+         {described:#}"
+    );
+}
+
+/// A typed `--write-scope` is the scope `tools` names, whole and in the typed order, with nothing
+/// of the default beside it.
+#[test]
+fn tools_names_a_typed_write_scope_instead_of_the_default() {
+    let machine = Machine::new();
+    let described = tools(
+        &machine,
+        &[
+            "--substrate-embedded",
+            "--write-scope",
+            "notes.md=denied",
+            "--write-scope",
+            "**=partial-only",
+        ],
+    );
+    assert_eq!(
+        described["write_scope"],
+        json!([
+            {"paths": "notes.md", "write": "denied"},
+            {"paths": "**", "write": "partial-only"},
+        ]),
+        "story:tools-help-matches-its-output — `tools` does not name the typed scope:\n\
+         {described:#}"
+    );
+}
+
+/// A listing with no confinement describes a read-only run, which applies no scope: the key is
+/// present and empty, typed `--write-scope` or not, so a reader can tell *this run writes nowhere*
+/// from *this build does not say*.
+#[test]
+fn tools_without_confinement_names_an_empty_scope() {
+    let machine = Machine::new();
+    for extra in [&[][..], &["--write-scope", "**=allowed"][..]] {
+        let described = tools(&machine, extra);
+        assert_eq!(
+            described["write_scope"],
+            json!([]),
+            "story:tools-help-matches-its-output — a read-only listing ({extra:?}) does not name \
+             an empty scope:\n{described:#}"
+        );
+    }
+}

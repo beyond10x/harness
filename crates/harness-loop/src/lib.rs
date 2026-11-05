@@ -1190,7 +1190,8 @@ pub const SUMMARY_ITEM_BYTES: usize = 4 * 1024;
 ///
 /// # What the rendering says out loud
 ///
-/// Opaque items are dropped — there is nothing to render, and the model is told once how many.
+/// Opaque items are left out — there is nothing to render, and the model is told once how many,
+/// reasoning apart from any other kind, which the fold keeps after the summary.
 /// Arguments and outputs over [`SUMMARY_ITEM_BYTES`] carry the count of what was cut, and a
 /// transcript over [`SUMMARY_TRANSCRIPT_BYTES`] loses its oldest lines behind a line that says how
 /// many. A shortened record the model reads as complete is exactly what invariant 8 forbids.
@@ -1202,10 +1203,12 @@ pub const SUMMARY_ITEM_BYTES: usize = 4 * 1024;
 pub fn summary_request_items(folded: &[Item]) -> Vec<Item> {
     let mut lines: Vec<String> = Vec::with_capacity(folded.len());
     let mut opaque = 0_usize;
+    let mut other = 0_usize;
     for item in folded {
         match transcript_line(item) {
             Some(line) => lines.push(line),
-            None => opaque += 1,
+            None if is_reasoning(item) => opaque += 1,
+            None => other += 1,
         }
     }
     // One for the newline each line is joined with, so the bound covers what is actually sent.
@@ -1231,6 +1234,12 @@ pub fn summary_request_items(folded: &[Item]) -> Vec<Item> {
         transcript.push(format!(
             "[{opaque} provider reasoning item(s) are not shown: they are opaque to this harness, \
              which replays them verbatim and never reads them.]"
+        ));
+    }
+    if other > 0 {
+        transcript.push(format!(
+            "[{other} other provider item(s) are not shown: they are opaque to this harness, and \
+             they stay in the conversation after this summary.]"
         ));
     }
     transcript.extend(lines.drain(cut_lines..));
@@ -1340,6 +1349,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) -> bool {
         elided_results: elided.count,
         elided_bytes: elided.freed,
         summarised_items: 0,
+        dropped_reasoning: 0,
         bytes_before: before,
         bytes_after: after,
         summary_turn: false,
@@ -1458,6 +1468,52 @@ fn fits_window(reported: Option<u64>, carried: Option<usize>, window: u64) -> us
     .unwrap_or(usize::MAX)
 }
 
+/// The opaque items each wire marks as its provider's reasoning: the wire's identifier, and the
+/// payload `type` values that mean reasoning on it.
+///
+/// A wire keeps more than reasoning as [`Item::Opaque`]: an output item, content block or stream
+/// event outside its pinned subset is preserved and warned about rather than dropped. Compaction
+/// may drop reasoning, because the item it preceded stays and nothing is left unpaired; it has no
+/// such argument for an item it does not know, so it keeps that one (invariant 7). The identifiers
+/// are the ones `harness-llm` tags its opaque items with (`RESPONSES_WIRE`, `MESSAGES_WIRE`). An
+/// opaque item from any other wire is never taken for reasoning.
+const REASONING_ITEM_TYPES: &[(&str, &[&str])] = &[
+    ("openai-responses", &["reasoning"]),
+    ("anthropic-messages", &["thinking", "redacted_thinking"]),
+];
+
+/// Whether `item` is an opaque provider reasoning item, which compaction may drop.
+///
+/// Reads the payload's `type` and nothing else in it, the one read of an opaque payload this loop
+/// makes. Every other item, opaque or not, is not reasoning.
+fn is_reasoning(item: &Item) -> bool {
+    let Item::Opaque { wire, payload } = item else {
+        return false;
+    };
+    let Some(kind) = payload.get("type").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    REASONING_ITEM_TYPES
+        .iter()
+        .any(|(named, types)| wire.as_str() == *named && types.contains(&kind))
+}
+
+/// The wires whose provider reasoning compaction may drop, by the identifier each tags its opaque
+/// items with.
+///
+/// An opaque item from any other wire is never taken for reasoning, so a wire missing here keeps
+/// every opaque item it produces through every compaction. Public so the crate that names the
+/// wires (`harness-llm`'s `RESPONSES_WIRE` and `MESSAGES_WIRE`) can be checked against it.
+pub fn reasoning_wires() -> impl Iterator<Item = &'static str> {
+    REASONING_ITEM_TYPES.iter().map(|(wire, _)| *wire)
+}
+
+/// Whether a summary fold keeps `item` rather than taking it: an opaque item that is not
+/// reasoning ([`is_reasoning`]), which nothing renders and nothing says may be dropped.
+fn kept_by_fold(item: &Item) -> bool {
+    matches!(item, Item::Opaque { .. }) && !is_reasoning(item)
+}
+
 /// [`drop_reasoning_within`] with the target as its only threshold, as the tests drive it.
 #[cfg(test)]
 fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
@@ -1465,7 +1521,8 @@ fn drop_reasoning(items: &mut Vec<Item>, target: usize) -> usize {
 }
 
 /// Drops the fewest oldest [`Item::Opaque`] reasoning items that take the conversation to one of
-/// two thresholds, in bytes, and returns how many went.
+/// two thresholds, in bytes, and returns how many went. Only items [`is_reasoning`] says are
+/// reasoning are counted or dropped; any other opaque item stays where it is.
 ///
 /// # Why a reasoning item may go alone
 ///
@@ -1503,10 +1560,7 @@ fn drop_reasoning_within(items: &mut Vec<Item>, target: usize, window: usize) ->
     let mut under_window = (size <= window).then_some(0_usize);
     let mut at_target = None;
     let mut count = 0_usize;
-    for item in items
-        .iter()
-        .filter(|item| matches!(item, Item::Opaque { .. }))
-    {
+    for item in items.iter().filter(|item| is_reasoning(item)) {
         size = size.saturating_sub(measure_one(item));
         count += 1;
         if under_window.is_none() && size <= window {
@@ -1523,7 +1577,7 @@ fn drop_reasoning_within(items: &mut Vec<Item>, target: usize, window: usize) ->
     };
     let mut left = needed;
     items.retain(|item| {
-        if left > 0 && matches!(item, Item::Opaque { .. }) {
+        if left > 0 && is_reasoning(item) {
             left -= 1;
             return false;
         }
@@ -1630,7 +1684,8 @@ enum Summarised {
     /// Nothing was folded: too little to be worth a turn, or all of it protected.
     Skipped,
     /// The prefix is now one summary item, in place of `items`, of which `reasoning` were opaque
-    /// reasoning items that went with the round trips they preceded.
+    /// reasoning items that went with the round trips they preceded. Opaque items that are not
+    /// reasoning were kept after the summary and are not counted in `items`.
     Folded { items: usize, reasoning: usize },
     /// A turn was spent and produced nothing usable. The elided conversation stands.
     Failed,
@@ -3330,6 +3385,7 @@ impl<'a> AgentLoop<'a> {
             elided_results: elided.count,
             elided_bytes: elided.freed,
             summarised_items: summarised,
+            dropped_reasoning: reasoning,
             bytes_before: before,
             bytes_after: after,
             summary_turn,
@@ -3354,7 +3410,8 @@ impl<'a> AgentLoop<'a> {
     /// harness's own words for a person's. The folded range's [`Item::Opaque`] reasoning items go
     /// with it: each preceded a call or a text that is now inside the summary, and one kept after
     /// the summary would precede something else. How many went is returned, so the
-    /// `conversation-compacted` warning can say so.
+    /// `conversation-compacted` warning can say so. An opaque item that is not reasoning
+    /// ([`is_reasoning`]) is not folded: it stays, in order, right after the summary.
     ///
     /// The turn is counted against the run's turn, token and spend ceilings like any other,
     /// because every model request consumes the same finite budget regardless of why the loop
@@ -3369,7 +3426,17 @@ impl<'a> AgentLoop<'a> {
             return Summarised::Skipped;
         };
         let folded: Vec<Item> = state.items[FIRST_KEPT_ITEM..end].to_vec();
-        if measure(&folded) < SUMMARY_MIN_FOLD_BYTES {
+        // Worth a turn by what the fold removes, not by what it spans: an item it keeps stays in
+        // the conversation, so counting it bought a summary turn that removed nothing, and again
+        // before every later request while that item stayed in the fold range. A fold that
+        // removes nothing is under the minimum too.
+        const { assert!(SUMMARY_MIN_FOLD_BYTES > 0) };
+        let removed: usize = folded
+            .iter()
+            .filter(|item| !kept_by_fold(item))
+            .map(measure_one)
+            .sum();
+        if removed < SUMMARY_MIN_FOLD_BYTES {
             return Summarised::Skipped;
         }
         if self.cancel.is_cancelled() {
@@ -3442,18 +3509,28 @@ impl<'a> AgentLoop<'a> {
         // now inside the summary; re-inserting them after it left each followed by the next
         // reasoning item or by the tail instead of by its own item, which the Responses route
         // refuses.
+        //
+        // An opaque item that is not reasoning ([`is_reasoning`]) is not the summary's to take:
+        // nothing renders it and nothing says what it may be dropped for, so it stays, in order,
+        // right after the summary that replaced the items around it.
         let reasoning = state.items[FIRST_KEPT_ITEM..end]
             .iter()
-            .filter(|item| matches!(item, Item::Opaque { .. }))
+            .filter(|item| is_reasoning(item))
             .count();
         let tail = state.items.split_off(end);
-        state.items.truncate(FIRST_KEPT_ITEM);
+        let kept: Vec<Item> = state
+            .items
+            .drain(FIRST_KEPT_ITEM..)
+            .filter(kept_by_fold)
+            .collect();
+        let folded = end - FIRST_KEPT_ITEM - kept.len();
         state
             .items
             .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
+        state.items.extend(kept);
         state.items.extend(tail);
         Summarised::Folded {
-            items: end - FIRST_KEPT_ITEM,
+            items: folded,
             reasoning,
         }
     }

@@ -7,6 +7,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-05
+
+### Added
+
+- `harness_loop::reasoning_wires()`: the wires whose provider reasoning compaction may drop, by the identifier each tags its opaque items with; a test ties it to `harness_llm::RESPONSES_WIRE` and `MESSAGES_WIRE`, so a wire renamed on one side fails instead of silently keeping its reasoning.
+
+### Changed
+
+- `LoopEvent::Compacted` gains `dropped_reasoning`, the number of provider reasoning items a compaction dropped (folded with a summary or dropped to reach the target), and the progress line names it when it is not zero; a recorded `compacted` line without the field reads as zero, but a consumer that builds the variant by its fields must add it (`story:compacted-event-counts-dropped-reasoning`).
+
+### Fixed
+
+- Compaction drops only the opaque items a wire marks as reasoning (`openai-responses` `reasoning`, `anthropic-messages` `thinking` and `redacted_thinking`); any other opaque item, such as an output item outside the pinned subset, is kept through the summary fold, right after the summary, and through the reasoning drop instead of being discarded as reasoning. Whether a fold is worth a summary turn is decided on the bytes it removes, so an item it keeps never buys a turn that removes nothing (`story:compaction-keeps-unknown-opaque-items`).
+- `tools` names the write scope a run with the same flags enforces, as its `--write-scope` help says it does: the JSON document carries `write_scope`, always present, each rule's glob and scope in the order applied, empty when the run would not write. It follows the profiles a run applies without `-p`, the operator's `[default]` included: a typed `--substrate-embedded` or `--substrate`, or `[default] write = true`, with no `--write-scope` names the configured `write-scope` or the default scope, as `run` and `chat` apply it (`story:tools-help-matches-its-output`).
+
 ## [0.27.0] - 2026-11-05
 
 ### Added

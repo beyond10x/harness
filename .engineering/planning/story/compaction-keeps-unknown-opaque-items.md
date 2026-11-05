@@ -2,14 +2,27 @@
 format: aep.planning-md/3
 id: story:compaction-keeps-unknown-opaque-items
 kind: story
-status: draft
+status: implemented
 title: Compaction drops only opaque items that are reasoning
 tags:
 - from-finding
 relations:
 - informed_by: review-result:adversary-1104-u3-pass-1
 - serves: vision:b10x-owns-its-loop
-revision: 1
+scope:
+- confidence: cited
+  path: crates/harness-cli/tests/reasoning_wires.rs
+- confidence: cited
+  path: crates/harness-loop/src/lib.rs
+- confidence: cited
+  path: crates/harness-loop/src/tests.rs
+- confidence: cited
+  path: crates/harness-wire/src/item.rs
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T02:19:08Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-05T02:19:08Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-05T04:11:59Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

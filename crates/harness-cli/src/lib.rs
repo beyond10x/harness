@@ -1565,10 +1565,33 @@ fn apply_profiles(options: &mut RunOptions) -> Result<Vec<profile::ProfileRef>, 
 /// `--write-scope` is never touched: it replaces the default whole, as it does for a profile run.
 ///
 /// A run with no confinement is read-only and gets nothing, so its scope stays as typed.
+///
+/// The rule itself is [`applied_write_scope`], which `tools` applies too, so the scope `tools`
+/// names and the scope `run` and `chat` apply cannot drift.
 fn fill_write_scope(options: &mut RunOptions, configured: Option<Vec<String>>) {
-    let writes = options.substrate_embedded || options.substrate.is_some();
-    if writes && options.write_scope.is_empty() {
-        options.write_scope = configured.unwrap_or_else(profile::default_write_scope);
+    options.write_scope = applied_write_scope(
+        writes_through_substrate(options.substrate_embedded, options.substrate.as_deref()),
+        std::mem::take(&mut options.write_scope),
+        configured,
+    );
+}
+
+/// Whether a run with this confinement may write: the embedded driver or a substrate socket.
+fn writes_through_substrate(embedded: bool, substrate: Option<&std::path::Path>) -> bool {
+    embedded || substrate.is_some()
+}
+
+/// The scope declarations a run applies, as [`fill_write_scope`] explains: `typed` when the
+/// operator typed any or the run does not write, else `configured`, else the default.
+fn applied_write_scope(
+    writes: bool,
+    typed: Vec<String>,
+    configured: Option<Vec<String>>,
+) -> Vec<String> {
+    if writes && typed.is_empty() {
+        configured.unwrap_or_else(profile::default_write_scope)
+    } else {
+        typed
     }
 }
 
@@ -4231,6 +4254,19 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
     let confined_programs = programs(&options.allow_program, &confined_toolchain);
     let process_workspace_access =
         harness_substrate::process_workspace_access(&options.process_write_subtree)?;
+    // The scope `run` applies with the same flags, by the same rule. `tools` reads no profile, so
+    // a run that types the confinement without a scope starts from the default here.
+    let writes = writes_through_substrate(options.substrate_embedded, options.substrate.as_deref());
+    let scope = write_scope(&applied_write_scope(
+        writes,
+        options.write_scope.clone(),
+        None,
+    ))?;
+    let applied_scope = if writes {
+        scope.rules().to_vec()
+    } else {
+        Vec::new()
+    };
     let Publication { tools, withheld } = published(
         harness_catalogue::LocalOperations::new(&options.workspace)?,
         workspace_name(&options.workspace),
@@ -4244,7 +4280,7 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             programs: &confined_programs,
             toolchain: &confined_toolchain,
             process_workspace_access,
-            scope: write_scope(&options.write_scope)?,
+            scope,
             toolchain_origin: None,
         },
     )?;
@@ -4287,6 +4323,12 @@ fn tools_command(options: &ToolsOptions) -> Result<(), String> {
             // difference between a six-entry catalogue nobody wanted a seventh entry in and one
             // that was refused it.
             "withheld": withheld,
+            // And where it may write: each rule's glob and scope, in the order the run applies
+            // them, first match winning. Always a list, empty when the run would not write, for
+            // the reason `withheld` is: a reader cannot otherwise tell *this run writes nowhere*
+            // from *this build does not say*. A list of tools alone does not answer the question
+            // once some paths refuse some of them.
+            "write_scope": applied_scope,
             // And what the run is given beyond its tools. Always a list, empty included, for the
             // reason `withheld` is: a reader cannot otherwise tell *none were declared* from
             // *this build does not say*.

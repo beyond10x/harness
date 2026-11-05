@@ -46,8 +46,8 @@ pub struct Wire {
     /// Sent after the person stopped that turn, so they are for whatever comes next — a
     /// `turn/start` here is the next turn — and only the main loop can serve that. Every one was
     /// dequeued after an interrupt and before anything still on the channel, so it is older than
-    /// every frame on the channel, and the queue keeps the order they came off it in. Each reader
-    /// that serves requests in order takes this queue before the channel; see
+    /// every frame on the channel, and the queue keeps the order they came off it in. Every reader
+    /// takes this queue before the stash and the channel; see
     /// [`serve_control`](Self::serve_control), fact 3.
     deferred: Rc<RefCell<VecDeque<Incoming>>>,
 }
@@ -137,7 +137,15 @@ impl Wire {
             // `next_frame_within` would immediately pop the unrelated frame we just stashed,
             // serve it, stash it again, and repeat forever without reaching the interrupt behind
             // it.
-            let message = self.reader.next_within(INTERRUPT_SETTLE_TIMEOUT)?;
+            //
+            // A request an earlier turn held comes first all the same: it was sent before
+            // anything on the channel, the owed interrupt included. This cannot loop either —
+            // `take_deferred` gives nothing once this turn has heard an interrupt, and a turn
+            // that has not heard one refuses what it takes rather than holding it again.
+            let message = match self.take_deferred(control) {
+                Some(message) => message,
+                None => self.reader.next_within(INTERRUPT_SETTLE_TIMEOUT)?,
+            };
             self.serve_control(message, control)?;
         }
         Ok(())
@@ -177,10 +185,12 @@ impl Wire {
     ///    stash would not be because of what may enter it and who reads it: a request is held
     ///    only once an interrupt of its turn has left the queue, so it was dequeued — and sent —
     ///    after every interrupt that turn answered and before every frame still on the channel;
-    ///    it is appended behind the requests held before it; and every reader that serves
-    ///    requests in order ([`next_frame`](Self::next_frame), [`drain_control`](Self::drain_control),
-    ///    [`next_frame_within`](Self::next_frame_within)) takes `deferred` before the channel. So
-    ///    a held request never leaves the queue ahead of a frame the client sent earlier.
+    ///    it is appended behind the requests held before it; and every reader of the queue —
+    ///    [`next_frame`](Self::next_frame), [`drain_control`](Self::drain_control),
+    ///    [`settle_interrupts`](Self::settle_interrupts) and
+    ///    [`next_frame_within`](Self::next_frame_within) — takes `deferred` before the stash and
+    ///    the channel. So every request is served in the order it was sent: a held request never
+    ///    leaves the queue behind a frame the client sent after it, nor ahead of one sent before.
     ///
     /// Fact 1 is about requests only, and deliberately: [`drain_control`](Self::drain_control)
     /// reads the channel directly and does *not* look at the stash, so a frame off the channel can
@@ -239,16 +249,16 @@ impl Wire {
     }
 
     /// Returns the next frame for the main loop, preferring one already pulled off the wire: a
-    /// stashed one, then a request a turn held for after it.
+    /// request a turn held for after it, then a stashed one.
     ///
     /// # Errors
     ///
     /// Returns [`TransportError::Closed`] once the client's input ends.
     pub fn next_frame(&self) -> Result<Incoming, TransportError> {
-        if let Some(message) = self.stash.borrow_mut().pop_front() {
+        if let Some(message) = self.deferred.borrow_mut().pop_front() {
             return Ok(message);
         }
-        if let Some(message) = self.deferred.borrow_mut().pop_front() {
+        if let Some(message) = self.stash.borrow_mut().pop_front() {
             return Ok(message);
         }
         self.reader.next()
@@ -268,10 +278,10 @@ impl Wire {
         timeout: Duration,
         control: &TurnControl,
     ) -> Result<Incoming, TransportError> {
-        if let Some(message) = self.stash.borrow_mut().pop_front() {
+        if let Some(message) = self.take_deferred(control) {
             return Ok(message);
         }
-        if let Some(message) = self.take_deferred(control) {
+        if let Some(message) = self.stash.borrow_mut().pop_front() {
             return Ok(message);
         }
         self.reader.next_within(timeout)

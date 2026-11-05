@@ -8981,3 +8981,178 @@ fn a_summary_fold_keeps_an_opaque_item_that_is_not_reasoning() {
         "the warning counts the same two: {warning}"
     );
 }
+
+// --- adversary pass 1, wave 2026-11-05 U2: story:compaction-keeps-unknown-opaque-items and
+// story:compacted-event-counts-dropped-reasoning ----------------------------------------------------
+
+/// A model that answers every summary turn with one fixed summary and every other turn from its
+/// script, so a test can count the summary turns a run spent without the script's order deciding
+/// which request receives which answer.
+struct Adversary1105Model {
+    wire: WireId,
+    script: VecDeque<TurnOutcome>,
+    seen: Vec<TurnRequest>,
+    summaries: usize,
+}
+
+impl Adversary1105Model {
+    fn new(script: Vec<TurnOutcome>) -> Self {
+        Self {
+            wire: wire(),
+            script: script.into(),
+            seen: Vec::new(),
+            summaries: 0,
+        }
+    }
+}
+
+impl ModelPort for Adversary1105Model {
+    fn wire(&self) -> &WireId {
+        &self.wire
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        _sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        request.validate()?;
+        request.check_opaque_items(&self.wire)?;
+        self.seen.push(request.clone());
+        if request.instructions == super::SUMMARY_INSTRUCTION {
+            self.summaries += 1;
+            return Ok(answer("a summary of what came before"));
+        }
+        self.script
+            .pop_front()
+            .ok_or_else(|| WireError::protocol("the script ran out of turns"))
+    }
+}
+
+/// One run of `model` against a declared window of `window` tokens, with the one tool `a`.
+fn adversary_1105_u2_run(
+    model: &mut Adversary1105Model,
+    window: u64,
+) -> (Result<LoopOutcome, LoopError>, VecLoopSink) {
+    let mut tools = ScriptedTools::new(vec![spec("a", Approval::NotRequired)]);
+    let mut approvals = DenyAll;
+    let config = LoopConfig::new("scripted-model", "be useful").with_context_window(Some(window));
+    let mut sink = VecLoopSink::new();
+    let outcome =
+        AgentLoop::new(model, &mut tools, &mut approvals, config).run("do the thing", &mut sink);
+    (outcome, sink)
+}
+
+/// A turn that emits `kept` (an opaque item that is not reasoning), says one short line and asks
+/// for one call: `kept` is then a turn group of its own, so a fold may end right after it.
+fn adversary_1105_u2_keeps_and_asks(kept: Item, id: &str) -> TurnOutcome {
+    let mut turn = says_and_asks("I looked it up", &[(id, "a", json!({}))]);
+    turn.items.insert(0, kept);
+    turn
+}
+
+#[test]
+fn adversary_1105_u2_a_summary_turn_is_not_spent_on_a_fold_that_can_remove_nothing() {
+    // story:compaction-keeps-unknown-opaque-items. The fold's weight is one opaque item that is
+    // not reasoning, which the fold now keeps. `summarise` still decides the fold is worth a turn
+    // on `measure(&folded)`, which counts that kept item, so it spends a model turn whose summary
+    // replaces no item at all and leaves the conversation larger than before.
+    let mut model = Adversary1105Model::new(vec![
+        adversary_1105_u2_keeps_and_asks(unmodelled(34_000), "c1"),
+        answer("done"),
+    ]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    let folds = compacted(&sink);
+    assert_eq!(
+        model.summaries, 0,
+        "story:compaction-keeps-unknown-opaque-items: the only item in the fold is one the fold \
+         keeps, so a summary turn removes nothing and is spent for nothing; compactions as \
+         (elided, summarised, summary turn): {folds:?}"
+    );
+}
+
+#[test]
+fn adversary_1105_u2_an_item_the_fold_keeps_does_not_buy_a_summary_turn_before_every_request() {
+    // The same kept item over four real turns. It never leaves the fold range and never leaves
+    // the conversation, so the conversation stays over the trigger and every compaction folds the
+    // previous summary plus that item again: one extra model turn before every request, each
+    // charged to the run's turn, token and spend ceilings. Before the unit the first fold took the
+    // item with it, so at most one summary turn was spent.
+    let mut model = Adversary1105Model::new(vec![
+        adversary_1105_u2_keeps_and_asks(unmodelled(34_000), "c1"),
+        asks_for(&[("c2", "a", json!({}))]),
+        asks_for(&[("c3", "a", json!({}))]),
+        answer("done"),
+    ]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    let folds = compacted(&sink);
+    assert!(
+        model.summaries <= 1,
+        "story:compaction-keeps-unknown-opaque-items: {} summary turns over 4 conversation \
+         turns, each folding nothing but the previous summary; compactions as (elided, \
+         summarised, summary turn): {folds:?}",
+        model.summaries
+    );
+}
+
+#[test]
+fn adversary_1105_u2_a_kept_item_stands_right_after_the_summary_and_is_not_counted_as_folded() {
+    // Pins what `a_summary_fold_keeps_an_opaque_item_that_is_not_reasoning` leaves open: where the
+    // kept item lands, and the exact figures. The fold takes [kept, reasoning, text]; the
+    // reasoning goes with its text, the text into the summary, and the kept item stays in order
+    // between the summary and the round trip after it. `summarised_items` is the two items that
+    // went into the summary, not three, and `dropped_reasoning` is the one reasoning item.
+    let kept = unmodelled(200);
+    let mut first = says_and_asks(&"t".repeat(33_000), &[("c1", "a", json!({}))]);
+    first.items.insert(0, reasoning(300));
+    first.items.insert(0, kept.clone());
+    let mut model = Adversary1105Model::new(vec![first, answer("done")]);
+    let (outcome, sink) = adversary_1105_u2_run(&mut model, 10_000);
+    outcome.expect("the run completes");
+    assert_eq!(model.summaries, 1, "the text was worth one summary turn");
+
+    let after = after_the_summary(&model.seen);
+    let next = &after
+        .first()
+        .expect("the run turned again after the fold")
+        .items;
+    assert_eq!(
+        next[..4],
+        [
+            Item::user("do the thing"),
+            Item::user(format!("{SUMMARY_MARKER}\na summary of what came before")),
+            kept,
+            a_call("c1", json!({})),
+        ],
+        "story:compaction-keeps-unknown-opaque-items: the kept item stays in order, right after \
+         the summary and before the round trip that followed it: {next:?}"
+    );
+    assert!(
+        matches!(next.get(4), Some(Item::ToolResult { call_id, .. }) if call_id.as_str() == "c1")
+            && next.len() == 5,
+        "the round trip after the fold is whole and nothing follows it: {next:?}"
+    );
+    assert_replayable(next, "the request after the fold");
+
+    let events: Vec<Value> = sink
+        .events()
+        .iter()
+        .filter(|event| matches!(event, LoopEvent::Compacted { .. }))
+        .map(|event| serde_json::to_value(event).expect("an event serializes"))
+        .collect();
+    let [event] = &events[..] else {
+        panic!("one compaction, not {events:?}");
+    };
+    assert_eq!(
+        (
+            event["summarised_items"].clone(),
+            event["dropped_reasoning"].clone(),
+            event["summary_turn"].clone(),
+        ),
+        (json!(2), json!(1), json!(true)),
+        "story:compacted-event-counts-dropped-reasoning: two items folded (the reasoning item and \
+         the text), one of them reasoning, and the kept item in neither figure: {event}"
+    );
+}

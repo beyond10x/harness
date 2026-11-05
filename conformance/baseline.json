@@ -76,6 +76,18 @@
     "harness.loop/authored/run-tool-read",
     "harness.loop/authored/run-tool-write",
     "harness.loop/authored/run-turn-limit",
-    "harness.loop/authored/run-usage-absent"
+    "harness.loop/authored/run-usage-absent",
+    "harness.loop.Loop/state/AwaitingModel/refuses/harness.loop.CompleteTool",
+    "harness.loop.Loop/state/AwaitingModel/refuses/harness.loop.Deny",
+    "harness.loop.Loop/state/AwaitingModel/refuses/harness.loop.ResumeDenied",
+    "harness.loop.Loop/state/AwaitingSummary/refuses/harness.loop.CompleteTool",
+    "harness.loop.Loop/state/AwaitingSummary/refuses/harness.loop.Deny",
+    "harness.loop.Loop/state/AwaitingSummary/refuses/harness.loop.ResumeDenied",
+    "harness.loop.Loop/state/Failed/refuses/harness.loop.CompleteTool",
+    "harness.loop.Loop/state/Failed/refuses/harness.loop.Deny",
+    "harness.loop.Loop/state/Failed/refuses/harness.loop.ResumeDenied",
+    "harness.loop.Loop/state/Stopped/refuses/harness.loop.CompleteTool",
+    "harness.loop.Loop/state/Stopped/refuses/harness.loop.Deny",
+    "harness.loop.Loop/state/Stopped/refuses/harness.loop.ResumeDenied"
   ]
 }

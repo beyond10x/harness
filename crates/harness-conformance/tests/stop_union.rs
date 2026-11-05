@@ -105,7 +105,8 @@ fn a_completed_stop_carrying_limit_ms_is_refused_by_ess() {
         refused,
         vec![(
             "ESS-AUTHOR-001".to_owned(),
-            "response literal stop: invalid_input".to_owned()
-        )]
+            "response literal stop: invalid_input at `limit_ms`".to_owned()
+        )],
+        "story:harness-spec-runs-on-the-newest-ess: ESS 0.86.0 names the field it refuses"
     );
 }

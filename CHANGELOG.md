@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-05
+
+### Changed
+
+- ESS 0.86.0 is the pinned specification toolchain (`spec/ess-inputs.yaml`, the `ess-*` crates of `b10x-harness-conformance` at `8d26c81f`), up from 0.77.0; the guards on `next` of `CompleteTool`, `Deny` and `ResumeDenied` read `{all: [defined(next), next == ...]}` so the twelve wrong-state scenarios of those commands that 0.86.0 refused (`ESS-SYNTH-003`) are generated again, and the suite keeps its 139 generated scenario ids. Those twelve ids are now required in `conformance/baseline.json`, so a toolchain move that stops generating them fails the coverage check (`story:harness-spec-runs-on-the-newest-ess`).
+
 ## [0.28.0] - 2026-11-05
 
 ### Added

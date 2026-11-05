@@ -13,11 +13,11 @@ harness-wire.workspace = true
 harness-loop.workspace = true
 clap.workspace = true
 serde_json.workspace = true
-ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "f692aabbb0fcd321eca0a9eef86e12b25a7601f4" }
-ess-primitives = { git = "https://github.com/beyond10x/ess", rev = "f692aabbb0fcd321eca0a9eef86e12b25a7601f4" }
+ess-conformance = { git = "https://github.com/beyond10x/ess", rev = "8d26c81f74f4374316d5ee565c2da43dd81a16a8" }
+ess-primitives = { git = "https://github.com/beyond10x/ess", rev = "8d26c81f74f4374316d5ee565c2da43dd81a16a8" }
 
-ess-domain = { git = "https://github.com/beyond10x/ess", rev = "f692aabbb0fcd321eca0a9eef86e12b25a7601f4" }
-ess-compiler = { git = "https://github.com/beyond10x/ess", rev = "f692aabbb0fcd321eca0a9eef86e12b25a7601f4" }
+ess-domain = { git = "https://github.com/beyond10x/ess", rev = "8d26c81f74f4374316d5ee565c2da43dd81a16a8" }
+ess-compiler = { git = "https://github.com/beyond10x/ess", rev = "8d26c81f74f4374316d5ee565c2da43dd81a16a8" }
 serde_yaml_ng.workspace = true
 
 [lints]

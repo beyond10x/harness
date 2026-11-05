@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-05T08:33:43Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-spec-runs-on-the-newest-ess",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/harness-1105b/gate at 7849045",
+    "reference": "staged local gate G0-G6 at 7849045 (ESS 0.86.0): EXIT=0 in every stage; 1407 passed, 0 failed, 7 ignored; fmt and clippy -D warnings clean; provider, cli and toolchain contracts, docs current, Harness ESS 183/183, home paths clean; strict rustdoc"
+  }
+}

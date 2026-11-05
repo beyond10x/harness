@@ -2,17 +2,27 @@
 format: aep.planning-md/3
 id: story:tools-help-matches-its-output
 kind: story
-status: active
+status: implemented
 title: The tools help and the tools output agree on the write scope
 tags:
 - from-finding
 relations:
 - informed_by: review-result:security-1104-u1-pass-1
 - serves: vision:b10x-owns-its-loop
-revision: 3
+scope:
+- confidence: cited
+  path: crates/harness-cli/src/lib.rs
+- confidence: cited
+  path: crates/harness-cli/tests/adversary_1105_u3.rs
+- confidence: cited
+  path: crates/harness-cli/tests/security_1104_u1.rs
+- confidence: cited
+  path: crates/harness-cli/tests/typed_write_scope.rs
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T02:19:08Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-05T02:19:09Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-05T04:12:00Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Context
 

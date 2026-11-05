@@ -429,9 +429,9 @@
     }
   },
   "provenance": {
-    "contract_digest": "26b7b5f751289155ab113bb78e85adfe634e47283a24abb8d5cd91b59fc982c5",
+    "contract_digest": "20dd1352768a110862a93a05abfe58a3039fc792dc874201aee40244165e469c",
     "scenario_initial_state": "empty",
-    "spec_digest": "3b2fcbee1ee914c705a4e569b878476b9d46ecbd8465d26c144122c0256fc069",
+    "spec_digest": "b7b447a530c4692ce724c074eea37c5d1dffa504d8f793153a77e4e7838ca9b8",
     "specification_version": "v1",
     "suite_version": "ess-conformance/35",
     "system": "harness"
@@ -32039,6 +32039,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ValidateBudget",
             "declarations": {},
@@ -32116,6 +32119,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -32197,6 +32203,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ValidateBudget",
             "declarations": {},
@@ -32274,6 +32283,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -32355,6 +32367,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ValidateBudget",
             "declarations": {},
@@ -32432,6 +32447,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -32513,6 +32531,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ValidateBudget",
             "declarations": {},
@@ -32590,6 +32611,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -32671,6 +32695,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ValidateBudget",
             "declarations": {},
@@ -32737,6 +32764,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -32812,6 +32842,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Call",
             "declarations": {},
@@ -32885,6 +32918,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Call",
             "declarations": {},
@@ -32956,6 +32992,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -33147,6 +33186,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -33196,6 +33238,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -33233,6 +33278,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Approve",
             "declarations": {},
@@ -33268,6 +33316,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -33309,6 +33360,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -33721,6 +33775,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -33770,6 +33827,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -33809,6 +33869,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -34372,6 +34435,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -34421,6 +34487,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -34460,6 +34529,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -34813,6 +34885,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ResumeApproved",
             "declarations": {},
@@ -34848,6 +34923,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -34899,6 +34977,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -34938,6 +35019,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -35292,6 +35376,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ResumeApproved",
             "declarations": {},
@@ -35327,6 +35414,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -35368,6 +35458,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -35758,6 +35851,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -35807,6 +35903,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -35848,6 +35947,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Deny",
             "declarations": {},
@@ -35887,6 +35989,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -36332,6 +36437,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -36381,6 +36489,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -36420,6 +36531,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -36777,6 +36891,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ResumeDenied",
             "declarations": {},
@@ -36814,6 +36931,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.AnswerSummary",
             "declarations": {},
@@ -36849,6 +36969,9 @@
             "outcome": "cancelled"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -37280,6 +37403,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -37329,6 +37455,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -37368,6 +37497,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -37721,6 +37853,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ResumeApproved",
             "declarations": {},
@@ -37756,6 +37891,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -37797,6 +37935,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -38232,6 +38373,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -38285,6 +38429,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -38324,6 +38471,9 @@
             "outcome": "deferred"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -38677,6 +38827,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.ResumeApproved",
             "declarations": {},
@@ -38714,6 +38867,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -38749,6 +38905,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -38790,6 +38949,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -39150,6 +39312,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -39185,6 +39350,9 @@
             "outcome": "cancelled"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -39593,6 +39761,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -39642,6 +39813,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -39679,6 +39853,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -39714,6 +39891,9 @@
             "outcome": "kept"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -39755,6 +39935,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -40173,6 +40356,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -40222,6 +40408,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -40259,6 +40448,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -40294,6 +40486,9 @@
             "outcome": "folded"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -40335,6 +40530,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -40773,6 +40971,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -40822,6 +41023,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -40857,6 +41061,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -40898,6 +41105,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -41145,6 +41355,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -41194,6 +41407,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -41231,6 +41447,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -41266,6 +41485,9 @@
             "outcome": "folded"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -41307,6 +41529,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -41753,6 +41978,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -41815,6 +42043,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -41850,6 +42081,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -41891,6 +42125,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -42309,6 +42546,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -42358,6 +42598,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -42395,6 +42638,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -42430,6 +42676,9 @@
             "outcome": "kept"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -42471,6 +42720,9 @@
             "outcome": "failed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -42893,6 +43145,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -42942,6 +43197,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -42979,6 +43237,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -43014,6 +43275,9 @@
             "outcome": "folded"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -43055,6 +43319,9 @@
             "outcome": "failed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -43442,6 +43709,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -43481,6 +43751,9 @@
             "outcome": "failed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -43896,6 +44169,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -43935,6 +44211,9 @@
             "outcome": "retried"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -44178,6 +44457,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -44213,6 +44495,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -44254,6 +44539,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -44638,6 +44926,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -44679,237 +44970,7 @@
           "step": "expect_outcome"
         },
         {
-          "response": {
-            "command": "harness.loop.FailTurn",
-            "declarations": {
-              "harness.loop.AwaitingApprovalStop": {
-                "fields": [
-                  {
-                    "name": "checkpoint_id",
-                    "type": "String"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.BudgetUnobservableStop": {
-                "fields": [
-                  {
-                    "name": "name",
-                    "type": "String"
-                  },
-                  {
-                    "name": "reason",
-                    "type": "String"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.CancelledStop": {
-                "fields": [
-                  {
-                    "name": "reason",
-                    "type": "String"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.DeadlineStop": {
-                "fields": [
-                  {
-                    "name": "limit_ms",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.FailedStop": {
-                "fields": [
-                  {
-                    "name": "cause",
-                    "type": "String"
-                  },
-                  {
-                    "name": "message",
-                    "type": "String"
-                  },
-                  {
-                    "name": "after_compaction",
-                    "type": "Boolean"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.MaxCostStop": {
-                "fields": [
-                  {
-                    "name": "limit_micro_usd",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "spent_micro_usd",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.MaxInputTokensStop": {
-                "fields": [
-                  {
-                    "name": "limit",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.MaxOutputTokensStop": {
-                "fields": [
-                  {
-                    "name": "limit",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "reported",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.MaxTurnsStop": {
-                "fields": [
-                  {
-                    "name": "limit",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.ProviderIncompleteStop": {
-                "fields": [
-                  {
-                    "name": "reason",
-                    "type": "String"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.RunLedger": {
-                "fields": [
-                  {
-                    "name": "usage",
-                    "type": "List<harness.loop.Usage>"
-                  },
-                  {
-                    "name": "cost_micro_usd",
-                    "type": "Optional<Integer>"
-                  },
-                  {
-                    "name": "turns",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.Stop": {
-                "kind": "union",
-                "tag": "kind",
-                "variants": {
-                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
-                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
-                  "cancelled": "harness.loop.CancelledStop",
-                  "completed": null,
-                  "deadline": "harness.loop.DeadlineStop",
-                  "failed": "harness.loop.FailedStop",
-                  "max-cost": "harness.loop.MaxCostStop",
-                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
-                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
-                  "max-turns": "harness.loop.MaxTurnsStop",
-                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
-                  "unstructured": "harness.loop.UnstructuredStop"
-                }
-              },
-              "harness.loop.UnstructuredStop": {
-                "fields": [
-                  {
-                    "name": "asked_again",
-                    "type": "Integer"
-                  }
-                ],
-                "kind": "struct"
-              },
-              "harness.loop.Usage": {
-                "fields": [
-                  {
-                    "name": "model",
-                    "type": "String"
-                  },
-                  {
-                    "name": "input_tokens",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "output_tokens",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "cached_input_tokens",
-                    "type": "Integer"
-                  },
-                  {
-                    "name": "cache_creation_input_tokens",
-                    "type": "Optional<Integer>"
-                  }
-                ],
-                "kind": "struct"
-              }
-            },
-            "expected": {
-              "turn": 1.0
-            },
-            "fields": [
-              {
-                "name": "turn",
-                "type": "Integer"
-              },
-              {
-                "name": "stop",
-                "type": "Optional<harness.loop.Stop>"
-              },
-              {
-                "name": "ledger",
-                "type": "Optional<harness.loop.RunLedger>"
-              }
-            ],
-            "outcome": {
-              "command": "harness.loop.FailTurn",
-              "outcome": "retried"
-            }
-          },
-          "step": "expect_direct_response"
-        },
-        {
-          "command": "harness.loop.FailTurn",
-          "input": {
-            "retriable": {
-              "kind": "literal",
-              "value": true
-            },
-            "run_id": {
-              "kind": "literal",
-              "value": "run-a"
-            }
-          },
-          "step": "execute_command"
-        },
-        {
-          "outcome": {
-            "command": "harness.loop.FailTurn",
-            "outcome": "retried"
-          },
-          "step": "expect_outcome"
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -45143,6 +45204,245 @@
             "outcome": "retried"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "response": {
+            "command": "harness.loop.FailTurn",
+            "declarations": {
+              "harness.loop.AwaitingApprovalStop": {
+                "fields": [
+                  {
+                    "name": "checkpoint_id",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.BudgetUnobservableStop": {
+                "fields": [
+                  {
+                    "name": "name",
+                    "type": "String"
+                  },
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.CancelledStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.DeadlineStop": {
+                "fields": [
+                  {
+                    "name": "limit_ms",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.FailedStop": {
+                "fields": [
+                  {
+                    "name": "cause",
+                    "type": "String"
+                  },
+                  {
+                    "name": "message",
+                    "type": "String"
+                  },
+                  {
+                    "name": "after_compaction",
+                    "type": "Boolean"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxCostStop": {
+                "fields": [
+                  {
+                    "name": "limit_micro_usd",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "spent_micro_usd",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxInputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxOutputTokensStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "reported",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.MaxTurnsStop": {
+                "fields": [
+                  {
+                    "name": "limit",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.ProviderIncompleteStop": {
+                "fields": [
+                  {
+                    "name": "reason",
+                    "type": "String"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.RunLedger": {
+                "fields": [
+                  {
+                    "name": "usage",
+                    "type": "List<harness.loop.Usage>"
+                  },
+                  {
+                    "name": "cost_micro_usd",
+                    "type": "Optional<Integer>"
+                  },
+                  {
+                    "name": "turns",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Stop": {
+                "kind": "union",
+                "tag": "kind",
+                "variants": {
+                  "awaiting-approval": "harness.loop.AwaitingApprovalStop",
+                  "budget-unobservable": "harness.loop.BudgetUnobservableStop",
+                  "cancelled": "harness.loop.CancelledStop",
+                  "completed": null,
+                  "deadline": "harness.loop.DeadlineStop",
+                  "failed": "harness.loop.FailedStop",
+                  "max-cost": "harness.loop.MaxCostStop",
+                  "max-input-tokens": "harness.loop.MaxInputTokensStop",
+                  "max-output-tokens": "harness.loop.MaxOutputTokensStop",
+                  "max-turns": "harness.loop.MaxTurnsStop",
+                  "provider-incomplete": "harness.loop.ProviderIncompleteStop",
+                  "unstructured": "harness.loop.UnstructuredStop"
+                }
+              },
+              "harness.loop.UnstructuredStop": {
+                "fields": [
+                  {
+                    "name": "asked_again",
+                    "type": "Integer"
+                  }
+                ],
+                "kind": "struct"
+              },
+              "harness.loop.Usage": {
+                "fields": [
+                  {
+                    "name": "model",
+                    "type": "String"
+                  },
+                  {
+                    "name": "input_tokens",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "output_tokens",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "cached_input_tokens",
+                    "type": "Integer"
+                  },
+                  {
+                    "name": "cache_creation_input_tokens",
+                    "type": "Optional<Integer>"
+                  }
+                ],
+                "kind": "struct"
+              }
+            },
+            "expected": {
+              "turn": 1.0
+            },
+            "fields": [
+              {
+                "name": "turn",
+                "type": "Integer"
+              },
+              {
+                "name": "stop",
+                "type": "Optional<harness.loop.Stop>"
+              },
+              {
+                "name": "ledger",
+                "type": "Optional<harness.loop.RunLedger>"
+              }
+            ],
+            "outcome": {
+              "command": "harness.loop.FailTurn",
+              "outcome": "retried"
+            }
+          },
+          "step": "expect_direct_response"
+        },
+        {
+          "command": "harness.loop.FailTurn",
+          "input": {
+            "retriable": {
+              "kind": "literal",
+              "value": true
+            },
+            "run_id": {
+              "kind": "literal",
+              "value": "run-a"
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "harness.loop.FailTurn",
+            "outcome": "retried"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -45376,6 +45676,9 @@
             "outcome": "exhausted"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -45816,6 +46119,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.StartLoop",
             "declarations": {},
@@ -45869,6 +46175,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -45904,6 +46213,9 @@
             "outcome": "approved"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -45943,6 +46255,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -45980,6 +46295,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Approve",
             "declarations": {},
@@ -46015,6 +46333,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -46070,6 +46391,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -46111,6 +46435,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Deny",
             "declarations": {},
@@ -46146,6 +46473,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -46201,6 +46531,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CallTool",
             "declarations": {},
@@ -46236,6 +46569,9 @@
             "outcome": "approved"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -46275,6 +46611,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.CompleteTool",
             "declarations": {},
@@ -46310,6 +46649,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -46351,6 +46693,9 @@
             "outcome": "completed"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -46751,6 +47096,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -47087,6 +47435,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -47412,6 +47763,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -47751,6 +48105,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -48080,6 +48437,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -48417,6 +48777,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -48757,6 +49120,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -49091,6 +49457,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -49449,6 +49818,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -49800,6 +50172,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
@@ -50155,6 +50530,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -50490,6 +50868,9 @@
           "step": "expect_outcome"
         },
         {
+          "step": "expect_no_error"
+        },
+        {
           "response": {
             "command": "harness.loop.Run",
             "declarations": {
@@ -50818,6 +51199,9 @@
             "outcome": "returned"
           },
           "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
         },
         {
           "response": {
